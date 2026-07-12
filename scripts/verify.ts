@@ -13,6 +13,7 @@ import { parseBlueprints, bpGet } from '../src/formats/blueprint'
 import { parseDds } from '../src/formats/dds'
 import { decodeDxt } from '../src/formats/dxt'
 import { parseSca } from '../src/formats/sca'
+import { resolveUnitPaths } from '../src/formats/unitPaths'
 import { UnitAnimator } from '../src/anim/animator'
 import { Matrix4 } from 'three'
 import { parseScmap } from '../src/formats/scmap'
@@ -122,6 +123,44 @@ async function main(): Promise<void> {
   }
   check(bpOk === bpPaths.length, `${bpOk}/${bpPaths.length} Blueprints geparst`)
   for (const e of bpErrors.slice(0, 10)) console.error(`       ${e}`)
+
+  console.log('\n== Asset-Auflösung aller Units (Mesh + Albedo) ==')
+  const envArc = await ZipArchive.open(await NodeFile.open(`${GAME_DIR}/gamedata/env.scd`))
+  const texArc = await ZipArchive.open(await NodeFile.open(`${GAME_DIR}/gamedata/textures.scd`))
+  const meshArc = await ZipArchive.open(await NodeFile.open(`${GAME_DIR}/gamedata/meshes.scd`))
+  const inAnyArchive = (p: string): boolean =>
+    !!(unitsScd.get(p) ?? envArc.get(p) ?? texArc.get(p) ?? meshArc.get(p))
+  let resolved = 0
+  let noMesh = 0
+  const unresolved: string[] = []
+  for (const path of bpPaths) {
+    const id = path.split('/')[1]!
+    try {
+      const bp = parseBlueprints(
+        new TextDecoder().decode(await unitsScd.read(unitsScd.get(path)!)),
+      )[0]!
+      const paths = resolveUnitPaths(id, bp, inAnyArchive)
+      if (!paths) {
+        noMesh++
+        continue
+      }
+      if (inAnyArchive(paths.mesh) && paths.albedo.some(inAnyArchive)) resolved++
+      else {
+        unresolved.push(
+          `${id}: mesh=${inAnyArchive(paths.mesh) ? 'ok' : paths.mesh} albedo=${
+            paths.albedo.some(inAnyArchive) ? 'ok' : paths.albedo[0]
+          }`,
+        )
+      }
+    } catch {
+      unresolved.push(`${id}: bp-Fehler`)
+    }
+  }
+  check(
+    unresolved.length <= 2,
+    `${resolved} aufgelöst, ${noMesh} bewusst ohne Mesh, ${unresolved.length} unauflösbar`,
+  )
+  for (const e of unresolved.slice(0, 10)) console.error(`       ${e}`)
 
   console.log('\n== Alle LOD0-Meshes in units.scd ==')
   const scmPaths = [...unitsScd.entries.keys()].filter((p) => /_lod0\.scm$/.test(p))

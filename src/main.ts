@@ -11,6 +11,7 @@ import { GameVfs } from './vfs/vfs'
 import { parseScm, type ScmModel } from './formats/scm'
 import { parseSca } from './formats/sca'
 import { parseScmap } from './formats/scmap'
+import { resolveUnitPaths } from './formats/unitPaths'
 import {
   parseBlueprint,
   parseLuaAssignments,
@@ -172,27 +173,34 @@ async function loadTexture(path: string): Promise<THREE.Texture | null> {
   return ddsToTexture(await vfs.read(path), viewer.s3tcSupported)
 }
 
+async function loadFirstTexture(paths: string[]): Promise<THREE.Texture | null> {
+  for (const p of paths) {
+    const tex = await loadTexture(p)
+    if (tex) return tex
+  }
+  return null
+}
+
 async function loadUnitAssets(
   id: string,
 ): Promise<{ model: ScmModel; textures: UnitTextures; bp: BpObject } | null> {
   if (!vfs) return null
-  const base = `units/${id}/${id}`
-  const bp = parseBlueprint(await vfs.readText(`${base}_unit.bp`))
+  const bp = parseBlueprint(await vfs.readText(`units/${id}/${id}_unit.bp`))
 
-  if (!vfs.exists(`${base}_lod0.scm`)) {
-    log(`Kein LOD0-Mesh für ${id.toUpperCase()} gefunden`)
+  const paths = resolveUnitPaths(id, bp, (p) => vfs!.exists(p))
+  if (!paths) {
+    log(`${id.toUpperCase()} hat kein Mesh (Platzhalter-Unit)`)
     return null
   }
-  const model = parseScm(await vfs.read(`${base}_lod0.scm`))
+  if (!vfs.exists(paths.mesh)) {
+    log(`Mesh nicht gefunden für ${id.toUpperCase()}: ${paths.mesh}`)
+    return null
+  }
+  const model = parseScm(await vfs.read(paths.mesh))
 
-  const albedo =
-    (await loadTexture(`${base}_albedo.dds`)) ?? (await loadTexture(`${base}_lod1_albedo.dds`))
-  const normals =
-    (await loadTexture(`${base}_normalsts.dds`)) ??
-    (await loadTexture(`${base}_lod1_normalsts.dds`))
-  const specTeam =
-    (await loadTexture(`${base}_specteam.dds`)) ??
-    (await loadTexture(`${base}_lod1_specteam.dds`))
+  const albedo = await loadFirstTexture(paths.albedo)
+  const normals = await loadFirstTexture(paths.normals)
+  const specTeam = await loadFirstTexture(paths.specTeam)
 
   if (!albedo) log(`Keine Albedo-Textur für ${id.toUpperCase()} — rendere grau`)
   const fallbackAlbedo = new THREE.DataTexture(new Uint8Array([140, 140, 145, 255]), 1, 1)
