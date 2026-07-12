@@ -183,7 +183,7 @@ async function loadFirstTexture(paths: string[]): Promise<THREE.Texture | null> 
 
 async function loadUnitAssets(
   id: string,
-): Promise<{ model: ScmModel; textures: UnitTextures; bp: BpObject } | null> {
+): Promise<{ model: ScmModel; textures: UnitTextures; bp: BpObject; shader: string } | null> {
   if (!vfs) return null
   const bp = parseBlueprint(await vfs.readText(`units/${id}/${id}_unit.bp`))
 
@@ -201,12 +201,18 @@ async function loadUnitAssets(
   const albedo = await loadFirstTexture(paths.albedo)
   const normals = await loadFirstTexture(paths.normals)
   const specTeam = await loadFirstTexture(paths.specTeam)
+  const lookup = paths.shader === 'Seraphim' ? await loadFirstTexture(paths.lookup) : null
 
   if (!albedo) log(`Keine Albedo-Textur für ${id.toUpperCase()} — rendere grau`)
   const fallbackAlbedo = new THREE.DataTexture(new Uint8Array([140, 140, 145, 255]), 1, 1)
   fallbackAlbedo.needsUpdate = true
 
-  return { model, textures: { albedo: albedo ?? fallbackAlbedo, normals, specTeam }, bp }
+  return {
+    model,
+    textures: { albedo: albedo ?? fallbackAlbedo, normals, specTeam, lookup },
+    bp,
+    shader: paths.shader,
+  }
 }
 
 async function loadUnit(id: string): Promise<void> {
@@ -222,7 +228,7 @@ async function loadUnit(id: string): Promise<void> {
     const { model, textures, bp } = assets
     showUnitInfo(id, bp)
 
-    viewer.setModel(model, textures, currentTeamColor())
+    viewer.setModel(model, textures, currentTeamColor(), assets.shader)
     currentModel = model
     populateAnimList(id)
     log(

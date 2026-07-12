@@ -22,6 +22,7 @@ export interface SandboxUnitAssets {
   textures: UnitTextures
   bp: BpObject
   walkAnim: ScaAnim | null
+  shader: string
 }
 
 interface Binding {
@@ -80,7 +81,7 @@ export class SandboxController {
   }
 
   spawn(assets: SandboxUnitAssets, x: number, z: number, teamColor: THREE.Color): void {
-    const scene = this.viewer.addUnit(assets.model, assets.textures, teamColor)
+    const scene = this.viewer.addUnit(assets.model, assets.textures, teamColor, assets.shader)
 
     const uniformScale = bpGet(assets.bp, 'Display.UniformScale')
     if (typeof uniformScale === 'number' && uniformScale > 0) {

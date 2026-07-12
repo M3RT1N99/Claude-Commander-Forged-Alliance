@@ -19,6 +19,9 @@ export interface UnitAssetPaths {
   albedo: string[]
   normals: string[]
   specTeam: string[]
+  lookup: string[]
+  /** LOD0-ShaderName ('Unit', 'Seraphim', 'Insect', 'Aeon', …) */
+  shader: string
 }
 
 /** RES_CompletePath: absolut ab VFS-Wurzel oder relativ zum Quellverzeichnis. */
@@ -73,6 +76,8 @@ export function resolveUnitPaths(
       albedo: texture(lod?.AlbedoName, `${prefix}_albedo.dds`),
       normals: texture(lod?.NormalsName, `${prefix}_normalsts.dds`),
       specTeam: texture(lod?.SpecularName, `${prefix}_specteam.dds`),
+      lookup: texture(lod?.LookupName, `${prefix}_lookup.dds`),
+      shader: typeof lod?.ShaderName === 'string' && lod.ShaderName ? lod.ShaderName : 'Unit',
     }
   }
 

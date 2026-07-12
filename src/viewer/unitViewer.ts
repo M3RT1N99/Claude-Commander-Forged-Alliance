@@ -141,7 +141,7 @@ export class UnitViewer {
     }
   }
 
-  setModel(model: ScmModel, textures: UnitTextures, teamColor: THREE.Color): void {
+  setModel(model: ScmModel, textures: UnitTextures, teamColor: THREE.Color, shader = 'Unit'): void {
     this.clearContent()
 
     const geometry = new THREE.BufferGeometry()
@@ -161,7 +161,7 @@ export class UnitViewer {
     this.animPlaying = false
     this.animTime = 0
 
-    const material = createUnitMaterial(textures, teamColor, this.animator.skinMatrices)
+    const material = createUnitMaterial(textures, teamColor, this.animator.skinMatrices, shader)
     const mesh = new THREE.Mesh(geometry, material)
     // Skinning kann über die statische Bounding-Sphere hinausgehen
     mesh.frustumCulled = false
@@ -185,7 +185,12 @@ export class UnitViewer {
   // -------------------------------------------------------------------------
 
   /** Fügt eine Einheit zur Szene hinzu (Terrain bleibt bestehen). */
-  addUnit(model: ScmModel, textures: UnitTextures, teamColor: THREE.Color): SceneUnit {
+  addUnit(
+    model: ScmModel,
+    textures: UnitTextures,
+    teamColor: THREE.Color,
+    shader = 'Unit',
+  ): SceneUnit {
     const geometry = new THREE.BufferGeometry()
     geometry.setAttribute('position', new THREE.BufferAttribute(model.positions, 3))
     geometry.setAttribute('normal', new THREE.BufferAttribute(model.normals, 3))
@@ -199,7 +204,7 @@ export class UnitViewer {
     geometry.setIndex(new THREE.BufferAttribute(model.indices, 1))
 
     const animator = new UnitAnimator(model)
-    const material = createUnitMaterial(textures, teamColor, animator.skinMatrices)
+    const material = createUnitMaterial(textures, teamColor, animator.skinMatrices, shader)
     const mesh = new THREE.Mesh(geometry, material)
     mesh.frustumCulled = false
     this.scene.add(mesh)
