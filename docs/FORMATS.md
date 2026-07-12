@@ -83,7 +83,16 @@ Kernfakten:
 - 10 Albedo-Strata (Lower, Stratum0–7, Upper) + 9 Normal-Strata, je
   Pfad (case-insensitiv in env.scd!) + Kachelgröße in Weltmetern
 - Splat-Masken: 2 eingebettete unkomprimierte BGRA-DDS (Stratum 0-3 in
-  RGBA von UtilityA, 4-7 in UtilityB), Dekodierung `saturate(tex*2-1)`
+  RGBA von UtilityA, 4-7 in UtilityB), Dekodierung `saturate(tex*2-1)`.
+  **Achtung:** Der `terrainShader`-String der Karte wählt im Original die
+  Shader-Technique (faf-re: `StratumMaterial::mShaderName`, Default
+  `TTerrain`). `TTerrain`-Karten (z. B. SCMP_001) sampeln UtilityB **nie**
+  — die zweite Maske enthält dort Junk (Duplikat von UtilityA). Unsere
+  Lösung: Masken nur für Strata mit nicht-leerem Texturpfad anwenden
+  (`stratumEnable`-Uniforms), verhaltensäquivalent für beide Techniques.
+- Eingebettete Bilder (Masken/Watermap/Preview) haben dieselbe
+  Zeilen-Orientierung wie die Heightmap — kein V-Flip (numerisch bewiesen:
+  `scripts/check-orientation.ts`, Korrelation 0,998)
 - Watermap (UtilityC, DXT5, halbe Auflösung): R = über Wasser,
   **G = Wassertiefe**, B = Flatness, A = Foam
 - Wasser-Settings: elevation/deep/abyss, SurfaceColor, WaterRamp-Textur
