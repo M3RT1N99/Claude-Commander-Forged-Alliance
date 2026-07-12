@@ -8,7 +8,7 @@ Browser (später Mobile, Linux und Windows) — als offene Engine nach dem
 > Texturen, Blueprints und Karten direkt aus der **eigenen, gekauften
 > Installation** des Spiels (Steam/GOG). Ohne Original-Spiel keine Assets.
 
-## Status: Meilenstein 1 — Unit-Viewer ✅
+## Status: M1 Unit-Viewer ✅ · M2 Karten ✅ · M3 Animationen ✅ · M4-Preview Sandbox ✅
 
 Die App mountet die komplette Spielinstallation als virtuelles Dateisystem im
 Browser und rendert Original-Einheiten mit Original-Texturen in WebGL:
@@ -61,9 +61,11 @@ Gleiches Prinzip wie bei OpenRA, OpenMW, openage oder OpenSAGE.
 Siehe [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Kurzfassung:
 
 1. ✅ **Unit-Viewer** — Formate, VFS, Rendering-Grundlage
-2. **Karten-Renderer** — SCMAP-Terrain, Wasser, Props
-3. **Sim-Kern** — deterministische Simulation (Einheiten, Bewegung, Waffen,
+2. ✅ **Karten-Renderer** — SCMAP-Terrain-Splatting, Wasser (einfach)
+3. ✅ **Animationen** — SCA-Parser, GPU-Skinning, Walk-Cycles
+4. ✅ **Sandbox-Preview** — Einheit auf Karte, Klick-Bewegung
+5. **Sim-Kern** — deterministische Simulation (Einheiten, Bewegung, Waffen,
    Wirtschaft) auf Basis der Blueprints; Referenz: rekonstruierte
    Moho-Engine-Quellen (faf-re)
-4. **Spielbarkeit** — Steuerung, UI, Fog of War, KI-Skirmish
-5. **Plattformen** — Mobile (Touch-UI), Desktop-Builds (Tauri), Multiplayer
+6. **Spielbarkeit** — Steuerung, UI, Fog of War, KI-Skirmish
+7. **Plattformen** — Mobile (Touch-UI), Desktop-Builds (Tauri), Multiplayer
