@@ -20,6 +20,8 @@ import {
 } from './formats/blueprint'
 import { ddsToTexture } from './viewer/textures'
 import { UnitViewer } from './viewer/unitViewer'
+import { Sandbox } from './sandbox/sandbox'
+import type { UnitTextures } from './viewer/unitMaterial'
 
 const $ = <T extends HTMLElement>(sel: string): T => {
   const el = document.querySelector<T>(sel)
@@ -35,9 +37,13 @@ const btnFallback = $<HTMLButtonElement>('#btn-fallback')
 const inputDir = $<HTMLInputElement>('#input-dir')
 const unitPanel = $('#unit-panel')
 const mapPanel = $('#map-panel')
+const sandboxPanel = $('#sandbox-panel')
 const modeTabs = $('#mode-tabs')
 const tabUnits = $<HTMLButtonElement>('#tab-units')
 const tabMaps = $<HTMLButtonElement>('#tab-maps')
+const tabSandbox = $<HTMLButtonElement>('#tab-sandbox')
+const btnSandboxStart = $<HTMLButtonElement>('#btn-sandbox-start')
+const sandboxInfo = $('#sandbox-info')
 const mapSelect = $<HTMLSelectElement>('#map-select')
 const mapInfo = $('#map-info')
 const unitSearch = $<HTMLInputElement>('#unit-search')
@@ -82,6 +88,17 @@ async function connect(src: GameSource): Promise<void> {
     await populateMapList(src)
 
     const params = new URLSearchParams(location.search)
+    const wantedSandbox = params.get('sandbox')
+    if (wantedSandbox) {
+      await startSandbox(wantedSandbox)
+      const move = params.get('move')
+      if (move && sandbox) {
+        const [dx, dz] = move.split(',').map(Number)
+        const p = sandbox.position
+        sandbox.moveTo(new THREE.Vector3(p.x + (dx || 0), 0, p.z + (dz || 0)))
+      }
+      return
+    }
     const wantedMap = params.get('map')
     if (wantedMap) {
       setMode('maps')
@@ -115,11 +132,13 @@ async function populateMapList(src: GameSource): Promise<void> {
   }
 }
 
-function setMode(mode: 'units' | 'maps'): void {
+function setMode(mode: 'units' | 'maps' | 'sandbox'): void {
   tabUnits.classList.toggle('active', mode === 'units')
   tabMaps.classList.toggle('active', mode === 'maps')
+  tabSandbox.classList.toggle('active', mode === 'sandbox')
   unitPanel.hidden = mode !== 'units'
   mapPanel.hidden = mode !== 'maps'
+  sandboxPanel.hidden = mode !== 'sandbox'
 }
 
 function renderUnitList(filter: string): void {
@@ -147,47 +166,45 @@ async function loadTexture(path: string): Promise<THREE.Texture | null> {
   return ddsToTexture(await vfs.read(path), viewer.s3tcSupported)
 }
 
+async function loadUnitAssets(
+  id: string,
+): Promise<{ model: ScmModel; textures: UnitTextures; bp: BpObject } | null> {
+  if (!vfs) return null
+  const base = `units/${id}/${id}`
+  const bp = parseBlueprint(await vfs.readText(`${base}_unit.bp`))
+
+  if (!vfs.exists(`${base}_lod0.scm`)) {
+    log(`Kein LOD0-Mesh für ${id.toUpperCase()} gefunden`)
+    return null
+  }
+  const model = parseScm(await vfs.read(`${base}_lod0.scm`))
+
+  const albedo =
+    (await loadTexture(`${base}_albedo.dds`)) ?? (await loadTexture(`${base}_lod1_albedo.dds`))
+  const normals =
+    (await loadTexture(`${base}_normalsts.dds`)) ??
+    (await loadTexture(`${base}_lod1_normalsts.dds`))
+  const specTeam =
+    (await loadTexture(`${base}_specteam.dds`)) ??
+    (await loadTexture(`${base}_lod1_specteam.dds`))
+
+  if (!albedo) log(`Keine Albedo-Textur für ${id.toUpperCase()} — rendere grau`)
+  const fallbackAlbedo = new THREE.DataTexture(new Uint8Array([140, 140, 145, 255]), 1, 1)
+  fallbackAlbedo.needsUpdate = true
+
+  return { model, textures: { albedo: albedo ?? fallbackAlbedo, normals, specTeam }, bp }
+}
+
 async function loadUnit(id: string): Promise<void> {
   if (!vfs) return
   try {
-    const base = `units/${id}/${id}`
     log(`Lade ${id.toUpperCase()}…`)
-
-    const bp = parseBlueprint(await vfs.readText(`${base}_unit.bp`))
+    const assets = await loadUnitAssets(id)
+    if (!assets) return
+    const { model, textures, bp } = assets
     showUnitInfo(id, bp)
 
-    const meshPath = vfs.exists(`${base}_lod0.scm`) ? `${base}_lod0.scm` : null
-    if (!meshPath) {
-      log(`Kein LOD0-Mesh für ${id.toUpperCase()} gefunden`)
-      return
-    }
-    const model = parseScm(await vfs.read(meshPath))
-
-    const albedo =
-      (await loadTexture(`${base}_albedo.dds`)) ?? (await loadTexture(`${base}_lod1_albedo.dds`))
-    const normals =
-      (await loadTexture(`${base}_normalsts.dds`)) ??
-      (await loadTexture(`${base}_lod1_normalsts.dds`))
-    const specTeam =
-      (await loadTexture(`${base}_specteam.dds`)) ??
-      (await loadTexture(`${base}_lod1_specteam.dds`))
-
-    if (!albedo) {
-      log(`Keine Albedo-Textur für ${id.toUpperCase()} — rendere grau`)
-    }
-
-    const fallbackAlbedo = new THREE.DataTexture(
-      new Uint8Array([140, 140, 145, 255]),
-      1,
-      1,
-    )
-    fallbackAlbedo.needsUpdate = true
-
-    viewer.setModel(
-      model,
-      { albedo: albedo ?? fallbackAlbedo, normals, specTeam },
-      currentTeamColor(),
-    )
+    viewer.setModel(model, textures, currentTeamColor())
     currentModel = model
     populateAnimList(id)
     log(
@@ -282,6 +299,76 @@ async function loadMap(folder: string): Promise<void> {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Sandbox
+// ---------------------------------------------------------------------------
+
+let sandbox: Sandbox | null = null
+
+async function startSandbox(mapFolder: string, unitId = 'uel0001'): Promise<void> {
+  if (!vfs || !source) return
+  try {
+    sandbox = null
+    setMode('sandbox')
+    await loadMap(mapFolder)
+
+    // Spawn-Punkt der Armee 1 aus der _save.lua
+    const files = await source.list(`maps/${mapFolder}`)
+    const saveFile = files.find((f) => f.name.toLowerCase().endsWith('_save.lua'))
+    let spawn = new THREE.Vector3(20, 0, 20)
+    if (saveFile) {
+      const raf = await source.open(`maps/${mapFolder}/${saveFile.name}`)
+      const text = new TextDecoder('utf-8').decode(await raf.slice(0, raf.size))
+      const save = parseLuaAssignments(text)
+      const marker =
+        bpGet(save, 'Scenario.MasterChain._MASTERCHAIN_.Markers.ARMY_1.position') ??
+        bpGet(save, 'Scenario.MasterChain._MASTERCHAIN_.Markers.ARMY_2.position')
+      if (Array.isArray(marker) && marker.length === 3 && marker.every((v) => typeof v === 'number')) {
+        spawn = new THREE.Vector3(marker[0] as number, marker[1] as number, marker[2] as number)
+        log(`Spawn ARMY_1: ${spawn.x.toFixed(0)}, ${spawn.z.toFixed(0)}`)
+      }
+    }
+
+    const assets = await loadUnitAssets(unitId)
+    if (!assets) return
+    const unit = viewer.addUnit(assets.model, assets.textures, currentTeamColor())
+
+    // Walk-Animation aus dem Blueprint
+    let walkAnim = null
+    const walkPath = bpGet(assets.bp, 'Display.AnimationWalk')
+    const walkCandidate =
+      typeof walkPath === 'string' && walkPath ? walkPath : `units/${unitId}/${unitId}_a002.sca`
+    if (vfs.exists(walkCandidate)) {
+      walkAnim = parseSca(await vfs.read(walkCandidate))
+    }
+
+    sandbox = new Sandbox(viewer, unit, walkAnim, assets.bp, spawn)
+    viewer.focusOn(sandbox.position, 8)
+    sandboxInfo.innerHTML = `<strong>${unitId.toUpperCase()}</strong> auf ${mapFolder} — Klick = Bewegungsbefehl`
+    log(`Sandbox bereit: ${unitId.toUpperCase()} auf ${mapFolder}`)
+  } catch (err) {
+    log(`FEHLER Sandbox: ${err instanceof Error ? err.message : err}`)
+  }
+}
+
+// Klick (ohne Drag) = Bewegungsbefehl
+let pointerDown: { x: number; y: number } | null = null
+const viewportEl = $<HTMLCanvasElement>('#viewport')
+viewportEl.addEventListener('pointerdown', (e) => {
+  if (e.button === 0) pointerDown = { x: e.clientX, y: e.clientY }
+})
+viewportEl.addEventListener('pointerup', (e) => {
+  if (!pointerDown || !sandbox) return
+  const moved = Math.hypot(e.clientX - pointerDown.x, e.clientY - pointerDown.y)
+  pointerDown = null
+  if (moved > 5) return
+  const hit = viewer.pickTerrain(e.clientX, e.clientY)
+  if (hit) {
+    sandbox.moveTo(hit)
+    log(`Bewegung → ${hit.x.toFixed(0)}, ${hit.z.toFixed(0)}`)
+  }
+})
+
 function showUnitInfo(id: string, bp: BpObject): void {
   const name = stripLoc(bpGet(bp, 'General.UnitName')) ?? ''
   const desc = stripLoc(bpGet(bp, 'Description')) ?? ''
@@ -336,7 +423,11 @@ teamColorInput.addEventListener('input', () => viewer.setTeamColor(currentTeamCo
 animSelect.addEventListener('change', () => void playSelectedAnimation())
 tabUnits.addEventListener('click', () => setMode('units'))
 tabMaps.addEventListener('click', () => setMode('maps'))
+tabSandbox.addEventListener('click', () => setMode('sandbox'))
 mapSelect.addEventListener('change', () => void loadMap(mapSelect.value))
+btnSandboxStart.addEventListener('click', () => {
+  void startSandbox(mapSelect.value || 'SCMP_037')
+})
 
 // ---------------------------------------------------------------------------
 // Start

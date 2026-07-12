@@ -9,6 +9,34 @@ import { ddsToTexture } from './textures'
 import { UnitAnimator } from '../anim/animator'
 import type { ScaAnim } from '../formats/sca'
 
+/** Eine in die Szene gesetzte Einheit (Sandbox-Modus). */
+export class SceneUnit {
+  playing = false
+  time = 0
+  speed = 1
+
+  constructor(
+    readonly mesh: THREE.Mesh,
+    readonly animator: UnitAnimator,
+    readonly boneNames: string[],
+  ) {}
+
+  play(anim: ScaAnim | null, speed = 1): void {
+    this.animator.setAnimation(anim, this.boneNames)
+    this.playing = anim !== null
+    this.speed = speed
+    this.time = 0
+    if (!anim) this.animator.update(0)
+  }
+
+  update(dt: number): void {
+    if (this.playing) {
+      this.time += dt * this.speed
+      this.animator.update(this.time)
+    }
+  }
+}
+
 /**
  * Three.js-Szene für die Unit-Ansicht: Orbit-Kamera, Bodenraster und das
  * aktuell geladene SCM-Modell mit Original-Texturen.
@@ -26,6 +54,18 @@ export class UnitViewer {
   private readonly clock = new THREE.Clock()
   animationSpeed = 1
   readonly s3tcSupported: boolean
+
+  /** Sandbox: zusätzliche Einheiten + Update-Hooks */
+  private readonly units: SceneUnit[] = []
+  private readonly updateHooks: ((dt: number) => void)[] = []
+
+  /** Heightfield der aktuellen Karte (für Sampling/Picking) */
+  private heightfield: {
+    data: Uint16Array
+    width: number
+    height: number
+    scale: number
+  } | null = null
 
   constructor(private readonly canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true })
@@ -62,6 +102,8 @@ export class UnitViewer {
         this.animTime += dt * this.animationSpeed
         this.animator.update(this.animTime)
       }
+      for (const hook of this.updateHooks) hook(dt)
+      for (const unit of this.units) unit.update(dt)
       this.controls.update()
       this.renderer.render(this.scene, this.camera)
     })
@@ -70,6 +112,14 @@ export class UnitViewer {
   private clearContent(): void {
     this.animator = null
     this.animPlaying = false
+    this.heightfield = null
+    this.updateHooks.length = 0
+    for (const unit of this.units) {
+      this.scene.remove(unit.mesh)
+      unit.mesh.geometry.dispose()
+      ;(unit.mesh.material as THREE.Material).dispose()
+    }
+    this.units.length = 0
     if (this.current) {
       this.scene.remove(this.current)
       this.current.geometry.dispose()
@@ -123,10 +173,128 @@ export class UnitViewer {
     if (!anim) this.animator.update(0)
   }
 
+  // -------------------------------------------------------------------------
+  // Sandbox-API
+  // -------------------------------------------------------------------------
+
+  /** Fügt eine Einheit zur Szene hinzu (Terrain bleibt bestehen). */
+  addUnit(model: ScmModel, textures: UnitTextures, teamColor: THREE.Color): SceneUnit {
+    const geometry = new THREE.BufferGeometry()
+    geometry.setAttribute('position', new THREE.BufferAttribute(model.positions, 3))
+    geometry.setAttribute('normal', new THREE.BufferAttribute(model.normals, 3))
+    geometry.setAttribute('uv', new THREE.BufferAttribute(model.uv0, 2))
+    geometry.setAttribute('scmUv1', new THREE.BufferAttribute(model.uv1, 2))
+    geometry.setAttribute('scmTangent', new THREE.BufferAttribute(model.tangents, 3))
+    geometry.setAttribute('scmBinormal', new THREE.BufferAttribute(model.binormals, 3))
+    const boneIndex = new Float32Array(model.vertexCount)
+    for (let i = 0; i < model.vertexCount; i++) boneIndex[i] = model.boneIndices[i * 4]!
+    geometry.setAttribute('scmBoneIndex', new THREE.BufferAttribute(boneIndex, 1))
+    geometry.setIndex(new THREE.BufferAttribute(model.indices, 1))
+
+    const animator = new UnitAnimator(model)
+    const material = createUnitMaterial(textures, teamColor, animator.skinMatrices)
+    const mesh = new THREE.Mesh(geometry, material)
+    mesh.frustumCulled = false
+    this.scene.add(mesh)
+
+    const unit = new SceneUnit(mesh, animator, model.bones.map((b) => b.name))
+    this.units.push(unit)
+    return unit
+  }
+
+  onUpdate(hook: (dt: number) => void): void {
+    this.updateHooks.push(hook)
+  }
+
+  /** Höhe der aktuellen Karte an Weltposition (bilinear), 0 ohne Karte. */
+  heightAt(x: number, z: number): number {
+    const hf = this.heightfield
+    if (!hf) return 0
+    const cx = Math.min(Math.max(x, 0), hf.width - 0.001)
+    const cz = Math.min(Math.max(z, 0), hf.height - 0.001)
+    const x0 = Math.floor(cx)
+    const z0 = Math.floor(cz)
+    const fx = cx - x0
+    const fz = cz - z0
+    const stride = hf.width + 1
+    const h00 = hf.data[z0 * stride + x0]!
+    const h10 = hf.data[z0 * stride + x0 + 1]!
+    const h01 = hf.data[(z0 + 1) * stride + x0]!
+    const h11 = hf.data[(z0 + 1) * stride + x0 + 1]!
+    return ((h00 * (1 - fx) + h10 * fx) * (1 - fz) + (h01 * (1 - fx) + h11 * fx) * fz) * hf.scale
+  }
+
+  /**
+   * Schnittpunkt eines Bildschirm-Klicks mit dem Terrain (Raymarch gegen das
+   * Heightfield mit binärer Verfeinerung). null ohne Karte/Treffer.
+   */
+  pickTerrain(clientX: number, clientY: number): THREE.Vector3 | null {
+    const hf = this.heightfield
+    if (!hf) return null
+    const rect = this.canvas.getBoundingClientRect()
+    const ndc = new THREE.Vector2(
+      ((clientX - rect.left) / rect.width) * 2 - 1,
+      -((clientY - rect.top) / rect.height) * 2 + 1,
+    )
+    const raycaster = new THREE.Raycaster()
+    raycaster.setFromCamera(ndc, this.camera)
+    const origin = raycaster.ray.origin
+    const dir = raycaster.ray.direction
+
+    const maxDist = Math.max(hf.width, hf.height) * 3
+    const step = 1
+    let prevT = 0
+    let prevAbove = origin.y - this.heightAt(origin.x, origin.z) > 0
+    for (let t = step; t < maxDist; t += step) {
+      const px = origin.x + dir.x * t
+      const pz = origin.z + dir.z * t
+      const py = origin.y + dir.y * t
+      const above = py - this.heightAt(px, pz) > 0
+      if (prevAbove && !above) {
+        // binäre Verfeinerung zwischen prevT und t
+        let lo = prevT
+        let hi = t
+        for (let i = 0; i < 20; i++) {
+          const mid = (lo + hi) / 2
+          const mx = origin.x + dir.x * mid
+          const mz = origin.z + dir.z * mid
+          const my = origin.y + dir.y * mid
+          if (my - this.heightAt(mx, mz) > 0) lo = mid
+          else hi = mid
+        }
+        const hit = new THREE.Vector3(
+          origin.x + dir.x * hi,
+          0,
+          origin.z + dir.z * hi,
+        )
+        if (hit.x < 0 || hit.z < 0 || hit.x > hf.width || hit.z > hf.height) return null
+        hit.y = this.heightAt(hit.x, hit.z)
+        return hit
+      }
+      prevAbove = above
+      prevT = t
+    }
+    return null
+  }
+
+  /** Kamera auf eine Position ausrichten (RTS-artige Nahansicht). */
+  focusOn(pos: THREE.Vector3, distance = 40): void {
+    const dir = new THREE.Vector3(0.4, 0.75, 0.65).normalize()
+    this.camera.position.copy(pos).addScaledVector(dir, distance)
+    this.controls.target.copy(pos)
+    this.controls.update()
+  }
+
   async setMap(scmap: ScmapData, vfs: GameVfs): Promise<void> {
     this.clearContent()
 
     const { width, height } = scmap
+    this.heightfield = {
+      data: scmap.heightmap,
+      width,
+      height,
+      scale: scmap.heightScale,
+    }
     const hmW = width + 1
     const hmH = height + 1
 
