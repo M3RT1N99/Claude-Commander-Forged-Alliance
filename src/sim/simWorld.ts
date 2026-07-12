@@ -31,8 +31,14 @@ export interface UnitStats {
   maxHealth: number
   massProduction: number
   energyProduction: number
+  massConsumption: number
+  energyConsumption: number
   massStorage: number
   energyStorage: number
+  buildCostMass: number
+  buildCostEnergy: number
+  /** Bauzeit-Einheiten (Economy.BuildTime) */
+  buildTime: number
 }
 
 /** Leitet die Sim-Statistik aus einem UnitBlueprint ab. */
@@ -53,8 +59,13 @@ export function statsFromBlueprint(blueprintId: string, bp: BpObject): UnitStats
     maxHealth: f(num('Defense.MaxHealth', 100)),
     massProduction: f(num('Economy.ProductionPerSecondMass', 0)),
     energyProduction: f(num('Economy.ProductionPerSecondEnergy', 0)),
+    massConsumption: f(num('Economy.MaintenanceConsumptionPerSecondMass', 0)),
+    energyConsumption: f(num('Economy.MaintenanceConsumptionPerSecondEnergy', 0)),
     massStorage: f(num('Economy.StorageMass', 0)),
     energyStorage: f(num('Economy.StorageEnergy', 0)),
+    buildCostMass: f(num('Economy.BuildCostMass', 0)),
+    buildCostEnergy: f(num('Economy.BuildCostEnergy', 0)),
+    buildTime: f(num('Economy.BuildTime', 1)),
   }
 }
 
@@ -66,28 +77,78 @@ export class Army {
   energyStorage = f(4000)
   massIncome = 0
   energyIncome = 0
+  massExpense = 0
+  energyExpense = 0
 
   /** @internal */
   tick(units: SimUnit[], armyIndex: number): void {
+    // 1. Einkommen/Unterhalt — nur fertige Einheiten produzieren/verbrauchen
     let massIn = 0
     let energyIn = 0
+    let massOut = 0
+    let energyOut = 0
     let massStore = f(650)
     let energyStore = f(4000)
     for (const u of units) {
-      if (u.army !== armyIndex || u.health <= 0) continue
-      massIn = f(massIn + u.stats.massProduction)
-      energyIn = f(energyIn + u.stats.energyProduction)
+      // health<=0 bei fertigen Einheiten = tot; Baustellen zählen weiter
+      if (u.army !== armyIndex || (u.health <= 0 && u.buildProgress >= 1)) continue
       massStore = f(massStore + u.stats.massStorage)
       energyStore = f(energyStore + u.stats.energyStorage)
+      if (u.buildProgress < 1) continue
+      massIn = f(massIn + u.stats.massProduction)
+      energyIn = f(energyIn + u.stats.energyProduction)
+      massOut = f(massOut + u.stats.massConsumption)
+      energyOut = f(energyOut + u.stats.energyConsumption)
     }
-    this.massIncome = massIn
-    this.energyIncome = energyIn
+
     this.massStorage = massStore
     this.energyStorage = energyStore
-    this.mass = Math.min(f(this.mass + f(massIn * SIM_DT)), massStore)
-    this.energy = Math.min(f(this.energy + f(energyIn * SIM_DT)), energyStore)
+    this.mass = Math.min(f(this.mass + f(f(massIn - massOut) * SIM_DT)), massStore)
+    this.energy = Math.min(f(this.energy + f(f(energyIn - energyOut) * SIM_DT)), energyStore)
+    if (this.mass < 0) this.mass = 0
+    if (this.energy < 0) this.energy = 0
+
+    // 2. Floating Economy: Baustellen ziehen kontinuierlich Ressourcen.
+    //    Soll-Fortschritt = BuildRate/BuildTime; reicht der Vorrat nicht,
+    //    skaliert der Fortschritt auf den bezahlbaren Anteil (Stall).
+    let buildMassDrain = 0
+    let buildEnergyDrain = 0
+    for (const u of units) {
+      if (u.army !== armyIndex || u.buildProgress >= 1) continue
+      const s = u.stats
+      const step = Math.min(f(f(BUILDER_RATE / Math.max(s.buildTime, 1)) * SIM_DT), f(1 - u.buildProgress))
+      const needMass = f(s.buildCostMass * step)
+      const needEnergy = f(s.buildCostEnergy * step)
+      let fraction = 1
+      if (needMass > 0) fraction = Math.min(fraction, this.mass / needMass)
+      if (needEnergy > 0) fraction = Math.min(fraction, this.energy / needEnergy)
+      fraction = f(Math.min(Math.max(fraction, 0), 1))
+
+      const paidMass = f(needMass * fraction)
+      const paidEnergy = f(needEnergy * fraction)
+      this.mass = Math.max(f(this.mass - paidMass), 0)
+      this.energy = Math.max(f(this.energy - paidEnergy), 0)
+      buildMassDrain = f(buildMassDrain + f(paidMass / SIM_DT))
+      buildEnergyDrain = f(buildEnergyDrain + f(paidEnergy / SIM_DT))
+
+      u.buildProgress = Math.min(f(u.buildProgress + f(step * fraction)), 1)
+      // Health wächst mit dem Baufortschritt (Original-Verhalten)
+      u.health = f(u.stats.maxHealth * u.buildProgress)
+    }
+
+    this.massIncome = massIn
+    this.energyIncome = energyIn
+    this.massExpense = f(massOut + buildMassDrain)
+    this.energyExpense = f(energyOut + buildEnergyDrain)
   }
 }
+
+/**
+ * Baurate des (impliziten) Konstrukteurs — Übergangslösung bis Ingenieure/
+ * Fabriken existieren; 10 = BuildRate des UEF-ACU.
+ * TODO: echte Builder-Zuordnung (Economy.BuildRate des bauenden Units).
+ */
+const BUILDER_RATE = 10
 
 export type UnitCommand = { type: 'move'; x: number; z: number }
 
@@ -98,6 +159,11 @@ export class SimUnit {
   heading: number
   speed = 0
   health: number
+  /**
+   * Baufortschritt 0..1 (Floating Economy: Kosten fließen kontinuierlich
+   * über die Bauzeit; bei Ressourcenmangel verlangsamt sich der Bau).
+   */
+  buildProgress = 1
 
   /** Zustand des vorherigen Ticks (für Render-Interpolation) */
   prevX: number

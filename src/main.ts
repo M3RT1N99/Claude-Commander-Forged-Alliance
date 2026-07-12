@@ -22,6 +22,7 @@ import {
 import { ddsToTexture } from './viewer/textures'
 import { UnitViewer } from './viewer/unitViewer'
 import { SandboxController, type SandboxUnitAssets } from './sandbox/sandbox'
+import { statsFromBlueprint } from './sim/simWorld'
 import { Hud } from './ui/hud'
 import type { ScmapData } from './formats/scmap'
 import type { UnitTextures } from './viewer/unitMaterial'
@@ -336,6 +337,7 @@ let sandbox: SandboxController | null = null
 let hud: Hud | null = null
 let currentScmap: ScmapData | null = null
 let spawnPoint = new THREE.Vector3(20, 0, 20)
+let massSpots: { x: number; z: number }[] = []
 const sandboxAssetCache = new Map<string, SandboxUnitAssets>()
 
 async function loadSandboxAssets(id: string): Promise<SandboxUnitAssets | null> {
@@ -362,14 +364,24 @@ async function sandboxSpawn(id: string): Promise<void> {
   if (!sandbox) return
   const assets = await loadSandboxAssets(id)
   if (!assets) return
+
   // versetzt um den Spawn-Punkt platzieren (goldener Winkel)
   const n = sandbox.unitCount
   const angle = n * 2.4
   const radius = 2 + n * 1.2
   const x = spawnPoint.x + Math.sin(angle) * radius
   const z = spawnPoint.z + Math.cos(angle) * radius
-  sandbox.spawn(assets, x, z, currentTeamColor())
-  log(`Spawn: ${id.toUpperCase()} (${sandbox.unitCount} Einheiten)`)
+  if (!sandbox.spawn(assets, x, z, currentTeamColor())) {
+    log(`Kein freier Mass-Punkt in Reichweite für ${id.toUpperCase()}`)
+    return
+  }
+  // Floating Economy: Gebäude ziehen ihre Kosten kontinuierlich über die
+  // Bauzeit (Stall bei Ressourcenmangel) — keine Sofortbuchung wie in SC2
+  const stats = statsFromBlueprint(id, assets.bp)
+  log(
+    `Baue ${id.toUpperCase()} — ${stats.buildCostMass} Mass / ${stats.buildCostEnergy} Energy ` +
+      `über ${(stats.buildTime / 10).toFixed(0)} s`,
+  )
 }
 
 async function startSandbox(mapFolder: string): Promise<void> {
@@ -393,9 +405,27 @@ async function startSandbox(mapFolder: string): Promise<void> {
         spawnPoint = new THREE.Vector3(marker[0] as number, marker[1] as number, marker[2] as number)
         log(`Spawn ARMY_1: ${spawnPoint.x.toFixed(0)}, ${spawnPoint.z.toFixed(0)}`)
       }
+
+      // Mass-Punkte aus den Markern
+      const allMarkers = bpGet(save, 'Scenario.MasterChain._MASTERCHAIN_.Markers')
+      if (allMarkers && typeof allMarkers === 'object' && !Array.isArray(allMarkers)) {
+        const spots: { x: number; z: number }[] = []
+        for (const m of Object.values(allMarkers)) {
+          if (m && typeof m === 'object' && !Array.isArray(m)) {
+            const mm = m as BpObject
+            const pos = mm.position
+            if (mm.type === 'Mass' && Array.isArray(pos) && typeof pos[0] === 'number') {
+              spots.push({ x: pos[0] as number, z: pos[2] as number })
+            }
+          }
+        }
+        massSpots = spots
+        log(`${spots.length} Mass-Punkte gefunden`)
+      }
     }
 
     sandbox = new SandboxController(viewer)
+    sandbox.setMassSpots(massSpots)
     const acu = await loadSandboxAssets('uel0001')
     if (acu) {
       sandbox.spawn(acu, spawnPoint.x, spawnPoint.z, currentTeamColor())
@@ -404,7 +434,8 @@ async function startSandbox(mapFolder: string): Promise<void> {
     if (currentScmap) {
       hud = new Hud(vfs, viewer, sandbox, currentScmap)
     }
-    viewer.focusOn(spawnPoint, 14)
+    const zoomParam = Number(new URLSearchParams(location.search).get('zoom'))
+    viewer.focusOn(spawnPoint, zoomParam > 0 ? zoomParam : 14)
     $('#sandbox-spawns').hidden = false
     sandboxInfo.innerHTML =
       `Karte <strong>${mapFolder}</strong> — Klick auf Einheit = Auswahl, ` +

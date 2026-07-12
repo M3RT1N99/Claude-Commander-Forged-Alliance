@@ -423,6 +423,20 @@ select.inline {
   background-size: 100% 100%;
 }
 
+#strat-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.strat-icon {
+  position: absolute;
+  left: 0;
+  top: 0;
+  image-rendering: pixelated;
+}
+
 /* Minimap-Rahmen aus den Original-9-Slice-Teilen */
 .mm-frame {
   position: absolute;

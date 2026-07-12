@@ -413,6 +413,13 @@ export class UnitViewer {
     this.camera.lookAt(r.target)
   }
 
+  /** Aktuelle Kamera-Zoomdistanz (für Strategic-Icon-Schwellen). */
+  getRtsDistance(): number {
+    return this.rts.enabled
+      ? this.rts.dist
+      : this.camera.position.distanceTo(this.controls.target)
+  }
+
   /** Mausrad: Zoom zum Cursor (SupCom-Verhalten). */
   rtsZoom(wheelDelta: number, clientX: number, clientY: number): void {
     if (!this.rts.enabled) return

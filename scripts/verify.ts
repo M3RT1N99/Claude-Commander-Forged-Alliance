@@ -235,6 +235,16 @@ async function main(): Promise<void> {
     acceleration: 3,
     brake: 3,
     arriveRadius: Math.fround(0.6),
+    maxHealth: 300,
+    massProduction: 0,
+    energyProduction: 0,
+    massConsumption: 0,
+    energyConsumption: 0,
+    massStorage: 0,
+    energyStorage: 0,
+    buildCostMass: 50,
+    buildCostEnergy: 250,
+    buildTime: 100,
   }
   const runSim = (): number[] => {
     const w = new SimWorld()
@@ -273,6 +283,27 @@ async function main(): Promise<void> {
   check(
     Math.hypot(turner.x - 10, turner.z - -40) < 1,
     '180°-Wende + Ankunft funktioniert',
+  )
+
+  // Floating Economy: Bau zieht Kosten kontinuierlich, Health wächst mit
+  const wEco = new SimWorld()
+  const site = wEco.spawn(testStats, 5, 5)
+  site.buildProgress = 0
+  site.health = 0
+  const armyEco = wEco.army(1)
+  const massBefore = armyEco.mass
+  for (let i = 0; i < 20; i++) wEco.tick() // 2 s bei BuildRate 10/BuildTime 100 → ~20 %
+  check(
+    site.buildProgress > 0.15 && site.buildProgress < 0.25,
+    `Baufortschritt nach 2 s: ${(site.buildProgress * 100).toFixed(0)} % (erwartet ~20 %)`,
+  )
+  check(
+    Math.abs(massBefore - armyEco.mass - 50 * site.buildProgress) < 1,
+    `Mass-Abfluss entspricht Fortschritt (${(massBefore - armyEco.mass).toFixed(1)} von 50)`,
+  )
+  check(
+    Math.abs(site.health - 300 * site.buildProgress) < 1,
+    'Health wächst mit Baufortschritt',
   )
 
   console.log('\n== SCMAP: alle Karten in maps/ ==')

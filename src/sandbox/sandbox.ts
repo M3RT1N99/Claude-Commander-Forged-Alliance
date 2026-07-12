@@ -37,6 +37,10 @@ interface Binding {
   name: string
   /** RULEUCC_*-Fähigkeiten aus General.CommandCaps (bestimmt Order-Buttons) */
   caps: ReadonlySet<string>
+  categories: ReadonlySet<string>
+  strategicIcon: string
+  /** Kameradistanz, ab der das Strategic Icon erscheint (IconFadeInZoom) */
+  fadeZoom: number
 }
 
 /** Momentaufnahme für das HUD. */
@@ -48,7 +52,10 @@ export interface HudUnitInfo {
   selected: boolean
   x: number
   z: number
+  y: number
   army: number
+  strategicIcon: string
+  fadeZoom: number
 }
 
 const SIM_STEP = 0.1
@@ -64,6 +71,11 @@ function readCommandCaps(bp: BpObject): ReadonlySet<string> {
   return caps
 }
 
+function readCategories(bp: BpObject): ReadonlySet<string> {
+  const raw = bpGet(bp, 'Categories')
+  return new Set(Array.isArray(raw) ? raw.filter((c): c is string => typeof c === 'string') : [])
+}
+
 const ringGeometry = (() => {
   const g = new THREE.RingGeometry(0.85, 1, 40)
   g.rotateX(-Math.PI / 2)
@@ -74,13 +86,62 @@ export class SandboxController {
   readonly world = new SimWorld()
   private readonly bindings: Binding[] = []
   private accumulator = 0
+  private massSpots: { x: number; z: number; occupiedBy: number | null }[] = []
 
   constructor(private readonly viewer: UnitViewer) {
     viewer.setRtsControls(true)
     viewer.onUpdate((dt) => this.update(dt))
   }
 
-  spawn(assets: SandboxUnitAssets, x: number, z: number, teamColor: THREE.Color): void {
+  /** Mass-Punkte der Karte (aus den _save.lua-Markern) + Welt-Marker. */
+  setMassSpots(spots: { x: number; z: number }[]): void {
+    this.massSpots = spots.map((s) => ({ x: s.x, z: s.z, occupiedBy: null }))
+    const geo = new THREE.RingGeometry(0.6, 0.9, 24)
+    geo.rotateX(-Math.PI / 2)
+    for (const s of spots) {
+      const marker = new THREE.Mesh(
+        geo,
+        new THREE.MeshBasicMaterial({ color: 0x9be045, transparent: true, opacity: 0.85 }),
+      )
+      marker.position.set(s.x, this.viewer.heightAt(s.x, s.z) + 0.06, s.z)
+      marker.renderOrder = 5
+      this.viewer.addHelper(marker)
+    }
+  }
+
+  /**
+   * Extraktoren nur auf freie Mass-Punkte (Snapping wie im Original).
+   * Liefert die Bauposition oder null, wenn kein Punkt frei/in Reichweite.
+   */
+  private snapToMassSpot(x: number, z: number, unitIndex: number): { x: number; z: number } | null {
+    let best: (typeof this.massSpots)[number] | null = null
+    let bestDist = 24
+    for (const s of this.massSpots) {
+      if (s.occupiedBy !== null) continue
+      const d = Math.hypot(s.x - x, s.z - z)
+      if (d < bestDist) {
+        bestDist = d
+        best = s
+      }
+    }
+    if (!best) return null
+    best.occupiedBy = unitIndex
+    return { x: best.x, z: best.z }
+  }
+
+  /**
+   * Spawnt eine Einheit. Extraktoren snappen auf freie Mass-Punkte;
+   * Baukosten müssen vorher via world.army(n).trySpend gebucht sein.
+   * Liefert false, wenn kein Bauplatz verfügbar ist.
+   */
+  spawn(assets: SandboxUnitAssets, x: number, z: number, teamColor: THREE.Color): boolean {
+    const categories = readCategories(assets.bp)
+    if (categories.has('MASSEXTRACTION')) {
+      const spot = this.snapToMassSpot(x, z, this.bindings.length)
+      if (!spot) return false
+      x = spot.x
+      z = spot.z
+    }
     const scene = this.viewer.addUnit(assets.model, assets.textures, teamColor, assets.shader)
 
     const uniformScale = bpGet(assets.bp, 'Display.UniformScale')
@@ -90,6 +151,12 @@ export class SandboxController {
 
     const walkRateRaw = bpGet(assets.bp, 'Display.AnimationWalkRate')
     const sim = this.world.spawn(statsFromBlueprint(assets.id, assets.bp), x, z)
+    // Gebäude entstehen als Baustelle (Floating Economy zieht die Kosten
+    // über die Bauzeit); mobile Einheiten spawnen zum Testen fertig
+    if (categories.has('STRUCTURE')) {
+      sim.buildProgress = 0
+      sim.health = 0
+    }
 
     const ring = new THREE.Mesh(
       ringGeometry,
@@ -118,9 +185,19 @@ export class SandboxController {
         stripLoc(bpGet(assets.bp, 'Description')) ??
         assets.id.toUpperCase(),
       caps: readCommandCaps(assets.bp),
+      categories,
+      strategicIcon:
+        typeof bpGet(assets.bp, 'StrategicIconName') === 'string'
+          ? (bpGet(assets.bp, 'StrategicIconName') as string)
+          : 'icon_land_generic',
+      fadeZoom: (() => {
+        const v = bpGet(assets.bp, 'Display.Mesh.IconFadeInZoom')
+        return typeof v === 'number' && v > 0 ? v : 130
+      })(),
     })
 
     scene.mesh.position.set(sim.x, this.viewer.heightAt(sim.x, sim.z), sim.z)
+    return true
   }
 
   get unitCount(): number {
@@ -133,13 +210,27 @@ export class SandboxController {
 
   /** Linksklick: Einheit unter dem Cursor exklusiv auswählen (oder leeren). */
   clickSelect(clientX: number, clientY: number): string | null {
+    let hitBinding: Binding | null = null
     const hit = this.viewer.pickUnit(clientX, clientY)
-    for (const b of this.bindings) b.selected = hit !== null && b.scene === hit
     if (hit) {
-      const b = this.bindings.find((x) => x.scene === hit)
-      return b ? `Ausgewählt: ${b.sim.stats.blueprintId.toUpperCase()}` : null
+      hitBinding = this.bindings.find((x) => x.scene === hit) ?? null
+    } else {
+      // Herausgezoomt: Klick auf das Strategic Icon (Screen-Space)
+      const dist = this.viewer.getRtsDistance()
+      let best = 16
+      for (const b of this.bindings) {
+        if (dist < b.fadeZoom) continue
+        const s = this.viewer.worldToScreen(b.scene.mesh.position)
+        if (!s) continue
+        const d = Math.hypot(s.x - clientX, s.y - clientY)
+        if (d < best) {
+          best = d
+          hitBinding = b
+        }
+      }
     }
-    return null
+    for (const b of this.bindings) b.selected = b === hitBinding
+    return hitBinding ? `Ausgewählt: ${hitBinding.sim.stats.blueprintId.toUpperCase()}` : null
   }
 
   /** Box-Selektion: alle Einheiten, deren Position im Bildschirmrechteck liegt. */
@@ -193,9 +284,12 @@ export class SandboxController {
       health: b.sim.health,
       maxHealth: b.sim.stats.maxHealth,
       selected: b.selected,
-      x: b.sim.x,
-      z: b.sim.z,
+      x: b.scene.mesh.position.x,
+      z: b.scene.mesh.position.z,
+      y: b.scene.mesh.position.y,
       army: b.sim.army,
+      strategicIcon: b.strategicIcon,
+      fadeZoom: b.fadeZoom,
     }))
   }
 
@@ -209,7 +303,8 @@ export class SandboxController {
   }
 
   moveSelectedTo(x: number, z: number, append = false): void {
-    const selected = this.bindings.filter((b) => b.selected)
+    // Nur Einheiten mit Move-Fähigkeit (Gebäude bleiben stehen)
+    const selected = this.bindings.filter((b) => b.selected && b.caps.has('RULEUCC_Move'))
     if (selected.length === 0) return
     const spacing = Math.max(...selected.map((b) => b.sim.stats.arriveRadius)) * 3 + 1
     const cols = Math.ceil(Math.sqrt(selected.length))

@@ -62,6 +62,7 @@ export class Hud {
     this.root = document.createElement('div')
     this.root.id = 'hud'
     this.root.innerHTML = `
+      <div id="strat-layer"></div>
       <div id="eco-panel">
         <div class="eco-group" id="eco-mass">
           <img class="eco-icon" />
@@ -102,11 +103,96 @@ export class Hud {
     })
 
     this.interval = window.setInterval(() => this.update(), 100)
+    // Strategic Icons müssen der Kamera pro Frame folgen
+    viewer.onUpdate(() => this.updateStrategicIcons())
   }
 
   dispose(): void {
     clearInterval(this.interval)
     this.root.remove()
+  }
+
+  // -------------------------------------------------------------------------
+  // Strategic Icons (Original: sichtbar ab Display.Mesh.IconFadeInZoom,
+  // Texturen /game/strategicicons/<StrategicIconName>_{rest,selected}.dds,
+  // getönt mit der Armee-Farbe)
+  // -------------------------------------------------------------------------
+
+  private readonly stratPool: HTMLImageElement[] = []
+  private readonly tintCache = new Map<string, string | 'pending'>()
+
+  private static readonly ARMY_COLORS: Record<number, string> = {
+    1: '#2a6dbb',
+    2: '#e23c2c',
+  }
+
+  private tintedIcon(name: string, state: 'rest' | 'selected', army: number): string | null {
+    const key = `${name}|${state}|${army}`
+    const cached = this.tintCache.get(key)
+    if (cached && cached !== 'pending') return cached
+    if (cached === 'pending') return null
+    this.tintCache.set(key, 'pending')
+    void this.skin(`/game/strategicicons/${name}_${state}.dds`).then((base) => {
+      if (!base) {
+        this.tintCache.delete(key)
+        return
+      }
+      const img = new Image()
+      img.onload = () => {
+        const canvas = document.createElement('canvas')
+        canvas.width = img.width
+        canvas.height = img.height
+        const ctx = canvas.getContext('2d')!
+        ctx.drawImage(img, 0, 0)
+        ctx.globalCompositeOperation = 'multiply'
+        ctx.fillStyle = Hud.ARMY_COLORS[army] ?? '#999999'
+        ctx.fillRect(0, 0, canvas.width, canvas.height)
+        ctx.globalCompositeOperation = 'destination-in'
+        ctx.drawImage(img, 0, 0)
+        this.tintCache.set(key, canvas.toDataURL())
+      }
+      img.src = base
+    })
+    return null
+  }
+
+  private updateStrategicIcons(): void {
+    const layer = this.el('#strat-layer')
+    const rootRect = this.root.getBoundingClientRect()
+    const dist = this.viewer.getRtsDistance()
+    const units = this.controller.hudUnits()
+
+    while (this.stratPool.length < units.length) {
+      const img = document.createElement('img')
+      img.className = 'strat-icon'
+      layer.appendChild(img)
+      this.stratPool.push(img)
+    }
+
+    for (let i = 0; i < this.stratPool.length; i++) {
+      const img = this.stratPool[i]!
+      const u = units[i]
+      if (!u || dist < u.fadeZoom) {
+        img.style.display = 'none'
+        continue
+      }
+      const s = this.viewer.worldToScreen(new THREE.Vector3(u.x, u.y, u.z))
+      if (!s) {
+        img.style.display = 'none'
+        continue
+      }
+      const url = this.tintedIcon(u.strategicIcon, u.selected ? 'selected' : 'rest', u.army)
+      if (!url) {
+        img.style.display = 'none'
+        continue
+      }
+      if (img.dataset.url !== url) {
+        img.src = url
+        img.dataset.url = url
+      }
+      img.style.display = 'block'
+      img.style.transform = `translate(${s.x - rootRect.left}px, ${s.y - rootRect.top}px) translate(-50%, -50%)`
+    }
   }
 
   /** SkinnableFile: Fraktions-Skin zuerst, dann common. */
@@ -257,18 +343,22 @@ export class Hud {
   }
 
   private update(): void {
-    // Economy — Werte aus der Sim
+    // Economy — Werte aus der Sim (Rate-Farben wie economy.lua: positiv
+    // grün, negativ mit Vorrat gelb, negativ ohne Vorrat rot)
     const army = this.controller.world.army(1)
-    for (const [group, cur, max, income] of [
-      ['#eco-mass', army.mass, army.massStorage, army.massIncome],
-      ['#eco-energy', army.energy, army.energyStorage, army.energyIncome],
+    for (const [group, cur, max, income, expense] of [
+      ['#eco-mass', army.mass, army.massStorage, army.massIncome, army.massExpense],
+      ['#eco-energy', army.energy, army.energyStorage, army.energyIncome, army.energyExpense],
     ] as const) {
+      const net = income - expense
       this.el(`${group} .eco-cur`).textContent = Math.floor(cur).toString()
       this.el(`${group} .eco-max`).textContent = Math.floor(max).toString()
       this.el(`${group} .eco-fill`).style.width = `${Math.min(100, (cur / max) * 100)}%`
-      this.el(`${group} .eco-rate`).textContent = `+${income.toFixed(0)}`
+      const rate = this.el(`${group} .eco-rate`)
+      rate.textContent = `${net >= 0 ? '+' : ''}${net.toFixed(0)}`
+      rate.style.color = net >= 0 ? '#b7e75f' : cur > 1 ? '#ffff00' : '#ff0000'
       this.el(`${group} .eco-income`).textContent = `+${income.toFixed(1)}`
-      this.el(`${group} .eco-expense`).textContent = '-0.0'
+      this.el(`${group} .eco-expense`).textContent = `-${expense.toFixed(1)}`
     }
 
     // Orders — verfügbar = Union der CommandCaps der Auswahl (Original)
