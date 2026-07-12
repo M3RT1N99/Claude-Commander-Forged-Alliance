@@ -12,6 +12,9 @@ import { parseScm } from '../src/formats/scm'
 import { parseBlueprints, bpGet } from '../src/formats/blueprint'
 import { parseDds } from '../src/formats/dds'
 import { decodeDxt } from '../src/formats/dxt'
+import { parseScmap } from '../src/formats/scmap'
+import { parseLuaAssignments, bpGet as bpGetPath } from '../src/formats/blueprint'
+import { readdir, readFile } from 'node:fs/promises'
 
 const GAME_DIR =
   process.argv[2] ??
@@ -132,6 +135,71 @@ async function main(): Promise<void> {
   }
   check(scmOk === scmPaths.length, `${scmOk}/${scmPaths.length} Meshes geparst`)
   for (const e of scmErrors.slice(0, 10)) console.error(`       ${e}`)
+
+  console.log('\n== SCMAP: alle Karten in maps/ ==')
+  const envScd = await ZipArchive.open(await NodeFile.open(`${GAME_DIR}/gamedata/env.scd`))
+  const texturesScd = await ZipArchive.open(await NodeFile.open(`${GAME_DIR}/gamedata/textures.scd`))
+  const mapDirs = (await readdir(`${GAME_DIR}/maps`, { withFileTypes: true }))
+    .filter((d) => d.isDirectory())
+    .map((d) => d.name)
+  let mapOk = 0
+  const mapErrors: string[] = []
+  const validSizes = new Set([64, 128, 256, 512, 1024, 2048, 4096])
+  for (const dir of mapDirs) {
+    try {
+      const files = await readdir(`${GAME_DIR}/maps/${dir}`)
+      const scmapName = files.find((f) => f.toLowerCase().endsWith('.scmap'))
+      if (!scmapName) continue
+      const scmap = parseScmap(new Uint8Array(await readFile(`${GAME_DIR}/maps/${dir}/${scmapName}`)))
+      const problems: string[] = []
+      if (!validSizes.has(scmap.width) || !validSizes.has(scmap.height)) {
+        problems.push(`Größe ${scmap.width}x${scmap.height}`)
+      }
+      if (Math.abs(scmap.heightScale - 1 / 128) > 1e-6) {
+        problems.push(`heightScale=${scmap.heightScale}`)
+      }
+      if (!scmap.terrainShader.toLowerCase().includes('terrain')) {
+        problems.push(`Shader "${scmap.terrainShader}"`)
+      }
+      const layers = scmap.strata.filter((s) => s.albedoPath)
+      if (layers.length < 2) problems.push(`nur ${layers.length} Texturlagen`)
+      for (const s of layers) {
+        if (!envScd.get(s.albedoPath.replace(/^\//, '')) && !texturesScd.get(s.albedoPath.replace(/^\//, ''))) {
+          problems.push(`Layer fehlt in env/textures.scd: ${s.albedoPath}`)
+        }
+        if (!(s.albedoScale > 0 && s.albedoScale < 10000)) {
+          problems.push(`Layer-Scale ${s.albedoScale}`)
+        }
+      }
+      for (const [label, dds] of [
+        ['maskLow', scmap.textureMaskLowDds],
+        ['maskHigh', scmap.textureMaskHighDds],
+        ['waterMap', scmap.waterMapDds],
+      ] as const) {
+        if (dds) {
+          const img = parseDds(dds)
+          if (img.width < 32) problems.push(`${label}: ${img.width}px`)
+        } else {
+          problems.push(`${label} fehlt`)
+        }
+      }
+      const maxH = scmap.heightmap.reduce((a, b) => Math.max(a, b), 0) * scmap.heightScale
+      if (!(maxH >= 0 && maxH < 512)) problems.push(`max. Höhe ${maxH}`)
+      if (problems.length === 0) mapOk++
+      else mapErrors.push(`${dir}: ${problems.join('; ')}`)
+    } catch (err) {
+      mapErrors.push(`${dir}: ${err instanceof Error ? err.message : err}`)
+    }
+  }
+  check(mapErrors.length === 0, `${mapOk}/${mapOk + mapErrors.length} Karten geparst und plausibel`)
+  for (const e of mapErrors.slice(0, 15)) console.error(`       ${e}`)
+
+  console.log('\n== Scenario-Lua ==')
+  const scenText = await readFile(`${GAME_DIR}/maps/SCMP_001/SCMP_001_scenario.lua`, 'utf-8')
+  const scen = parseLuaAssignments(scenText)
+  check(bpGetPath(scen, 'ScenarioInfo.name') === 'Burial Mounds', `name=${bpGetPath(scen, 'ScenarioInfo.name')}`)
+  const scenSize = bpGetPath(scen, 'ScenarioInfo.size')
+  check(Array.isArray(scenSize) && scenSize[0] === 1024, `size=${JSON.stringify(scenSize)}`)
 
   console.log(failures === 0 ? '\nALLE CHECKS BESTANDEN' : `\n${failures} CHECK(S) FEHLGESCHLAGEN`)
   process.exit(failures === 0 ? 0 : 1)

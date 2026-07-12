@@ -191,6 +191,19 @@ class Parser {
         if (Array.isArray(table)) return { __type: ident, values: table }
         return { __type: ident, ...(table as BpObject) }
       }
+      if (this.peek() === '(') {
+        // Funktionsaufruf wie STRING('x') oder Vector(x, y, z):
+        // ein Argument → der Wert selbst, mehrere → Array
+        this.pos++
+        const args: BpValue[] = []
+        while (this.peek() !== ')') {
+          if (this.peek() === '') this.error('")" erwartet')
+          args.push(this.parseValue())
+          if (this.peek() === ',') this.pos++
+        }
+        this.pos++
+        return args.length === 1 ? args[0]! : args
+      }
       // nackter Bezeichner (selten) → als String behandeln
       return ident
     }
@@ -260,11 +273,27 @@ class Parser {
     }
     return out
   }
+
+  /** Top-Level: Folge von `name = value`-Zuweisungen (z. B. _scenario.lua). */
+  parseAssignments(): BpObject {
+    const out: BpObject = {}
+    while (!this.atEnd()) {
+      const ident = this.readIdent()
+      this.expect('=')
+      out[ident] = this.parseValue()
+    }
+    return out
+  }
 }
 
 /** Parst eine .bp-Datei; liefert alle Top-Level-Blueprints. */
 export function parseBlueprints(source: string): BpObject[] {
   return new Parser(source).parseFile()
+}
+
+/** Parst Lua-Dateien aus Top-Level-Zuweisungen (z. B. `version = 3` + `ScenarioInfo = {...}`). */
+export function parseLuaAssignments(source: string): BpObject {
+  return new Parser(source).parseAssignments()
 }
 
 /** Bequemer Zugriff: erster Blueprint der Datei. */

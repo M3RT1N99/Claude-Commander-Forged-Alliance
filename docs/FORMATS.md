@@ -33,10 +33,20 @@ Referenz UEL0001_LOD0.scm: 5807 Vertices, 10458 Indizes (3486 Tris),
 
 ## SCA — Animationen (`*_A*.sca`)
 
-Magic `ANIM`, Version 5. Header (verifiziert an UEL0001_A001.sca):
+Magic `ANIM`, Version 5. Header (verifiziert an UEL0001_A001.sca und dem
+rekonstruierten Loader `RScaResource::LoadScaFile` in faf-re):
 numFrames u32 · duration f32 · numBones u32 · namesOffset u32 ·
-linksOffset u32 · animDataOffset u32 · frameSize u32. Pro Frame und Bone:
-Position ³f + Rotation ⁴f. **Parser noch nicht implementiert (M3).**
+linksOffset u32 · animDataOffset u32 · frameSize u32.
+
+- Ab animDataOffset: ein 28-Byte-**Root-Delta**-Record, dann pro Frame:
+  8-Byte-Header (f32 time, u32 flags) + numBones × 28-Byte-Keys
+  {pos ³f, quat ⁴f (w,x,y,z)}
+- Version < 5: Quaternion-Komponenten [a,b,c,d]→[d,a,b,c] rotieren
+- Playback (Original): 10-Hz-Sim-Ticks, `framePos = (frames-1)/duration * t`,
+  Position-LERP + Quaternion-LERP zwischen Nachbarframes
+- Skelett kommt aus der SCM-Datei (Bones + Parents + Bindpose)
+
+**Parser noch nicht implementiert (M3).**
 
 ## Blueprints (`*_unit.bp`, Lua)
 
@@ -60,7 +70,24 @@ Team-Color (mesh.fx): `albedo.rgb = lerp(teamColor, albedo.rgb, 1 - specular.a)`
 
 ## SCMAP — Karten (`maps/*/*.scmap`)
 
-Magic `Map\x1a`. Heightmap (u16), Terrain-Textur-Lagen, Wasser-Parameter,
-Props, Decals. **Parser noch nicht implementiert (M2)** — Referenzen:
-FAForever-Map-Tools (Neroxis-Generator, hazard-x scmap-Doku), Original-Code
-in faf-re.
+Magic `Map\x1a`, Version major 2, minor 56 (FA) / 60 (FAF-Editor;
+Original-Steam-Karten sind teils ebenfalls 60). Vollständiges Layout in
+[src/formats/scmap.ts](../src/formats/scmap.ts); Parser verifiziert gegen
+alle 60 Karten der Installation. Quellen: Neroxis `SCMapImporter.java`,
+ozonex FAF Map Editor (HazardX-Loader), faf-re (`CWldMap::MapLoad`).
+
+Kernfakten:
+
+- Heightmap: u16-Grid mit (w+1)×(h+1) Samples, Welthöhe = wert × 1/128,
+  1 Sample pro Weltmeter
+- 10 Albedo-Strata (Lower, Stratum0–7, Upper) + 9 Normal-Strata, je
+  Pfad (case-insensitiv in env.scd!) + Kachelgröße in Weltmetern
+- Splat-Masken: 2 eingebettete unkomprimierte BGRA-DDS (Stratum 0-3 in
+  RGBA von UtilityA, 4-7 in UtilityB), Dekodierung `saturate(tex*2-1)`
+- Watermap (UtilityC, DXT5, halbe Auflösung): R = über Wasser,
+  **G = Wassertiefe**, B = Flatness, A = Foam
+- Wasser-Settings: elevation/deep/abyss, SurfaceColor, WaterRamp-Textur
+- Lighting: Sonnenrichtung/-farbe, Ambience, ShadowFill, Specular,
+  LightingMultiplier, Fog — 1:1 an den Terrain-Shader durchgereicht
+- Danach: WaveGenerators, Decals, TerrainType-Bytes, (v60: Skybox), Props
+  (Blueprint-Pfad + Position + 3×3-Rotationsmatrix)

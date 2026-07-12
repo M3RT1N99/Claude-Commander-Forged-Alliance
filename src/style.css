@@ -123,6 +123,34 @@ select {
   font-family: Consolas, monospace;
 }
 
+#mode-tabs {
+  display: flex;
+  gap: 6px;
+}
+
+.tab {
+  margin-bottom: 0;
+  background: transparent;
+  border: 1px solid var(--panel-border);
+  color: var(--text-dim);
+}
+
+.tab.active {
+  background: #1c4275;
+  border-color: #2d5da0;
+  color: #fff;
+}
+
+#map-info {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-dim);
+}
+
+#map-info strong {
+  color: var(--text);
+}
+
 .row {
   display: flex;
   align-items: center;

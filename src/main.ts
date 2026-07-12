@@ -9,7 +9,14 @@ import {
 } from './vfs/gameSource'
 import { GameVfs } from './vfs/vfs'
 import { parseScm } from './formats/scm'
-import { parseBlueprint, bpGet, stripLoc, type BpObject } from './formats/blueprint'
+import { parseScmap } from './formats/scmap'
+import {
+  parseBlueprint,
+  parseLuaAssignments,
+  bpGet,
+  stripLoc,
+  type BpObject,
+} from './formats/blueprint'
 import { ddsToTexture } from './viewer/textures'
 import { UnitViewer } from './viewer/unitViewer'
 
@@ -26,6 +33,12 @@ const btnResume = $<HTMLButtonElement>('#btn-resume')
 const btnFallback = $<HTMLButtonElement>('#btn-fallback')
 const inputDir = $<HTMLInputElement>('#input-dir')
 const unitPanel = $('#unit-panel')
+const mapPanel = $('#map-panel')
+const modeTabs = $('#mode-tabs')
+const tabUnits = $<HTMLButtonElement>('#tab-units')
+const tabMaps = $<HTMLButtonElement>('#tab-maps')
+const mapSelect = $<HTMLSelectElement>('#map-select')
+const mapInfo = $('#map-info')
 const unitSearch = $<HTMLInputElement>('#unit-search')
 const unitSelect = $<HTMLSelectElement>('#unit-select')
 const teamColorInput = $<HTMLInputElement>('#team-color')
@@ -39,18 +52,20 @@ function log(msg: string): void {
 
 const viewer = new UnitViewer($<HTMLCanvasElement>('#viewport'))
 let vfs: GameVfs | null = null
+let source: GameSource | null = null
 let unitIds: string[] = []
 
 // ---------------------------------------------------------------------------
 // Quellen-Verbindung
 // ---------------------------------------------------------------------------
 
-async function connect(source: GameSource): Promise<void> {
+async function connect(src: GameSource): Promise<void> {
   try {
-    log(`Verbinde: ${source.label}`)
+    source = src
+    log(`Verbinde: ${src.label}`)
     log(viewer.s3tcSupported ? 'GPU: S3TC/DXT nativ' : 'GPU: DXT-Software-Dekodierung')
-    vfs = await GameVfs.mount(source, log)
-    sourceLabel.textContent = source.label
+    vfs = await GameVfs.mount(src, log)
+    sourceLabel.textContent = src.label
 
     unitIds = vfs
       .find((p) => /^units\/[^/]+\/[^/]+_unit\.bp$/.test(p))
@@ -59,9 +74,19 @@ async function connect(source: GameSource): Promise<void> {
     log(`${unitIds.length} Einheiten gefunden`)
 
     unitPanel.hidden = false
+    modeTabs.hidden = false
     renderUnitList('')
+    await populateMapList(src)
 
-    const wanted = new URLSearchParams(location.search).get('unit') ?? 'uel0001'
+    const params = new URLSearchParams(location.search)
+    const wantedMap = params.get('map')
+    if (wantedMap) {
+      setMode('maps')
+      mapSelect.value = wantedMap
+      await loadMap(wantedMap)
+      return
+    }
+    const wanted = params.get('unit') ?? 'uel0001'
     if (unitIds.includes(wanted.toLowerCase())) {
       unitSelect.value = wanted.toLowerCase()
       await loadUnit(wanted.toLowerCase())
@@ -69,6 +94,29 @@ async function connect(source: GameSource): Promise<void> {
   } catch (err) {
     log(`FEHLER: ${err instanceof Error ? err.message : err}`)
   }
+}
+
+async function populateMapList(src: GameSource): Promise<void> {
+  try {
+    const entries = await src.list('maps')
+    mapSelect.innerHTML = ''
+    for (const e of entries.filter((e) => e.dir).sort((a, b) => a.name.localeCompare(b.name))) {
+      const opt = document.createElement('option')
+      opt.value = e.name
+      opt.textContent = e.name
+      mapSelect.appendChild(opt)
+    }
+    log(`${mapSelect.options.length} Karten gefunden`)
+  } catch (err) {
+    log(`Karten-Liste nicht verfügbar: ${err instanceof Error ? err.message : err}`)
+  }
+}
+
+function setMode(mode: 'units' | 'maps'): void {
+  tabUnits.classList.toggle('active', mode === 'units')
+  tabMaps.classList.toggle('active', mode === 'maps')
+  unitPanel.hidden = mode !== 'units'
+  mapPanel.hidden = mode !== 'maps'
 }
 
 function renderUnitList(filter: string): void {
@@ -146,6 +194,47 @@ async function loadUnit(id: string): Promise<void> {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Karte laden
+// ---------------------------------------------------------------------------
+
+async function loadMap(folder: string): Promise<void> {
+  if (!source || !vfs) return
+  try {
+    log(`Lade Karte ${folder}…`)
+    const files = await source.list(`maps/${folder}`)
+    const scenarioFile = files.find((f) => f.name.toLowerCase().endsWith('_scenario.lua'))
+    if (scenarioFile) {
+      const raf = await source.open(`maps/${folder}/${scenarioFile.name}`)
+      const text = new TextDecoder('utf-8').decode(await raf.slice(0, raf.size))
+      const scenario = parseLuaAssignments(text)
+      const info = scenario.ScenarioInfo
+      const name = stripLoc(bpGet(info, 'name')) ?? folder
+      const desc = stripLoc(bpGet(info, 'description')) ?? ''
+      const size = bpGet(info, 'size')
+      const sizeStr = Array.isArray(size) ? `${size[0]}×${size[1]}` : '?'
+      mapInfo.innerHTML = `<strong>${name}</strong><br>${desc}<br>Größe: <strong>${sizeStr}</strong>`
+    }
+
+    const scmapFile = files.find((f) => f.name.toLowerCase().endsWith('.scmap'))
+    if (!scmapFile) {
+      log(`Keine .scmap-Datei in maps/${folder}`)
+      return
+    }
+    const raf = await source.open(`maps/${folder}/${scmapFile.name}`)
+    const data = new Uint8Array(await raf.slice(0, raf.size))
+    const scmap = parseScmap(data)
+    log(
+      `${scmapFile.name}: ${scmap.width}×${scmap.height}, ` +
+        `${scmap.strata.length} Texturlagen, Wasser ${scmap.water.hasWater ? 'ja' : 'nein'}`,
+    )
+    await viewer.setMap(scmap, vfs)
+    log(`Karte ${folder} geladen`)
+  } catch (err) {
+    log(`FEHLER beim Laden der Karte: ${err instanceof Error ? err.message : err}`)
+  }
+}
+
 function showUnitInfo(id: string, bp: BpObject): void {
   const name = stripLoc(bpGet(bp, 'General.UnitName')) ?? ''
   const desc = stripLoc(bpGet(bp, 'Description')) ?? ''
@@ -197,6 +286,9 @@ inputDir.addEventListener('change', () => {
 unitSearch.addEventListener('input', () => renderUnitList(unitSearch.value))
 unitSelect.addEventListener('change', () => void loadUnit(unitSelect.value))
 teamColorInput.addEventListener('input', () => viewer.setTeamColor(currentTeamColor()))
+tabUnits.addEventListener('click', () => setMode('units'))
+tabMaps.addEventListener('click', () => setMode('maps'))
+mapSelect.addEventListener('change', () => void loadMap(mapSelect.value))
 
 // ---------------------------------------------------------------------------
 // Start

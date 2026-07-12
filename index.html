@@ -27,6 +27,17 @@
           <button id="btn-fallback" hidden>Ordner wählen (Fallback)…</button>
         </section>
 
+        <nav id="mode-tabs" hidden>
+          <button id="tab-units" class="tab active">Einheiten</button>
+          <button id="tab-maps" class="tab">Karten</button>
+        </nav>
+
+        <section id="map-panel" hidden>
+          <h2>Karte</h2>
+          <select id="map-select" size="10"></select>
+          <div id="map-info"></div>
+        </section>
+
         <section id="unit-panel" hidden>
           <h2>Einheit</h2>
           <input id="unit-search" type="search" placeholder="Suchen… (z. B. UEL0001)" />

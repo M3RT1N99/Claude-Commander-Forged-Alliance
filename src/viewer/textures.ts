@@ -54,8 +54,8 @@ function dataTexture(rgba: Uint8Array, dds: DdsImage): THREE.DataTexture {
   tex.wrapS = THREE.RepeatWrapping
   tex.wrapT = THREE.RepeatWrapping
   tex.anisotropy = 4
-  // DDS-Daten sind top-down gespeichert; DataTexture lädt bottom-up
-  tex.flipY = true
+  // flipY bleibt false — identisches Verhalten wie CompressedTexture,
+  // die DirectX-UVs der Spieldaten passen dann ohne Flip.
   tex.needsUpdate = true
   return tex
 }
