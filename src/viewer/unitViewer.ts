@@ -55,8 +55,9 @@ export class UnitViewer {
   animationSpeed = 1
   readonly s3tcSupported: boolean
 
-  /** Sandbox: zusätzliche Einheiten + Update-Hooks */
+  /** Sandbox: zusätzliche Einheiten, Hilfsobjekte + Update-Hooks */
   private readonly units: SceneUnit[] = []
+  private readonly helpers: THREE.Object3D[] = []
   private readonly updateHooks: ((dt: number) => void)[] = []
 
   /** Heightfield der aktuellen Karte (für Sampling/Picking) */
@@ -120,6 +121,8 @@ export class UnitViewer {
       ;(unit.mesh.material as THREE.Material).dispose()
     }
     this.units.length = 0
+    for (const helper of this.helpers) this.scene.remove(helper)
+    this.helpers.length = 0
     if (this.current) {
       this.scene.remove(this.current)
       this.current.geometry.dispose()
@@ -204,6 +207,31 @@ export class UnitViewer {
 
   onUpdate(hook: (dt: number) => void): void {
     this.updateHooks.push(hook)
+  }
+
+  /** Hilfsobjekt (Auswahl-Ring o. Ä.) — wird beim Szenenwechsel entfernt. */
+  addHelper(obj: THREE.Object3D): void {
+    this.scene.add(obj)
+    this.helpers.push(obj)
+  }
+
+  /** Nächstgelegene getroffene Einheit unter dem Cursor (oder null). */
+  pickUnit(clientX: number, clientY: number): SceneUnit | null {
+    if (this.units.length === 0) return null
+    const rect = this.canvas.getBoundingClientRect()
+    const ndc = new THREE.Vector2(
+      ((clientX - rect.left) / rect.width) * 2 - 1,
+      -((clientY - rect.top) / rect.height) * 2 + 1,
+    )
+    const raycaster = new THREE.Raycaster()
+    raycaster.setFromCamera(ndc, this.camera)
+    const hits = raycaster.intersectObjects(
+      this.units.map((u) => u.mesh),
+      false,
+    )
+    const hit = hits[0]
+    if (!hit) return null
+    return this.units.find((u) => u.mesh === hit.object) ?? null
   }
 
   /** Höhe der aktuellen Karte an Weltposition (bilinear), 0 ohne Karte. */

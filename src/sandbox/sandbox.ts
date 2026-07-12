@@ -1,102 +1,153 @@
 import * as THREE from 'three'
+import { SimWorld, statsFromBlueprint, type SimUnit } from '../sim/simWorld'
 import type { UnitViewer, SceneUnit } from '../viewer/unitViewer'
+import type { UnitTextures } from '../viewer/unitMaterial'
+import type { ScmModel } from '../formats/scm'
 import type { ScaAnim } from '../formats/sca'
-import type { BpObject } from '../formats/blueprint'
-import { bpGet } from '../formats/blueprint'
+import { bpGet, type BpObject } from '../formats/blueprint'
 
 /**
- * Minimaler Sandbox-Controller (M4-Preview): eine Einheit steht auf der
- * Karte, Klick setzt ein Bewegungsziel. Geradeaus-Bewegung mit
- * Blueprint-Geschwindigkeit, Drehung zum Ziel, Walk-Animation während der
- * Fahrt, Boden-Clamping über das Heightfield. Noch kein Pathfinding und
- * keine deterministische Sim — das kommt in M4/M5.
+ * Sandbox (M4): bindet den deterministischen Sim-Kern an den Renderer.
+ * Die Sim läuft mit festen 10-Hz-Ticks; der Renderer interpoliert zwischen
+ * dem vorherigen und dem aktuellen Tick-Zustand. Höhe/Animation sind rein
+ * visuell und beeinflussen die Sim nicht.
  */
-export class Sandbox {
-  private readonly pos: THREE.Vector3
-  private target: THREE.Vector3 | null = null
-  private heading = 0
-  private moving = false
 
-  private readonly maxSpeed: number
-  private readonly turnRate: number
-  private readonly walkAnimSpeed: number
+export interface SandboxUnitAssets {
+  id: string
+  model: ScmModel
+  textures: UnitTextures
+  bp: BpObject
+  walkAnim: ScaAnim | null
+}
 
-  constructor(
-    private readonly viewer: UnitViewer,
-    private readonly unit: SceneUnit,
-    private readonly walkAnim: ScaAnim | null,
-    blueprint: BpObject,
-    spawn: THREE.Vector3,
-  ) {
-    this.pos = spawn.clone()
-    const maxSpeed = bpGet(blueprint, 'Physics.MaxSpeed')
-    const turnRate = bpGet(blueprint, 'Physics.TurnRate')
-    const walkRate = bpGet(blueprint, 'Display.AnimationWalkRate')
-    this.maxSpeed = typeof maxSpeed === 'number' && maxSpeed > 0 ? maxSpeed : 1.7
-    // TurnRate ist in Grad/s
-    this.turnRate = ((typeof turnRate === 'number' && turnRate > 0 ? turnRate : 90) * Math.PI) / 180
-    // AnimationWalkRate ist ein direkter Abspielraten-Multiplikator
-    this.walkAnimSpeed = typeof walkRate === 'number' && walkRate > 0 ? walkRate : 1
+interface Binding {
+  sim: SimUnit
+  scene: SceneUnit
+  walkAnim: ScaAnim | null
+  walkRate: number
+  wasMoving: boolean
+}
 
-    const uniformScale = bpGet(blueprint, 'Display.UniformScale')
+const SIM_STEP = 0.1
+
+export class SandboxController {
+  readonly world = new SimWorld()
+  private readonly bindings: Binding[] = []
+  private accumulator = 0
+  private selected: Binding | null = null
+  private readonly ring: THREE.Mesh
+
+  constructor(private readonly viewer: UnitViewer) {
+    const ringGeo = new THREE.RingGeometry(0.85, 1, 40)
+    ringGeo.rotateX(-Math.PI / 2)
+    this.ring = new THREE.Mesh(
+      ringGeo,
+      new THREE.MeshBasicMaterial({
+        color: 0x44ff66,
+        transparent: true,
+        opacity: 0.9,
+        depthTest: false,
+      }),
+    )
+    this.ring.visible = false
+    this.ring.renderOrder = 10
+    viewer.addHelper(this.ring)
+    viewer.onUpdate((dt) => this.update(dt))
+  }
+
+  spawn(assets: SandboxUnitAssets, x: number, z: number, teamColor: THREE.Color): Binding {
+    const scene = this.viewer.addUnit(assets.model, assets.textures, teamColor)
+
+    const uniformScale = bpGet(assets.bp, 'Display.UniformScale')
     if (typeof uniformScale === 'number' && uniformScale > 0) {
-      unit.mesh.scale.setScalar(uniformScale)
+      scene.mesh.scale.setScalar(uniformScale)
     }
 
-    this.pos.y = viewer.heightAt(this.pos.x, this.pos.z)
-    this.apply()
-    viewer.onUpdate((dt) => this.tick(dt))
+    const walkRateRaw = bpGet(assets.bp, 'Display.AnimationWalkRate')
+    const sim = this.world.spawn(statsFromBlueprint(assets.id, assets.bp), x, z)
+
+    const binding: Binding = {
+      sim,
+      scene,
+      walkAnim: assets.walkAnim,
+      walkRate: typeof walkRateRaw === 'number' && walkRateRaw > 0 ? walkRateRaw : 1,
+      wasMoving: false,
+    }
+    this.bindings.push(binding)
+
+    scene.mesh.position.set(sim.x, this.viewer.heightAt(sim.x, sim.z), sim.z)
+    return binding
   }
 
-  moveTo(point: THREE.Vector3): void {
-    this.target = point.clone()
+  get selectedUnit(): SimUnit | null {
+    return this.selected?.sim ?? null
   }
 
-  get position(): THREE.Vector3 {
-    return this.pos.clone()
+  get unitCount(): number {
+    return this.bindings.length
   }
 
-  private tick(dt: number): void {
-    if (!this.target) return
-
-    const dx = this.target.x - this.pos.x
-    const dz = this.target.z - this.pos.z
-    const dist = Math.hypot(dx, dz)
-
-    if (dist < 0.15) {
-      this.target = null
-      if (this.moving) {
-        this.moving = false
-        this.unit.play(null, 1)
+  /** Klick: Einheit anwählen oder — mit Auswahl — Bewegungsbefehl geben. */
+  handleClick(clientX: number, clientY: number, append = false): string | null {
+    const hitUnit = this.viewer.pickUnit(clientX, clientY)
+    if (hitUnit) {
+      this.selected = this.bindings.find((b) => b.scene === hitUnit) ?? null
+      return this.selected ? `Ausgewählt: ${this.selected.sim.stats.blueprintId.toUpperCase()}` : null
+    }
+    if (this.selected) {
+      const hit = this.viewer.pickTerrain(clientX, clientY)
+      if (hit) {
+        this.world.issueMove(this.selected.sim, hit.x, hit.z, append)
+        return `Bewegung → ${hit.x.toFixed(0)}, ${hit.z.toFixed(0)}`
       }
-      return
     }
-
-    if (!this.moving) {
-      this.moving = true
-      if (this.walkAnim) this.unit.play(this.walkAnim, this.walkAnimSpeed)
-    }
-
-    // Richtung Ziel drehen (SCM-Modelle schauen entlang +z)
-    const wanted = Math.atan2(dx, dz)
-    let diff = wanted - this.heading
-    while (diff > Math.PI) diff -= 2 * Math.PI
-    while (diff < -Math.PI) diff += 2 * Math.PI
-    const maxTurn = this.turnRate * dt
-    this.heading += Math.abs(diff) <= maxTurn ? diff : Math.sign(diff) * maxTurn
-
-    // Nur fahren, wenn grob Richtung Ziel ausgerichtet
-    if (Math.abs(diff) < Math.PI / 3) {
-      const step = Math.min(this.maxSpeed * dt, dist)
-      this.pos.x += Math.sin(this.heading) * step
-      this.pos.z += Math.cos(this.heading) * step
-    }
-    this.pos.y = this.viewer.heightAt(this.pos.x, this.pos.z)
-    this.apply()
+    return null
   }
 
-  private apply(): void {
-    this.unit.mesh.position.copy(this.pos)
-    this.unit.mesh.rotation.set(0, this.heading, 0)
+  selectFirst(): void {
+    this.selected = this.bindings[0] ?? null
+  }
+
+  moveSelected(x: number, z: number, append = false): void {
+    if (this.selected) this.world.issueMove(this.selected.sim, x, z, append)
+  }
+
+  private update(dt: number): void {
+    // Fixe Sim-Schritte; Obergrenze verhindert Spiralen nach Tab-Pausen
+    this.accumulator = Math.min(this.accumulator + dt, SIM_STEP * 10)
+    while (this.accumulator >= SIM_STEP) {
+      this.world.tick()
+      this.accumulator -= SIM_STEP
+    }
+    const alpha = this.accumulator / SIM_STEP
+
+    for (const b of this.bindings) {
+      const x = b.sim.prevX + (b.sim.x - b.sim.prevX) * alpha
+      const z = b.sim.prevZ + (b.sim.z - b.sim.prevZ) * alpha
+      let dh = b.sim.heading - b.sim.prevHeading
+      while (dh > Math.PI) dh -= 2 * Math.PI
+      while (dh < -Math.PI) dh += 2 * Math.PI
+      const heading = b.sim.prevHeading + dh * alpha
+
+      b.scene.mesh.position.set(x, this.viewer.heightAt(x, z), z)
+      b.scene.mesh.rotation.set(0, heading, 0)
+
+      const moving = b.sim.speed > 0.05
+      if (moving !== b.wasMoving) {
+        b.wasMoving = moving
+        b.scene.play(moving ? b.walkAnim : null, b.walkRate)
+      }
+    }
+
+    if (this.selected) {
+      const m = this.selected.scene.mesh
+      this.ring.visible = true
+      this.ring.position.set(m.position.x, m.position.y + 0.05, m.position.z)
+      const r = Math.max(this.selected.sim.stats.arriveRadius * 1.6, 0.7)
+      this.ring.scale.setScalar(r)
+    } else {
+      this.ring.visible = false
+    }
   }
 }

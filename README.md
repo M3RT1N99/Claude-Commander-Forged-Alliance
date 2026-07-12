@@ -8,7 +8,7 @@ Browser (später Mobile, Linux und Windows) — als offene Engine nach dem
 > Texturen, Blueprints und Karten direkt aus der **eigenen, gekauften
 > Installation** des Spiels (Steam/GOG). Ohne Original-Spiel keine Assets.
 
-## Status: M1 Unit-Viewer ✅ · M2 Karten ✅ · M3 Animationen ✅ · M4-Preview Sandbox ✅
+## Status: M1 Viewer ✅ · M2 Karten ✅ · M3 Animationen ✅ · M4 Sim-Basis ✅
 
 Die App mountet die komplette Spielinstallation als virtuelles Dateisystem im
 Browser und rendert Original-Einheiten mit Original-Texturen in WebGL:
@@ -63,9 +63,10 @@ Siehe [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Kurzfassung:
 1. ✅ **Unit-Viewer** — Formate, VFS, Rendering-Grundlage
 2. ✅ **Karten-Renderer** — SCMAP-Terrain-Splatting, Wasser (einfach)
 3. ✅ **Animationen** — SCA-Parser, GPU-Skinning, Walk-Cycles
-4. ✅ **Sandbox-Preview** — Einheit auf Karte, Klick-Bewegung
-5. **Sim-Kern** — deterministische Simulation (Einheiten, Bewegung, Waffen,
-   Wirtschaft) auf Basis der Blueprints; Referenz: rekonstruierte
-   Moho-Engine-Quellen (faf-re)
+4. ✅ **Sim-Basis** — deterministischer 10-Hz-Kern (bit-identische Läufe),
+   Befehlsqueues, Bewegungsmodell aus Blueprint-Werten, Mehrfach-Einheiten
+   mit Auswahl in der Sandbox
+5. **Sim-Ausbau** — Pathfinding, Kollision, Waffen/Schaden, Wirtschaft,
+   Fabriken; Referenz: rekonstruierte Moho-Engine-Quellen (faf-re)
 6. **Spielbarkeit** — Steuerung, UI, Fog of War, KI-Skirmish
 7. **Plattformen** — Mobile (Touch-UI), Desktop-Builds (Tauri), Multiplayer

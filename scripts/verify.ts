@@ -16,6 +16,7 @@ import { parseSca } from '../src/formats/sca'
 import { UnitAnimator } from '../src/anim/animator'
 import { Matrix4 } from 'three'
 import { parseScmap } from '../src/formats/scmap'
+import { SimWorld, type UnitStats } from '../src/sim/simWorld'
 import { parseLuaAssignments, bpGet as bpGetPath } from '../src/formats/blueprint'
 import { readdir, readFile } from 'node:fs/promises'
 
@@ -186,6 +187,54 @@ async function main(): Promise<void> {
   }
   check(scaOk === scaPaths.length, `${scaOk}/${scaPaths.length} Animationen geparst`)
   for (const e of scaErrors.slice(0, 10)) console.error(`       ${e}`)
+
+  console.log('\n== Sim-Kern: Determinismus & Bewegung ==')
+  const testStats: UnitStats = {
+    blueprintId: 'test',
+    maxSpeed: Math.fround(3.4),
+    turnRate: 120,
+    acceleration: 3,
+    brake: 3,
+    arriveRadius: Math.fround(0.6),
+  }
+  const runSim = (): number[] => {
+    const w = new SimWorld()
+    const a = w.spawn(testStats, 10, 10)
+    const b = w.spawn(testStats, 20, 15, 1.5)
+    w.issueMove(a, 80, 60)
+    w.issueMove(b, 15, 70)
+    w.issueMove(b, 60, 20, true)
+    for (let i = 0; i < 500; i++) {
+      w.tick()
+      if (i === 100) w.issueMove(a, 30, 90)
+    }
+    return w.units.flatMap((u) => [u.x, u.z, u.heading, u.speed])
+  }
+  const run1 = runSim()
+  const run2 = runSim()
+  check(
+    run1.length === run2.length && run1.every((v, i) => Object.is(v, run2[i])),
+    'Zwei identische Läufe sind bit-identisch (500 Ticks, 2 Einheiten, Queue)',
+  )
+  check(run1.every((v) => Number.isFinite(v)), 'Alle Sim-Zustände endlich')
+
+  const wArrive = new SimWorld()
+  const mover = wArrive.spawn(testStats, 10, 10)
+  wArrive.issueMove(mover, 50, 55)
+  for (let i = 0; i < 600; i++) wArrive.tick()
+  const arriveDist = Math.hypot(mover.x - 50, mover.z - 55)
+  check(
+    arriveDist <= testStats.arriveRadius + 0.4 && mover.speed < 0.05,
+    `Einheit kommt an (Restdistanz ${arriveDist.toFixed(2)}, v=${mover.speed.toFixed(3)})`,
+  )
+  const wTurn = new SimWorld()
+  const turner = wTurn.spawn(testStats, 10, 10, 0)
+  wTurn.issueMove(turner, 10, -40) // 180° hinter der Einheit
+  for (let i = 0; i < 300; i++) wTurn.tick()
+  check(
+    Math.hypot(turner.x - 10, turner.z - -40) < 1,
+    '180°-Wende + Ankunft funktioniert',
+  )
 
   console.log('\n== SCMAP: alle Karten in maps/ ==')
   const envScd = await ZipArchive.open(await NodeFile.open(`${GAME_DIR}/gamedata/env.scd`))

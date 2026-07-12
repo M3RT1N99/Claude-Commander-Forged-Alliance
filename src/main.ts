@@ -20,7 +20,7 @@ import {
 } from './formats/blueprint'
 import { ddsToTexture } from './viewer/textures'
 import { UnitViewer } from './viewer/unitViewer'
-import { Sandbox } from './sandbox/sandbox'
+import { SandboxController, type SandboxUnitAssets } from './sandbox/sandbox'
 import type { UnitTextures } from './viewer/unitMaterial'
 
 const $ = <T extends HTMLElement>(sel: string): T => {
@@ -91,11 +91,15 @@ async function connect(src: GameSource): Promise<void> {
     const wantedSandbox = params.get('sandbox')
     if (wantedSandbox) {
       await startSandbox(wantedSandbox)
+      const extraSpawns = params.get('spawn')
+      if (extraSpawns && sandbox) {
+        for (const id of extraSpawns.split(',')) await sandboxSpawn(id.trim().toLowerCase())
+      }
       const move = params.get('move')
       if (move && sandbox) {
         const [dx, dz] = move.split(',').map(Number)
-        const p = sandbox.position
-        sandbox.moveTo(new THREE.Vector3(p.x + (dx || 0), 0, p.z + (dz || 0)))
+        sandbox.selectFirst()
+        sandbox.moveSelected(spawnPoint.x + (dx || 0), spawnPoint.z + (dz || 0))
       }
       return
     }
@@ -303,9 +307,45 @@ async function loadMap(folder: string): Promise<void> {
 // Sandbox
 // ---------------------------------------------------------------------------
 
-let sandbox: Sandbox | null = null
+let sandbox: SandboxController | null = null
+let spawnPoint = new THREE.Vector3(20, 0, 20)
+const sandboxAssetCache = new Map<string, SandboxUnitAssets>()
 
-async function startSandbox(mapFolder: string, unitId = 'uel0001'): Promise<void> {
+async function loadSandboxAssets(id: string): Promise<SandboxUnitAssets | null> {
+  const cached = sandboxAssetCache.get(id)
+  if (cached) return cached
+  if (!vfs) return null
+  const assets = await loadUnitAssets(id)
+  if (!assets) return null
+
+  let walkAnim = null
+  const walkPath = bpGet(assets.bp, 'Display.AnimationWalk')
+  const walkCandidate =
+    typeof walkPath === 'string' && walkPath ? walkPath : `units/${id}/${id}_a002.sca`
+  if (vfs.exists(walkCandidate)) {
+    walkAnim = parseSca(await vfs.read(walkCandidate))
+  }
+
+  const bundle: SandboxUnitAssets = { id, ...assets, walkAnim }
+  sandboxAssetCache.set(id, bundle)
+  return bundle
+}
+
+async function sandboxSpawn(id: string): Promise<void> {
+  if (!sandbox) return
+  const assets = await loadSandboxAssets(id)
+  if (!assets) return
+  // versetzt um den Spawn-Punkt platzieren (goldener Winkel)
+  const n = sandbox.unitCount
+  const angle = n * 2.4
+  const radius = 2 + n * 1.2
+  const x = spawnPoint.x + Math.sin(angle) * radius
+  const z = spawnPoint.z + Math.cos(angle) * radius
+  sandbox.spawn(assets, x, z, currentTeamColor())
+  log(`Spawn: ${id.toUpperCase()} (${sandbox.unitCount} Einheiten)`)
+}
+
+async function startSandbox(mapFolder: string): Promise<void> {
   if (!vfs || !source) return
   try {
     sandbox = null
@@ -315,7 +355,6 @@ async function startSandbox(mapFolder: string, unitId = 'uel0001'): Promise<void
     // Spawn-Punkt der Armee 1 aus der _save.lua
     const files = await source.list(`maps/${mapFolder}`)
     const saveFile = files.find((f) => f.name.toLowerCase().endsWith('_save.lua'))
-    let spawn = new THREE.Vector3(20, 0, 20)
     if (saveFile) {
       const raf = await source.open(`maps/${mapFolder}/${saveFile.name}`)
       const text = new TextDecoder('utf-8').decode(await raf.slice(0, raf.size))
@@ -324,34 +363,29 @@ async function startSandbox(mapFolder: string, unitId = 'uel0001'): Promise<void
         bpGet(save, 'Scenario.MasterChain._MASTERCHAIN_.Markers.ARMY_1.position') ??
         bpGet(save, 'Scenario.MasterChain._MASTERCHAIN_.Markers.ARMY_2.position')
       if (Array.isArray(marker) && marker.length === 3 && marker.every((v) => typeof v === 'number')) {
-        spawn = new THREE.Vector3(marker[0] as number, marker[1] as number, marker[2] as number)
-        log(`Spawn ARMY_1: ${spawn.x.toFixed(0)}, ${spawn.z.toFixed(0)}`)
+        spawnPoint = new THREE.Vector3(marker[0] as number, marker[1] as number, marker[2] as number)
+        log(`Spawn ARMY_1: ${spawnPoint.x.toFixed(0)}, ${spawnPoint.z.toFixed(0)}`)
       }
     }
 
-    const assets = await loadUnitAssets(unitId)
-    if (!assets) return
-    const unit = viewer.addUnit(assets.model, assets.textures, currentTeamColor())
-
-    // Walk-Animation aus dem Blueprint
-    let walkAnim = null
-    const walkPath = bpGet(assets.bp, 'Display.AnimationWalk')
-    const walkCandidate =
-      typeof walkPath === 'string' && walkPath ? walkPath : `units/${unitId}/${unitId}_a002.sca`
-    if (vfs.exists(walkCandidate)) {
-      walkAnim = parseSca(await vfs.read(walkCandidate))
+    sandbox = new SandboxController(viewer)
+    const acu = await loadSandboxAssets('uel0001')
+    if (acu) {
+      sandbox.spawn(acu, spawnPoint.x, spawnPoint.z, currentTeamColor())
+      sandbox.selectFirst()
     }
-
-    sandbox = new Sandbox(viewer, unit, walkAnim, assets.bp, spawn)
-    viewer.focusOn(sandbox.position, 8)
-    sandboxInfo.innerHTML = `<strong>${unitId.toUpperCase()}</strong> auf ${mapFolder} — Klick = Bewegungsbefehl`
-    log(`Sandbox bereit: ${unitId.toUpperCase()} auf ${mapFolder}`)
+    viewer.focusOn(spawnPoint, 14)
+    $('#sandbox-spawns').hidden = false
+    sandboxInfo.innerHTML =
+      `Karte <strong>${mapFolder}</strong> — Klick auf Einheit = Auswahl, ` +
+      `Klick aufs Terrain = Bewegung (Shift = Warteschlange)`
+    log(`Sandbox bereit auf ${mapFolder} (Sim: 10 Ticks/s)`)
   } catch (err) {
     log(`FEHLER Sandbox: ${err instanceof Error ? err.message : err}`)
   }
 }
 
-// Klick (ohne Drag) = Bewegungsbefehl
+// Klick (ohne Drag) = Auswahl / Bewegungsbefehl
 let pointerDown: { x: number; y: number } | null = null
 const viewportEl = $<HTMLCanvasElement>('#viewport')
 viewportEl.addEventListener('pointerdown', (e) => {
@@ -362,11 +396,8 @@ viewportEl.addEventListener('pointerup', (e) => {
   const moved = Math.hypot(e.clientX - pointerDown.x, e.clientY - pointerDown.y)
   pointerDown = null
   if (moved > 5) return
-  const hit = viewer.pickTerrain(e.clientX, e.clientY)
-  if (hit) {
-    sandbox.moveTo(hit)
-    log(`Bewegung → ${hit.x.toFixed(0)}, ${hit.z.toFixed(0)}`)
-  }
+  const msg = sandbox.handleClick(e.clientX, e.clientY, e.shiftKey)
+  if (msg) log(msg)
 })
 
 function showUnitInfo(id: string, bp: BpObject): void {
@@ -428,6 +459,9 @@ mapSelect.addEventListener('change', () => void loadMap(mapSelect.value))
 btnSandboxStart.addEventListener('click', () => {
   void startSandbox(mapSelect.value || 'SCMP_037')
 })
+for (const btn of document.querySelectorAll<HTMLButtonElement>('#sandbox-spawns .spawn')) {
+  btn.addEventListener('click', () => void sandboxSpawn(btn.dataset.unit!))
+}
 
 // ---------------------------------------------------------------------------
 // Start
