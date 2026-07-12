@@ -99,7 +99,7 @@ async function connect(src: GameSource): Promise<void> {
       if (move && sandbox) {
         const [dx, dz] = move.split(',').map(Number)
         sandbox.selectFirst()
-        sandbox.moveSelected(spawnPoint.x + (dx || 0), spawnPoint.z + (dz || 0))
+        sandbox.moveSelectedTo(spawnPoint.x + (dx || 0), spawnPoint.z + (dz || 0))
       }
       return
     }
@@ -202,6 +202,8 @@ async function loadUnitAssets(
 async function loadUnit(id: string): Promise<void> {
   if (!vfs) return
   try {
+    sandbox = null
+    viewer.setRtsControls(false)
     log(`Lade ${id.toUpperCase()}…`)
     const assets = await loadUnitAssets(id)
     if (!assets) return
@@ -269,6 +271,8 @@ async function playSelectedAnimation(): Promise<void> {
 async function loadMap(folder: string): Promise<void> {
   if (!source || !vfs) return
   try {
+    sandbox = null
+    viewer.setRtsControls(false)
     log(`Lade Karte ${folder}…`)
     const files = await source.list(`maps/${folder}`)
     const scenarioFile = files.find((f) => f.name.toLowerCase().endsWith('_scenario.lua'))
@@ -385,19 +389,71 @@ async function startSandbox(mapFolder: string): Promise<void> {
   }
 }
 
-// Klick (ohne Drag) = Auswahl / Bewegungsbefehl
-let pointerDown: { x: number; y: number } | null = null
+// --- SupCom-Steuerung ------------------------------------------------------
+// Linksklick = Auswahl, Links-Drag = Box-Selektion, Rechtsklick = Move
+// (Shift = Warteschlange), Leertaste + Maus = Kamera drehen
 const viewportEl = $<HTMLCanvasElement>('#viewport')
+const selectBox = $('#select-box')
+let boxStart: { x: number; y: number } | null = null
+let spaceHeld = false
+
 viewportEl.addEventListener('pointerdown', (e) => {
-  if (e.button === 0) pointerDown = { x: e.clientX, y: e.clientY }
+  if (e.button === 0 && sandbox && !spaceHeld) {
+    boxStart = { x: e.clientX, y: e.clientY }
+  }
 })
-viewportEl.addEventListener('pointerup', (e) => {
-  if (!pointerDown || !sandbox) return
-  const moved = Math.hypot(e.clientX - pointerDown.x, e.clientY - pointerDown.y)
-  pointerDown = null
-  if (moved > 5) return
-  const msg = sandbox.handleClick(e.clientX, e.clientY, e.shiftKey)
+
+window.addEventListener('pointermove', (e) => {
+  if (spaceHeld && sandbox) {
+    viewer.rotateAroundTarget(e.movementX, e.movementY)
+  }
+  if (boxStart && sandbox) {
+    const w = Math.abs(e.clientX - boxStart.x)
+    const h = Math.abs(e.clientY - boxStart.y)
+    if (w > 4 || h > 4) {
+      selectBox.hidden = false
+      selectBox.style.left = `${Math.min(e.clientX, boxStart.x)}px`
+      selectBox.style.top = `${Math.min(e.clientY, boxStart.y)}px`
+      selectBox.style.width = `${w}px`
+      selectBox.style.height = `${h}px`
+    }
+  }
+})
+
+window.addEventListener('pointerup', (e) => {
+  if (e.button !== 0 || !boxStart) return
+  const start = boxStart
+  boxStart = null
+  selectBox.hidden = true
+  if (!sandbox) return
+  const moved = Math.hypot(e.clientX - start.x, e.clientY - start.y)
+  const msg =
+    moved > 5
+      ? sandbox.boxSelect(start.x, start.y, e.clientX, e.clientY)
+      : sandbox.clickSelect(e.clientX, e.clientY)
   if (msg) log(msg)
+})
+
+viewportEl.addEventListener('contextmenu', (e) => {
+  e.preventDefault()
+  if (!sandbox) return
+  const msg = sandbox.commandMove(e.clientX, e.clientY, e.shiftKey)
+  if (msg) log(msg)
+})
+
+window.addEventListener('keydown', (e) => {
+  if (
+    e.code === 'Space' &&
+    sandbox &&
+    !(e.target instanceof HTMLInputElement) &&
+    !(e.target instanceof HTMLSelectElement)
+  ) {
+    spaceHeld = true
+    e.preventDefault()
+  }
+})
+window.addEventListener('keyup', (e) => {
+  if (e.code === 'Space') spaceHeld = false
 })
 
 function showUnitInfo(id: string, bp: BpObject): void {

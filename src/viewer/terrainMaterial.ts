@@ -63,6 +63,7 @@ const fragmentShader = /* glsl */ `
   uniform sampler2D waterRamp;
   uniform sampler2D utilityC;
   uniform float hasWater;
+  uniform float waterElevation;
 
   uniform vec3 sunDirection;
   uniform vec3 sunColor;
@@ -112,8 +113,11 @@ const fragmentShader = /* glsl */ `
     light = lightingMultiplier * light + shadowFillColor * (1.0 - light);
     albedo.rgb = light * (albedo.rgb + specular);
 
-    // Wassertiefen-Tint
-    if (hasWater > 0.5) {
+    // Wassertiefen-Tint wie im Original (terrain.fx): Tiefe aus dem
+    // G-Kanal der vom Map-Compiler gebackenen Watermap. Das Höhen-Gate
+    // verhindert, dass DXT-Kompressionsartefakte der Watermap über die
+    // Uferlinie hinaus tinten (Treppen-/Fleck-Artefakte).
+    if (hasWater > 0.5 && vWorldPos.y < waterElevation) {
       float waterDepth = texture2D(utilityC, vUvMap).g;
       vec4 water = texture2D(waterRamp, vec2(waterDepth, 0.5));
       albedo.rgb = mix(albedo.rgb, water.rgb, water.a);
@@ -144,6 +148,7 @@ export interface TerrainMaterialOptions {
   layers: TerrainLayerTextures
   waterRamp: THREE.Texture | null
   utilityC: THREE.Texture | null
+  waterElevation: number
   lighting: {
     sunDirection: THREE.Vector3
     sunColor: THREE.Color
@@ -189,6 +194,7 @@ export function createTerrainMaterial(o: TerrainMaterialOptions): THREE.ShaderMa
       waterRamp: { value: o.waterRamp ?? dummy },
       utilityC: { value: o.utilityC ?? dummy },
       hasWater: { value: o.waterRamp && o.utilityC ? 1 : 0 },
+      waterElevation: { value: o.waterElevation },
       sunDirection: { value: o.lighting.sunDirection },
       sunColor: { value: o.lighting.sunColor },
       sunAmbience: { value: o.lighting.sunAmbience },

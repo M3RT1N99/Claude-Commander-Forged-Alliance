@@ -9,8 +9,11 @@ import { bpGet, type BpObject } from '../formats/blueprint'
 /**
  * Sandbox (M4): bindet den deterministischen Sim-Kern an den Renderer.
  * Die Sim läuft mit festen 10-Hz-Ticks; der Renderer interpoliert zwischen
- * dem vorherigen und dem aktuellen Tick-Zustand. Höhe/Animation sind rein
- * visuell und beeinflussen die Sim nicht.
+ * dem vorherigen und dem aktuellen Tick-Zustand.
+ *
+ * Steuerung nach SupCom-Schema (Verdrahtung in main.ts):
+ * Linksklick = Auswahl, Links-Drag = Box-Selektion, Rechtsklick = Move
+ * (Shift = Warteschlange), Leertaste + Maus = Kamera drehen.
  */
 
 export interface SandboxUnitAssets {
@@ -27,36 +30,29 @@ interface Binding {
   walkAnim: ScaAnim | null
   walkRate: number
   wasMoving: boolean
+  ring: THREE.Mesh
+  selected: boolean
 }
 
 const SIM_STEP = 0.1
+
+const ringGeometry = (() => {
+  const g = new THREE.RingGeometry(0.85, 1, 40)
+  g.rotateX(-Math.PI / 2)
+  return g
+})()
 
 export class SandboxController {
   readonly world = new SimWorld()
   private readonly bindings: Binding[] = []
   private accumulator = 0
-  private selected: Binding | null = null
-  private readonly ring: THREE.Mesh
 
   constructor(private readonly viewer: UnitViewer) {
-    const ringGeo = new THREE.RingGeometry(0.85, 1, 40)
-    ringGeo.rotateX(-Math.PI / 2)
-    this.ring = new THREE.Mesh(
-      ringGeo,
-      new THREE.MeshBasicMaterial({
-        color: 0x44ff66,
-        transparent: true,
-        opacity: 0.9,
-        depthTest: false,
-      }),
-    )
-    this.ring.visible = false
-    this.ring.renderOrder = 10
-    viewer.addHelper(this.ring)
+    viewer.setRtsControls(true)
     viewer.onUpdate((dt) => this.update(dt))
   }
 
-  spawn(assets: SandboxUnitAssets, x: number, z: number, teamColor: THREE.Color): Binding {
+  spawn(assets: SandboxUnitAssets, x: number, z: number, teamColor: THREE.Color): void {
     const scene = this.viewer.addUnit(assets.model, assets.textures, teamColor)
 
     const uniformScale = bpGet(assets.bp, 'Display.UniformScale')
@@ -67,50 +63,93 @@ export class SandboxController {
     const walkRateRaw = bpGet(assets.bp, 'Display.AnimationWalkRate')
     const sim = this.world.spawn(statsFromBlueprint(assets.id, assets.bp), x, z)
 
-    const binding: Binding = {
+    const ring = new THREE.Mesh(
+      ringGeometry,
+      new THREE.MeshBasicMaterial({
+        color: 0x44ff66,
+        transparent: true,
+        opacity: 0.9,
+        depthTest: false,
+      }),
+    )
+    ring.visible = false
+    ring.renderOrder = 10
+    this.viewer.addHelper(ring)
+
+    this.bindings.push({
       sim,
       scene,
       walkAnim: assets.walkAnim,
       walkRate: typeof walkRateRaw === 'number' && walkRateRaw > 0 ? walkRateRaw : 1,
       wasMoving: false,
-    }
-    this.bindings.push(binding)
+      ring,
+      selected: false,
+    })
 
     scene.mesh.position.set(sim.x, this.viewer.heightAt(sim.x, sim.z), sim.z)
-    return binding
-  }
-
-  get selectedUnit(): SimUnit | null {
-    return this.selected?.sim ?? null
   }
 
   get unitCount(): number {
     return this.bindings.length
   }
 
-  /** Klick: Einheit anwählen oder — mit Auswahl — Bewegungsbefehl geben. */
-  handleClick(clientX: number, clientY: number, append = false): string | null {
-    const hitUnit = this.viewer.pickUnit(clientX, clientY)
-    if (hitUnit) {
-      this.selected = this.bindings.find((b) => b.scene === hitUnit) ?? null
-      return this.selected ? `Ausgewählt: ${this.selected.sim.stats.blueprintId.toUpperCase()}` : null
-    }
-    if (this.selected) {
-      const hit = this.viewer.pickTerrain(clientX, clientY)
-      if (hit) {
-        this.world.issueMove(this.selected.sim, hit.x, hit.z, append)
-        return `Bewegung → ${hit.x.toFixed(0)}, ${hit.z.toFixed(0)}`
-      }
+  get selectedCount(): number {
+    return this.bindings.filter((b) => b.selected).length
+  }
+
+  /** Linksklick: Einheit unter dem Cursor exklusiv auswählen (oder leeren). */
+  clickSelect(clientX: number, clientY: number): string | null {
+    const hit = this.viewer.pickUnit(clientX, clientY)
+    for (const b of this.bindings) b.selected = hit !== null && b.scene === hit
+    if (hit) {
+      const b = this.bindings.find((x) => x.scene === hit)
+      return b ? `Ausgewählt: ${b.sim.stats.blueprintId.toUpperCase()}` : null
     }
     return null
   }
 
-  selectFirst(): void {
-    this.selected = this.bindings[0] ?? null
+  /** Box-Selektion: alle Einheiten, deren Position im Bildschirmrechteck liegt. */
+  boxSelect(x1: number, y1: number, x2: number, y2: number): string | null {
+    const minX = Math.min(x1, x2)
+    const maxX = Math.max(x1, x2)
+    const minY = Math.min(y1, y2)
+    const maxY = Math.max(y1, y2)
+    let count = 0
+    for (const b of this.bindings) {
+      const s = this.viewer.worldToScreen(b.scene.mesh.position)
+      b.selected = s !== null && s.x >= minX && s.x <= maxX && s.y >= minY && s.y <= maxY
+      if (b.selected) count++
+    }
+    return count > 0 ? `${count} Einheit(en) ausgewählt` : null
   }
 
-  moveSelected(x: number, z: number, append = false): void {
-    if (this.selected) this.world.issueMove(this.selected.sim, x, z, append)
+  selectFirst(): void {
+    this.bindings.forEach((b, i) => {
+      b.selected = i === 0
+    })
+  }
+
+  /** Rechtsklick: Move-Befehl für die Auswahl, in lockerer Formation. */
+  commandMove(clientX: number, clientY: number, append = false): string | null {
+    const hit = this.viewer.pickTerrain(clientX, clientY)
+    if (!hit) return null
+    this.moveSelectedTo(hit.x, hit.z, append)
+    const n = this.selectedCount
+    return n > 0 ? `Move (${n}) → ${hit.x.toFixed(0)}, ${hit.z.toFixed(0)}` : null
+  }
+
+  moveSelectedTo(x: number, z: number, append = false): void {
+    const selected = this.bindings.filter((b) => b.selected)
+    if (selected.length === 0) return
+    const spacing = Math.max(...selected.map((b) => b.sim.stats.arriveRadius)) * 3 + 1
+    const cols = Math.ceil(Math.sqrt(selected.length))
+    selected.forEach((b, i) => {
+      const col = i % cols
+      const row = Math.floor(i / cols)
+      const tx = x + (col - (cols - 1) / 2) * spacing
+      const tz = z + (row - (Math.ceil(selected.length / cols) - 1) / 2) * spacing
+      this.world.issueMove(b.sim, tx, tz, append)
+    })
   }
 
   private update(dt: number): void {
@@ -130,7 +169,8 @@ export class SandboxController {
       while (dh < -Math.PI) dh += 2 * Math.PI
       const heading = b.sim.prevHeading + dh * alpha
 
-      b.scene.mesh.position.set(x, this.viewer.heightAt(x, z), z)
+      const y = this.viewer.heightAt(x, z)
+      b.scene.mesh.position.set(x, y, z)
       b.scene.mesh.rotation.set(0, heading, 0)
 
       const moving = b.sim.speed > 0.05
@@ -138,16 +178,12 @@ export class SandboxController {
         b.wasMoving = moving
         b.scene.play(moving ? b.walkAnim : null, b.walkRate)
       }
-    }
 
-    if (this.selected) {
-      const m = this.selected.scene.mesh
-      this.ring.visible = true
-      this.ring.position.set(m.position.x, m.position.y + 0.05, m.position.z)
-      const r = Math.max(this.selected.sim.stats.arriveRadius * 1.6, 0.7)
-      this.ring.scale.setScalar(r)
-    } else {
-      this.ring.visible = false
+      b.ring.visible = b.selected
+      if (b.selected) {
+        b.ring.position.set(x, y + 0.05, z)
+        b.ring.scale.setScalar(Math.max(b.sim.stats.arriveRadius * 1.6, 0.7))
+      }
     }
   }
 }

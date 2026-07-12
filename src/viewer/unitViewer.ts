@@ -313,6 +313,47 @@ export class UnitViewer {
     this.controls.update()
   }
 
+  /**
+   * RTS-Steuerung (SupCom-Schema): Links-Drag ist für die Box-Selektion
+   * reserviert, Rechtsklick für Befehle — OrbitControls behält nur noch
+   * Mausrad-Zoom und Mitteltaste-Pan. Rotation läuft über Leertaste+Maus
+   * (rotateAroundTarget).
+   */
+  setRtsControls(enabled: boolean): void {
+    const buttons = this.controls.mouseButtons as Record<string, THREE.MOUSE | null>
+    if (enabled) {
+      buttons.LEFT = null
+      buttons.MIDDLE = THREE.MOUSE.PAN
+      buttons.RIGHT = null
+    } else {
+      buttons.LEFT = THREE.MOUSE.ROTATE
+      buttons.MIDDLE = THREE.MOUSE.DOLLY
+      buttons.RIGHT = THREE.MOUSE.PAN
+    }
+  }
+
+  /** Kamera um das aktuelle Ziel drehen (Leertaste + Mausbewegung). */
+  rotateAroundTarget(dxPixels: number, dyPixels: number): void {
+    const offset = this.camera.position.clone().sub(this.controls.target)
+    const spherical = new THREE.Spherical().setFromVector3(offset)
+    spherical.theta -= dxPixels * 0.005
+    spherical.phi = Math.min(Math.max(spherical.phi - dyPixels * 0.005, 0.08), Math.PI / 2 - 0.02)
+    offset.setFromSpherical(spherical)
+    this.camera.position.copy(this.controls.target).add(offset)
+    this.controls.update()
+  }
+
+  /** Weltposition → Canvas-Client-Koordinaten (null wenn hinter der Kamera). */
+  worldToScreen(pos: THREE.Vector3): { x: number; y: number } | null {
+    const p = pos.clone().project(this.camera)
+    if (p.z > 1) return null
+    const rect = this.canvas.getBoundingClientRect()
+    return {
+      x: rect.left + ((p.x + 1) / 2) * rect.width,
+      y: rect.top + ((1 - p.y) / 2) * rect.height,
+    }
+  }
+
   async setMap(scmap: ScmapData, vfs: GameVfs): Promise<void> {
     this.clearContent()
 
@@ -357,6 +398,8 @@ export class UnitViewer {
 
     const embedded = (dds: Uint8Array | null): THREE.Texture => {
       if (!dds) return dummy
+      // Eingebettete Masken/Watermaps haben dieselbe Zeilen-Orientierung
+      // wie die Heightmap (numerisch verifiziert: scripts/check-orientation.ts)
       const tex = ddsToTexture(dds, this.s3tcSupported)
       tex.wrapS = THREE.ClampToEdgeWrapping
       tex.wrapT = THREE.ClampToEdgeWrapping
@@ -389,6 +432,7 @@ export class UnitViewer {
       },
       waterRamp,
       utilityC,
+      waterElevation: scmap.water.elevation,
       lighting: {
         sunDirection: new THREE.Vector3(...scmap.lighting.sunDirection).normalize(),
         sunColor: new THREE.Color(...scmap.lighting.sunColor),
@@ -408,10 +452,14 @@ export class UnitViewer {
       const waterGeo = new THREE.PlaneGeometry(width, height)
       waterGeo.rotateX(-Math.PI / 2)
       waterGeo.translate(width / 2, scmap.water.elevation, height / 2)
+      // Näherung an water2.fx: die Original-Oberfläche lebt von der
+      // Himmelsreflexion; SurfaceColor tönt sie (echter Shader-Port folgt)
+      const surface = new THREE.Color(...scmap.water.surfaceColor)
+      const sky = new THREE.Color(0.32, 0.42, 0.5)
       const waterMat = new THREE.MeshBasicMaterial({
-        color: new THREE.Color(...scmap.water.surfaceColor),
+        color: sky.lerp(surface, 0.45),
         transparent: true,
-        opacity: 0.35,
+        opacity: 0.55,
         depthWrite: false,
       })
       this.waterMesh = new THREE.Mesh(waterGeo, waterMat)

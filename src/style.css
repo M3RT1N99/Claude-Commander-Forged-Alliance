@@ -192,3 +192,11 @@ select.inline {
   display: block;
   min-width: 0;
 }
+
+#select-box {
+  position: fixed;
+  border: 1px solid #55e070;
+  background: rgba(85, 224, 112, 0.12);
+  pointer-events: none;
+  z-index: 50;
+}

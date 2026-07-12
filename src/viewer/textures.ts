@@ -2,20 +2,34 @@ import * as THREE from 'three'
 import { parseDds, type DdsImage } from '../formats/dds'
 import { bgraToRgba, decodeDxt } from '../formats/dxt'
 
+export interface DdsTextureOptions {
+  /**
+   * Vertikal spiegeln (erzwingt CPU-Dekodierung bei DXT). Nötig für die in
+   * SCMAP eingebetteten Masken/Watermaps, deren Zeilen gegenläufig zur
+   * Heightmap gespeichert sind. Unit-Texturen: false (DirectX-UVs).
+   */
+  flipY?: boolean
+}
+
 /**
  * Erzeugt aus DDS-Rohdaten eine Three.js-Textur. Wenn die GPU S3TC
  * unterstützt (alle Desktop-GPUs), werden die DXT-Blöcke direkt
  * hochgeladen; sonst (Mobile) wird in Software zu RGBA8 dekodiert.
  */
-export function ddsToTexture(data: Uint8Array, s3tcSupported: boolean): THREE.Texture {
+export function ddsToTexture(
+  data: Uint8Array,
+  s3tcSupported: boolean,
+  options: DdsTextureOptions = {},
+): THREE.Texture {
   const dds = parseDds(data)
+  const flip = options.flipY === true
 
   if (dds.format === 'BGRA8') {
-    return dataTexture(bgraToRgba(dds.mips[0]!.data), dds)
+    return dataTexture(bgraToRgba(dds.mips[0]!.data), dds, flip)
   }
 
-  if (!s3tcSupported) {
-    return dataTexture(decodeDxt(dds.mips[0]!.data, dds.width, dds.height, dds.format), dds)
+  if (!s3tcSupported || flip) {
+    return dataTexture(decodeDxt(dds.mips[0]!.data, dds.width, dds.height, dds.format), dds, flip)
   }
 
   const format =
@@ -46,7 +60,7 @@ export function ddsToTexture(data: Uint8Array, s3tcSupported: boolean): THREE.Te
   return tex
 }
 
-function dataTexture(rgba: Uint8Array, dds: DdsImage): THREE.DataTexture {
+function dataTexture(rgba: Uint8Array, dds: DdsImage, flipY: boolean): THREE.DataTexture {
   const tex = new THREE.DataTexture(new Uint8Array(rgba), dds.width, dds.height, THREE.RGBAFormat)
   tex.generateMipmaps = true
   tex.minFilter = THREE.LinearMipmapLinearFilter
@@ -54,8 +68,9 @@ function dataTexture(rgba: Uint8Array, dds: DdsImage): THREE.DataTexture {
   tex.wrapS = THREE.RepeatWrapping
   tex.wrapT = THREE.RepeatWrapping
   tex.anisotropy = 4
-  // flipY bleibt false — identisches Verhalten wie CompressedTexture,
-  // die DirectX-UVs der Spieldaten passen dann ohne Flip.
+  // Standard false — identisches Verhalten wie CompressedTexture, die
+  // DirectX-UVs der Spieldaten passen dann ohne Flip.
+  tex.flipY = flipY
   tex.needsUpdate = true
   return tex
 }
