@@ -8,7 +8,8 @@ import {
   type GameSource,
 } from './vfs/gameSource'
 import { GameVfs } from './vfs/vfs'
-import { parseScm } from './formats/scm'
+import { parseScm, type ScmModel } from './formats/scm'
+import { parseSca } from './formats/sca'
 import { parseScmap } from './formats/scmap'
 import {
   parseBlueprint,
@@ -42,6 +43,7 @@ const mapInfo = $('#map-info')
 const unitSearch = $<HTMLInputElement>('#unit-search')
 const unitSelect = $<HTMLSelectElement>('#unit-select')
 const teamColorInput = $<HTMLInputElement>('#team-color')
+const animSelect = $<HTMLSelectElement>('#anim-select')
 const unitInfo = $('#unit-info')
 
 function log(msg: string): void {
@@ -54,6 +56,7 @@ const viewer = new UnitViewer($<HTMLCanvasElement>('#viewport'))
 let vfs: GameVfs | null = null
 let source: GameSource | null = null
 let unitIds: string[] = []
+let currentModel: ScmModel | null = null
 
 // ---------------------------------------------------------------------------
 // Quellen-Verbindung
@@ -185,12 +188,56 @@ async function loadUnit(id: string): Promise<void> {
       { albedo: albedo ?? fallbackAlbedo, normals, specTeam },
       currentTeamColor(),
     )
+    currentModel = model
+    populateAnimList(id)
     log(
       `${id.toUpperCase()}: ${model.vertexCount} Vertices, ${model.indices.length / 3} Tris, ` +
         `${model.bones.length} Bones`,
     )
+
+    const wantedAnim = new URLSearchParams(location.search).get('anim')
+    if (wantedAnim) {
+      const match = [...animSelect.options].find((o) =>
+        o.value.toLowerCase().includes(wantedAnim.toLowerCase()),
+      )
+      if (match) {
+        animSelect.value = match.value
+        await playSelectedAnimation()
+      }
+    }
   } catch (err) {
     log(`FEHLER beim Laden von ${id}: ${err instanceof Error ? err.message : err}`)
+  }
+}
+
+function populateAnimList(id: string): void {
+  if (!vfs) return
+  animSelect.innerHTML = '<option value="">— Bindpose —</option>'
+  const scas = vfs.find((p) => p.startsWith(`units/${id}/`) && p.endsWith('.sca')).sort()
+  for (const path of scas) {
+    const opt = document.createElement('option')
+    opt.value = path
+    opt.textContent = path.split('/').pop()!.replace('.sca', '').replace(`${id}_`, '')
+    animSelect.appendChild(opt)
+  }
+}
+
+async function playSelectedAnimation(): Promise<void> {
+  if (!vfs || !currentModel) return
+  const path = animSelect.value
+  if (!path) {
+    viewer.playAnimation(null, [])
+    return
+  }
+  try {
+    const anim = parseSca(await vfs.read(path))
+    viewer.playAnimation(
+      anim,
+      currentModel.bones.map((b) => b.name),
+    )
+    log(`Animation: ${path.split('/').pop()} (${anim.numFrames} Frames, ${anim.duration.toFixed(2)}s)`)
+  } catch (err) {
+    log(`FEHLER bei Animation: ${err instanceof Error ? err.message : err}`)
   }
 }
 
@@ -286,6 +333,7 @@ inputDir.addEventListener('change', () => {
 unitSearch.addEventListener('input', () => renderUnitList(unitSearch.value))
 unitSelect.addEventListener('change', () => void loadUnit(unitSelect.value))
 teamColorInput.addEventListener('input', () => viewer.setTeamColor(currentTeamColor()))
+animSelect.addEventListener('change', () => void playSelectedAnimation())
 tabUnits.addEventListener('click', () => setMode('units'))
 tabMaps.addEventListener('click', () => setMode('maps'))
 mapSelect.addEventListener('change', () => void loadMap(mapSelect.value))

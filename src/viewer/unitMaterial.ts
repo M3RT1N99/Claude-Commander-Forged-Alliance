@@ -16,6 +16,9 @@ const vertexShader = /* glsl */ `
   attribute vec3 scmTangent;
   attribute vec3 scmBinormal;
   attribute vec2 scmUv1;
+  attribute float scmBoneIndex;
+
+  uniform mat4 boneMatrices[MAX_BONES];
 
   varying vec2 vUv0;
   varying vec2 vUv1;
@@ -27,11 +30,17 @@ const vertexShader = /* glsl */ `
   void main() {
     vUv0 = uv;
     vUv1 = scmUv1;
-    mat3 nm = mat3(modelMatrix);
+
+    // FA-Skinning ist rigid: genau ein Bone pro Vertex
+    mat4 skin = boneMatrices[int(scmBoneIndex + 0.5)];
+    vec4 skinned = skin * vec4(position, 1.0);
+    mat3 skinRot = mat3(skin);
+
+    mat3 nm = mat3(modelMatrix) * skinRot;
     vNormal = nm * normal;
     vTangent = nm * scmTangent;
     vBinormal = nm * scmBinormal;
-    vec4 worldPos = modelMatrix * vec4(position, 1.0);
+    vec4 worldPos = modelMatrix * skinned;
     vWorldPos = worldPos.xyz;
     gl_Position = projectionMatrix * viewMatrix * worldPos;
   }
@@ -103,6 +112,7 @@ export interface UnitTextures {
 export function createUnitMaterial(
   textures: UnitTextures,
   teamColor: THREE.Color,
+  skinMatrices: THREE.Matrix4[],
 ): THREE.ShaderMaterial {
   const white = new THREE.DataTexture(new Uint8Array([255, 255, 255, 0]), 1, 1)
   white.needsUpdate = true
@@ -112,7 +122,9 @@ export function createUnitMaterial(
   return new THREE.ShaderMaterial({
     vertexShader,
     fragmentShader,
+    defines: { MAX_BONES: Math.max(skinMatrices.length, 1) },
     uniforms: {
+      boneMatrices: { value: skinMatrices.length > 0 ? skinMatrices : [new THREE.Matrix4()] },
       albedoMap: { value: textures.albedo },
       normalsMap: { value: textures.normals ?? flatNormal },
       specTeamMap: { value: textures.specTeam ?? white },

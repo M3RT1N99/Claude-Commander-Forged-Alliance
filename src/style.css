@@ -123,6 +123,11 @@ select {
   font-family: Consolas, monospace;
 }
 
+select.inline {
+  width: 60%;
+  margin-bottom: 0;
+}
+
 #mode-tabs {
   display: flex;
   gap: 6px;

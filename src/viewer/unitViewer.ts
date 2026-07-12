@@ -6,6 +6,8 @@ import type { GameVfs } from '../vfs/vfs'
 import { createUnitMaterial, type UnitTextures } from './unitMaterial'
 import { createTerrainMaterial } from './terrainMaterial'
 import { ddsToTexture } from './textures'
+import { UnitAnimator } from '../anim/animator'
+import type { ScaAnim } from '../formats/sca'
 
 /**
  * Three.js-Szene für die Unit-Ansicht: Orbit-Kamera, Bodenraster und das
@@ -18,6 +20,11 @@ export class UnitViewer {
   private readonly controls: OrbitControls
   private current: THREE.Mesh | null = null
   private waterMesh: THREE.Mesh | null = null
+  private animator: UnitAnimator | null = null
+  private animPlaying = false
+  private animTime = 0
+  private readonly clock = new THREE.Clock()
+  animationSpeed = 1
   readonly s3tcSupported: boolean
 
   constructor(private readonly canvas: HTMLCanvasElement) {
@@ -50,12 +57,19 @@ export class UnitViewer {
     resize()
 
     this.renderer.setAnimationLoop(() => {
+      const dt = this.clock.getDelta()
+      if (this.animator && this.animPlaying) {
+        this.animTime += dt * this.animationSpeed
+        this.animator.update(this.animTime)
+      }
       this.controls.update()
       this.renderer.render(this.scene, this.camera)
     })
   }
 
   private clearContent(): void {
+    this.animator = null
+    this.animPlaying = false
     if (this.current) {
       this.scene.remove(this.current)
       this.current.geometry.dispose()
@@ -80,15 +94,33 @@ export class UnitViewer {
     geometry.setAttribute('scmUv1', new THREE.BufferAttribute(model.uv1, 2))
     geometry.setAttribute('scmTangent', new THREE.BufferAttribute(model.tangents, 3))
     geometry.setAttribute('scmBinormal', new THREE.BufferAttribute(model.binormals, 3))
+    const boneIndex = new Float32Array(model.vertexCount)
+    for (let i = 0; i < model.vertexCount; i++) boneIndex[i] = model.boneIndices[i * 4]!
+    geometry.setAttribute('scmBoneIndex', new THREE.BufferAttribute(boneIndex, 1))
     geometry.setIndex(new THREE.BufferAttribute(model.indices, 1))
     geometry.computeBoundingSphere()
 
-    const material = createUnitMaterial(textures, teamColor)
+    this.animator = new UnitAnimator(model)
+    this.animPlaying = false
+    this.animTime = 0
+
+    const material = createUnitMaterial(textures, teamColor, this.animator.skinMatrices)
     const mesh = new THREE.Mesh(geometry, material)
+    // Skinning kann über die statische Bounding-Sphere hinausgehen
+    mesh.frustumCulled = false
     this.scene.add(mesh)
     this.current = mesh
 
     this.frameObject(geometry)
+  }
+
+  /** Startet eine Animation auf dem aktuellen Modell (null = Bindpose). */
+  playAnimation(anim: ScaAnim | null, boneNames: string[]): void {
+    if (!this.animator) return
+    this.animator.setAnimation(anim, boneNames)
+    this.animTime = 0
+    this.animPlaying = anim !== null
+    if (!anim) this.animator.update(0)
   }
 
   async setMap(scmap: ScmapData, vfs: GameVfs): Promise<void> {

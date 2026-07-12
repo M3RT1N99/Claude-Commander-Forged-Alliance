@@ -12,6 +12,9 @@ import { parseScm } from '../src/formats/scm'
 import { parseBlueprints, bpGet } from '../src/formats/blueprint'
 import { parseDds } from '../src/formats/dds'
 import { decodeDxt } from '../src/formats/dxt'
+import { parseSca } from '../src/formats/sca'
+import { UnitAnimator } from '../src/anim/animator'
+import { Matrix4 } from 'three'
 import { parseScmap } from '../src/formats/scmap'
 import { parseLuaAssignments, bpGet as bpGetPath } from '../src/formats/blueprint'
 import { readdir, readFile } from 'node:fs/promises'
@@ -135,6 +138,54 @@ async function main(): Promise<void> {
   }
   check(scmOk === scmPaths.length, `${scmOk}/${scmPaths.length} Meshes geparst`)
   for (const e of scmErrors.slice(0, 10)) console.error(`       ${e}`)
+
+  console.log('\n== SCA: Skinning-Konvention (Bindpose × restPoseInverse = I) ==')
+  const animator = new UnitAnimator(acu)
+  let bindErr = 0
+  const identity = new Matrix4()
+  for (const m of animator.skinMatrices) {
+    for (let k = 0; k < 16; k++) {
+      bindErr = Math.max(bindErr, Math.abs(m.elements[k]! - identity.elements[k]!))
+    }
+  }
+  check(bindErr < 1e-4, `Bindpose-Skin-Matrizen ≈ Identität (maxErr=${bindErr.toExponential(2)})`)
+
+  const walkAnim = parseSca(await unitsScd.read(unitsScd.get('units/UEL0001/UEL0001_A002.sca')!))
+  check(walkAnim.numFrames > 10, `A002: ${walkAnim.numFrames} Frames, ${walkAnim.duration.toFixed(2)}s`)
+  check(
+    walkAnim.boneNames.length > 0 && walkAnim.boneNames.every((n) => n.length > 0),
+    `A002: ${walkAnim.boneNames.length} Bones benannt`,
+  )
+  animator.setAnimation(walkAnim, acu.bones.map((b) => b.name))
+  animator.update(walkAnim.duration * 0.35)
+  let movedBones = 0
+  let allFinite = true
+  for (const m of animator.skinMatrices) {
+    let diff = 0
+    for (let k = 0; k < 16; k++) {
+      if (!Number.isFinite(m.elements[k]!)) allFinite = false
+      diff = Math.max(diff, Math.abs(m.elements[k]! - identity.elements[k]!))
+    }
+    if (diff > 0.01) movedBones++
+  }
+  check(allFinite, 'Animierte Skin-Matrizen endlich')
+  check(movedBones >= 5, `${movedBones} Bones bewegen sich in A002-Pose`)
+
+  console.log('\n== Alle SCA-Animationen in units.scd ==')
+  const scaPaths = [...unitsScd.entries.keys()].filter((p) => p.endsWith('.sca'))
+  let scaOk = 0
+  const scaErrors: string[] = []
+  for (const path of scaPaths) {
+    try {
+      const a = parseSca(await unitsScd.read(unitsScd.get(path)!))
+      if (a.numFrames > 0 && a.boneNames.length > 0 && Number.isFinite(a.duration)) scaOk++
+      else scaErrors.push(`${path}: frames=${a.numFrames} bones=${a.boneNames.length}`)
+    } catch (err) {
+      scaErrors.push(`${path}: ${err instanceof Error ? err.message : err}`)
+    }
+  }
+  check(scaOk === scaPaths.length, `${scaOk}/${scaPaths.length} Animationen geparst`)
+  for (const e of scaErrors.slice(0, 10)) console.error(`       ${e}`)
 
   console.log('\n== SCMAP: alle Karten in maps/ ==')
   const envScd = await ZipArchive.open(await NodeFile.open(`${GAME_DIR}/gamedata/env.scd`))
