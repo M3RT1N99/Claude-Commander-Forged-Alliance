@@ -312,6 +312,11 @@ export class UnitViewer {
   focusOn(pos: THREE.Vector3, distance = 40): void {
     const dir = new THREE.Vector3(0.4, 0.75, 0.65).normalize()
     this.camera.position.copy(pos).addScaledVector(dir, distance)
+    // Clipping an die neue Distanz anpassen (frameObject setzt near für
+    // Karten-Totalen sehr hoch — Nahsicht würde sonst weggeclippt)
+    this.camera.near = Math.max(distance / 100, 0.05)
+    this.camera.far = Math.max(this.camera.far, distance * 50)
+    this.camera.updateProjectionMatrix()
     this.controls.target.copy(pos)
     this.controls.update()
   }

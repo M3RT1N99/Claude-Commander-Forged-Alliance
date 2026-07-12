@@ -4,7 +4,7 @@ import type { UnitViewer, SceneUnit } from '../viewer/unitViewer'
 import type { UnitTextures } from '../viewer/unitMaterial'
 import type { ScmModel } from '../formats/scm'
 import type { ScaAnim } from '../formats/sca'
-import { bpGet, type BpObject } from '../formats/blueprint'
+import { bpGet, stripLoc, type BpObject } from '../formats/blueprint'
 
 /**
  * Sandbox (M4): bindet den deterministischen Sim-Kern an den Renderer.
@@ -32,6 +32,20 @@ interface Binding {
   wasMoving: boolean
   ring: THREE.Mesh
   selected: boolean
+  id: string
+  name: string
+}
+
+/** Momentaufnahme für das HUD. */
+export interface HudUnitInfo {
+  id: string
+  name: string
+  health: number
+  maxHealth: number
+  selected: boolean
+  x: number
+  z: number
+  army: number
 }
 
 const SIM_STEP = 0.1
@@ -84,6 +98,11 @@ export class SandboxController {
       wasMoving: false,
       ring,
       selected: false,
+      id: assets.id,
+      name:
+        stripLoc(bpGet(assets.bp, 'General.UnitName')) ??
+        stripLoc(bpGet(assets.bp, 'Description')) ??
+        assets.id.toUpperCase(),
     })
 
     scene.mesh.position.set(sim.x, this.viewer.heightAt(sim.x, sim.z), sim.z)
@@ -127,6 +146,26 @@ export class SandboxController {
     this.bindings.forEach((b, i) => {
       b.selected = i === 0
     })
+  }
+
+  stopSelected(): void {
+    for (const b of this.bindings) {
+      if (b.selected) this.world.stop(b.sim)
+    }
+  }
+
+  /** Zustands-Snapshot für das HUD (Einheiten + Auswahl). */
+  hudUnits(): HudUnitInfo[] {
+    return this.bindings.map((b) => ({
+      id: b.id,
+      name: b.name,
+      health: b.sim.health,
+      maxHealth: b.sim.stats.maxHealth,
+      selected: b.selected,
+      x: b.sim.x,
+      z: b.sim.z,
+      army: b.sim.army,
+    }))
   }
 
   /** Rechtsklick: Move-Befehl für die Auswahl, in lockerer Formation. */

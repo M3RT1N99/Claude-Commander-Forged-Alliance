@@ -200,3 +200,168 @@ select.inline {
   pointer-events: none;
   z-index: 50;
 }
+
+/* ------------------------------------------------------------------ */
+/* In-Game-HUD (SupCom-Stil, Original-Texturen)                        */
+/* ------------------------------------------------------------------ */
+
+#hud {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 320px;
+  pointer-events: none;
+  z-index: 20;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+}
+
+#hud .panel,
+#hud-eco,
+#hud-selection,
+#hud-minimap {
+  background: linear-gradient(180deg, rgba(20, 28, 44, 0.92), rgba(9, 13, 22, 0.94));
+  border: 1px solid #3a4a6b;
+  border-radius: 4px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(120, 150, 200, 0.15);
+}
+
+#hud-eco {
+  position: absolute;
+  top: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 22px;
+  padding: 6px 14px;
+  pointer-events: auto;
+}
+
+.eco-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.eco-icon {
+  width: 34px;
+  height: 34px;
+}
+
+.eco-info {
+  width: 150px;
+}
+
+.eco-bar-back {
+  height: 7px;
+  background: #0a0d14;
+  border: 1px solid #2a3550;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.eco-bar {
+  height: 100%;
+  width: 0%;
+}
+
+.eco-bar.mass {
+  background: linear-gradient(180deg, #b8e05a, #6d9a26);
+}
+
+.eco-bar.energy {
+  background: linear-gradient(180deg, #ffd95e, #cf9a1e);
+}
+
+.eco-numbers {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  margin-top: 2px;
+}
+
+.eco-value {
+  color: #e8eefb;
+  font-weight: 600;
+}
+
+.eco-income {
+  color: #7ec96a;
+}
+
+#hud-minimap {
+  position: absolute;
+  top: 6px;
+  left: 8px;
+  padding: 4px;
+  pointer-events: auto;
+}
+
+#hud-minimap canvas {
+  display: block;
+  cursor: crosshair;
+}
+
+#hud-selection {
+  position: absolute;
+  bottom: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 16px;
+  pointer-events: auto;
+}
+
+#hud-sel-icon {
+  width: 64px;
+  height: 64px;
+  border: 1px solid #3a4a6b;
+  background: #0a0d14;
+}
+
+#hud-sel-text {
+  min-width: 170px;
+}
+
+#hud-sel-name {
+  color: #e8eefb;
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 5px;
+  white-space: nowrap;
+}
+
+#hud-sel-hpbar-back {
+  height: 9px;
+  width: 170px;
+  background: #0a0d14;
+  border: 1px solid #2a3550;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+#hud-sel-hpbar {
+  height: 100%;
+  width: 100%;
+  background: #3fbf3f;
+}
+
+#hud-sel-hp {
+  color: #9fb2cf;
+  font-size: 12px;
+  margin-top: 3px;
+}
+
+#hud-orders {
+  display: flex;
+  gap: 5px;
+  margin-left: 6px;
+}
+
+.order-btn {
+  width: 46px;
+  height: 46px;
+  cursor: pointer;
+}

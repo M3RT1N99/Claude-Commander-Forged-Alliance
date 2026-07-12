@@ -28,6 +28,11 @@ export interface UnitStats {
   brake: number
   /** Ankunftsradius in Weltmetern */
   arriveRadius: number
+  maxHealth: number
+  massProduction: number
+  energyProduction: number
+  massStorage: number
+  energyStorage: number
 }
 
 /** Leitet die Sim-Statistik aus einem UnitBlueprint ab. */
@@ -45,6 +50,42 @@ export function statsFromBlueprint(blueprintId: string, bp: BpObject): UnitStats
     acceleration: f(num('Physics.MaxAcceleration', 2)),
     brake: f(num('Physics.MaxBrake', 2)),
     arriveRadius: f(Math.max(sizeX, sizeZ) / 2 + 0.15),
+    maxHealth: f(num('Defense.MaxHealth', 100)),
+    massProduction: f(num('Economy.ProductionPerSecondMass', 0)),
+    energyProduction: f(num('Economy.ProductionPerSecondEnergy', 0)),
+    massStorage: f(num('Economy.StorageMass', 0)),
+    energyStorage: f(num('Economy.StorageEnergy', 0)),
+  }
+}
+
+/** Ressourcen-Zustand einer Armee (deterministisch, f32). */
+export class Army {
+  mass = f(150) // Startressourcen wie im Original-Skirmish
+  energy = f(400)
+  massStorage = f(650)
+  energyStorage = f(4000)
+  massIncome = 0
+  energyIncome = 0
+
+  /** @internal */
+  tick(units: SimUnit[], armyIndex: number): void {
+    let massIn = 0
+    let energyIn = 0
+    let massStore = f(650)
+    let energyStore = f(4000)
+    for (const u of units) {
+      if (u.army !== armyIndex || u.health <= 0) continue
+      massIn = f(massIn + u.stats.massProduction)
+      energyIn = f(energyIn + u.stats.energyProduction)
+      massStore = f(massStore + u.stats.massStorage)
+      energyStore = f(energyStore + u.stats.energyStorage)
+    }
+    this.massIncome = massIn
+    this.energyIncome = energyIn
+    this.massStorage = massStore
+    this.energyStorage = energyStore
+    this.mass = Math.min(f(this.mass + f(massIn * SIM_DT)), massStore)
+    this.energy = Math.min(f(this.energy + f(energyIn * SIM_DT)), energyStore)
   }
 }
 
@@ -56,6 +97,7 @@ export class SimUnit {
   z: number
   heading: number
   speed = 0
+  health: number
 
   /** Zustand des vorherigen Ticks (für Render-Interpolation) */
   prevX: number
@@ -70,10 +112,12 @@ export class SimUnit {
     x: number,
     z: number,
     heading = 0,
+    readonly army = 1,
   ) {
     this.x = f(x)
     this.z = f(z)
     this.heading = f(heading)
+    this.health = stats.maxHealth
     this.prevX = this.x
     this.prevZ = this.z
     this.prevHeading = this.heading
@@ -86,13 +130,20 @@ export class SimUnit {
 
 export class SimWorld {
   readonly units: SimUnit[] = []
+  /** Armeen, Index 0 = Armee 1 */
+  readonly armies: Army[] = [new Army(), new Army()]
   tickCount = 0
   private nextId = 1
 
-  spawn(stats: UnitStats, x: number, z: number, heading = 0): SimUnit {
-    const unit = new SimUnit(this.nextId++, stats, x, z, heading)
+  spawn(stats: UnitStats, x: number, z: number, heading = 0, army = 1): SimUnit {
+    const unit = new SimUnit(this.nextId++, stats, x, z, heading, army)
     this.units.push(unit)
+    while (this.armies.length < army) this.armies.push(new Army())
     return unit
+  }
+
+  army(index: number): Army {
+    return this.armies[index - 1] ?? this.armies[0]!
   }
 
   issueMove(unit: SimUnit, x: number, z: number, append = false): void {
@@ -111,6 +162,9 @@ export class SimWorld {
       u.prevZ = u.z
       u.prevHeading = u.heading
       this.tickUnit(u)
+    }
+    for (let i = 0; i < this.armies.length; i++) {
+      this.armies[i]!.tick(this.units, i + 1)
     }
     this.tickCount++
   }

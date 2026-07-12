@@ -21,6 +21,8 @@ import {
 import { ddsToTexture } from './viewer/textures'
 import { UnitViewer } from './viewer/unitViewer'
 import { SandboxController, type SandboxUnitAssets } from './sandbox/sandbox'
+import { Hud } from './ui/hud'
+import type { ScmapData } from './formats/scmap'
 import type { UnitTextures } from './viewer/unitMaterial'
 
 const $ = <T extends HTMLElement>(sel: string): T => {
@@ -203,6 +205,8 @@ async function loadUnit(id: string): Promise<void> {
   if (!vfs) return
   try {
     sandbox = null
+    hud?.dispose()
+    hud = null
     viewer.setRtsControls(false)
     log(`Lade ${id.toUpperCase()}…`)
     const assets = await loadUnitAssets(id)
@@ -272,6 +276,8 @@ async function loadMap(folder: string): Promise<void> {
   if (!source || !vfs) return
   try {
     sandbox = null
+    hud?.dispose()
+    hud = null
     viewer.setRtsControls(false)
     log(`Lade Karte ${folder}…`)
     const files = await source.list(`maps/${folder}`)
@@ -296,6 +302,7 @@ async function loadMap(folder: string): Promise<void> {
     const raf = await source.open(`maps/${folder}/${scmapFile.name}`)
     const data = new Uint8Array(await raf.slice(0, raf.size))
     const scmap = parseScmap(data)
+    currentScmap = scmap
     log(
       `${scmapFile.name}: ${scmap.width}×${scmap.height}, ` +
         `${scmap.strata.length} Texturlagen, Wasser ${scmap.water.hasWater ? 'ja' : 'nein'}`,
@@ -312,6 +319,8 @@ async function loadMap(folder: string): Promise<void> {
 // ---------------------------------------------------------------------------
 
 let sandbox: SandboxController | null = null
+let hud: Hud | null = null
+let currentScmap: ScmapData | null = null
 let spawnPoint = new THREE.Vector3(20, 0, 20)
 const sandboxAssetCache = new Map<string, SandboxUnitAssets>()
 
@@ -377,6 +386,9 @@ async function startSandbox(mapFolder: string): Promise<void> {
     if (acu) {
       sandbox.spawn(acu, spawnPoint.x, spawnPoint.z, currentTeamColor())
       sandbox.selectFirst()
+    }
+    if (currentScmap) {
+      hud = new Hud(vfs, viewer, sandbox, currentScmap)
     }
     viewer.focusOn(spawnPoint, 14)
     $('#sandbox-spawns').hidden = false
