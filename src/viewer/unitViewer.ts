@@ -108,7 +108,8 @@ export class UnitViewer {
       }
       for (const hook of this.updateHooks) hook(dt)
       for (const unit of this.units) unit.update(dt)
-      this.controls.update()
+      if (this.rts.enabled) this.updateRtsCamera(dt)
+      else this.controls.update()
       this.renderer.render(this.scene, this.camera)
     })
   }
@@ -310,6 +311,11 @@ export class UnitViewer {
 
   /** Kamera auf eine Position ausrichten (RTS-artige Nahansicht). */
   focusOn(pos: THREE.Vector3, distance = 40): void {
+    if (this.rts.enabled) {
+      this.rts.goalTarget.copy(pos)
+      this.rts.goalDist = distance
+      return
+    }
     const dir = new THREE.Vector3(0.4, 0.75, 0.65).normalize()
     this.camera.position.copy(pos).addScaledVector(dir, distance)
     // Clipping an die neue Distanz anpassen (frameObject setzt near für
@@ -322,26 +328,133 @@ export class UnitViewer {
   }
 
   /**
-   * RTS-Steuerung (SupCom-Schema): Links-Drag ist für die Box-Selektion
-   * reserviert, Rechtsklick für Befehle — OrbitControls behält nur noch
-   * Mausrad-Zoom und Mitteltaste-Pan. Rotation läuft über Leertaste+Maus
-   * (rotateAroundTarget).
+   * RTS-Kamera nach SupCom-Vorbild: Ziel auf dem Terrain, Zoomdistanz
+   * bestimmt die Höhe; der Pitch ist an den Zoom gekoppelt (weit draußen
+   * fast senkrecht von oben, nah am Boden flach). Mausrad zoomt zum
+   * Cursor, Kanten-Scroll/Pfeiltasten/Mitteltaste schieben, Leertaste +
+   * Maus rotiert. Alles exponentiell geglättet wie im Original.
    */
+  private rts = {
+    enabled: false,
+    target: new THREE.Vector3(),
+    dist: 40,
+    yaw: 0,
+    pitchOffset: 0,
+    goalTarget: new THREE.Vector3(),
+    goalDist: 40,
+    goalYaw: 0,
+    panX: 0,
+    panZ: 0,
+  }
+
   setRtsControls(enabled: boolean): void {
-    const buttons = this.controls.mouseButtons as Record<string, THREE.MOUSE | null>
+    this.rts.enabled = enabled
+    this.controls.enabled = !enabled
     if (enabled) {
-      buttons.LEFT = null
-      buttons.MIDDLE = THREE.MOUSE.PAN
-      buttons.RIGHT = null
-    } else {
-      buttons.LEFT = THREE.MOUSE.ROTATE
-      buttons.MIDDLE = THREE.MOUSE.DOLLY
-      buttons.RIGHT = THREE.MOUSE.PAN
+      this.rts.target.copy(this.controls.target)
+      this.rts.goalTarget.copy(this.controls.target)
+      const d = this.camera.position.distanceTo(this.controls.target)
+      this.rts.dist = d
+      this.rts.goalDist = d
+      this.rts.yaw = 0
+      this.rts.goalYaw = 0
+      this.rts.pitchOffset = 0
     }
   }
 
-  /** Kamera um das aktuelle Ziel drehen (Leertaste + Mausbewegung). */
+  private rtsPitch(dist: number): number {
+    // Original-Gefühl: oberhalb ~60 Einheiten Draufsicht, darunter kippen
+    const t = Math.min(Math.max((dist - 6) / 54, 0), 1)
+    const base = 0.6 + (1.45 - 0.6) * Math.sqrt(t)
+    return Math.min(Math.max(base + this.rts.pitchOffset, 0.35), 1.5)
+  }
+
+  private updateRtsCamera(dt: number): void {
+    const r = this.rts
+    // Dauer-Pan (Kanten-Scroll/Pfeiltasten): Geschwindigkeit ∝ Distanz
+    if (r.panX !== 0 || r.panZ !== 0) {
+      const speed = r.dist * 0.9 * dt
+      const cos = Math.cos(r.yaw)
+      const sin = Math.sin(r.yaw)
+      r.goalTarget.x += (r.panX * cos - r.panZ * sin) * speed
+      r.goalTarget.z += (r.panZ * cos + r.panX * sin) * speed
+    }
+    const hf = this.heightfield
+    if (hf) {
+      r.goalTarget.x = Math.min(Math.max(r.goalTarget.x, 0), hf.width)
+      r.goalTarget.z = Math.min(Math.max(r.goalTarget.z, 0), hf.height)
+    }
+    r.goalTarget.y = this.heightAt(r.goalTarget.x, r.goalTarget.z)
+
+    // exponentielle Glättung
+    const k = 1 - Math.exp(-10 * dt)
+    r.target.lerp(r.goalTarget, k)
+    r.dist += (r.goalDist - r.dist) * k
+    let dy = r.goalYaw - r.yaw
+    while (dy > Math.PI) dy -= 2 * Math.PI
+    while (dy < -Math.PI) dy += 2 * Math.PI
+    r.yaw += dy * k
+
+    const pitch = this.rtsPitch(r.dist)
+    const horiz = Math.cos(pitch) * r.dist
+    this.camera.position.set(
+      r.target.x + Math.sin(r.yaw) * horiz,
+      r.target.y + Math.sin(pitch) * r.dist,
+      r.target.z + Math.cos(r.yaw) * horiz,
+    )
+    this.camera.near = Math.max(r.dist / 100, 0.05)
+    this.camera.far = Math.max(2000, r.dist * 10)
+    this.camera.updateProjectionMatrix()
+    this.camera.lookAt(r.target)
+  }
+
+  /** Mausrad: Zoom zum Cursor (SupCom-Verhalten). */
+  rtsZoom(wheelDelta: number, clientX: number, clientY: number): void {
+    if (!this.rts.enabled) return
+    const r = this.rts
+    const oldDist = r.goalDist
+    const factor = Math.pow(1.25, wheelDelta > 0 ? 1 : -1)
+    const maxDist = this.heightfield
+      ? Math.max(this.heightfield.width, this.heightfield.height) * 1.4
+      : 800
+    r.goalDist = Math.min(Math.max(r.goalDist * factor, 4), maxDist)
+    const cursor = this.pickTerrain(clientX, clientY)
+    if (cursor) {
+      const shift = 1 - r.goalDist / oldDist
+      r.goalTarget.x += (cursor.x - r.goalTarget.x) * shift
+      r.goalTarget.z += (cursor.z - r.goalTarget.z) * shift
+    }
+  }
+
+  /** Dauer-Pan setzen (-1/0/1 je Achse; Kanten-Scroll & Pfeiltasten). */
+  rtsSetPan(x: number, z: number): void {
+    this.rts.panX = x
+    this.rts.panZ = z
+  }
+
+  /** Direktes Verschieben (Mitteltaste-Drag), pixelproportional. */
+  rtsDragPan(dxPixels: number, dyPixels: number): void {
+    if (!this.rts.enabled) return
+    const r = this.rts
+    const scale = (r.dist * 1.4) / this.canvas.clientHeight
+    const cos = Math.cos(r.yaw)
+    const sin = Math.sin(r.yaw)
+    const dx = -dxPixels * scale
+    const dz = -dyPixels * scale
+    r.goalTarget.x += dx * cos - dz * sin
+    r.goalTarget.z += dz * cos + dx * sin
+  }
+
+  /** Kamera drehen (Leertaste + Maus). */
   rotateAroundTarget(dxPixels: number, dyPixels: number): void {
+    if (this.rts.enabled) {
+      this.rts.goalYaw -= dxPixels * 0.006
+      this.rts.pitchOffset = Math.min(
+        Math.max(this.rts.pitchOffset - dyPixels * 0.004, -0.9),
+        0.5,
+      )
+      return
+    }
     const offset = this.camera.position.clone().sub(this.controls.target)
     const spherical = new THREE.Spherical().setFromVector3(offset)
     spherical.theta -= dxPixels * 0.005

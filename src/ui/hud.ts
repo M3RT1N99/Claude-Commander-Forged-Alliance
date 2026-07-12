@@ -122,6 +122,65 @@ export class Hud {
     const energy = await this.tex(`${UI}/game/resources/energy_btn_up.dds`)
     if (mass) icons[0]!.src = mass
     if (energy) icons[1]!.src = energy
+
+    // Original-Panel-Hintergründe
+    const setBg = (el: HTMLElement | null, url: string | null, size = '100% 100%'): void => {
+      if (el && url) {
+        el.style.backgroundImage = `url(${url})`
+        el.style.backgroundSize = size
+      }
+    }
+    const eco = this.root.querySelector<HTMLElement>('#hud-eco')
+    setBg(eco, await this.tex(`${UI}/game/resources/center_bmp_m.dds`))
+    const sel = this.root.querySelector<HTMLElement>('#hud-selection')
+    setBg(sel, await this.tex(`${UI}/game/mini-ui-unit-over/unit-over-back_bmp.dds`))
+    const hpBack = this.root.querySelector<HTMLElement>('#hud-sel-hpbar-back')
+    setBg(hpBack, await this.tex(`${UI}/game/unit-over/health-bars-back_bmp.dds`))
+    for (const [sel2, path] of [
+      ['.eco-bar-back', 'mass-bar-back_bmp'],
+      ['.eco-bar.mass', 'mass-bar_bmp'],
+      ['.eco-bar.energy', 'energy-bar_bmp'],
+    ] as const) {
+      for (const el of this.root.querySelectorAll<HTMLElement>(sel2)) {
+        setBg(el, await this.tex(`${UI}/game/resources/${path}.dds`))
+      }
+    }
+
+    // Minimap: Original-9-Slice-Rahmen
+    const frame = this.root.querySelector<HTMLElement>('#hud-minimap')
+    if (frame) {
+      const piece = async (name: string): Promise<string | null> =>
+        this.tex(`${UI}/game/mini-map-brd01/mini-map_brd_${name}.dds`)
+      const [ul, um, ur, vl, vr, ll, lm, lr, mid] = await Promise.all([
+        piece('ul'),
+        piece('horz_um'),
+        piece('ur'),
+        piece('vert_l'),
+        piece('vert_r'),
+        piece('ll'),
+        piece('lm'),
+        piece('lr'),
+        piece('m'),
+      ])
+      const corners: [string, string | null][] = [
+        ['hud-mm-ul', ul],
+        ['hud-mm-um', um],
+        ['hud-mm-ur', ur],
+        ['hud-mm-l', vl],
+        ['hud-mm-r', vr],
+        ['hud-mm-ll', ll],
+        ['hud-mm-lm', lm],
+        ['hud-mm-lr', lr],
+      ]
+      for (const [cls, url] of corners) {
+        if (!url) continue
+        const div = document.createElement('div')
+        div.className = `mm-frame ${cls}`
+        div.style.backgroundImage = `url(${url})`
+        frame.appendChild(div)
+      }
+      if (mid) setBg(frame, mid)
+    }
   }
 
   private async buildOrderButtons(): Promise<void> {

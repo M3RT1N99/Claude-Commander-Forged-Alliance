@@ -476,6 +476,69 @@ window.addEventListener('keyup', (e) => {
   if (e.code === 'Space') spaceHeld = false
 })
 
+// --- Original-Kamera: Rad-Zoom zum Cursor, Mitteltasten-Pan, ------------
+// --- Kanten-Scroll und Pfeiltasten ---------------------------------------
+let midDrag = false
+const keyPan = { x: 0, z: 0 }
+const edgePan = { x: 0, z: 0 }
+
+function applyPan(): void {
+  viewer.rtsSetPan(
+    Math.max(-1, Math.min(1, keyPan.x + edgePan.x)),
+    Math.max(-1, Math.min(1, keyPan.z + edgePan.z)),
+  )
+}
+
+viewportEl.addEventListener(
+  'wheel',
+  (e) => {
+    if (!sandbox) return
+    e.preventDefault()
+    viewer.rtsZoom(e.deltaY, e.clientX, e.clientY)
+  },
+  { passive: false },
+)
+
+viewportEl.addEventListener('pointerdown', (e) => {
+  if (e.button === 1 && sandbox) {
+    midDrag = true
+    e.preventDefault()
+  }
+})
+window.addEventListener('pointerup', (e) => {
+  if (e.button === 1) midDrag = false
+})
+viewportEl.addEventListener('auxclick', (e) => e.preventDefault())
+
+window.addEventListener('pointermove', (e) => {
+  if (!sandbox) return
+  if (midDrag) viewer.rtsDragPan(e.movementX, e.movementY)
+  // Kanten-Scroll innerhalb des Viewports
+  const rect = viewportEl.getBoundingClientRect()
+  const m = 14
+  const inside =
+    e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom
+  edgePan.x = inside ? (e.clientX < rect.left + m ? -1 : e.clientX > rect.right - m ? 1 : 0) : 0
+  edgePan.z = inside ? (e.clientY < rect.top + m ? -1 : e.clientY > rect.bottom - m ? 1 : 0) : 0
+  applyPan()
+})
+
+window.addEventListener('keydown', (e) => {
+  if (!sandbox || e.target instanceof HTMLInputElement) return
+  if (e.code === 'ArrowLeft') keyPan.x = -1
+  else if (e.code === 'ArrowRight') keyPan.x = 1
+  else if (e.code === 'ArrowUp') keyPan.z = -1
+  else if (e.code === 'ArrowDown') keyPan.z = 1
+  else return
+  e.preventDefault()
+  applyPan()
+})
+window.addEventListener('keyup', (e) => {
+  if (e.code === 'ArrowLeft' || e.code === 'ArrowRight') keyPan.x = 0
+  if (e.code === 'ArrowUp' || e.code === 'ArrowDown') keyPan.z = 0
+  applyPan()
+})
+
 function showUnitInfo(id: string, bp: BpObject): void {
   const name = stripLoc(bpGet(bp, 'General.UnitName')) ?? ''
   const desc = stripLoc(bpGet(bp, 'Description')) ?? ''

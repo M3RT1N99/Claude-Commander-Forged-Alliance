@@ -216,15 +216,32 @@ select.inline {
   font-family: 'Segoe UI', system-ui, sans-serif;
 }
 
+/* Fallback-Optik, wird von den Original-Bitmaps überlagert sobald geladen */
 #hud .panel,
 #hud-eco,
 #hud-selection,
 #hud-minimap {
   background: linear-gradient(180deg, rgba(20, 28, 44, 0.92), rgba(9, 13, 22, 0.94));
-  border: 1px solid #3a4a6b;
-  border-radius: 4px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(120, 150, 200, 0.15);
+  background-size: 100% 100%;
+  border-radius: 3px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.6);
 }
+
+/* Minimap-Rahmen aus den Original-9-Slice-Teilen */
+.mm-frame {
+  position: absolute;
+  background-size: 100% 100%;
+  pointer-events: none;
+}
+
+.hud-mm-ul { top: -14px; left: -14px; width: 28px; height: 28px; }
+.hud-mm-ur { top: -14px; right: -14px; width: 28px; height: 28px; }
+.hud-mm-ll { bottom: -14px; left: -14px; width: 28px; height: 28px; }
+.hud-mm-lr { bottom: -14px; right: -14px; width: 28px; height: 28px; }
+.hud-mm-um { top: -14px; left: 14px; right: 14px; height: 28px; }
+.hud-mm-lm { bottom: -14px; left: 14px; right: 14px; height: 28px; }
+.hud-mm-l  { top: 14px; bottom: 14px; left: -14px; width: 28px; }
+.hud-mm-r  { top: 14px; bottom: 14px; right: -14px; width: 28px; }
 
 #hud-eco {
   position: absolute;
@@ -267,10 +284,17 @@ select.inline {
 
 .eco-bar.mass {
   background: linear-gradient(180deg, #b8e05a, #6d9a26);
+  background-size: 100% 100%;
 }
 
 .eco-bar.energy {
   background: linear-gradient(180deg, #ffd95e, #cf9a1e);
+  background-size: 100% 100%;
+}
+
+#hud-sel-hpbar-back,
+#hud-sel-hpbar {
+  background-size: 100% 100%;
 }
 
 .eco-numbers {
@@ -291,8 +315,8 @@ select.inline {
 
 #hud-minimap {
   position: absolute;
-  top: 6px;
-  left: 8px;
+  top: 22px;
+  left: 24px;
   padding: 4px;
   pointer-events: auto;
 }
