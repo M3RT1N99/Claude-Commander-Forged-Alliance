@@ -59,6 +59,10 @@ const fragmentShader = /* glsl */ `
   uniform float lowerTile;
   uniform float stratumTile[8];
   uniform float upperTile;
+  // 1 = Stratum hat eine Textur; 0 = Maske ignorieren. Wichtig: Karten mit
+  // dem alten 4-Lagen-Shader (TTerrain) tragen in der zweiten Maske Junk.
+  uniform vec4 stratumEnable0;
+  uniform vec4 stratumEnable1;
 
   uniform sampler2D waterRamp;
   uniform sampler2D utilityC;
@@ -88,8 +92,8 @@ const fragmentShader = /* glsl */ `
     vec3 normal = normalize(vec3(hl - hr, 2.0, hd - hu));
 
     vec2 world = vWorldPos.xz;
-    vec4 m0 = clamp(texture2D(maskA, vUvMap) * 2.0 - 1.0, 0.0, 1.0);
-    vec4 m1 = clamp(texture2D(maskB, vUvMap) * 2.0 - 1.0, 0.0, 1.0);
+    vec4 m0 = clamp(texture2D(maskA, vUvMap) * 2.0 - 1.0, 0.0, 1.0) * stratumEnable0;
+    vec4 m1 = clamp(texture2D(maskB, vUvMap) * 2.0 - 1.0, 0.0, 1.0) * stratumEnable1;
 
     vec4 albedo = texture2D(lowerAlbedo, world / lowerTile);
     albedo = mix(albedo, texture2D(stratum0Albedo, world / stratumTile[0]), m0.x);
@@ -134,6 +138,8 @@ export interface TerrainLayerTextures {
   lowerScale: number
   strataScales: number[] // 8 Einträge
   upperScale: number
+  /** 1 = Stratum vorhanden, 0 = Maske ignorieren — 8 Einträge */
+  strataEnabled: number[]
 }
 
 export interface TerrainMaterialOptions {
@@ -191,6 +197,8 @@ export function createTerrainMaterial(o: TerrainMaterialOptions): THREE.ShaderMa
       lowerTile: { value: o.layers.lowerScale },
       stratumTile: { value: o.layers.strataScales },
       upperTile: { value: o.layers.upperScale },
+      stratumEnable0: { value: new THREE.Vector4(...o.layers.strataEnabled.slice(0, 4)) },
+      stratumEnable1: { value: new THREE.Vector4(...o.layers.strataEnabled.slice(4, 8)) },
       waterRamp: { value: o.waterRamp ?? dummy },
       utilityC: { value: o.utilityC ?? dummy },
       hasWater: { value: o.waterRamp && o.utilityC ? 1 : 0 },

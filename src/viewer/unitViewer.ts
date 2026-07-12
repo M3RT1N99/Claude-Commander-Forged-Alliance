@@ -429,6 +429,7 @@ export class UnitViewer {
         lowerScale: lower?.albedoScale || 4,
         strataScales: mid.map((s) => s?.albedoScale || 4),
         upperScale: upper?.albedoScale || 4,
+        strataEnabled: mid.map((s) => (s?.albedoPath ? 1 : 0)),
       },
       waterRamp,
       utilityC,
