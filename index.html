@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Claude Commander: Forged Alliance</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <header id="topbar">
+      <h1>CLAUDE COMMANDER <span>FORGED ALLIANCE</span></h1>
+      <div id="source-label">Keine Spieldaten verbunden</div>
+    </header>
+
+    <main id="layout">
+      <aside id="sidebar">
+        <section id="connect-panel">
+          <h2>Spieldaten</h2>
+          <p class="hint">
+            Wähle dein Installationsverzeichnis von
+            <em>Supreme Commander: Forged Alliance</em> (Steam/GOG). Die Dateien
+            bleiben lokal — nichts wird hochgeladen.
+          </p>
+          <button id="btn-pick-dir" class="primary">Spielverzeichnis wählen…</button>
+          <button id="btn-resume" hidden>Erneut verbinden</button>
+          <input id="input-dir" type="file" webkitdirectory hidden />
+          <button id="btn-fallback" hidden>Ordner wählen (Fallback)…</button>
+        </section>
+
+        <section id="unit-panel" hidden>
+          <h2>Einheit</h2>
+          <input id="unit-search" type="search" placeholder="Suchen… (z. B. UEL0001)" />
+          <select id="unit-select" size="12"></select>
+          <label class="row">
+            Teamfarbe
+            <input id="team-color" type="color" value="#2a6dbb" />
+          </label>
+          <div id="unit-info"></div>
+        </section>
+
+        <section>
+          <h2>Log</h2>
+          <pre id="log"></pre>
+        </section>
+      </aside>
+
+      <canvas id="viewport"></canvas>
+    </main>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

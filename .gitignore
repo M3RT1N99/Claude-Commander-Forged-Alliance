@@ -1,0 +1,13 @@
+node_modules/
+dist/
+*.local
+.DS_Store
+
+# Niemals Original-Game-Assets einchecken (Copyright!)
+assets/
+extracted/
+*.scd
+*.scm
+*.sca
+*.scmap
+*.dds
