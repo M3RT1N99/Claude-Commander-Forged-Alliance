@@ -216,15 +216,211 @@ select.inline {
   font-family: 'Segoe UI', system-ui, sans-serif;
 }
 
-/* Fallback-Optik, wird von den Original-Bitmaps überlagert sobald geladen */
-#hud .panel,
-#hud-eco,
-#hud-selection,
-#hud-minimap {
-  background: linear-gradient(180deg, rgba(20, 28, 44, 0.92), rgba(9, 13, 22, 0.94));
+/* Original-„mini“-Layout (economy_mini/orders_mini/unitview) ------------- */
+
+#hud {
+  font-family: Arial, sans-serif;
+}
+
+/* Economy-Panel: Screen (16,3), 324×72 */
+#eco-panel {
+  position: absolute;
+  left: 16px;
+  top: 3px;
+  width: 324px;
+  height: 72px;
   background-size: 100% 100%;
-  border-radius: 3px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.6);
+  pointer-events: auto;
+}
+
+.eco-group {
+  position: absolute;
+  left: 14px;
+  width: 296px;
+  height: 25px;
+}
+
+#eco-mass {
+  top: 9px;
+}
+
+#eco-energy {
+  top: 38px; /* Below(mass, 4) */
+}
+
+.eco-icon {
+  position: absolute;
+  height: 36px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.eco-storage {
+  position: absolute;
+  left: 30px;
+  top: 2px;
+  width: 100px;
+  height: 10px;
+  background-size: 100% 100%;
+}
+
+.eco-fill {
+  height: 100%;
+  background-size: 100% 100%;
+}
+
+.eco-cur,
+.eco-max {
+  position: absolute;
+  top: 13px;
+  font-size: 10px;
+}
+
+.eco-cur {
+  left: 30px;
+}
+
+.eco-max {
+  left: 30px;
+  width: 100px;
+  text-align: right;
+}
+
+#eco-mass .eco-cur,
+#eco-mass .eco-max {
+  color: #b7e75f;
+}
+
+#eco-energy .eco-cur,
+#eco-energy .eco-max {
+  color: #f7c70f;
+}
+
+.eco-rate {
+  position: absolute;
+  left: 140px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 18px;
+  color: #b7e75f;
+  text-shadow: 1px 1px 1px #000;
+}
+
+.eco-income,
+.eco-expense {
+  position: absolute;
+  right: 10px;
+  font-size: 10px;
+}
+
+.eco-income {
+  top: 0;
+  color: #b7e75f;
+}
+
+.eco-expense {
+  bottom: 0;
+  color: #f30017;
+}
+
+/* Orders-Panel: links 17, unten 0, 332×120; Raster 2×6 à 50×50 */
+#orders-panel {
+  position: absolute;
+  left: 17px;
+  bottom: 0;
+  width: 332px;
+  height: 120px;
+  background-size: 100% 100%;
+  pointer-events: auto;
+}
+
+#orders-grid {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(calc(-50% - 1px), -50%);
+  display: grid;
+  grid-template-columns: repeat(6, 50px);
+  grid-template-rows: repeat(2, 50px);
+}
+
+.order-slot {
+  width: 50px;
+  height: 50px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.order-slot img {
+  width: 48px;
+  height: 48px;
+}
+
+/* Unit-View: links 17, 120 über Unterkante, 332×116 */
+#unitview-panel {
+  position: absolute;
+  left: 17px;
+  bottom: 120px;
+  width: 332px;
+  height: 116px;
+  background-size: 100% 100%;
+  pointer-events: auto;
+}
+
+#uv-bracket {
+  position: absolute;
+  left: -18px;
+  top: -2px;
+  width: 32px;
+  height: 120px;
+}
+
+#uv-name {
+  position: absolute;
+  left: 16px;
+  top: 14px;
+  right: 16px;
+  font-size: 14px;
+  color: #badbdb;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+#uv-icon {
+  position: absolute;
+  left: 12px;
+  top: 34px;
+  width: 48px;
+  height: 48px;
+}
+
+#uv-health {
+  position: absolute;
+  left: 66px;
+  top: 35px;
+  width: 188px;
+  height: 16px;
+  background-size: 100% 100%;
+}
+
+#uv-health-fill {
+  height: 100%;
+}
+
+#uv-health-text {
+  position: absolute;
+  inset: 0;
+  text-align: center;
+  font-size: 12px;
+  line-height: 16px;
+  color: #e8f3f3;
+  text-shadow: 1px 1px 1px #000;
+}
+
+#hud-minimap {
+  background: rgba(8, 12, 18, 0.85);
+  background-size: 100% 100%;
 }
 
 /* Minimap-Rahmen aus den Original-9-Slice-Teilen */
@@ -315,7 +511,7 @@ select.inline {
 
 #hud-minimap {
   position: absolute;
-  top: 22px;
+  top: 92px;
   left: 24px;
   padding: 4px;
   pointer-events: auto;

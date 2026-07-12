@@ -8,31 +8,49 @@ import { parseDds } from '../formats/dds'
 import { bgraToRgba, decodeDxt } from '../formats/dxt'
 
 /**
- * In-Game-HUD im Stil des Originals, gebaut aus den Original-UI-Texturen
- * (textures.scd): Economy-Bar oben (Mass/Energy-Buttons + Balken),
- * Selektions-Panel unten (Unit-Icon, Name, HP), Order-Buttons
- * (move/stop/attack mit up/over/down-Zuständen) und Minimap (eingebettetes
- * Karten-Preview + Einheiten-Punkte, Klick = Kamera).
+ * In-Game-HUD 1:1 nach dem Original-„mini“-Layout (lua/ui/game/layouts/
+ * economy_mini.lua, orders_mini.lua + unitview.lua, verifiziert gegen die
+ * Original-Quellen in lua.scd):
+ *
+ * - Economy-Panel: Screen-(16,3), resources_panel_bmp 324×72; Mass-Gruppe
+ *   (14,9) 296×25, Energy 4 px darunter; Storage-Balken 100×10 bei (30,2);
+ *   Texte/Farben wie im Original (Mass #b7e75f, Energy #f7c70f).
+ * - Orders-Panel: links 17, unten 0, order-panel_bmp 332×120; Raster 2×6 à
+ *   50×50 zentriert (0,−1); Slots nach standardOrdersTable (Move=1, Attack=2,
+ *   Patrol=3, Stop=4, Guard=5, Modus=6); verfügbar = Union der CommandCaps.
+ * - Unit-View: links 17, 120 über Unterkante, build-over-back_bmp 332×116;
+ *   Icon 48² (12,34), Name (16,14), Health-Balken 188×16 (66,35) mit
+ *   healthbar_bg/green/yellow/red (>75 % grün, >25 % gelb, sonst rot).
+ * - Texturen via SkinnableFile-Reihenfolge: Fraktions-Skin (uef) → common.
  */
 
-const UI = 'textures/ui/common'
+const FACTION_SKIN = 'uef'
+
+interface OrderDef {
+  cap: string
+  bitmap: string
+  slot: number
+  action?: (c: SandboxController) => void
+}
+
+/** standardOrdersTable, Slots 1–6 (orders.lua) */
+const COMMON_ORDERS: OrderDef[] = [
+  { cap: 'RULEUCC_Move', bitmap: 'move', slot: 1 },
+  { cap: 'RULEUCC_Attack', bitmap: 'attack', slot: 2 },
+  { cap: 'RULEUCC_Patrol', bitmap: 'patrol', slot: 3 },
+  { cap: 'RULEUCC_Stop', bitmap: 'stop', slot: 4, action: (c) => c.stopSelected() },
+  { cap: 'RULEUCC_Guard', bitmap: 'guard', slot: 5 },
+  { cap: 'RULEUCC_RetaliateToggle', bitmap: 'stand-ground', slot: 6 },
+]
 
 export class Hud {
   private readonly root: HTMLDivElement
-  private readonly massValue: HTMLSpanElement
-  private readonly massIncome: HTMLSpanElement
-  private readonly massBar: HTMLDivElement
-  private readonly energyValue: HTMLSpanElement
-  private readonly energyIncome: HTMLSpanElement
-  private readonly energyBar: HTMLDivElement
-  private readonly selIcon: HTMLImageElement
-  private readonly selName: HTMLDivElement
-  private readonly selHealth: HTMLDivElement
-  private readonly selHealthBar: HTMLDivElement
-  private readonly selPanel: HTMLDivElement
-  private readonly minimapCanvas: HTMLCanvasElement
-  private minimapImage: ImageBitmap | null = null
+  private readonly refs = new Map<string, HTMLElement>()
+  private readonly orderButtons: { def: OrderDef; img: HTMLImageElement; enabled: boolean }[] = []
+  private readonly healthTex = new Map<string, string>()
   private readonly iconCache = new Map<string, string>()
+  private minimapImage: ImageBitmap | null = null
+  private readonly minimapCanvas: HTMLCanvasElement
   private readonly interval: number
 
   constructor(
@@ -44,53 +62,37 @@ export class Hud {
     this.root = document.createElement('div')
     this.root.id = 'hud'
     this.root.innerHTML = `
-      <div id="hud-eco">
-        <div class="eco-group">
-          <img class="eco-icon" data-tex="mass" alt="Mass" />
-          <div class="eco-info">
-            <div class="eco-bar-back"><div class="eco-bar mass"></div></div>
-            <div class="eco-numbers"><span class="eco-value">0</span><span class="eco-income">+0</span></div>
-          </div>
+      <div id="eco-panel">
+        <div class="eco-group" id="eco-mass">
+          <img class="eco-icon" />
+          <div class="eco-storage"><div class="eco-fill"></div></div>
+          <span class="eco-cur"></span><span class="eco-max"></span>
+          <span class="eco-rate"></span>
+          <span class="eco-income"></span><span class="eco-expense"></span>
         </div>
-        <div class="eco-group">
-          <img class="eco-icon" data-tex="energy" alt="Energy" />
-          <div class="eco-info">
-            <div class="eco-bar-back"><div class="eco-bar energy"></div></div>
-            <div class="eco-numbers"><span class="eco-value">0</span><span class="eco-income">+0</span></div>
-          </div>
+        <div class="eco-group" id="eco-energy">
+          <img class="eco-icon" />
+          <div class="eco-storage"><div class="eco-fill"></div></div>
+          <span class="eco-cur"></span><span class="eco-max"></span>
+          <span class="eco-rate"></span>
+          <span class="eco-income"></span><span class="eco-expense"></span>
         </div>
       </div>
       <div id="hud-minimap"><canvas width="216" height="216"></canvas></div>
-      <div id="hud-selection" hidden>
-        <img id="hud-sel-icon" alt="" />
-        <div id="hud-sel-text">
-          <div id="hud-sel-name"></div>
-          <div id="hud-sel-hpbar-back"><div id="hud-sel-hpbar"></div></div>
-          <div id="hud-sel-hp"></div>
-        </div>
-        <div id="hud-orders"></div>
+      <div id="unitview-panel" hidden>
+        <img id="uv-bracket" />
+        <div id="uv-name"></div>
+        <img id="uv-icon" />
+        <div id="uv-health"><div id="uv-health-fill"></div><span id="uv-health-text"></span></div>
+      </div>
+      <div id="orders-panel">
+        <div id="orders-grid"></div>
       </div>
     `
     document.body.appendChild(this.root)
+    this.minimapCanvas = this.root.querySelector('canvas')!
 
-    const $ = <T extends HTMLElement>(sel: string): T => this.root.querySelector(sel) as T
-    const ecoGroups = this.root.querySelectorAll('.eco-group')
-    this.massValue = ecoGroups[0]!.querySelector('.eco-value')!
-    this.massIncome = ecoGroups[0]!.querySelector('.eco-income')!
-    this.massBar = ecoGroups[0]!.querySelector('.eco-bar')!
-    this.energyValue = ecoGroups[1]!.querySelector('.eco-value')!
-    this.energyIncome = ecoGroups[1]!.querySelector('.eco-income')!
-    this.energyBar = ecoGroups[1]!.querySelector('.eco-bar')!
-    this.selIcon = $('#hud-sel-icon')
-    this.selName = $('#hud-sel-name')
-    this.selHealth = $('#hud-sel-hp')
-    this.selHealthBar = $('#hud-sel-hpbar')
-    this.selPanel = $('#hud-selection')
-    this.minimapCanvas = $('#hud-minimap canvas') as HTMLCanvasElement
-
-    void this.loadStaticTextures()
-    void this.buildOrderButtons()
-    void this.buildMinimap()
+    void this.build()
 
     this.minimapCanvas.addEventListener('pointerdown', (e) => {
       const rect = this.minimapCanvas.getBoundingClientRect()
@@ -107,118 +109,110 @@ export class Hud {
     this.root.remove()
   }
 
-  private async tex(path: string): Promise<string | null> {
-    try {
-      if (!this.vfs.exists(path)) return null
-      return ddsToDataUrl(path, await this.vfs.read(path))
-    } catch {
-      return null
+  /** SkinnableFile: Fraktions-Skin zuerst, dann common. */
+  private async skin(path: string): Promise<string | null> {
+    for (const base of [`textures/ui/${FACTION_SKIN}`, 'textures/ui/common']) {
+      const full = `${base}${path}`
+      if (this.vfs.exists(full)) {
+        try {
+          return ddsToDataUrl(full, await this.vfs.read(full))
+        } catch {
+          return null
+        }
+      }
     }
+    return null
   }
 
-  private async loadStaticTextures(): Promise<void> {
-    const icons = this.root.querySelectorAll<HTMLImageElement>('.eco-icon')
-    const mass = await this.tex(`${UI}/game/resources/mass_btn_up.dds`)
-    const energy = await this.tex(`${UI}/game/resources/energy_btn_up.dds`)
-    if (mass) icons[0]!.src = mass
-    if (energy) icons[1]!.src = energy
+  private el(sel: string): HTMLElement {
+    let e = this.refs.get(sel)
+    if (!e) {
+      e = this.root.querySelector(sel) as HTMLElement
+      this.refs.set(sel, e)
+    }
+    return e
+  }
 
-    // Original-Panel-Hintergründe
-    const setBg = (el: HTMLElement | null, url: string | null, size = '100% 100%'): void => {
-      if (el && url) {
+  private async build(): Promise<void> {
+    const setBg = (el: HTMLElement, url: string | null): void => {
+      if (url) {
         el.style.backgroundImage = `url(${url})`
-        el.style.backgroundSize = size
+        el.style.backgroundSize = '100% 100%'
       }
     }
-    const eco = this.root.querySelector<HTMLElement>('#hud-eco')
-    setBg(eco, await this.tex(`${UI}/game/resources/center_bmp_m.dds`))
-    const sel = this.root.querySelector<HTMLElement>('#hud-selection')
-    setBg(sel, await this.tex(`${UI}/game/mini-ui-unit-over/unit-over-back_bmp.dds`))
-    const hpBack = this.root.querySelector<HTMLElement>('#hud-sel-hpbar-back')
-    setBg(hpBack, await this.tex(`${UI}/game/unit-over/health-bars-back_bmp.dds`))
-    for (const [sel2, path] of [
-      ['.eco-bar-back', 'mass-bar-back_bmp'],
-      ['.eco-bar.mass', 'mass-bar_bmp'],
-      ['.eco-bar.energy', 'energy-bar_bmp'],
+
+    // --- Economy (economy_mini.lua) ---------------------------------------
+    setBg(this.el('#eco-panel'), await this.skin('/game/resource-panel/resources_panel_bmp.dds'))
+    for (const [group, res, iconW, iconLeft] of [
+      ['#eco-mass', 'mass', 44, -8],
+      ['#eco-energy', 'energy', 36, -4],
     ] as const) {
-      for (const el of this.root.querySelectorAll<HTMLElement>(sel2)) {
-        setBg(el, await this.tex(`${UI}/game/resources/${path}.dds`))
-      }
+      const icon = this.root.querySelector<HTMLImageElement>(`${group} .eco-icon`)!
+      const url = await this.skin(`/game/resources/${res}_btn_up.dds`)
+      if (url) icon.src = url
+      icon.style.width = `${iconW}px`
+      icon.style.left = `${iconLeft}px`
+      setBg(
+        this.el(`${group} .eco-storage`),
+        await this.skin('/game/resource-mini-bars/mini-energy-bar-back_bmp.dds'),
+      )
+      setBg(
+        this.el(`${group} .eco-fill`),
+        await this.skin(`/game/resource-bars/mini-${res}-bar_bmp.dds`),
+      )
     }
 
-    // Minimap: Original-9-Slice-Rahmen
-    const frame = this.root.querySelector<HTMLElement>('#hud-minimap')
-    if (frame) {
-      const piece = async (name: string): Promise<string | null> =>
-        this.tex(`${UI}/game/mini-map-brd01/mini-map_brd_${name}.dds`)
-      const [ul, um, ur, vl, vr, ll, lm, lr, mid] = await Promise.all([
-        piece('ul'),
-        piece('horz_um'),
-        piece('ur'),
-        piece('vert_l'),
-        piece('vert_r'),
-        piece('ll'),
-        piece('lm'),
-        piece('lr'),
-        piece('m'),
-      ])
-      const corners: [string, string | null][] = [
-        ['hud-mm-ul', ul],
-        ['hud-mm-um', um],
-        ['hud-mm-ur', ur],
-        ['hud-mm-l', vl],
-        ['hud-mm-r', vr],
-        ['hud-mm-ll', ll],
-        ['hud-mm-lm', lm],
-        ['hud-mm-lr', lr],
-      ]
-      for (const [cls, url] of corners) {
-        if (!url) continue
-        const div = document.createElement('div')
-        div.className = `mm-frame ${cls}`
-        div.style.backgroundImage = `url(${url})`
-        frame.appendChild(div)
-      }
-      if (mid) setBg(frame, mid)
-    }
-  }
-
-  private async buildOrderButtons(): Promise<void> {
-    const orders: { name: string; action: () => void; enabled: boolean }[] = [
-      { name: 'move', action: () => {}, enabled: true },
-      { name: 'stop', action: () => this.controller.stopSelected(), enabled: true },
-      { name: 'attack', action: () => {}, enabled: false },
-      { name: 'patrol', action: () => {}, enabled: false },
-    ]
-    const container = this.root.querySelector('#hud-orders')!
-    for (const order of orders) {
-      const state = order.enabled ? 'up' : 'dis'
-      const up = await this.tex(`${UI}/game/orders/${order.name}_btn_${state}.dds`)
-      const over = order.enabled
-        ? await this.tex(`${UI}/game/orders/${order.name}_btn_over.dds`)
-        : null
-      const down = order.enabled
-        ? await this.tex(`${UI}/game/orders/${order.name}_btn_down.dds`)
-        : null
-      if (!up) continue
-      const btn = document.createElement('img')
-      btn.className = 'order-btn'
-      btn.src = up
-      btn.title = order.name
-      if (order.enabled) {
-        btn.addEventListener('pointerenter', () => over && (btn.src = over))
-        btn.addEventListener('pointerleave', () => (btn.src = up))
-        btn.addEventListener('pointerdown', () => down && (btn.src = down))
-        btn.addEventListener('pointerup', () => {
-          btn.src = over ?? up
-          order.action()
+    // --- Orders (orders_mini.lua) ------------------------------------------
+    setBg(this.el('#orders-panel'), await this.skin('/game/orders-panel/order-panel_bmp.dds'))
+    const grid = this.el('#orders-grid')
+    const empty = await this.skin('/game/orders/basic-empty_bmp.dds')
+    for (let slot = 1; slot <= 12; slot++) {
+      const cell = document.createElement('div')
+      cell.className = 'order-slot'
+      const def = COMMON_ORDERS.find((o) => o.slot === slot)
+      if (def) {
+        const img = document.createElement('img')
+        const up = await this.skin(`/game/orders/${def.bitmap}_btn_up.dds`)
+        const over = await this.skin(`/game/orders/${def.bitmap}_btn_over.dds`)
+        const down = await this.skin(`/game/orders/${def.bitmap}_btn_down.dds`)
+        const dis = await this.skin(`/game/orders/${def.bitmap}_btn_dis.dds`)
+        if (up) img.src = up
+        img.dataset.up = up ?? ''
+        img.dataset.dis = dis ?? up ?? ''
+        const entry = { def, img, enabled: false }
+        img.addEventListener('pointerenter', () => entry.enabled && over && (img.src = over))
+        img.addEventListener('pointerleave', () => entry.enabled && up && (img.src = up))
+        img.addEventListener('pointerdown', () => entry.enabled && down && (img.src = down))
+        img.addEventListener('pointerup', () => {
+          if (!entry.enabled) return
+          if (over) img.src = over
+          def.action?.(this.controller)
         })
+        this.orderButtons.push(entry)
+        cell.appendChild(img)
+      } else if (empty) {
+        const img = document.createElement('img')
+        img.src = empty
+        cell.appendChild(img)
       }
-      container.appendChild(btn)
+      grid.appendChild(cell)
     }
-  }
 
-  private async buildMinimap(): Promise<void> {
+    // --- Unit-View (unitview.lua) --------------------------------------------
+    setBg(
+      this.el('#unitview-panel'),
+      await this.skin('/game/unit-build-over-panel/build-over-back_bmp.dds'),
+    )
+    const bracket = this.root.querySelector<HTMLImageElement>('#uv-bracket')!
+    const bracketUrl = await this.skin('/game/unit-build-over-panel/bracket-unit_bmp.dds')
+    if (bracketUrl) bracket.src = bracketUrl
+    setBg(this.el('#uv-health'), await this.skin('/game/unit-build-over-panel/healthbar_bg.dds'))
+    for (const color of ['green', 'yellow', 'red']) {
+      const url = await this.skin(`/game/unit-build-over-panel/healthbar_${color}.dds`)
+      if (url) this.healthTex.set(color, url)
+    }
+
+    // --- Minimap-Preview ---------------------------------------------------------
     try {
       const dds = parseDds(this.scmap.previewDds)
       const mip = dds.mips[0]!
@@ -226,50 +220,93 @@ export class Hud {
         dds.format === 'BGRA8'
           ? bgraToRgba(mip.data)
           : decodeDxt(mip.data, mip.width, mip.height, dds.format)
-      const img = new ImageData(new Uint8ClampedArray(rgba), mip.width, mip.height)
-      this.minimapImage = await createImageBitmap(img)
+      this.minimapImage = await createImageBitmap(
+        new ImageData(new Uint8ClampedArray(rgba), mip.width, mip.height),
+      )
     } catch {
       this.minimapImage = null
+    }
+    const framePiece = async (name: string): Promise<string | null> =>
+      this.skin(`/game/mini-map-brd01/mini-map_brd_${name}.dds`)
+    const frame = this.el('#hud-minimap')
+    for (const [cls, name] of [
+      ['hud-mm-ul', 'ul'],
+      ['hud-mm-um', 'horz_um'],
+      ['hud-mm-ur', 'ur'],
+      ['hud-mm-l', 'vert_l'],
+      ['hud-mm-r', 'vert_r'],
+      ['hud-mm-ll', 'll'],
+      ['hud-mm-lm', 'lm'],
+      ['hud-mm-lr', 'lr'],
+    ] as const) {
+      const url = await framePiece(name)
+      if (!url) continue
+      const div = document.createElement('div')
+      div.className = `mm-frame ${cls}`
+      div.style.backgroundImage = `url(${url})`
+      frame.appendChild(div)
     }
   }
 
   private async unitIcon(id: string): Promise<string | null> {
     const cached = this.iconCache.get(id)
     if (cached) return cached
-    const url = await this.tex(`${UI}/icons/units/${id}_icon.dds`)
+    const url = await this.skin(`/icons/units/${id.toUpperCase()}_icon.dds`)
     if (url) this.iconCache.set(id, url)
     return url
   }
 
   private update(): void {
-    // Economy
+    // Economy — Werte aus der Sim
     const army = this.controller.world.army(1)
-    this.massValue.textContent = Math.floor(army.mass).toString()
-    this.massIncome.textContent = `+${army.massIncome.toFixed(1)}`
-    this.massBar.style.width = `${Math.min(100, (army.mass / army.massStorage) * 100)}%`
-    this.energyValue.textContent = Math.floor(army.energy).toString()
-    this.energyIncome.textContent = `+${army.energyIncome.toFixed(1)}`
-    this.energyBar.style.width = `${Math.min(100, (army.energy / army.energyStorage) * 100)}%`
+    for (const [group, cur, max, income] of [
+      ['#eco-mass', army.mass, army.massStorage, army.massIncome],
+      ['#eco-energy', army.energy, army.energyStorage, army.energyIncome],
+    ] as const) {
+      this.el(`${group} .eco-cur`).textContent = Math.floor(cur).toString()
+      this.el(`${group} .eco-max`).textContent = Math.floor(max).toString()
+      this.el(`${group} .eco-fill`).style.width = `${Math.min(100, (cur / max) * 100)}%`
+      this.el(`${group} .eco-rate`).textContent = `+${income.toFixed(0)}`
+      this.el(`${group} .eco-income`).textContent = `+${income.toFixed(1)}`
+      this.el(`${group} .eco-expense`).textContent = '-0.0'
+    }
 
-    // Auswahl
+    // Orders — verfügbar = Union der CommandCaps der Auswahl (Original)
+    const caps = this.controller.selectedCaps()
+    for (const b of this.orderButtons) {
+      const enabled = caps.has(b.def.cap)
+      if (enabled !== b.enabled) {
+        b.enabled = enabled
+        b.img.src = enabled ? b.img.dataset.up! : b.img.dataset.dis!
+        b.img.style.cursor = enabled ? 'pointer' : 'default'
+      }
+    }
+
+    // Unit-View
     const units = this.controller.hudUnits()
     const selected = units.filter((u) => u.selected)
+    const panel = this.el('#unitview-panel')
     if (selected.length === 0) {
-      this.selPanel.hidden = true
+      panel.hidden = true
     } else {
-      this.selPanel.hidden = false
+      panel.hidden = false
       const first = selected[0]!
-      this.selName.textContent =
-        selected.length > 1 ? `${selected.length} Einheiten` : `${first.name}`
+      this.el('#uv-name').textContent =
+        selected.length > 1 ? `${selected.length} Einheiten` : first.name
       const hp = selected.reduce((a, u) => a + u.health, 0)
       const maxHp = selected.reduce((a, u) => a + u.maxHealth, 0)
-      this.selHealth.textContent = `${Math.ceil(hp)} / ${Math.ceil(maxHp)}`
       const ratio = maxHp > 0 ? hp / maxHp : 0
-      this.selHealthBar.style.width = `${ratio * 100}%`
-      this.selHealthBar.style.background =
-        ratio > 0.66 ? '#3fbf3f' : ratio > 0.33 ? '#d8c02a' : '#c43a2a'
+      const fill = this.el('#uv-health-fill')
+      fill.style.width = `${ratio * 100}%`
+      const tex = this.healthTex.get(ratio > 0.75 ? 'green' : ratio > 0.25 ? 'yellow' : 'red')
+      if (tex) {
+        fill.style.backgroundImage = `url(${tex})`
+        fill.style.backgroundSize = '100% 100%'
+      }
+      this.el('#uv-health-text').textContent = `${Math.ceil(hp)} / ${Math.ceil(maxHp)}`
       void this.unitIcon(first.id).then((url) => {
-        if (url) this.selIcon.src = url
+        const icon = this.root.querySelector<HTMLImageElement>('#uv-icon')!
+        if (url) icon.src = url
       })
     }
 
@@ -278,12 +315,7 @@ export class Hud {
     const w = this.minimapCanvas.width
     const h = this.minimapCanvas.height
     ctx.clearRect(0, 0, w, h)
-    if (this.minimapImage) {
-      ctx.drawImage(this.minimapImage, 0, 0, w, h)
-    } else {
-      ctx.fillStyle = '#0a0e14'
-      ctx.fillRect(0, 0, w, h)
-    }
+    if (this.minimapImage) ctx.drawImage(this.minimapImage, 0, 0, w, h)
     for (const u of units) {
       ctx.fillStyle = u.army === 1 ? '#3d8bff' : '#e23c2c'
       const x = (u.x / this.scmap.width) * w

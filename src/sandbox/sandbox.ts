@@ -34,6 +34,8 @@ interface Binding {
   selected: boolean
   id: string
   name: string
+  /** RULEUCC_*-Fähigkeiten aus General.CommandCaps (bestimmt Order-Buttons) */
+  caps: ReadonlySet<string>
 }
 
 /** Momentaufnahme für das HUD. */
@@ -49,6 +51,17 @@ export interface HudUnitInfo {
 }
 
 const SIM_STEP = 0.1
+
+function readCommandCaps(bp: BpObject): ReadonlySet<string> {
+  const caps = new Set<string>()
+  const raw = bpGet(bp, 'General.CommandCaps')
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    for (const [key, value] of Object.entries(raw)) {
+      if (value === true) caps.add(key)
+    }
+  }
+  return caps
+}
 
 const ringGeometry = (() => {
   const g = new THREE.RingGeometry(0.85, 1, 40)
@@ -103,6 +116,7 @@ export class SandboxController {
         stripLoc(bpGet(assets.bp, 'General.UnitName')) ??
         stripLoc(bpGet(assets.bp, 'Description')) ??
         assets.id.toUpperCase(),
+      caps: readCommandCaps(assets.bp),
     })
 
     scene.mesh.position.set(sim.x, this.viewer.heightAt(sim.x, sim.z), sim.z)
@@ -152,6 +166,22 @@ export class SandboxController {
     for (const b of this.bindings) {
       if (b.selected) this.world.stop(b.sim)
     }
+  }
+
+  /** Spielzeit in Sekunden (Sim-Ticks). */
+  get gameTime(): number {
+    return this.world.tickCount * SIM_STEP
+  }
+
+  /** Gemeinsame Command-Caps der Auswahl (Schnittmenge, wie das Original). */
+  selectedCaps(): ReadonlySet<string> {
+    const selected = this.bindings.filter((b) => b.selected)
+    if (selected.length === 0) return new Set()
+    const caps = new Set(selected[0]!.caps)
+    for (const b of selected.slice(1)) {
+      for (const c of caps) if (!b.caps.has(c)) caps.delete(c)
+    }
+    return caps
   }
 
   /** Zustands-Snapshot für das HUD (Einheiten + Auswahl). */
