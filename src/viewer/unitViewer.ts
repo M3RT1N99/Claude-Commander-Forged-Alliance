@@ -5,7 +5,10 @@ import type { ScmapData } from '../formats/scmap'
 import type { GameVfs } from '../vfs/vfs'
 import { createUnitMaterial, type UnitTextures } from './unitMaterial'
 import { createTerrainMaterial } from './terrainMaterial'
+import { createWaterMaterial } from './waterMaterial'
 import { ddsToTexture } from './textures'
+import { parseDds } from '../formats/dds'
+import { bgraToRgba, decodeDxt } from '../formats/dxt'
 import { UnitAnimator } from '../anim/animator'
 import type { ScaAnim } from '../formats/sca'
 
@@ -407,7 +410,7 @@ export class UnitViewer {
     }
     const maskA = embedded(scmap.textureMaskLowDds)
     const maskB = embedded(scmap.textureMaskHighDds)
-    const utilityC = scmap.water.hasWater ? embedded(scmap.waterMapDds) : null
+    const depthToG = fitDepthToG(scmap)
     const waterRamp =
       scmap.water.hasWater && scmap.water.texPathWaterRamp
         ? await loadLayer(scmap.water.texPathWaterRamp)
@@ -432,8 +435,8 @@ export class UnitViewer {
         strataEnabled: mid.map((s) => (s?.albedoPath ? 1 : 0)),
       },
       waterRamp,
-      utilityC,
       waterElevation: scmap.water.elevation,
+      depthToG,
       lighting: {
         sunDirection: new THREE.Vector3(...scmap.lighting.sunDirection).normalize(),
         sunColor: new THREE.Color(...scmap.lighting.sunColor),
@@ -453,15 +456,20 @@ export class UnitViewer {
       const waterGeo = new THREE.PlaneGeometry(width, height)
       waterGeo.rotateX(-Math.PI / 2)
       waterGeo.translate(width / 2, scmap.water.elevation, height / 2)
-      // Näherung an water2.fx: die Original-Oberfläche lebt von der
-      // Himmelsreflexion; SurfaceColor tönt sie (echter Shader-Port folgt)
-      const surface = new THREE.Color(...scmap.water.surfaceColor)
-      const sky = new THREE.Color(0.32, 0.42, 0.5)
-      const waterMat = new THREE.MeshBasicMaterial({
-        color: sky.lerp(surface, 0.45),
-        transparent: true,
-        opacity: 0.55,
-        depthWrite: false,
+      const waterMat = createWaterMaterial({
+        heightTex,
+        heightScale: scmap.heightScale,
+        hmWidth: hmW,
+        hmHeight: hmH,
+        mapWidth: width,
+        mapHeight: height,
+        elevation: scmap.water.elevation,
+        depthToG,
+        colorLerpMin: scmap.water.colorLerpMin,
+        colorLerpMax: scmap.water.colorLerpMax,
+        surfaceColor: new THREE.Color(...scmap.water.surfaceColor),
+        sunDirection: new THREE.Vector3(...scmap.lighting.sunDirection).normalize(),
+        sunColor: new THREE.Color(...scmap.lighting.sunColor),
       })
       this.waterMesh = new THREE.Mesh(waterGeo, waterMat)
       this.scene.add(this.waterMesh)
@@ -492,6 +500,52 @@ export class UnitViewer {
     this.camera.updateProjectionMatrix()
     this.controls.target.copy(sphere.center)
     this.controls.update()
+  }
+}
+
+/**
+ * Fittet die Skalierung Welttiefe → Watermap-G per linearer Regression gegen
+ * die gebackene Watermap der Karte (typisch ≈ 1/15, R² > 0,99). Der Shader
+ * rechnet die Tiefe dann aus der Höhe — gleicher Verlauf wie das Original,
+ * aber ohne DXT-Kompressionslöcher.
+ */
+function fitDepthToG(scmap: ScmapData): number {
+  const FALLBACK = 1 / 15
+  if (!scmap.water.hasWater || !scmap.waterMapDds) return FALLBACK
+  try {
+    const wm = parseDds(scmap.waterMapDds)
+    const mip = wm.mips[0]!
+    const rgba =
+      wm.format === 'BGRA8'
+        ? bgraToRgba(mip.data)
+        : decodeDxt(mip.data, wm.width, wm.height, wm.format)
+
+    const stride = scmap.width + 1
+    let n = 0
+    let sx = 0
+    let sy = 0
+    let sxx = 0
+    let sxy = 0
+    const step = Math.max(1, Math.floor(wm.width / 128))
+    for (let wz = 0; wz < wm.height; wz += step) {
+      for (let wx = 0; wx < wm.width; wx += step) {
+        const x = Math.min(scmap.width - 1, Math.floor((wx / wm.width) * scmap.width))
+        const z = Math.min(scmap.height - 1, Math.floor((wz / wm.height) * scmap.height))
+        const depth = scmap.water.elevation - scmap.heightmap[z * stride + x]! * scmap.heightScale
+        if (depth <= 0.1) continue
+        const g = rgba[(wz * wm.width + wx) * 4 + 1]! / 255
+        n++
+        sx += depth
+        sy += g
+        sxx += depth * depth
+        sxy += depth * g
+      }
+    }
+    if (n < 50) return FALLBACK
+    const a = (n * sxy - sx * sy) / (n * sxx - sx * sx)
+    return a > 0.005 && a < 1 ? a : FALLBACK
+  } catch {
+    return FALLBACK
   }
 }
 
