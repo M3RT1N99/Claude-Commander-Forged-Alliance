@@ -31,6 +31,35 @@ export interface TranspileResult {
 /** Gültige Escape-Sequenzen in Standard-Lua. */
 const VALID_ESCAPES = new Set(['a', 'b', 'f', 'n', 'r', 't', 'v', '\\', '"', "'", '\n', 'x', 'z'])
 
+/**
+ * Konsumiert ein Lua-Zahl-Literal ab Position `i` und liefert den Index
+ * hinter der Zahl. Deckt Dezimal (mit `.` und `e`/`E`-Exponent) und Hex
+ * (`0x…` mit `.` und `p`/`P`-Exponent) ab.
+ */
+function consumeNumber(source: string, i: number): number {
+  const isDigit = (c: string): boolean => c >= '0' && c <= '9'
+  const isHex = (c: string): boolean =>
+    isDigit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
+  let p = i
+  if (source[p] === '0' && (source[p + 1] === 'x' || source[p + 1] === 'X')) {
+    p += 2
+    while (p < source.length && (isHex(source[p]!) || source[p] === '.')) p++
+    if (source[p] === 'p' || source[p] === 'P') {
+      p++
+      if (source[p] === '+' || source[p] === '-') p++
+      while (p < source.length && isDigit(source[p]!)) p++
+    }
+    return p
+  }
+  while (p < source.length && (isDigit(source[p]!) || source[p] === '.')) p++
+  if (source[p] === 'e' || source[p] === 'E') {
+    p++
+    if (source[p] === '+' || source[p] === '-') p++
+    while (p < source.length && isDigit(source[p]!)) p++
+  }
+  return p
+}
+
 export function transpileFaLua(source: string): TranspileResult {
   const stats = { hashComments: 0, notEquals: 0, forInTable: 0, continues: 0, varargArg: 0 }
   let out = ''
@@ -103,6 +132,23 @@ export function transpileFaLua(source: string): TranspileResult {
         stats.notEquals++
         out += '~='
         i += 2
+        continue
+      }
+      // FA-Lua (5.0) erlaubt Zahl direkt an Keyword/Bezeichner (`0then`,
+      // `7end`); moderne Lexer lesen `0t` als kaputte Zahl. Zahl-Literal
+      // erkennen und bei folgendem Buchstaben ein Leerzeichen einfügen.
+      // Nur wenn die Ziffer wirklich eine Zahl beginnt (nicht Teil eines
+      // Bezeichners wie `foo2`) — geprüft über das letzte Ausgabezeichen.
+      const prevChar = out.length > 0 ? out[out.length - 1]! : ''
+      const startsNumber =
+        (c >= '0' && c <= '9') ||
+        (c === '.' && (source[i + 1] ?? '') >= '0' && (source[i + 1] ?? '') <= '9')
+      if (startsNumber && !/[A-Za-z0-9_.]/.test(prevChar)) {
+        const end = consumeNumber(source, i)
+        out += source.slice(i, end)
+        const after = source[end] ?? ''
+        if (/[A-Za-z_]/.test(after)) out += ' '
+        i = end
         continue
       }
       // LuaPlus-Größenhinweis im Tabellen-Konstruktor: `{&1&4}` → `{}`
