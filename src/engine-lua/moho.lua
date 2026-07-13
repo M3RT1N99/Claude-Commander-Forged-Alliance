@@ -286,6 +286,30 @@ local aibrain = withNoops(AIBRAIN_NAMES, {
 })
 
 -- ---------------------------------------------------------------------
+-- cursor_methods (CMauiCursor) — 5 bindings, UI VM only (scr_UserInits).
+-- Cursor (cursor.lua:6) derives from this and calls _c_CreateCursor in __init.
+-- The texture name is what the browser turns into a CSS cursor.
+-- ---------------------------------------------------------------------
+local CURSOR_NAMES = { 'Hide', 'ResetToDefault', 'SetDefaultTexture', 'SetNewTexture', 'Show' }
+
+local cursor = withNoops(CURSOR_NAMES, {
+  SetDefaultTexture = function(self, filename, hotspotX, hotspotY)
+    self.__defaultTexture = { filename, hotspotX or 0, hotspotY or 0 }
+  end,
+  ResetToDefault = function(self)
+    local d = self.__defaultTexture
+    if d then self:SetNewTexture(d[1], d[2], d[3]) end
+  end,
+  SetNewTexture = function(self, filename, hotspotX, hotspotY)
+    self.__texture = filename
+    self.__hotspot = { hotspotX or 0, hotspotY or 0 }
+    if __uiSetCursorTexture then __uiSetCursorTexture(filename, hotspotX or 0, hotspotY or 0) end
+  end,
+  Show = function(self) self.__hidden = false end,
+  Hide = function(self) self.__hidden = true end,
+})
+
+-- ---------------------------------------------------------------------
 -- Publish. Unknown moho.<x> keys become empty classes on demand, so a script
 -- deriving from a subsystem we have not built yet still loads (and then fails
 -- loudly at the first real call, which is what we want).
@@ -302,3 +326,4 @@ rawset(moho, 'entity_methods', Class() (entity))
 rawset(moho, 'unit_methods', Class(moho.entity_methods) (unit))
 rawset(moho, 'weapon_methods', Class(moho.entity_methods) (weapon))
 rawset(moho, 'aibrain_methods', Class() (aibrain))
+rawset(moho, 'cursor_methods', Class() (cursor))

@@ -92,6 +92,49 @@ redundant hält und streicht, bekommt einen Fehler weit weg vom Verursacher
 (`class.lua:377`, bei jedem State-Wechsel). `globals.lua` enthält bewusst **kein**
 `Class(` — nur deshalb darf es vor dem Reload laufen.
 
+### Zwei Lua-VMs — nicht eine
+
+Die Engine hat **zwei getrennte Lua-States**. Jede Bindung wird über `mPrevDef` in
+genau einen registriert ([docs/research/engine-api.md](docs/research/engine-api.md),
+aus der Decomp generiert):
+
+| Init-Liste | Ziel | Umfang |
+|---|---|---|
+| `scr_CoreInits` | beide VMs | 70 Bindungen |
+| `scr_UserInits` | nur **UI** | 453 (200 Globals, 23 Klassen) |
+| `sim_SimInits` | nur **Sim** | 626 (133 Globals, 27 Klassen) |
+
+Darum kennt die Sim kein `_c_CreateCursor` und die UI kein `CreateUnit`.
+`installEngine()` bootet die Sim, `installUiEngine()` die UI — nie beides in einer VM.
+
+### LuaPlus-Dialekt: `nil` hat eine Metatable
+
+FAs eigenes `config.lua:6` sagt es: *„Disable the LuaPlus bit where you can add
+attributes to nil, numbers, and strings."* — es schaltet dort aber nur das **Schreiben**
+ab; der `__index`-Teil ist **auskommentiert** (config.lua:14-16). In FA liefert
+`nil.foo` also `nil` statt zu knallen, und die Original-Lua **verlässt sich darauf**:
+
+```lua
+uiutil.lua:343   skins[currentSkin()].cursors or skins['default'].cursors
+```
+
+Beim ersten `SetupUI()` ist der Skin ungesetzt, `currentSkin()` liefert **0**
+(lazyvar.lua:110: `result[1] = initial or 0`), `skins[0]` ist nil — und die Zeile
+funktioniert trotzdem. Wir stellen das über `debug.setmetatable` in
+[boot.lua](src/engine-lua/boot.lua) her. Ohne das läuft kein einziges Original-UI-Skript.
+
+### `config.lua` bringt drei Dinge mit, die man nicht nachbauen darf
+
+1. **Der strenge `_G`** (config.lua:51-56): der Zugriff auf ein **nicht existierendes
+   Global wirft einen Fehler**. Das Original hat unsere Anti-Stub-Regel selbst
+   eingebaut — ein Stub-Trap ist also nicht nur schädlich, er ist das genaue Gegenteil
+   dessen, was die Engine tut. Folge: `x = nil` legt den Schlüssel **nicht** an; wer ein
+   Engine-Global später lesen will, muss es mit `false` initialisieren.
+2. **Das Thread-Objekt** (config.lua:29-35): Coroutines bekommen eine Metatable mit
+   `Destroy = KillThread`. *Das* ist das Objekt, das die Original-Lua in den TrashBag
+   legt — die Engine liefert die Coroutine, `config.lua` die Methode.
+3. **`iscallable`** (config.lua:63).
+
 ### Zwei Lua-Dialekte im selben Projekt
 
 - Dateien aus dem **VFS** (Original-Lua, `.bp`) laufen durch `transpileFaLua`:

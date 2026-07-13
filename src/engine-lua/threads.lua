@@ -2,7 +2,7 @@
 __gameTick = 0
 local threads = {}
 local nthreads = 0
-__currentThread = nil
+__currentThread = false
 local unpack = unpack or table.unpack
 
 function GetSimTicksPerSecond() return 10 end
@@ -46,7 +46,7 @@ function __startThread(fn)
     local t = newThread(fn)
     __currentThread = t
     local ok, res = coroutine.resume(t.co)
-    __currentThread = nil
+    __currentThread = false
     if not ok then return false, res end
     if coroutine.status(t.co) ~= 'dead' then
         if res == -1 then t.suspended = true else t.wait = tonumber(res) or 1 end
@@ -103,7 +103,7 @@ function __simAdvanceThreads()
                 else
                     ok, res = coroutine.resume(t.co)
                 end
-                __currentThread = nil
+                __currentThread = false
                 if not ok then
                     WARN('ForkThread-Fehler: ' .. tostring(res))
                     t.remove = true

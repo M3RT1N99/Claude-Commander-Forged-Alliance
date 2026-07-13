@@ -395,7 +395,7 @@ function DiskGetFileInfo(path) return false end
 -- for layer changes (land/water), amphibious movement and effects, and a silent
 -- 0 makes every one of those decisions wrong while looking fine. A test that
 -- wants flat ground says so explicitly.
-__terrainHeight = nil
+__terrainHeight = false
 function GetTerrainHeight(x, z)
   if not __terrainHeight then
     error('GetTerrainHeight: no terrain loaded — the engine must call setTerrainSource()', 2)
