@@ -632,6 +632,27 @@ interface LuaSceneUnit {
   caps: ReadonlySet<string>
 }
 let luaSim: LuaSimClient | null = null
+/**
+ * Der Boot der Sim wird über das PROMISE gemerkt, nicht über das Ergebnis.
+ * `if (!luaSim) luaSim = await create()` prüft vor dem await — zwei nebenläufige
+ * Spawns (Sandbox-ACU + ?luaspawn=) sahen beide null und starteten je einen
+ * Worker: zwei Lua-VMs, zwei 10-Hz-Beats, Units, die sich gegenseitig nicht sehen.
+ */
+let luaSimBoot: Promise<LuaSimClient> | null = null
+
+async function getLuaSim(): Promise<LuaSimClient> {
+  if (!luaSimBoot) {
+    log('Boote Original-Lua-Sim (Lua-VM)…')
+    luaSimBoot = LuaSimClient.create(vfs!, (lvl, msg) => {
+      if (lvl === 'WARN') log(`Lua-WARN: ${msg.slice(0, 80)}`)
+    }).then((sim) => {
+      luaSim = sim
+      log('Lua-Sim bereit')
+      return sim
+    })
+  }
+  return luaSimBoot
+}
 const luaUnits: LuaSceneUnit[] = []
 
 // Solange die Sim nicht läuft, gibt es nichts — keine erfundenen Startwerte.
@@ -728,13 +749,7 @@ function luaSimUpdate(): void {
 async function spawnViaLua(id: string): Promise<void> {
   if (!vfs) return
   try {
-    if (!luaSim) {
-      log('Boote Original-Lua-Sim (Lua-VM)…')
-      luaSim = await LuaSimClient.create(vfs, (lvl, msg) => {
-        if (lvl === 'WARN') log(`Lua-WARN: ${msg.slice(0, 80)}`)
-      })
-      log('Lua-Sim bereit')
-    }
+    const sim = await getLuaSim()
     if (!luaHookRegistered) {
       viewer.onUpdate(luaSimUpdate)
       luaHookRegistered = true
@@ -743,7 +758,7 @@ async function spawnViaLua(id: string): Promise<void> {
     const x = spawnPoint.x + 6
     const z = spawnPoint.z + 6
     const y = viewer.heightAt(x, z)
-    const uid = await luaSim.spawn(id, { x, y, z }, 1)
+    const uid = await sim.spawn(id, { x, y, z }, 1)
 
     const assets = await loadSandboxAssets(id)
     if (!assets) return

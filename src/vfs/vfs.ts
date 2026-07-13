@@ -31,15 +31,37 @@ export class GameVfs {
     const files = new Map<string, VfsFile>()
     const names: string[] = []
 
+    // Priorität: das ZUERST gemountete Archiv gewinnt — der erste Treffer im
+    // Mount-Pfad zählt, spätere Archive füllen nur Lücken.
+    //
+    // Beleg: bin/SupComDataPath.lua baut die `path`-Liste und mountet /mods und
+    // /maps VOR gamedata — genau deshalb überschreiben Mods das Spiel. Wer früher
+    // im Pfad steht, gewinnt. `gamedata/*.scd` expandiert die Engine per
+    // findfirst in Verzeichnisreihenfolge, also alphabetisch.
+    //
+    // Beide echten Kollisionen im Retail-Spiel lösen sich nur so korrekt auf:
+    //   lua.scd < mohodata.scd  → lua.scd gewinnt. Und das muss es: mohodatas
+    //     lua/sim/unit.lua ist ein 117-Zeilen-Stub OHNE SetupBuildBones, die
+    //     echte in lua.scd hat 3715 Zeilen. Andersherum stirbt jede ACU beim
+    //     Spawn (uel0001_script.lua:113).
+    //   "Advanced strategic icons.scd" < textures.scd → der Icon-Pack gewinnt,
+    //     was sein ganzer Zweck ist (1102 Dateien).
     for (const scd of scds) {
       try {
         const raf = await source.open(`gamedata/${scd.name}`)
         const zip = await ZipArchive.open(raf)
+        let added = 0
         for (const [key, entry] of zip.entries) {
+          if (files.has(key)) continue // früheres Archiv hat Vorrang
           files.set(key, { archive: scd.name, zip, entry })
+          added++
         }
         names.push(scd.name)
-        log(`  ${scd.name}: ${zip.entries.size} Dateien`)
+        const shadowed = zip.entries.size - added
+        log(
+          `  ${scd.name}: ${zip.entries.size} Dateien` +
+            (shadowed > 0 ? ` (${shadowed} von früheren Archiven überdeckt)` : ''),
+        )
       } catch (err) {
         log(`  ${scd.name}: FEHLER — ${err instanceof Error ? err.message : err}`)
       }
