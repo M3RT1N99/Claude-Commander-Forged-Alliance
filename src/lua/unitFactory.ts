@@ -128,12 +128,48 @@ function __readUnit(id)
 end
 `
 
-let setupDone = false
-
 export function installUnitFactory(host: LuaHost): void {
-  if (setupDone) return
   host.eval(SETUP_LUA)
-  setupDone = true
+}
+
+/**
+ * Richtet die Original-Blueprint-Pipeline ein (Collectors, DiskFindFiles über
+ * `__bpFiles`, `Blueprints.lua`). Danach registriert `loadUnitBlueprint`
+ * einzelne Blueprints über die echte `LoadBlueprints()`.
+ */
+export function installBlueprintPipeline(host: LuaHost): void {
+  host.eval(`
+    __active_mods = {}
+    __registered = { Unit={}, Mesh={}, Prop={}, Projectile={}, Emitter={}, TrailEmitter={}, Beam={} }
+    local function collector(g) return function(bp) __registered[g][bp.BlueprintId or '?'] = bp end end
+    RegisterUnitBlueprint=collector('Unit'); RegisterMeshBlueprint=collector('Mesh')
+    RegisterPropBlueprint=collector('Prop'); RegisterProjectileBlueprint=collector('Projectile')
+    RegisterEmitterBlueprint=collector('Emitter'); RegisterTrailEmitterBlueprint=collector('TrailEmitter')
+    RegisterBeamBlueprint=collector('Beam')
+    function BlueprintLoaderUpdateProgress() end
+    __bpFiles = {}
+    function DiskFindFiles(dir, pattern)
+      local out = {}
+      for _, f in ipairs(__bpFiles) do
+        if string.find(f, dir, 1, true) == 1 then out[#out+1] = f end
+      end
+      return out
+    end
+  `)
+  host.loadGlobal('/lua/system/Blueprints.lua')
+}
+
+/**
+ * Registriert ein einzelnes Unit-Blueprint über die echte Pipeline
+ * (`LoadBlueprints`), sofern noch nicht geschehen. `bpBytes` = Inhalt der
+ * `units/<id>/<id>_unit.bp`.
+ */
+export function loadUnitBlueprint(host: LuaHost, id: string, bpBytes: Uint8Array): void {
+  const already = host.eval(`return __registered.Unit['${id.toLowerCase()}'] ~= nil`)
+  if (already === true) return
+  const path = `units/${id}/${id}_unit.bp`
+  host.addFile(path, bpBytes)
+  host.eval(`__bpFiles = { '/${path}' }; LoadBlueprints()`)
 }
 
 /** Spawnt eine Unit über ihre Original-Klasse; liefert Unit-ID oder wirft. */

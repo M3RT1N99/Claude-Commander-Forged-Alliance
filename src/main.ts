@@ -23,6 +23,7 @@ import { ddsToTexture } from './viewer/textures'
 import { UnitViewer } from './viewer/unitViewer'
 import { SandboxController, type SandboxUnitAssets } from './sandbox/sandbox'
 import { statsFromBlueprint } from './sim/simWorld'
+import { LuaSim } from './sim/luaSim'
 import { Hud } from './ui/hud'
 import type { ScmapData } from './formats/scmap'
 import type { UnitTextures } from './viewer/unitMaterial'
@@ -104,6 +105,9 @@ async function connect(src: GameSource): Promise<void> {
         const [dx, dz] = move.split(',').map(Number)
         sandbox.selectFirst()
         sandbox.moveSelectedTo(spawnPoint.x + (dx || 0), spawnPoint.z + (dz || 0))
+      }
+      if (params.has('luaspawn')) {
+        await spawnViaLua(params.get('luaspawn') || 'uel0001')
       }
       return
     }
@@ -637,6 +641,43 @@ btnSandboxStart.addEventListener('click', () => {
 })
 for (const btn of document.querySelectorAll<HTMLButtonElement>('#sandbox-spawns .spawn')) {
   btn.addEventListener('click', () => void sandboxSpawn(btn.dataset.unit!))
+}
+
+// Spawn über die eingebettete Original-Lua-Sim (Unit.lua + Blueprint-Pipeline).
+let luaSim: LuaSim | null = null
+const btnLuaSpawn = document.querySelector<HTMLButtonElement>('#btn-lua-spawn')
+btnLuaSpawn?.addEventListener('click', () => void spawnViaLua('uel0001'))
+
+async function spawnViaLua(id: string): Promise<void> {
+  if (!vfs) return
+  try {
+    if (!luaSim) {
+      log('Boote Original-Lua-Sim (Lua-VM)…')
+      luaSim = await LuaSim.create(vfs, (lvl, msg) => {
+        if (lvl === 'WARN') log(`Lua-WARN: ${msg.slice(0, 80)}`)
+      })
+      log('Lua-Sim bereit')
+    }
+    // etwas versetzt vom Spawn-Punkt platzieren
+    const x = spawnPoint.x + 6
+    const z = spawnPoint.z + 6
+    const y = viewer.heightAt(x, z)
+    const state = await luaSim.spawn(id, { x, y, z }, 1)
+
+    const assets = await loadSandboxAssets(id)
+    if (!assets) return
+    const scene = viewer.addUnit(assets.model, assets.textures, currentTeamColor(), assets.shader)
+    const scale = bpGet(assets.bp, 'Display.UniformScale')
+    if (typeof scale === 'number' && scale > 0) scene.mesh.scale.setScalar(scale)
+    scene.mesh.position.set(state.x, y, state.z)
+
+    log(
+      `✓ ${state.name.toUpperCase()} über Original-Unit.lua gespawnt — ` +
+        `HP ${Math.round(state.health)}/${state.maxHealth} (aus Lua)`,
+    )
+  } catch (err) {
+    log(`FEHLER Lua-Spawn: ${err instanceof Error ? err.message : err}`)
+  }
 }
 
 // ---------------------------------------------------------------------------

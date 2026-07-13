@@ -10,7 +10,13 @@ import { ZipArchive } from '../src/vfs/zipArchive'
 import type { RandomAccessFile } from '../src/vfs/randomAccess'
 import { LuaHost } from '../src/lua/host'
 import { installMoho } from '../src/lua/moho'
-import { installUnitFactory, spawnLuaUnit, readLuaUnit } from '../src/lua/unitFactory'
+import {
+  installUnitFactory,
+  installBlueprintPipeline,
+  loadUnitBlueprint,
+  spawnLuaUnit,
+  readLuaUnit,
+} from '../src/lua/unitFactory'
 
 class NodeFile implements RandomAccessFile {
   private constructor(
@@ -47,9 +53,12 @@ for (const archive of ['mohodata.scd', 'lua.scd']) {
 const unitsFile = await NodeFile.open(`${GAME}/gamedata/units.scd`)
 openFiles.push(unitsFile)
 const unitsZip = await ZipArchive.open(unitsFile)
-for (const key of ['units/uel0001/uel0001_unit.bp', 'units/uel0001/uel0001_script.lua']) {
-  files.set(key, await unitsZip.read(unitsZip.get(key)!))
-}
+// Unit-Script vorladen; das Blueprint wird über loadUnitBlueprint registriert.
+files.set(
+  'units/uel0001/uel0001_script.lua',
+  await unitsZip.read(unitsZip.get('units/uel0001/uel0001_script.lua')!),
+)
+const uel0001bp = await unitsZip.read(unitsZip.get('units/uel0001/uel0001_unit.bp')!)
 
 let failures = 0
 const check = (ok: boolean, label: string): void => {
@@ -63,30 +72,11 @@ const host = await LuaHost.create(files, (level, msg) => {
 })
 host.loadGlobal('/lua/system/utils.lua')
 installMoho(host)
-
-// Blueprint-Pipeline (registriert uel0001)
-host.eval(`
-  __active_mods = {}
-  __registered = { Unit={}, Mesh={}, Prop={}, Projectile={}, Emitter={}, TrailEmitter={}, Beam={} }
-  local function collector(g) return function(bp) __registered[g][bp.BlueprintId or '?'] = bp end end
-  RegisterUnitBlueprint=collector('Unit'); RegisterMeshBlueprint=collector('Mesh')
-  RegisterPropBlueprint=collector('Prop'); RegisterProjectileBlueprint=collector('Projectile')
-  RegisterEmitterBlueprint=collector('Emitter'); RegisterTrailEmitterBlueprint=collector('TrailEmitter')
-  RegisterBeamBlueprint=collector('Beam')
-  function BlueprintLoaderUpdateProgress() end
-  __bpFiles = { '/units/uel0001/uel0001_unit.bp' }
-  function DiskFindFiles(dir, pattern)
-    local out = {}
-    for _, f in ipairs(__bpFiles) do if string.find(f, dir, 1, true) == 1 then out[#out+1]=f end end
-    return out
-  end
-`)
-host.loadGlobal('/lua/system/Blueprints.lua')
-
+installBlueprintPipeline(host)
 installUnitFactory(host)
 const missing = new Set<string>()
 host.installStubTrap((name) => missing.add(name))
-host.eval(`LoadBlueprints()`)
+loadUnitBlueprint(host, 'uel0001', uel0001bp)
 
 console.log('\n== Spawn über Original-Klasse (UEL0001 = TWalkingLandUnit) ==')
 try {

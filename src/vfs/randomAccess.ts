@@ -36,6 +36,9 @@ export class HttpRangeFile implements RandomAccessFile {
   }
 
   async slice(start: number, end: number): Promise<ArrayBuffer> {
+    // Leere Slice (z. B. 0-Byte-Zip-Eintrag) — kein Request, sonst entsteht
+    // eine ungültige Range `bytes=X-(X-1)`, die der Server ablehnt.
+    if (end <= start) return new ArrayBuffer(0)
     const res = await fetch(this.url, {
       headers: { Range: `bytes=${start}-${end - 1}` },
     })

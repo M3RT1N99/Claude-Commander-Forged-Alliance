@@ -106,6 +106,20 @@ export class LuaHost {
     this.lua.global.set(name, value)
   }
 
+  /**
+   * Registriert eine Datei zur Laufzeit im VFS des Hosts (z. B. ein
+   * Unit-Blueprint aus units.scd, das erst bei Bedarf gebraucht wird).
+   * Key wird kleingeschrieben; führende Slashes entfernt.
+   */
+  addFile(path: string, bytes: Uint8Array): void {
+    this.files.set(path.replace(/^\/+/, '').toLowerCase(), bytes)
+  }
+
+  /** Prüft, ob ein Modul-Pfad im Host-VFS vorhanden ist. */
+  hasFile(path: string): boolean {
+    return this.files.has(path.replace(/^\/+/, '').toLowerCase())
+  }
+
   /** Führt ein Boot-Modul im globalen Environment aus (öffentlich für Setup). */
   loadGlobal(name: string): void {
     this.runModuleGlobally(name)
