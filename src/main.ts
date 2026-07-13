@@ -430,14 +430,13 @@ async function startSandbox(mapFolder: string): Promise<void> {
 
     sandbox = new SandboxController(viewer)
     sandbox.setMassSpots(massSpots)
-    const acu = await loadSandboxAssets('uel0001')
-    if (acu) {
-      sandbox.spawn(acu, spawnPoint.x, spawnPoint.z, currentTeamColor())
-      sandbox.selectFirst()
-    }
     if (currentScmap) {
       hud = new Hud(vfs, viewer, sandbox, currentScmap)
     }
+    // ACU über die ECHTE Original-Lua-Sim spawnen (Engine-Pfad) statt als
+    // SimWorld-Platzhalter. Nicht awaiten, damit die Karte sofort bedienbar ist
+    // (die Lua-VM bootet einmalig im Hintergrund).
+    void spawnViaLua('uel0001')
     const zoomParam = Number(new URLSearchParams(location.search).get('zoom'))
     viewer.focusOn(spawnPoint, zoomParam > 0 ? zoomParam : 14)
     $('#sandbox-spawns').hidden = false
@@ -486,8 +485,16 @@ window.addEventListener('pointerup', (e) => {
   const start = boxStart
   boxStart = null
   selectBox.hidden = true
-  if (!sandbox) return
   const moved = Math.hypot(e.clientX - start.x, e.clientY - start.y)
+  // Lua-Engine-Units haben Vorrang bei der Auswahl.
+  if (moved <= 5 && luaSim && luaUnits.length > 0) {
+    const luaMsg = selectLua(e.clientX, e.clientY)
+    if (luaMsg) {
+      log(luaMsg)
+      return
+    }
+  }
+  if (!sandbox) return
   const msg =
     moved > 5
       ? sandbox.boxSelect(start.x, start.y, e.clientX, e.clientY)
@@ -497,13 +504,14 @@ window.addEventListener('pointerup', (e) => {
 
 viewportEl.addEventListener('contextmenu', (e) => {
   e.preventDefault()
-  // Lua-Engine-Units: Rechtsklick = Move über den Original-Navigator.
-  if (luaSim && luaUnits.length > 0) {
+  // Selektierte Lua-Engine-Units: Rechtsklick = Move über den Original-Navigator.
+  if (luaSim && hasLuaSelection()) {
     const hit = viewer.pickTerrain(e.clientX, e.clientY)
     if (hit) {
-      for (const u of luaUnits) luaSim.moveUnit(u.id, hit.x, hit.z)
-      log(`Move (Lua-Engine) → ${hit.x.toFixed(0)}, ${hit.z.toFixed(0)}`)
+      for (const u of luaUnits) if (u.selected) luaSim.moveUnit(u.id, hit.x, hit.z)
+      log(`Move → ${hit.x.toFixed(0)}, ${hit.z.toFixed(0)}`)
     }
+    return
   }
   if (!sandbox) return
   const msg = sandbox.commandMove(e.clientX, e.clientY, e.shiftKey)
@@ -651,17 +659,46 @@ for (const btn of document.querySelectorAll<HTMLButtonElement>('#sandbox-spawns 
   btn.addEventListener('click', () => void sandboxSpawn(btn.dataset.unit!))
 }
 
-// Spawn über die eingebettete Original-Lua-Sim (Unit.lua + Blueprint-Pipeline).
+// Engine-Sim (Original-Lua): Units werden über ihre echte Unit.lua gespawnt,
+// pro Beat getickt/bewegt und hier selektierbar/gerendert.
+interface LuaSceneUnit {
+  id: number
+  mesh: THREE.Object3D
+  ring: THREE.Mesh
+  selected: boolean
+}
 let luaSim: LuaSim | null = null
-const luaUnits: { id: number; mesh: THREE.Object3D }[] = []
+const luaUnits: LuaSceneUnit[] = []
 let luaBeatAcc = 0
 let luaHookRegistered = false
 const btnLuaSpawn = document.querySelector<HTMLButtonElement>('#btn-lua-spawn')
 btnLuaSpawn?.addEventListener('click', () => void spawnViaLua('uel0001'))
 
-// Treibt den Engine-Sim-Beat (10 Hz) und übernimmt Position/Heading der
-// Lua-Units pro Frame — die Original-Lua bewegt die Unit, hier wird nur
-// gerendert.
+const luaRingGeo = (() => {
+  const g = new THREE.RingGeometry(0.85, 1, 40)
+  g.rotateX(-Math.PI / 2)
+  return g
+})()
+
+/** Links-Klick: Lua-Unit unter dem Cursor auswählen (oder Auswahl leeren). */
+function selectLua(clientX: number, clientY: number): string | null {
+  const hit = viewer.pickUnit(clientX, clientY)
+  let name: string | null = null
+  for (const u of luaUnits) {
+    u.selected = hit != null && hit.mesh === u.mesh
+    if (u.selected) name = luaSim?.readState(u.id)?.name.toUpperCase() ?? 'Einheit'
+  }
+  return name ? `Ausgewählt: ${name}` : null
+}
+
+/** Ob mindestens eine Lua-Unit selektiert ist. */
+function hasLuaSelection(): boolean {
+  return luaUnits.some((u) => u.selected)
+}
+
+// Treibt den Engine-Sim-Beat (10 Hz) und übernimmt Position/Heading + Auswahl-
+// ring der Lua-Units pro Frame — die Original-Lua bewegt die Unit, hier wird
+// nur gerendert.
 function luaSimUpdate(dt: number): void {
   if (!luaSim) return
   luaBeatAcc = Math.min(luaBeatAcc + dt, 0.5)
@@ -672,8 +709,11 @@ function luaSimUpdate(dt: number): void {
   for (const u of luaUnits) {
     const s = luaSim.readState(u.id)
     if (!s) continue
-    u.mesh.position.set(s.x, viewer.heightAt(s.x, s.z), s.z)
+    const y = viewer.heightAt(s.x, s.z)
+    u.mesh.position.set(s.x, y, s.z)
     u.mesh.rotation.set(0, s.heading, 0)
+    u.ring.visible = u.selected
+    if (u.selected) u.ring.position.set(s.x, y + 0.05, s.z)
   }
 }
 
@@ -703,12 +743,19 @@ async function spawnViaLua(id: string): Promise<void> {
     const scale = bpGet(assets.bp, 'Display.UniformScale')
     if (typeof scale === 'number' && scale > 0) scene.mesh.scale.setScalar(scale)
     scene.mesh.position.set(state.x, y, state.z)
-    luaUnits.push({ id: state.id, mesh: scene.mesh })
+    const ring = new THREE.Mesh(
+      luaRingGeo,
+      new THREE.MeshBasicMaterial({ color: 0x44ff66, transparent: true, opacity: 0.9, depthTest: false }),
+    )
+    ring.visible = false
+    ring.renderOrder = 10
+    viewer.addHelper(ring)
+    luaUnits.push({ id: state.id, mesh: scene.mesh, ring, selected: false })
 
     log(
       `✓ ${state.name.toUpperCase()} über Original-Unit.lua gespawnt — ` +
         `HP ${Math.round(state.health)}/${state.maxHealth} (aus Lua) — ` +
-        `Rechtsklick bewegt sie über die Engine`,
+        `Linksklick wählt, Rechtsklick bewegt`,
     )
   } catch (err) {
     log(`FEHLER Lua-Spawn: ${err instanceof Error ? err.message : err}`)

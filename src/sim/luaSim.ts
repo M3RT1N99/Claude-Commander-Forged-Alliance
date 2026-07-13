@@ -28,9 +28,20 @@ export class LuaSim {
   ) {}
 
   static async create(vfs: GameVfs, log?: LogSink): Promise<LuaSim> {
+    // Framework + Sim-Lua vorladen (import() löst synchron auf). Die Reads
+    // parallel in Batches — sequenziell wären es ~1300 einzelne Range-Requests
+    // und die App friert ein.
     const files = new Map<string, Uint8Array>()
-    for (const path of vfs.find((p) => p.startsWith('lua/') && p.endsWith('.lua'))) {
-      files.set(path, await vfs.read(path))
+    // lua/ui/** ist das UI-Framework (maui) — für den Sim-Spawn nicht nötig;
+    // spart hunderte Fetches. Sim + System + AI werden geladen.
+    const paths = vfs.find(
+      (p) => p.startsWith('lua/') && p.endsWith('.lua') && !p.startsWith('lua/ui/'),
+    )
+    const BATCH = 64
+    for (let i = 0; i < paths.length; i += BATCH) {
+      const batch = paths.slice(i, i + BATCH)
+      const bytes = await Promise.all(batch.map((p) => vfs.read(p)))
+      batch.forEach((p, j) => files.set(p, bytes[j]!))
     }
     const host = await LuaHost.create(files, log)
     host.loadGlobal('/lua/system/utils.lua')
