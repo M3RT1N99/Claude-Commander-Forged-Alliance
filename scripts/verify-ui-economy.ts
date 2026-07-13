@@ -137,6 +137,33 @@ if (err === null) {
   check(h === 72, `panel.Height() = ${h}`)
 }
 
+console.log('\n== Event-Pump: Hit-Test + Original-Bubbling ==')
+// Das Eco-Panel sitzt bei (16,3) und ist 324x72 gross (economy_mini.lua).
+// Ein Klick mittendrin muss ein Control treffen; ein Klick weit daneben nicht.
+const MODS = `{ Shift = false, Ctrl = false, Alt = false, Left = true, Middle = false, Right = false }`
+// Klick INS Panel: gehoert der UI — die Welt darf ihn nicht sehen.
+const onPanel = host.eval(`return __mauiMouse('ButtonPress', 100, 40, ${MODS})`)
+// Klick weit daneben: nur der Root-Frame — die Welt bekommt ihn.
+const onWorld = host.eval(`return __mauiMouse('ButtonPress', 900, 900, ${MODS})`)
+check(onPanel === true, 'Klick aufs Eco-Panel gehört der UI (kein Bewegungsbefehl)')
+check(onWorld === false, 'Klick daneben trifft nur den Root-Frame → die Welt bekommt ihn')
+
+// Bubbling: ein Kind, das false liefert, reicht das Event an den Parent hoch
+// (Cfile:1124525). Kommt es dort an, ist die Kette richtig.
+const bubbled = host.eval(`
+  local Group = import('/lua/maui/group.lua').Group
+  local parent = Group(GetFrame(0), 'bubbleParent')
+  parent.Left:Set(500) parent.Top:Set(500) parent.Width:Set(100) parent.Height:Set(100)
+  local child = Group(parent, 'bubbleChild')
+  child.Left:Set(500) child.Top:Set(500) child.Width:Set(50) child.Height:Set(50)
+  local reached = false
+  child.HandleEvent = function(self, event) return false end
+  parent.HandleEvent = function(self, event) reached = true; return true end
+  __mauiMouse('ButtonPress', 510, 510, { Shift = false, Ctrl = false, Alt = false })
+  return reached
+`)
+check(bubbled === true, 'Kind liefert false → Event landet beim Parent (Cfile:1124525)')
+
 if (warnings.length > 0) {
   console.log(`\n${warnings.length} WARN (erste 3):`)
   for (const w of warnings.slice(0, 3)) console.log(`  ${w.slice(0, 120)}`)

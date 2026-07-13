@@ -101,6 +101,46 @@ export class GameUi {
     this.renderer.update()
   }
 
+  /**
+   * Maus-Events in die UI-VM. Der Hit-Test und das Bubbling laufen dort — nicht
+   * im DOM (CMauiControl::HandleEvent, Cfile:1124525: liefert Lua `false`, geht
+   * das Event die Parent-Kette hoch).
+   *
+   * Liefert `true`, wenn die UI das Event verbraucht hat. Dann darf es NICHT
+   * mehr an die Spielwelt gehen — ein Klick auf einen Button ist kein
+   * Bewegungsbefehl.
+   */
+  private handleMouse(type: string, e: MouseEvent | WheelEvent): boolean {
+    const mods = `{ Shift = ${e.shiftKey}, Ctrl = ${e.ctrlKey}, Alt = ${e.altKey}, ` +
+      `Left = ${(e.buttons & 1) !== 0}, Middle = ${(e.buttons & 4) !== 0}, Right = ${(e.buttons & 2) !== 0} }`
+    const call =
+      type === 'WheelRotation'
+        ? `return __mauiWheel(${e.clientX}, ${e.clientY}, ${-(e as WheelEvent).deltaY}, ${mods})`
+        : `return __mauiMouse('${type}', ${e.clientX}, ${e.clientY}, ${mods})`
+    return this.host.eval(call) === true
+  }
+
+  /**
+   * Hängt die Event-Pump an. Capture-Phase: verbraucht die UI das Event, wird es
+   * gestoppt, bevor die Kamera-/Selektions-Handler des Viewers es sehen.
+   */
+  attachEvents(target: Window = window): void {
+    const consume = (type: string) => (e: MouseEvent | WheelEvent) => {
+      if (this.handleMouse(type, e)) {
+        e.stopPropagation()
+        e.preventDefault()
+      }
+    }
+    target.addEventListener('pointermove', consume('MouseMotion') as EventListener, true)
+    target.addEventListener('pointerdown', consume('ButtonPress') as EventListener, true)
+    target.addEventListener('pointerup', consume('ButtonRelease') as EventListener, true)
+    target.addEventListener('dblclick', consume('ButtonDClick') as EventListener, true)
+    target.addEventListener('wheel', consume('WheelRotation') as EventListener, {
+      capture: true,
+      passive: false,
+    })
+  }
+
   dispose(): void {
     this.renderer.dispose()
     this.host.close()

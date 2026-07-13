@@ -425,6 +425,7 @@ async function startSandbox(mapFolder: string): Promise<void> {
     // TS-Nachbau in hud.ts ist dafür raus.
     gameUi?.dispose()
     gameUi = await GameUi.create(vfs, log)
+    gameUi.attachEvents()
 
     // Beide Frame-Hooks an EINER Stelle registrieren, nach dem Karten-Laden
     // (setMap → clearContent wirft alle Hooks weg). Sie vorher oder verteilt zu

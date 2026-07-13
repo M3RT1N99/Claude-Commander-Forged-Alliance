@@ -207,6 +207,98 @@ function __mauiSnapshot()
   return out
 end
 
+-- =====================================================================
+-- Event-Pump
+--
+-- Das Event-Table hat exakt die Felder, die func_CreateLuaEvent @0x795BD0
+-- (Cfile:1136293-1136348) setzt:
+--   Type, MouseX, MouseY, WheelRotation, WheelDelta, KeyCode, RawKeyCode,
+--   Modifiers { Shift, Ctrl, Alt, Left, Middle, Right }, Control
+--
+-- Die Typen sind Strings; die Original-Lua vergleicht direkt gegen sie
+-- (MouseEnter, MouseExit, ButtonPress, ButtonDClick, KeyDown, WheelRotation,
+-- MouseMotion).
+--
+-- Und das Bubbling ist NICHT das des DOM: CMauiControl::HandleEvent
+-- (@0x7873A0, Cfile:1124525-1124536) ruft HandleEvent auf dem Control; liefert
+-- es false, geht dasselbe Event die PARENT-Kette hoch, bis eines true liefert.
+-- Deshalb ist das DOM auf pointer-events:none — der Hit-Test laeuft hier.
+-- =====================================================================
+
+-- Trefferpruefung: das oberste (groesste Depth) sichtbare Control unter dem
+-- Punkt, dessen Hit-Test aktiv ist.
+function __mauiHitTest(x, y)
+  local best = nil
+  for _, c in pairs(__mauiControls) do
+    if not c.__destroyed and not c.__hidden and c.__hitTest ~= false then
+      local l, t = c.Left(), c.Top()
+      local r, b = c.Right(), c.Bottom()
+      if x >= l and x < r and y >= t and y < b then
+        if not best or c.Depth() > best.Depth() then best = c end
+      end
+    end
+  end
+  return best
+end
+
+-- Ein Event in den Baum geben. `control` ist das getroffene Control (oder nil).
+-- Rueckgabe: true, wenn es jemand behandelt hat.
+function __mauiDispatch(control, event)
+  if not control then return false end
+  event.Control = control
+  local c = control
+  while c do
+    if c:HandleEvent(event) then return true end
+    c = c.__parent or nil
+  end
+  return false
+end
+
+-- MouseEnter/MouseExit erzeugt die Engine aus der Bewegung, nicht der Browser:
+-- sie merkt sich, ueber welchem Control der Zeiger zuletzt stand.
+__mauiHover = false
+
+-- Liefert true, wenn das Event der UI gehoert.
+--
+-- Zwei Faelle:
+--  1. Ein Control hat es behandelt (HandleEvent -> true).
+--  2. Der Zeiger steht ueberhaupt ueber einem UI-Control.
+--
+-- Fall 2 ist kein Zusatz, sondern das Original: die Spielwelt ist dort selbst
+-- ein Control (CUIWorldView) ganz unten im Stapel. Liegt ein Panel darueber,
+-- ist das Panel das oberste getroffene Control — und die WorldView sieht das
+-- Event nie. Bei uns ist die Welt kein maui-Control, also gilt: alles ausser
+-- dem Root-Frame ist UI, und ein Klick darauf ist kein Bewegungsbefehl.
+function __mauiMouse(evType, x, y, mods)
+  local hit = __mauiHitTest(x, y)
+
+  if hit ~= __mauiHover then
+    if __mauiHover then
+      __mauiDispatch(__mauiHover, { Type = 'MouseExit', MouseX = x, MouseY = y, Modifiers = mods })
+    end
+    if hit then
+      __mauiDispatch(hit, { Type = 'MouseEnter', MouseX = x, MouseY = y, Modifiers = mods })
+    end
+    __mauiHover = hit or false
+  end
+
+  local handled = __mauiDispatch(hit, {
+    Type = evType, MouseX = x, MouseY = y, Modifiers = mods,
+  })
+  if handled then return true end
+  return hit ~= nil and hit.__kind ~= 'frame'
+end
+
+function __mauiWheel(x, y, rotation, mods)
+  local hit = __mauiHitTest(x, y)
+  return __mauiDispatch(hit, {
+    Type = 'WheelRotation',
+    MouseX = x, MouseY = y,
+    WheelRotation = rotation, WheelDelta = rotation,
+    Modifiers = mods,
+  })
+end
+
 function InternalCreateBorder(luaobj, parent)
   attachControl(luaobj, parent, 'border')
   local LazyVar = lazyvar()
