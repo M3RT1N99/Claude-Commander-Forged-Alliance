@@ -11,7 +11,7 @@ import { open, type FileHandle } from 'node:fs/promises'
 import { ZipArchive } from '../src/vfs/zipArchive'
 import type { RandomAccessFile } from '../src/vfs/randomAccess'
 import { LuaHost } from '../src/lua/host'
-import { installMoho } from '../src/lua/moho'
+import { installEngine } from '../src/lua/engine'
 import { installUnitFactory, installBlueprintPipeline, loadUnitBlueprint, spawnLuaUnit } from '../src/lua/unitFactory'
 import { installSimThreads, simTick } from '../src/lua/simThreads'
 import { installMotion, motionTick } from '../src/sim/motion'
@@ -56,13 +56,7 @@ const bool = (h: LuaHost, e: string): boolean => h.eval(`return ${e}`) === true
 
 const warnings: string[] = []
 const host = await LuaHost.create(files, (level, msg) => { if (level === 'WARN') warnings.push(msg) })
-host.loadGlobal('/lua/system/utils.lua')
-installMoho(host)
-installBlueprintPipeline(host)
-installUnitFactory(host)
-installSimThreads(host)
-installMotion(host)
-host.installStubTrap(() => {})
+installEngine(host)
 loadUnitBlueprint(host, 'uel0001', acuBp)
 
 const beat = (): void => { simTick(host); motionTick(host) }

@@ -32,11 +32,21 @@ console.log('\n== Zwei-Ratio-Verteilung (r1 Doppel, r2 Einzel) ==')
 console.log('\n== ArmyEconomy: Produktion akkumuliert bis Lagerkapazität ==')
 {
   const a = new ArmyEconomy()
-  a.register(1, { prodM: 0, prodE: 20, consM: 0, consE: 0, storeM: 0, storeE: 0, complete: true, prodActive: true, consActive: true })
+  // Wie die ACU: produziert 20 E/s UND bringt 4000 E Lager mit. Ohne Lager
+  // gäbe es nichts zu speichern — die Armee selbst hat keinen Sockel
+  // (SSTIArmyVariableData-Ctor: mMaxStorage = 0/0).
+  a.register(1, { prodM: 0, prodE: 20, consM: 0, consE: 0, storeM: 0, storeE: 4000, complete: true, prodActive: true, consActive: true })
   const e0 = a.energy
   for (let i = 0; i < 10; i++) a.tick()
   check(near(a.energy, e0 + 20, 1e-1), `Energie ${a.energy.toFixed(1)} (Start ${e0} + 20 über 1 s)`)
   check(a.incomeEnergy === 20, `Einkommen = ${a.incomeEnergy}/s`)
+  check(a.maxEnergy === 4000, `Lager = ${a.maxEnergy} (nur aus der Unit)`)
+
+  // Ohne Lager-Unit: kein Lager, der Vorrat kann nicht wachsen.
+  const b = new ArmyEconomy()
+  b.register(1, { prodM: 0, prodE: 20, consM: 0, consE: 0, storeM: 0, storeE: 0, complete: true, prodActive: true, consActive: true })
+  for (let i = 0; i < 10; i++) b.tick()
+  check(b.energy === 0 && b.maxEnergy === 0, `ohne Lager-Unit: Vorrat ${b.energy}, Lager ${b.maxEnergy}`)
 }
 
 // ── Stall: hoher Verbrauch, Vorrat bleibt >= 0, Ausgabe gedrosselt ──

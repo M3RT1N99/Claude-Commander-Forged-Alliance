@@ -10,15 +10,12 @@
  * Nachrichten herein.
  */
 import { LuaHost } from '../lua/host'
-import { installMoho } from '../lua/moho'
-import { installUnitFactory, installBlueprintPipeline, loadUnitBlueprint, spawnLuaUnit } from '../lua/unitFactory'
-import { installSimThreads, simTick } from '../lua/simThreads'
-import { installMotion, motionTick } from './motion'
-import { EconomyManager, installEconomy } from './economy'
+import { installEngine, beat, type Engine } from '../lua/engine'
+import { loadUnitBlueprint, spawnLuaUnit } from '../lua/unitFactory'
 
 const ctx = self as unknown as Worker
 let host: LuaHost | null = null
-let eco: EconomyManager | null = null
+let engine: Engine | null = null
 
 interface Vec3 {
   x: number
@@ -35,15 +32,10 @@ ctx.onmessage = async (e: MessageEvent<InMsg>): Promise<void> => {
   const msg = e.data
   if (msg.type === 'boot') {
     const h = await LuaHost.create(msg.files, (level, m) => ctx.postMessage({ type: 'log', level, msg: m }))
-    h.loadGlobal('/lua/system/utils.lua')
-    installMoho(h)
-    installBlueprintPipeline(h)
-    installUnitFactory(h)
-    installSimThreads(h)
-    eco = new EconomyManager()
-    installEconomy(h, eco)
-    installMotion(h)
-    h.installStubTrap(() => {})
+    // Der EINE Engine-Boot — derselbe wie in jeder Testsuite. Vorher stellte
+    // sich der Worker die Engine selbst zusammen und vergaß dabei das
+    // Bau-System (build.ts lief im Browser überhaupt nicht).
+    engine = installEngine(h)
     host = h
     ctx.postMessage({ type: 'booted' })
     setInterval(tickAndPost, 100) // 10-Hz-Sim-Beat im Worker-Thread
@@ -67,13 +59,11 @@ ctx.onmessage = async (e: MessageEvent<InMsg>): Promise<void> => {
 }
 
 function tickAndPost(): void {
-  if (!host || !eco) return
-  // Ein Sim-Beat in Original-Reihenfolge (Ökonomie → Threads → Physik).
-  eco.tick()
-  simTick(host)
-  motionTick(host)
+  if (!host || !engine) return
+  // Ein Sim-Beat: Bau-Bedarf → Ökonomie → gewährte Rate → Lua-Threads → Physik.
+  beat(engine)
   const units = host.eval('return __readAllUnits()')
-  const a = eco.army(1)
+  const a = engine.economy.army(1)
   ctx.postMessage({
     type: 'states',
     units,

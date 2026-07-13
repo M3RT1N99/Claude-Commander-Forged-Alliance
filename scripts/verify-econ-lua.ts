@@ -14,7 +14,7 @@ import { open, type FileHandle } from 'node:fs/promises'
 import { ZipArchive } from '../src/vfs/zipArchive'
 import type { RandomAccessFile } from '../src/vfs/randomAccess'
 import { LuaHost } from '../src/lua/host'
-import { installMoho } from '../src/lua/moho'
+import { installEngine } from '../src/lua/engine'
 import { installUnitFactory, installBlueprintPipeline, loadUnitBlueprint, spawnLuaUnit } from '../src/lua/unitFactory'
 import { installSimThreads, simTick } from '../src/lua/simThreads'
 import { EconomyManager, installEconomy } from '../src/sim/economy'
@@ -58,14 +58,7 @@ const near = (a: number, b: number, eps = 0.2): boolean => Math.abs(a - b) < eps
 
 const warnings: string[] = []
 const host = await LuaHost.create(files, (level, msg) => { if (level === 'WARN') warnings.push(msg) })
-host.loadGlobal('/lua/system/utils.lua')
-installMoho(host)
-installBlueprintPipeline(host)
-installUnitFactory(host)
-installSimThreads(host)
-const eco = new EconomyManager()
-installEconomy(host, eco)
-host.installStubTrap(() => {})
+const { economy: eco } = installEngine(host)
 loadUnitBlueprint(host, 'uel0001', acuBp)
 
 const beat = (): void => { eco.tick(); simTick(host) }
@@ -74,15 +67,28 @@ console.log('\n== ACU spawnen — registriert ihre Blueprint-Ökonomie (ProdE=20
 const acu = spawnLuaUnit(host, 'uel0001', { x: 128, y: 20, z: 128 }, 1)
 check(acu > 0, `gespawnt, Unit #${acu}`)
 const army = eco.army(1)
-const e0 = army.energy
-const m0 = army.mass
+check(army.energy === 0 && army.mass === 0, `Armee startet bei 0/0 (SSTIArmyVariableData-Ctor)`)
 
-console.log('\n== 10 Beats: Vorrat wächst über die echten Blueprint-Werte ==')
+console.log('\n== Lager kommt AUSSCHLIESSLICH aus den Units (ACU: 4000 E / 650 M) ==')
+beat()
+check(army.maxEnergy === 4000, `maxEnergie = ${army.maxEnergy} (= ACU Economy.StorageEnergy)`)
+check(army.maxMass === 650, `maxMasse = ${army.maxMass} (= ACU Economy.StorageMass)`)
+
+console.log('\n== Startvorrat: die ACU forkt GiveInitialResources (uel0001_script.lua:159) ==')
+// OnStopBeingBuilt -> ForkThread(GiveInitialResources) -> WaitTicks(5) ->
+// brain:GiveResource('Energy', StorageEnergy) + ('Mass', StorageMass).
+// Kein TS-Startwert: die Original-Lua schenkt der Armee ihr eigenes Lager.
 for (let i = 0; i < 10; i++) beat()
-check(near(army.energy, e0 + 20), `Energie ${army.energy.toFixed(1)} (Start ${e0} + 20: ACU 20/s über 1 s)`)
-check(near(army.mass, m0 + 1), `Masse ${army.mass.toFixed(1)} (Start ${m0} + 1: ACU 1/s)`)
+check(army.energy === 4000, `Energie ${army.energy} = volles Lager (von der ACU geschenkt)`)
+check(army.mass === 650, `Masse ${army.mass} = volles Lager (von der ACU geschenkt)`)
+
+console.log('\n== Einkommen aus dem echten Blueprint ==')
 check(army.incomeEnergy === 20, `Energie-Einkommen = ${army.incomeEnergy} (aus Blueprint)`)
 check(army.incomeMass === 1, `Masse-Einkommen = ${army.incomeMass} (aus Blueprint)`)
+// Vorrat leeren, dann wächst er mit genau dem Blueprint-Einkommen.
+army.energy = 0
+for (let i = 0; i < 10; i++) beat()
+check(near(army.energy, 20), `Energie nach 1 s ab 0: ${army.energy.toFixed(1)} (= 20/s)`)
 
 console.log('\n== brain:GetEconomyStored / GetEconomyIncome (moho, liest Live-Zustand) ==')
 const brainE = Number(host.eval(`return __units[${acu}]:GetAIBrain():GetEconomyStored('ENERGY')`))

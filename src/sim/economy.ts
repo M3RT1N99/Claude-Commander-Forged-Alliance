@@ -1,4 +1,5 @@
 import type { LuaHost } from '../lua/host'
+import BRAIN_LUA from '../engine-lua/brain.lua?raw'
 
 /**
  * Engine-Ökonomie pro Armee — die Zwei-Ratio-Verteilung aus
@@ -98,14 +99,21 @@ type Res = 'ENERGY' | 'MASS'
 
 /** Ressourcen-Zustand einer Armee. */
 export class ArmyEconomy {
-  mass = f(150) // Start wie im Original-Skirmish
-  energy = f(400)
-  maxMass = f(650)
-  maxEnergy = f(4000)
+  // Binär (SSTIArmyVariableData-Ctor @0x6FD390): mStored = 0/0, mMaxStorage =
+  // 0/0. Lager entsteht AUSSCHLIESSLICH aus StorageMass/StorageEnergy der
+  // Units (die ACU bringt ihr Lager selbst mit), Startvorrat kommt aus dem
+  // Lua-Global SetArmyEconomy(army, mass, energy) — nicht aus TS-Konstanten.
+  mass = 0
+  energy = 0
+  maxMass = 0
+  maxEnergy = 0
   incomeMass = 0
   incomeEnergy = 0
   expenseMass = 0
   expenseEnergy = 0
+  /** Demand before throttling (brain:GetEconomyRequested). */
+  requestedMass = 0
+  requestedEnergy = 0
 
   private readonly units = new Map<number, UnitEcon>()
   /** Transiente Bau-Requests (pro Tick vom Bau-System gesetzt). */
@@ -146,8 +154,8 @@ export class ArmyEconomy {
   tick(): void {
     let prodM = 0
     let prodE = 0
-    let maxM = f(650)
-    let maxE = f(4000)
+    let maxM = 0
+    let maxE = 0
     const consumers: Consumer[] = []
     for (const u of this.units.values()) {
       if (!u.complete) continue // Baustellen tragen weder Produktion noch Lager bei
@@ -169,6 +177,15 @@ export class ArmyEconomy {
     this.maxMass = maxM
     this.maxEnergy = maxE
 
+    let reqM = 0
+    let reqE = 0
+    for (const c of consumers) {
+      reqM = f(reqM + c.mass)
+      reqE = f(reqE + c.energy)
+    }
+    this.requestedMass = f(reqM / DT)
+    this.requestedEnergy = f(reqE / DT)
+
     const availMass = f(this.mass + f(prodM * DT))
     const availEnergy = f(this.energy + f(prodE * DT))
     const { spentMass, spentEnergy } = distribute(availMass, availEnergy, consumers)
@@ -179,6 +196,30 @@ export class ArmyEconomy {
     this.incomeEnergy = prodE
     this.expenseMass = f(spentMass / DT)
     this.expenseEnergy = f(spentEnergy / DT)
+  }
+
+  /**
+   * brain:GiveResource(res, amount) — schenkt der Armee Ressourcen (auf das
+   * Lager gedeckelt). Wird u. a. von GiveInitialResources jeder ACU gerufen.
+   * Der Deckel greift erst, wenn das Lager der Unit registriert ist; darum
+   * läuft GiveInitialResources im Original erst nach WaitTicks(5).
+   */
+  give(res: Res, amount: number): void {
+    if (res === 'MASS') this.mass = f(Math.min(Math.max(this.mass + amount, 0), this.maxMass))
+    else this.energy = f(Math.min(Math.max(this.energy + amount, 0), this.maxEnergy))
+  }
+
+  /** brain:GetEconomyUsage(res) — actual spend per second (after throttling). */
+  usage(res: Res): number {
+    return res === 'MASS' ? this.expenseMass : this.expenseEnergy
+  }
+  /** brain:GetEconomyRequested(res) — demand per second (before throttling). */
+  requested(res: Res): number {
+    return res === 'MASS' ? this.requestedMass : this.requestedEnergy
+  }
+  /** brain:GetEconomyTrend(res) — net change per tick (income minus spend). */
+  trend(res: Res): number {
+    return f((this.income(res) - this.usage(res)) * DT)
   }
 
   stored(res: Res): number {
@@ -217,6 +258,7 @@ export class EconomyManager {
  * brain:GetEconomyStored) aufrufen.
  */
 export function installEconomy(host: LuaHost, mgr: EconomyManager): void {
+  const armyIndex = new Map<string, number>()
   host.setGlobal('__econRegister', (army: number, id: number, pm: number, pe: number, cm: number, ce: number, sm: number, se: number) => {
     mgr.army(army).register(id, {
       prodM: pm, prodE: pe, consM: cm, consE: ce, storeM: sm, storeE: se,
@@ -243,26 +285,46 @@ export function installEconomy(host: LuaHost, mgr: EconomyManager): void {
     mgr.army(army).clearBuildRequest(taskId)
   })
   host.setGlobal('__econBuildRate', (army: number, taskId: number) => mgr.army(army).buildRate(taskId))
+  host.setGlobal('__econUnregister', (army: number, id: number) => {
+    mgr.army(army).remove(id)
+  })
 
+  // Echtes Engine-Global: SetArmyEconomy(army, mass, energy) setzt den
+  // Startvorrat der Armee (Original: aus dem Szenario/SetupSession heraus
+  // gerufen). Vorher standen 150/400 als TS-Konstante im Code — erfunden.
+  host.setGlobal('SetArmyEconomy', (army: number | string, mass: number, energy: number) => {
+    const a = mgr.army(typeof army === 'number' ? army : (armyIndex.get(army) ?? 1))
+    a.mass = mass
+    a.energy = energy
+  })
+  // Armee-Namen → Index (SetArmyEconomy akzeptiert im Original beides).
+  host.setGlobal('__econSetArmyName', (name: string, index: number) => {
+    armyIndex.set(name, index)
+  })
+
+  // GiveResource: die echte Quelle der Startressourcen. Jede ACU forkt in
+  // OnStopBeingBuilt `GiveInitialResources` (uel0001_script.lua:159-163):
+  // nach WaitTicks(5) schenkt sie der Armee ihr eigenes Lager
+  // (Economy.StorageEnergy = 4000, StorageMass = 650). Genau daher kommen die
+  // Startwerte — nicht aus einer TS-Konstante.
+  host.setGlobal('__econGive', (army: number, res: string, amount: number) => {
+    mgr.army(army).give(res.toUpperCase() === 'MASS' ? 'MASS' : 'ENERGY', amount)
+  })
   host.setGlobal('__econStored', (army: number, res: string) => mgr.army(army).stored((res === 'MASS' ? 'MASS' : 'ENERGY')))
   host.setGlobal('__econStoredRatio', (army: number, res: string) => mgr.army(army).storedRatio(res === 'MASS' ? 'MASS' : 'ENERGY'))
   host.setGlobal('__econIncome', (army: number, res: string) => mgr.army(army).income(res === 'MASS' ? 'MASS' : 'ENERGY'))
 
-  // Per-Armee-Brain mit den Original-Economy-Accessoren (CAiBrain-Methoden).
-  host.eval(`
-    __brains = __brains or {}
-    function __getBrain(army)
-      if not __brains[army] then
-        __brains[army] = {
-          __army = army,
-          GetArmyIndex = function(self) return army end,
-          GetEconomyStored = function(self, res) return __econStored(army, res) end,
-          GetEconomyStoredRatio = function(self, res) return __econStoredRatio(army, res) end,
-          GetEconomyIncome = function(self, res) return __econIncome(army, res) end,
-        }
-      end
-      return __brains[army]
-    end
-  `)
+  host.setGlobal('__econUsage', (army: number, res: string) => mgr.army(army).usage(res === 'MASS' ? 'MASS' : 'ENERGY'))
+  host.setGlobal('__econRequested', (army: number, res: string) => mgr.army(army).requested(res === 'MASS' ? 'MASS' : 'ENERGY'))
+  host.setGlobal('__econTrend', (army: number, res: string) => mgr.army(army).trend(res === 'MASS' ? 'MASS' : 'ENERGY'))
+
+  // Das Brain ist KEIN Engine-Objekt mit angeflanschten Feldern, sondern die
+  // Original-Klasse `AIBrain` aus /lua/aibrain.lua:342 — sie leitet von
+  // moho.aibrain_methods ab (die C++-Basis, die wir liefern) und bringt ihre
+  // eigene Logik mit (z. B. ESRegisterUnitMassStorage, aibrain.lua:500).
+  // Vorher stand hier ein handgebautes TS-Table: genau der Nachbau, den es
+  // nicht geben darf. Die Engine erzeugt das Brain und ruft OnCreateHuman —
+  // wie im Original beim Aufbau der Armeen.
+  host.eval(BRAIN_LUA)
   void RES
 }

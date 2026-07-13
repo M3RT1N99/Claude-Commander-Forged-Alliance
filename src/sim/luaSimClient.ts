@@ -46,11 +46,12 @@ export class LuaSimClient {
   ) {}
 
   static async create(vfs: GameVfs, log: (level: string, msg: string) => void): Promise<LuaSimClient> {
-    // Framework + Sim-Lua parallel vorladen (lua/ui nicht — reines UI-Framework).
+    // ALLE lua/-Dateien, auch lua/ui/. Die UI des Originals ist Lua (maui) und
+    // soll ausgeführt werden, nicht in TS/HTML nachgebaut — sie hier
+    // auszuschließen hat genau das verhindert. Der Sim-Host lädt ohnehin nur,
+    // was importiert wird; das Vorladen kostet nur den VFS-Lesevorgang.
     const files = new Map<string, Uint8Array>()
-    const paths = vfs.find(
-      (p) => p.startsWith('lua/') && p.endsWith('.lua') && !p.startsWith('lua/ui/'),
-    )
+    const paths = vfs.find((p) => p.startsWith('lua/') && p.endsWith('.lua'))
     const BATCH = 64
     for (let i = 0; i < paths.length; i += BATCH) {
       const batch = paths.slice(i, i + BATCH)

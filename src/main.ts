@@ -634,9 +634,14 @@ interface LuaSceneUnit {
 let luaSim: LuaSimClient | null = null
 const luaUnits: LuaSceneUnit[] = []
 
-const DEFAULT_ECO: EcoSnapshot = {
-  mass: 150, massStorage: 650, massIncome: 0, massExpense: 0,
-  energy: 400, energyStorage: 4000, energyIncome: 0, energyExpense: 0,
+// Solange die Sim nicht läuft, gibt es nichts — keine erfundenen Startwerte.
+// Vorrat und Lager entstehen ausschließlich in der Sim: das Lager aus den
+// Storage*-Feldern der Units, der Startvorrat aus GiveInitialResources der ACU
+// (uel0001_script.lua:159). Die 150/650/400/4000, die hier standen, waren frei
+// erfunden — und haben die echten Werte im HUD überdeckt.
+const EMPTY_ECO: EcoSnapshot = {
+  mass: 0, massStorage: 0, massIncome: 0, massExpense: 0,
+  energy: 0, energyStorage: 0, energyIncome: 0, energyExpense: 0,
 }
 
 /** RULEUCC_*-Fähigkeiten aus General.CommandCaps (bestimmt die Order-Buttons). */
@@ -652,7 +657,7 @@ function readCaps(bp: BpObject): ReadonlySet<string> {
 // HUD-Datenquelle aus der Lua-Engine (Ökonomie + gespawnte Units).
 const hudSource: HudSource = {
   economy(): EcoSnapshot {
-    return luaSim?.economySnapshot() ?? DEFAULT_ECO
+    return luaSim?.economySnapshot() ?? EMPTY_ECO
   },
   units(): HudUnitInfo[] {
     if (!luaSim) return []

@@ -30,7 +30,9 @@ for (const suite of suites) {
   console.log(`\n── ${suite} ${'─'.repeat(Math.max(0, 60 - suite.length))}`)
   // Relativer Pfad + cwd auf die Projektwurzel — der Absolutpfad enthält
   // Leerzeichen und würde mit shell:true zerbrechen.
-  const r = spawnSync('npx', ['tsx', `scripts/${suite}`], {
+  // --import registers the .lua text loader so engine Lua can live in real
+  // .lua files (Vite does the same through `?raw`).
+  const r = spawnSync('npx', ['tsx', '--import', './scripts/register-lua.mjs', `scripts/${suite}`], {
     stdio: 'inherit',
     shell: true,
     cwd: projectRoot,

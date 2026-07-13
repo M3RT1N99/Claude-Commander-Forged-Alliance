@@ -9,7 +9,7 @@ import { open, type FileHandle } from 'node:fs/promises'
 import { ZipArchive } from '../src/vfs/zipArchive'
 import type { RandomAccessFile } from '../src/vfs/randomAccess'
 import { LuaHost } from '../src/lua/host'
-import { installMoho } from '../src/lua/moho'
+import { installEngine } from '../src/lua/engine'
 import {
   installUnitFactory,
   installBlueprintPipeline,
@@ -70,12 +70,8 @@ const warnings: string[] = []
 const host = await LuaHost.create(files, (level, msg) => {
   if (level === 'WARN') warnings.push(msg)
 })
-host.loadGlobal('/lua/system/utils.lua')
-installMoho(host)
-installBlueprintPipeline(host)
-installUnitFactory(host)
+installEngine(host)
 const missing = new Set<string>()
-host.installStubTrap((name) => missing.add(name))
 loadUnitBlueprint(host, 'uel0001', uel0001bp)
 
 console.log('\n== Spawn über Original-Klasse (UEL0001 = TWalkingLandUnit) ==')

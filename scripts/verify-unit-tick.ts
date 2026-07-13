@@ -9,7 +9,7 @@ import { open, type FileHandle } from 'node:fs/promises'
 import { ZipArchive } from '../src/vfs/zipArchive'
 import type { RandomAccessFile } from '../src/vfs/randomAccess'
 import { LuaHost } from '../src/lua/host'
-import { installMoho } from '../src/lua/moho'
+import { installEngine } from '../src/lua/engine'
 import { installUnitFactory, installBlueprintPipeline, loadUnitBlueprint, spawnLuaUnit, readLuaUnit } from '../src/lua/unitFactory'
 import { installSimThreads, simTick, currentTick } from '../src/lua/simThreads'
 
@@ -52,12 +52,7 @@ const num = (h: LuaHost, e: string): number => Number(h.eval(`return ${e}`))
 
 const warnings: string[] = []
 const host = await LuaHost.create(files, (level, msg) => { if (level === 'WARN') warnings.push(msg) })
-host.loadGlobal('/lua/system/utils.lua')
-installMoho(host)
-installBlueprintPipeline(host)
-installUnitFactory(host)
-installSimThreads(host)
-host.installStubTrap(() => {})
+installEngine(host)
 loadUnitBlueprint(host, 'uel0001', uel0001bp)
 
 console.log('\n== ACU über Original-Klasse spawnen (OnCreate als Thread) ==')

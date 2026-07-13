@@ -1,3 +1,5 @@
+import COMPAT_LUA from '../engine-lua/compat.lua?raw'
+export { COMPAT_LUA }
 /**
  * Übersetzt den FA-Lua-Dialekt (Lua 5.0 mit GPG-Erweiterungen) in Standard-
  * Lua, das ein moderner VM (5.1/5.4) laden kann.
@@ -62,7 +64,16 @@ function consumeNumber(source: string, i: number): number {
 
 export function transpileFaLua(source: string): TranspileResult {
   const stats = { hashComments: 0, notEquals: 0, forInTable: 0, continues: 0, varargArg: 0 }
-  let out = ''
+  // Chunk-Liste statt String-Konkatenation: `out[out.length - 1]` auf einem
+  // wachsenden String zwingt V8, die Rope bei JEDEM Zeichen zu materialisieren
+  // — quadratisch. lua/basetemplates.lua (1,1 MB) brauchte so 164 Sekunden.
+  const parts: string[] = []
+  let lastChar = ''
+  const emit = (s: string): void => {
+    if (s.length === 0) return
+    parts.push(s)
+    lastChar = s[s.length - 1]!
+  }
   let mode: Mode = 'code'
   let quote = ''
   let longLevel = 0
@@ -94,11 +105,11 @@ export function transpileFaLua(source: string): TranspileResult {
         if (lvl >= 0) {
           mode = 'longComment'
           longLevel = lvl
-          out += source.slice(i, i + 4 + lvl)
+          emit(source.slice(i, i + 4 + lvl))
           i += 4 + lvl
         } else {
           mode = 'lineComment'
-          out += '--'
+          emit('--')
           i += 2
         }
         continue
@@ -107,7 +118,7 @@ export function transpileFaLua(source: string): TranspileResult {
       if (c === '#') {
         stats.hashComments++
         mode = 'lineComment'
-        out += '--'
+        emit('--')
         i++
         continue
       }
@@ -115,7 +126,7 @@ export function transpileFaLua(source: string): TranspileResult {
       if (c === '"' || c === "'") {
         mode = 'shortString'
         quote = c
-        out += c
+        emit(c)
         i++
         continue
       }
@@ -123,14 +134,14 @@ export function transpileFaLua(source: string): TranspileResult {
       if (lvl >= 0) {
         mode = 'longString'
         longLevel = lvl
-        out += source.slice(i, i + 2 + lvl)
+        emit(source.slice(i, i + 2 + lvl))
         i += 2 + lvl
         continue
       }
       // --- Operatoren ---
       if (c === '!' && source[i + 1] === '=') {
         stats.notEquals++
-        out += '~='
+        emit('~=')
         i += 2
         continue
       }
@@ -139,15 +150,15 @@ export function transpileFaLua(source: string): TranspileResult {
       // erkennen und bei folgendem Buchstaben ein Leerzeichen einfügen.
       // Nur wenn die Ziffer wirklich eine Zahl beginnt (nicht Teil eines
       // Bezeichners wie `foo2`) — geprüft über das letzte Ausgabezeichen.
-      const prevChar = out.length > 0 ? out[out.length - 1]! : ''
+      const prevChar = lastChar
       const startsNumber =
         (c >= '0' && c <= '9') ||
         (c === '.' && (source[i + 1] ?? '') >= '0' && (source[i + 1] ?? '') <= '9')
       if (startsNumber && !/[A-Za-z0-9_.]/.test(prevChar)) {
         const end = consumeNumber(source, i)
-        out += source.slice(i, end)
+        emit(source.slice(i, end))
         const after = source[end] ?? ''
-        if (/[A-Za-z_]/.test(after)) out += ' '
+        if (/[A-Za-z_]/.test(after)) emit(' ')
         i = end
         continue
       }
@@ -155,18 +166,18 @@ export function transpileFaLua(source: string): TranspileResult {
       if (c === '{') {
         const hint = /^\{\s*&\d+&\d+/.exec(source.slice(i, i + 24))
         if (hint) {
-          out += '{'
+          emit('{')
           i += hint[0].length
           continue
         }
       }
-      out += c
+      emit(c)
       i++
       continue
     }
 
     if (mode === 'lineComment') {
-      out += c
+      emit(c)
       if (c === '\n') mode = 'code'
       i++
       continue
@@ -177,14 +188,14 @@ export function transpileFaLua(source: string): TranspileResult {
         const next = source[i + 1] ?? ''
         // Lua 5.0 ließ unbekannte Escapes durch ("\m"), 5.1+ nicht
         if (!VALID_ESCAPES.has(next) && !/\d/.test(next)) {
-          out += `\\\\${next}`
+          emit(`\\\\${next}`)
         } else {
-          out += source.slice(i, i + 2)
+          emit(source.slice(i, i + 2))
         }
         i += 2
         continue
       }
-      out += c
+      emit(c)
       if (c === quote || c === '\n') mode = 'code'
       i++
       continue
@@ -199,16 +210,17 @@ export function transpileFaLua(source: string): TranspileResult {
         q++
       }
       if (eq === longLevel && source[q] === ']') {
-        out += source.slice(i, q + 1)
+        emit(source.slice(i, q + 1))
         i = q + 1
         mode = 'code'
         continue
       }
     }
-    out += c
+    emit(c)
     i++
   }
 
+  const out = parts.join('')
   return {
     code: rewriteContinue(rewriteVarargArg(rewriteForIn(out, stats), stats), stats),
     stats,
@@ -271,10 +283,17 @@ function rewriteVarargArg(code: string, stats: { varargArg: number }): string {
   }
 
   if (edits.length === 0) return code
-  edits.sort((a, b) => b.pos - a.pos)
-  let out = code
-  for (const e of edits) out = out.slice(0, e.pos) + e.text + out.slice(e.pos)
-  return out
+  // Ein einziger Durchgang: jede Einzelanwendung würde den kompletten Quelltext
+  // erneut kopieren (quadratisch bei vielen Edits).
+  edits.sort((a, b) => a.pos - b.pos)
+  const parts: string[] = []
+  let at = 0
+  for (const e of edits) {
+    parts.push(code.slice(at, e.pos), e.text)
+    at = e.pos
+  }
+  parts.push(code.slice(at))
+  return parts.join('')
 }
 
 /**
@@ -438,12 +457,17 @@ function rewriteContinue(code: string, stats: { continues: number }): string {
   }
 
   if (edits.length === 0) return code
-  edits.sort((a, b) => b.start - a.start) // von hinten anwenden
-  let out = code
+  // Ein Durchgang von vorn statt pro Edit den ganzen String neu zu bauen.
+  edits.sort((a, b) => a.start - b.start)
+  const parts: string[] = []
+  let at = 0
   for (const e of edits) {
-    out = out.slice(0, e.start) + e.text + out.slice(e.end)
+    if (e.start < at) continue // überlappende Edits kann es nicht geben
+    parts.push(code.slice(at, e.start), e.text)
+    at = e.end
   }
-  return out
+  parts.push(code.slice(at))
+  return parts.join('')
 }
 
 /**
@@ -473,51 +497,3 @@ function rewriteForIn(code: string, stats: { forInTable: number }): string {
  * Kompat-Schicht für Lua-5.0-Bibliotheksfunktionen, die FA nutzt.
  * Wird vor allen Spiel-Skripten in den VM geladen.
  */
-export const COMPAT_LUA = `
--- Lua-5.0-Kompatibilität für FA-Skripte
-
--- Generic-for-Dispatcher (siehe rewriteForIn): Tabelle -> pairs/next,
--- Iterator-Tripel unveraendert durchreichen.
-function __foriter(a, b, c)
-  if type(a) == 'table' then
-    return next, a, nil
-  end
-  return a, b, c
-end
-
-table.getn = table.getn or function(t) return #t end
-table.setn = table.setn or function() end
-table.foreach = table.foreach or function(t, f)
-  for k, v in pairs(t) do local r = f(k, v); if r ~= nil then return r end end
-end
-table.foreachi = table.foreachi or function(t, f)
-  for i, v in ipairs(t) do local r = f(i, v); if r ~= nil then return r end end
-end
-math.mod = math.mod or function(a, b) return a % b end
-unpack = unpack or table.unpack
-loadstring = loadstring or load
-if not setfenv then
-  -- 5.4: über Upvalue _ENV (ausreichend für FAs Nutzung)
-  function setfenv(fn, env)
-    if type(fn) == 'number' then return end
-    local i = 1
-    while true do
-      local name = debug.getupvalue(fn, i)
-      if not name then break end
-      if name == '_ENV' then debug.upvaluejoin(fn, i, function() return env end, 1); break end
-      i = i + 1
-    end
-    return fn
-  end
-  function getfenv(fn)
-    if type(fn) ~= 'function' then return _G end
-    local i = 1
-    while true do
-      local name, val = debug.getupvalue(fn, i)
-      if not name then return _G end
-      if name == '_ENV' then return val end
-      i = i + 1
-    end
-  end
-end
-`

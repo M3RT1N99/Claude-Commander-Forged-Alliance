@@ -9,6 +9,7 @@ import { open, type FileHandle } from 'node:fs/promises'
 import { ZipArchive } from '../src/vfs/zipArchive'
 import type { RandomAccessFile } from '../src/vfs/randomAccess'
 import { LuaHost } from '../src/lua/host'
+import { installEngine } from '../src/lua/engine'
 
 class NodeFile implements RandomAccessFile {
   private constructor(
@@ -56,23 +57,10 @@ const host = await LuaHost.create(files, (level, msg) => {
   if (level === 'WARN') warnings.push(msg)
 })
 
-host.loadGlobal('/lua/system/utils.lua')
-
-// moho-Engine-Basisklassen: lazy leere Class() pro Zugriff, damit
-// `Class(moho.unit_methods)` eine gültige Basis (Metatable == Class) bekommt.
-host.eval(`
-  moho = setmetatable({}, {
-    __index = function(t, k)
-      local c = Class() {}
-      rawset(t, k, c)
-      return c
-    end,
-  })
-`)
+installEngine(host)
 
 // Discovery-Trap: fehlende Engine-Globals melden (kein Raten).
 const missing = new Set<string>()
-host.installStubTrap((name) => missing.add(name))
 
 console.log('\n== Import-Kaskade: Unit.lua + defaultunits.lua ==')
 try {

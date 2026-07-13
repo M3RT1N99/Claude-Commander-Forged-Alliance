@@ -9,7 +9,7 @@ import { open, type FileHandle } from 'node:fs/promises'
 import { ZipArchive } from '../src/vfs/zipArchive'
 import type { RandomAccessFile } from '../src/vfs/randomAccess'
 import { LuaHost } from '../src/lua/host'
-import { installMoho, MOHO_METHOD_COUNT } from '../src/lua/moho'
+import { installEngine } from '../src/lua/engine'
 
 class NodeFile implements RandomAccessFile {
   private constructor(
@@ -61,9 +61,7 @@ const host = await LuaHost.create(files, (level, msg) => {
   if (level === 'WARN') warnings.push(msg)
 })
 
-host.loadGlobal('/lua/system/utils.lua')
-installMoho(host)
-console.log(`moho-API: ${MOHO_METHOD_COUNT.entity} Entity- + ${MOHO_METHOD_COUNT.unit} Unit-Methoden`)
+installEngine(host)
 
 // Blueprint-Pipeline (A2) — registriert uel0001
 host.eval(`
@@ -87,7 +85,6 @@ host.eval(`
 host.loadGlobal('/lua/system/Blueprints.lua')
 
 const missing = new Set<string>()
-host.installStubTrap((name) => missing.add(name))
 host.eval(`LoadBlueprints()`)
 
 console.log('\n== Unit über echte Unit.lua instanziieren + OnCreate ==')

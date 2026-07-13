@@ -10,7 +10,7 @@ import { open, type FileHandle } from 'node:fs/promises'
 import { ZipArchive } from '../src/vfs/zipArchive'
 import type { RandomAccessFile } from '../src/vfs/randomAccess'
 import { LuaHost } from '../src/lua/host'
-import { installMoho } from '../src/lua/moho'
+import { installEngine } from '../src/lua/engine'
 import { installUnitFactory, installBlueprintPipeline, loadUnitBlueprint, spawnLuaUnit, readLuaUnit } from '../src/lua/unitFactory'
 import { installSimThreads } from '../src/lua/simThreads'
 import { EconomyManager, installEconomy } from '../src/sim/economy'
@@ -56,10 +56,7 @@ let failures = 0
 const check = (ok: boolean, label: string): void => { console.log(`  ${ok ? 'OK  ' : 'FAIL'} ${label}`); if (!ok) failures++ }
 
 const host = await LuaHost.create(files, () => {})
-host.loadGlobal('/lua/system/utils.lua')
-installMoho(host); installBlueprintPipeline(host); installUnitFactory(host); installSimThreads(host)
-installEconomy(host, new EconomyManager()); installMotion(host)
-host.installStubTrap(() => {})
+installEngine(host)
 
 console.log('\n== Spawn aller Sandbox-Units über die echte Unit.lua ==')
 for (const [id, name] of UNITS) {

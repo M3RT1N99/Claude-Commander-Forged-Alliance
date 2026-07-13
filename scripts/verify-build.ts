@@ -11,7 +11,7 @@ import { open, type FileHandle } from 'node:fs/promises'
 import { ZipArchive } from '../src/vfs/zipArchive'
 import type { RandomAccessFile } from '../src/vfs/randomAccess'
 import { LuaHost } from '../src/lua/host'
-import { installMoho } from '../src/lua/moho'
+import { installEngine } from '../src/lua/engine'
 import { installUnitFactory, installBlueprintPipeline, loadUnitBlueprint, spawnLuaUnit, spawnBuildSite } from '../src/lua/unitFactory'
 import { installSimThreads, simTick } from '../src/lua/simThreads'
 import { installMotion, motionTick } from '../src/sim/motion'
@@ -47,11 +47,7 @@ const check = (ok: boolean, label: string): void => { console.log(`  ${ok ? 'OK 
 const near = (a: number, b: number, eps = 0.02): boolean => Math.abs(a - b) < eps
 
 const host = await LuaHost.create(files, () => {})
-host.loadGlobal('/lua/system/utils.lua')
-installMoho(host); installBlueprintPipeline(host); installUnitFactory(host); installSimThreads(host)
-const eco = new EconomyManager()
-installEconomy(host, eco); installMotion(host); installBuild(host)
-host.installStubTrap(() => {})
+const { economy: eco } = installEngine(host)
 loadUnitBlueprint(host, 'uel0001', bps.get('uel0001')!)
 loadUnitBlueprint(host, 'ueb1101', bps.get('ueb1101')!)
 

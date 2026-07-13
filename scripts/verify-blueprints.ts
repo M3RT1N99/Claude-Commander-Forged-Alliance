@@ -9,6 +9,7 @@ import { open, type FileHandle } from 'node:fs/promises'
 import { ZipArchive } from '../src/vfs/zipArchive'
 import type { RandomAccessFile } from '../src/vfs/randomAccess'
 import { LuaHost } from '../src/lua/host'
+import { installEngine } from '../src/lua/engine'
 
 class NodeFile implements RandomAccessFile {
   private constructor(
@@ -66,49 +67,18 @@ const host = await LuaHost.create(files, (level, msg) => {
 // Pipeline braucht). Läuft im globalen Env → Funktionen werden global.
 host.loadGlobal('/lua/system/utils.lua')
 
-// Engine-Seite bereitstellen, damit die ECHTE LoadBlueprints()-Pipeline
-// läuft: RegisterXBlueprint sammeln, DiskFindFiles liefert unseren einen
-// Blueprint, Fortschritts-/Safecall-Helfer.
-host.eval(`
-  __active_mods = {}
-  __registered = { Unit={}, Mesh={}, Prop={}, Projectile={}, Emitter={}, TrailEmitter={}, Beam={} }
-  local function collector(group)
-    return function(bp) __registered[group][bp.BlueprintId or '?'] = bp end
-  end
-  RegisterUnitBlueprint        = collector('Unit')
-  RegisterMeshBlueprint        = collector('Mesh')
-  RegisterPropBlueprint        = collector('Prop')
-  RegisterProjectileBlueprint  = collector('Projectile')
-  RegisterEmitterBlueprint     = collector('Emitter')
-  RegisterTrailEmitterBlueprint= collector('TrailEmitter')
-  RegisterBeamBlueprint        = collector('Beam')
-
-  function BlueprintLoaderUpdateProgress() end
-
-  -- DiskFindFiles: für A2 nur unser eines Unit-Blueprint unter /units
-  __bpFiles = { '/${bpKey}' }
-  function DiskFindFiles(dir, pattern)
-    local out = {}
-    for _, f in ipairs(__bpFiles) do
-      if string.find(f, dir, 1, true) == 1 then out[#out+1] = f end
-    end
-    return out
-  end
-`)
-
-// Blueprint-Pipeline (Original) laden
-host.loadGlobal('/lua/system/Blueprints.lua')
+// Die ECHTE Pipeline — kein Nachbau im Test (sonst fehlt z. B. Sound{}).
+installEngine(host)
 
 // Discovery-Trap: die Blueprint-DSL nutzt Engine-Konstruktoren (Sound{},
 // Vector{}, ...). Wir entdecken sie, statt zu raten.
 const missing = new Set<string>()
-host.installStubTrap((name) => missing.add(name))
 
 console.log('\n== Original-Pipeline: LoadBlueprints() ==')
 // Die echte LoadBlueprints() fährt Init -> doscript(bp) -> ExtractAllMesh ->
 // ModBlueprints -> RegisterAllBlueprints — nur gefüttert mit unserem einen
 // Blueprint (DiskFindFiles oben).
-host.eval(`LoadBlueprints()`)
+host.eval(`__bpFiles = { '/${bpKey}' }; LoadBlueprints()`)
 
 const storedId = host.eval(`
   local k = next(__registered.Unit)

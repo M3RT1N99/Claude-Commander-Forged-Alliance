@@ -1,0 +1,418 @@
+-- === Vektor-Mathematik (cfunc_VDist2/VDist3/…) ===
+function VDist2(x1, z1, x2, z2)
+  local dx, dz = x1 - x2, z1 - z2
+  return math.sqrt(dx * dx + dz * dz)
+end
+function VDist2Sq(x1, z1, x2, z2)
+  local dx, dz = x1 - x2, z1 - z2
+  return dx * dx + dz * dz
+end
+local function vxyz(v)
+  if not v then return 0, 0, 0 end
+  return v[1] or v.x or 0, v[2] or v.y or 0, v[3] or v.z or 0
+end
+function VDist3(a, b)
+  local ax, ay, az = vxyz(a)
+  local bx, by, bz = vxyz(b)
+  local dx, dy, dz = ax - bx, ay - by, az - bz
+  return math.sqrt(dx * dx + dy * dy + dz * dz)
+end
+function VDist3Sq(a, b)
+  local ax, ay, az = vxyz(a)
+  local bx, by, bz = vxyz(b)
+  local dx, dy, dz = ax - bx, ay - by, az - bz
+  return dx * dx + dy * dy + dz * dz
+end
+function VAdd(a, b) local ax,ay,az = vxyz(a); local bx,by,bz = vxyz(b); return { ax+bx, ay+by, az+bz } end
+function VSub(a, b) local ax,ay,az = vxyz(a); local bx,by,bz = vxyz(b); return { ax-bx, ay-by, az-bz } end
+function VDiff(a, b) return VSub(a, b) end
+function VMult(a, s) local ax,ay,az = vxyz(a); return { ax*s, ay*s, az*s } end
+function Vector(x, y, z) return { x, y, z } end
+function Vector2(x, y) return { x, y } end
+
+-- === Entity-Praedikate (cfunc_IsDestroyed/IsUnit/…) ===
+function IsDestroyed(e)
+  if not e then return true end
+  if type(e) ~= 'table' then return true end
+  return e.__destroyed == true
+end
+function IsEntity(e) return type(e) == 'table' and e.__id ~= nil end
+function IsUnit(e) return type(e) == 'table' and e.__bp ~= nil end
+function IsProp(e) return false end
+function IsAlly(a, b) return a == b end
+function IsEnemy(a, b) return a ~= b end
+
+-- === Kategorie-System (EntityCategory, categories, ParseEntityCategory) ===
+-- Eine EntityCategory ist ein Ausdrucksbaum ueber Kategorie-Tokens; getestet
+-- wird gegen die Categories-Liste des Blueprints (wie EntityCategoryContains).
+local CatMeta = {}
+local function mkcat(kind, a, b) return setmetatable({ __cat = true, kind = kind, a = a, b = b }, CatMeta) end
+CatMeta.__add = function(x, y) return mkcat('or', x, y) end
+CatMeta.__mul = function(x, y) return mkcat('and', x, y) end
+CatMeta.__sub = function(x, y) return mkcat('sub', x, y) end
+CatMeta.__index = CatMeta
+
+local function catTest(c, set)
+  if type(c) ~= 'table' or not c.__cat then return false end
+  local k = c.kind
+  if k == 'tok' then return set[c.a] == true end
+  if k == 'or' then return catTest(c.a, set) or catTest(c.b, set) end
+  if k == 'and' then return catTest(c.a, set) and catTest(c.b, set) end
+  if k == 'sub' then return catTest(c.a, set) and not catTest(c.b, set) end
+  if k == 'all' then return true end
+  return false
+end
+
+categories = setmetatable({}, {
+  __index = function(t, k)
+    local c = mkcat('tok', k)
+    rawset(t, k, c)
+    return c
+  end,
+})
+categories.ALLUNITS = mkcat('all')
+
+-- ParseEntityCategory('BUILTBYCOMMANDER UEF'): Leerzeichen = UND (wie in den
+-- Blueprint-BuildableCategory-Termen); '+'/'-'/'*' werden ebenfalls erkannt.
+function ParseEntityCategory(expr)
+  if type(expr) ~= 'string' then return expr end
+  local cur = nil
+  local op = 'and'
+  for tok in string.gmatch(expr, '%S+') do
+    if tok == '+' then op = 'or'
+    elseif tok == '-' then op = 'sub'
+    elseif tok == '*' then op = 'and'
+    else
+      local c = categories[tok]
+      if not cur then cur = c
+      elseif op == 'or' then cur = cur + c
+      elseif op == 'sub' then cur = cur - c
+      else cur = cur * c end
+      op = 'and'
+    end
+  end
+  return cur or mkcat('all')
+end
+
+local function bpCategorySet(bp)
+  local set = {}
+  if bp and bp.Categories then
+    for _, c in ipairs(bp.Categories) do set[c] = true end
+  end
+  return set
+end
+
+local function entityBp(e)
+  if type(e) ~= 'table' then return nil end
+  if e.__bp then return e.__bp end
+  if type(e) == 'string' then return __registered and __registered.Unit[e] end
+  return nil
+end
+
+function EntityCategoryContains(cat, e)
+  local bp = entityBp(e)
+  if not bp then
+    -- auch ein Blueprint-Name ist erlaubt
+    if type(e) == 'string' and __registered then bp = __registered.Unit[string.lower(e)] end
+  end
+  if not bp or not cat then return false end
+  if type(cat) == 'string' then cat = ParseEntityCategory(cat) end
+  return catTest(cat, bpCategorySet(bp))
+end
+
+function EntityCategoryFilterDown(cat, list)
+  local out = {}
+  local n = 0
+  for _, e in ipairs(list or {}) do
+    if EntityCategoryContains(cat, e) then n = n + 1; out[n] = e end
+  end
+  return out
+end
+function EntityCategoryFilterOut(cat, list)
+  local out = {}
+  local n = 0
+  for _, e in ipairs(list or {}) do
+    if not EntityCategoryContains(cat, e) then n = n + 1; out[n] = e end
+  end
+  return out
+end
+function EntityCategoryCount(cat, list)
+  local n = 0
+  for _, e in ipairs(list or {}) do if EntityCategoryContains(cat, e) then n = n + 1 end end
+  return n
+end
+function EntityCategoryEmpty(cat, list)
+  return EntityCategoryCount(cat, list) == 0
+end
+
+-- Alle registrierten Blueprint-IDs, die die Kategorie erfuellen.
+function EntityCategoryGetUnitList(cat)
+  local out = {}
+  local n = 0
+  if type(cat) == 'string' then cat = ParseEntityCategory(cat) end
+  if __registered and __registered.Unit then
+    for id, bp in pairs(__registered.Unit) do
+      if catTest(cat, bpCategorySet(bp)) then n = n + 1; out[n] = id end
+    end
+  end
+  table.sort(out)
+  return out
+end
+
+-- === Manipulatoren (CreateRotator/CreateSlider/… ) ===
+-- Im Original C++-Objekte, die die Unit im Trash sammelt (brauchen :Destroy()).
+local ManipMeta = {}
+ManipMeta.__index = ManipMeta
+function ManipMeta:SetGoal(...) self.__goal = { ... }; return self end
+function ManipMeta:SetSpeed(s) self.__speed = s; return self end
+function ManipMeta:SetTargetSpeed(s) self.__targetSpeed = s; return self end
+function ManipMeta:SetAccel(a) self.__accel = a; return self end
+function ManipMeta:SetPrecedence(p) self.__precedence = p; return self end
+function ManipMeta:SetSpinDown(v) self.__spinDown = v; return self end
+-- unit.lua:1660 dokumentiert die Signatur selbst:
+-- BuilderArmManipulator:SetAimingArc(minHeading, maxHeading, headingMaxSlew, minPitch, maxPitch, pitchMaxSlew)
+function ManipMeta:SetAimingArc(minH, maxH, slewH, minP, maxP, slewP)
+  self.__arc = { minH, maxH, slewH, minP, maxP, slewP }
+  return self
+end
+function ManipMeta:SetHeadingPitch(h, p) self.__heading = h; self.__pitch = p; return self end
+function ManipMeta:GetHeadingPitch() return self.__heading or 0, self.__pitch or 0 end
+-- CAnimationManipulator (decomp: cfunc_CAnimationManipulatorPlayAnim).
+function ManipMeta:PlayAnim(anim, loop)
+  self.__anim = anim
+  self.__loop = loop == true
+  self.__animTime = 0
+  return self
+end
+function ManipMeta:SetAnimationFraction(fr) self.__animFraction = fr; return self end
+function ManipMeta:GetAnimationFraction() return self.__animFraction or 0 end
+function ManipMeta:SetRate(r) self.__rate = r; return self end
+function ManipMeta:GetAnimationTime() return self.__animTime or 0 end
+function ManipMeta:SetBoneEnabled(bone, on) return self end
+function ManipMeta:ClearGoal() self.__goal = nil; return self end
+function ManipMeta:Disable() self.__enabled = false; return self end
+function ManipMeta:Enable() self.__enabled = true; return self end
+function ManipMeta:Destroy() self.__destroyed = true end
+function ManipMeta:IsDestroyed() return self.__destroyed == true end
+function ManipMeta:GetGoal() return self.__goal end
+-- WaitFor(manipulator) blocks until the manipulator reached its goal. There is
+-- no bone animation system yet, so a manipulator is done the moment it is set;
+-- once bones animate, this reports real progress instead.
+function ManipMeta:IsDone() return true end
+
+local function newManipulator(kind, unit, bone)
+  return setmetatable({ __kind = kind, __unit = unit, __bone = bone, __enabled = true }, ManipMeta)
+end
+function CreateRotator(unit, bone, axis) return newManipulator('rotator', unit, bone) end
+function CreateSlider(unit, bone) return newManipulator('slider', unit, bone) end
+function CreateAnimator(unit) return newManipulator('animator', unit) end
+function CreateBuilderArmController(unit, bone) return newManipulator('builderarm', unit, bone) end
+function CreateThrustController(unit, bone) return newManipulator('thrust', unit, bone) end
+function CreateAimController(unit, bone) return newManipulator('aim', unit, bone) end
+
+-- CollisionDetector: Engine-Objekt, das Bones auf Bodenkontakt ueberwacht
+-- (unit.lua:2660 CreateCollisionDetector(self) -> :WatchBone(bone); landet im
+-- Trash, braucht also Destroy()). Fussstapfen-/Aufschlag-Effekte haengen daran.
+local DetectorMeta = {}
+DetectorMeta.__index = DetectorMeta
+function DetectorMeta:WatchBone(bone)
+  self.bones[#self.bones + 1] = bone
+  return self
+end
+function DetectorMeta:Enable() self.__enabled = true; return self end
+function DetectorMeta:Disable() self.__enabled = false; return self end
+function DetectorMeta:Destroy() self.__destroyed = true end
+function CreateCollisionDetector(unit)
+  return setmetatable({ __unit = unit, bones = {}, __enabled = true }, DetectorMeta)
+end
+function CreateFootPlantController(unit, footBone, kneeBone, hipBone, straightLegs, maxFootFall)
+  return newManipulator('footplant', unit, footBone)
+end
+
+-- === Armeen / Brains ===
+-- GetArmyBrain(army) ist ein echtes Engine-Global (defaultunits.lua:442 u. a.).
+-- Als Stub lieferte es die Identitaet — also die ARMEE-ZAHL statt des Brains,
+-- worauf defaultunits.lua:443 eine Zahl indizierte.
+function GetArmyBrain(army) return __getBrain(army) end
+-- brain:GetListOfUnits(cat, needToBeIdle) -> living units of that army.
+function __armyUnits(army, cat)
+  local out = {}
+  local n = 0
+  for _, u in pairs(__units or {}) do
+    if u.__army == army and not u.__destroyed then
+      if not cat or EntityCategoryContains(cat, u) then n = n + 1; out[n] = u end
+    end
+  end
+  return out
+end
+__focusArmy = 1
+function GetFocusArmy() return __focusArmy end
+function SetFocusArmy(a) __focusArmy = a end
+
+-- Sim-Global: Enhancements je Entity-Id. Die Sim fuellt es, die UI liest es
+-- ueber Sync.UserUnitEnhancements (simuistate.lua:44). unit.lua:576/2085
+-- indizieren es ungeprueft, es muss also immer eine Tabelle sein.
+SimUnitEnhancements = {}
+
+-- _c_CreateEntity(self, spec): der C-Konstruktor hinter Entity (entity.lua:11).
+-- Er verwandelt die Lua-Tabelle in eine Engine-Entity — Id, Armee, Position.
+__nextEntityId = 1000000
+function _c_CreateEntity(self, spec)
+  spec = spec or {}
+  self.__id = __nextEntityId
+  __nextEntityId = __nextEntityId + 1
+  self.__army = spec.Army or spec.army or -1
+  self.__pos = spec.Position or { 0, 0, 0 }
+  self.__orient = spec.Orientation or { 0, 0, 0, 1 }
+  self.__bp = spec.Blueprint or spec.bp
+  self.__owner = spec.Owner
+  return self
+end
+
+-- === Effekt-Emitter (CreateAttachedEmitter / CreateEmitterAtBone …) ===
+-- Engine objects for particle effects. The Lua chains calls on them
+-- (defaultunits.lua:189 :OffsetEmitter(...)), collects them in TrashBags and
+-- expects :Destroy(). The renderer will consume __emitters later; for now they
+-- are honest state carriers, not identity stubs.
+local EmitterMeta = {}
+EmitterMeta.__index = EmitterMeta
+function EmitterMeta:OffsetEmitter(x, y, z) self.__offset = { x, y, z }; return self end
+function EmitterMeta:ScaleEmitter(s) self.__scale = s; return self end
+function EmitterMeta:SetEmitterParam(p, v) self.__params[p] = v; return self end
+function EmitterMeta:SetEmitterCurveParam(p, a, b) self.__params[p] = { a, b }; return self end
+function EmitterMeta:SetAmbientSound(a, b) return self end
+function EmitterMeta:SetSoftness(s) self.__softness = s; return self end
+function EmitterMeta:Enable() self.__enabled = true; return self end
+function EmitterMeta:Disable() self.__enabled = false; return self end
+function EmitterMeta:Destroy() self.__destroyed = true end
+function EmitterMeta:IsDestroyed() return self.__destroyed == true end
+
+__emitters = {}
+local function newEmitter(owner, bone, army, spec)
+  local e = setmetatable({
+    __owner = owner, __bone = bone, __army = army, __spec = spec,
+    __params = {}, __enabled = true,
+  }, EmitterMeta)
+  __emitters[#__emitters + 1] = e
+  return e
+end
+function CreateAttachedEmitter(owner, bone, army, spec) return newEmitter(owner, bone, army, spec) end
+function CreateEmitterAtBone(owner, bone, army, spec) return newEmitter(owner, bone, army, spec) end
+function CreateEmitterAtEntity(owner, army, spec) return newEmitter(owner, -1, army, spec) end
+function CreateEmitterOnEntity(owner, army, spec) return newEmitter(owner, -1, army, spec) end
+function CreateBeamEmitter(owner, spec, army) return newEmitter(owner, -1, army, spec) end
+function CreateBeamEmitterOnEntity(owner, bone, army, spec) return newEmitter(owner, bone, army, spec) end
+function AttachBeamEntityToEntity(a, ab, b, bb, army, spec) return newEmitter(a, ab, army, spec) end
+function CreateLightParticle(owner, bone, army, size, life, tex, ramp) end
+function CreateLightParticleIntel(owner, bone, army, size, life, tex, ramp) end
+function CreateSplat(pos, heading, tex, sx, sz, lod, life, army) return newEmitter(nil, -1, army, tex) end
+function CreateDecal(pos, heading, tex1, tex2, type, sx, sz, lod, life, army) return newEmitter(nil, -1, army, tex1) end
+
+-- === Economy events (CreateEconomyEvent / WaitFor) ===
+-- unit.lua:3599 (teleport drain) and defaultweapons.lua:143 (overcharge) buy a
+-- timed resource drain: CreateEconomyEvent(unit, energy, mass, time, callback).
+-- It is an economy CONSUMER just like a build task, so it goes through the same
+-- two-ratio distribution — if the army stalls, the event simply takes longer.
+__econEvents = {}
+__nextEconEventId = 1
+
+local EventMeta = {}
+EventMeta.__index = EventMeta
+function EventMeta:IsDone() return self.progress >= 1.0 end
+function EventMeta:GetProgress() return self.progress end
+function EventMeta:Destroy()
+  self.destroyed = true
+  __econEvents[self.id] = nil
+  __econClearBuildRequest(self.army, self.id)
+end
+
+function CreateEconomyEvent(entity, energy, mass, time, callback)
+  local ticks = math.max(1, math.floor((time or 1) * 10))
+  local ev = setmetatable({
+    -- Negative ids: economy events and build tasks share the consumer table.
+    id = -__nextEconEventId,
+    army = (entity and entity.__army) or 1,
+    massPerTick = (mass or 0) / ticks,
+    energyPerTick = (energy or 0) / ticks,
+    ticksLeft = ticks,
+    totalTicks = ticks,
+    progress = 0,
+    callback = callback,
+    entity = entity,
+  }, EventMeta)
+  __nextEconEventId = __nextEconEventId + 1
+  __econEvents[ev.id] = ev
+  return ev
+end
+
+function RemoveEconomyEvent(entity, ev)
+  if ev then ev:Destroy() end
+end
+
+-- Phase 1 of the beat: register demand. Phase 2: apply the granted rate.
+function __econEventsCollect()
+  for id, ev in pairs(__econEvents) do
+    if not ev.destroyed and ev.progress < 1.0 then
+      __econSetBuildRequest(ev.army, id, ev.massPerTick, ev.energyPerTick)
+    end
+  end
+end
+
+function __econEventsApply()
+  for id, ev in pairs(__econEvents) do
+    if not ev.destroyed and ev.progress < 1.0 then
+      local rate = __econBuildRate(ev.army, id)
+      ev.progress = math.min(1.0, ev.progress + rate / ev.totalTicks)
+      if ev.callback then ev.callback(ev.entity, ev.progress) end
+      if ev.progress >= 1.0 then __econClearBuildRequest(ev.army, id) end
+    end
+  end
+end
+
+-- WaitFor(obj): suspend the calling thread until the object reports done.
+-- Used on economy events and on manipulators (aeonweapons.lua:138).
+function WaitFor(obj)
+  if type(obj) ~= 'table' or not obj.IsDone then return end
+  while not obj:IsDone() do
+    coroutine.yield(1)
+  end
+end
+
+-- === Buff-Blueprints (BuffBlueprint{...}) ===
+__buffs = {}
+function BuffBlueprint(spec)
+  if type(spec) == 'table' and spec.Name then __buffs[spec.Name] = spec end
+  return spec
+end
+
+-- === Datei-/Pfad-Helfer ===
+function DiskToLocal(path) return path end
+function DiskGetFileInfo(path) return false end
+
+-- === Terrain (wird von der Engine mit der geladenen Karte versorgt) ===
+-- Ohne Karte 0 — aber eine EHRLICHE Funktion, kein Identitaets-Stub.
+__terrainHeight = nil
+function GetTerrainHeight(x, z)
+  if __terrainHeight then return __terrainHeight(x, z) end
+  return 0
+end
+function GetSurfaceHeight(x, z) return GetTerrainHeight(x, z) end
+
+-- GetTerrainType(x, z) returns a terrain-type record from TerrainTypes
+-- (lua/terraintypes.lua:126, a global list whose first entry is 'Default').
+-- The original Lua indexes the result without checking (unit.lua:2420) and
+-- explicitly asks for the default with (-1, -1) (unit.lua:2421). Until a map
+-- with a terrain-type layer is loaded, every position is the default type.
+function GetTerrainType(x, z)
+  return TerrainTypes and TerrainTypes[1]
+end
+
+-- FlattenMapRect(x, z, w, h, y): Gebaeude planieren ihr Baufeld
+-- (defaultunits.lua:72, StructureUnit:FlattenSkirt). Die Engine deformiert die
+-- Hoehenkarte; solange keine Karte geladen ist, werden die Rechtecke
+-- gesammelt (der Renderer/die Karte wenden sie an).
+__flattenRects = {}
+function FlattenMapRect(x, z, w, h, y)
+  __flattenRects[#__flattenRects + 1] = { x = x, z = z, w = w, h = h, y = y }
+  if __terrainFlatten then __terrainFlatten(x, z, w, h, y) end
+end
