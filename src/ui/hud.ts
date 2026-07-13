@@ -1,7 +1,6 @@
 import * as THREE from 'three'
 import type { GameVfs } from '../vfs/vfs'
 import type { UnitViewer } from '../viewer/unitViewer'
-import type { SandboxController } from '../sandbox/sandbox'
 import type { ScmapData } from '../formats/scmap'
 import { ddsToDataUrl } from './ddsUrl'
 import { parseDds } from '../formats/dds'
@@ -30,7 +29,7 @@ interface OrderDef {
   cap: string
   bitmap: string
   slot: number
-  action?: (c: SandboxController) => void
+  action?: (s: HudSource) => void
 }
 
 /** standardOrdersTable, Slots 1–6 (orders.lua) */
@@ -38,12 +37,12 @@ const COMMON_ORDERS: OrderDef[] = [
   { cap: 'RULEUCC_Move', bitmap: 'move', slot: 1 },
   { cap: 'RULEUCC_Attack', bitmap: 'attack', slot: 2 },
   { cap: 'RULEUCC_Patrol', bitmap: 'patrol', slot: 3 },
-  { cap: 'RULEUCC_Stop', bitmap: 'stop', slot: 4, action: (c) => c.stopSelected() },
+  { cap: 'RULEUCC_Stop', bitmap: 'stop', slot: 4, action: (s) => s.stop() },
   { cap: 'RULEUCC_Guard', bitmap: 'guard', slot: 5 },
   { cap: 'RULEUCC_RetaliateToggle', bitmap: 'stand-ground', slot: 6 },
 ]
 
-/** Ökonomie-Momentaufnahme fürs HUD (SimWorld.Army oder Lua-Engine-Adapter). */
+/** Ökonomie-Momentaufnahme fürs HUD. */
 export interface EcoSnapshot {
   mass: number
   massStorage: number
@@ -55,9 +54,30 @@ export interface EcoSnapshot {
   energyExpense: number
 }
 
+/** Momentaufnahme einer Einheit fürs HUD (Unit-Panel, Minimap, Strategic Icons). */
+export interface HudUnitInfo {
+  id: string
+  name: string
+  health: number
+  maxHealth: number
+  selected: boolean
+  x: number
+  z: number
+  y: number
+  army: number
+  strategicIcon: string
+  fadeZoom: number
+}
+
+/** Datenquelle fürs HUD — von der Lua-Engine (main.ts) bereitgestellt. */
+export interface HudSource {
+  economy(): EcoSnapshot
+  units(): HudUnitInfo[]
+  selectedCaps(): ReadonlySet<string>
+  stop(): void
+}
+
 export class Hud {
-  /** Optionale Ökonomie-Quelle (Lua-Engine); überschreibt die SimWorld-Armee. */
-  economyOverride: (() => EcoSnapshot | null) | null = null
   private readonly root: HTMLDivElement
   private readonly refs = new Map<string, HTMLElement>()
   private readonly orderButtons: { def: OrderDef; img: HTMLImageElement; enabled: boolean }[] = []
@@ -70,7 +90,7 @@ export class Hud {
   constructor(
     private readonly vfs: GameVfs,
     private readonly viewer: UnitViewer,
-    private readonly controller: SandboxController,
+    private readonly source: HudSource,
     private readonly scmap: ScmapData,
   ) {
     this.root = document.createElement('div')
@@ -174,7 +194,7 @@ export class Hud {
     const layer = this.el('#strat-layer')
     const rootRect = this.root.getBoundingClientRect()
     const dist = this.viewer.getRtsDistance()
-    const units = this.controller.hudUnits()
+    const units = this.source.units()
 
     while (this.stratPool.length < units.length) {
       const img = document.createElement('img')
@@ -286,7 +306,7 @@ export class Hud {
         img.addEventListener('pointerup', () => {
           if (!entry.enabled) return
           if (over) img.src = over
-          def.action?.(this.controller)
+          def.action?.(this.source)
         })
         this.orderButtons.push(entry)
         cell.appendChild(img)
@@ -359,7 +379,7 @@ export class Hud {
   private update(): void {
     // Economy — Werte aus der Sim (Rate-Farben wie economy.lua: positiv
     // grün, negativ mit Vorrat gelb, negativ ohne Vorrat rot)
-    const army: EcoSnapshot = this.economyOverride?.() ?? this.controller.world.army(1)
+    const army: EcoSnapshot = this.source.economy()
     for (const [group, cur, max, income, expense] of [
       ['#eco-mass', army.mass, army.massStorage, army.massIncome, army.massExpense],
       ['#eco-energy', army.energy, army.energyStorage, army.energyIncome, army.energyExpense],
@@ -376,7 +396,7 @@ export class Hud {
     }
 
     // Orders — verfügbar = Union der CommandCaps der Auswahl (Original)
-    const caps = this.controller.selectedCaps()
+    const caps = this.source.selectedCaps()
     for (const b of this.orderButtons) {
       const enabled = caps.has(b.def.cap)
       if (enabled !== b.enabled) {
@@ -387,7 +407,7 @@ export class Hud {
     }
 
     // Unit-View
-    const units = this.controller.hudUnits()
+    const units = this.source.units()
     const selected = units.filter((u) => u.selected)
     const panel = this.el('#unitview-panel')
     if (selected.length === 0) {

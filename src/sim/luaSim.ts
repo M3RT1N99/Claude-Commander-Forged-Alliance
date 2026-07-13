@@ -92,6 +92,11 @@ export class LuaSim {
     this.host.eval(`local u = __units[${id}]; if u then u:GetNavigator():SetGoal({ ${x}, 0, ${z} }) end`)
   }
 
+  /** Stopp-Befehl: bricht die Bewegung der Unit ab. */
+  stopUnit(id: number): void {
+    this.host.eval(`local u = __units[${id}]; if u then u:GetNavigator():AbortMove() end`)
+  }
+
   /** Aktueller Zustand einer Unit (Position/Heading/Health). */
   readState(id: number): LuaUnitState | null {
     return readLuaUnit(this.host, id)

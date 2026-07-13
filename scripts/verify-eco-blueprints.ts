@@ -10,7 +10,6 @@ import { open, type FileHandle } from 'node:fs/promises'
 import { ZipArchive } from '../src/vfs/zipArchive'
 import type { RandomAccessFile } from '../src/vfs/randomAccess'
 import { parseBlueprint, bpGet, type BpObject } from '../src/formats/blueprint'
-import { statsFromBlueprint } from '../src/sim/simWorld'
 
 class NodeFile implements RandomAccessFile {
   private constructor(
@@ -89,25 +88,6 @@ for (const [id, expected] of Object.entries(EXPECTED)) {
   for (const [field, want] of Object.entries(expected)) {
     const got = bpGet(bp, `Economy.${field}`)
     check(got === want, `Economy.${field} = ${JSON.stringify(got)} (erwartet ${want})`)
-  }
-
-  // statsFromBlueprint muss die Blueprint-Werte 1:1 in die Sim übertragen
-  const s = statsFromBlueprint(id, bp)
-  const mapping: [string, number, number][] = [
-    ['massProduction', s.massProduction, expected.ProductionPerSecondMass ?? 0],
-    ['energyProduction', s.energyProduction, expected.ProductionPerSecondEnergy ?? 0],
-    ['massConsumption', s.massConsumption, expected.MaintenanceConsumptionPerSecondMass ?? 0],
-    ['energyConsumption', s.energyConsumption, expected.MaintenanceConsumptionPerSecondEnergy ?? 0],
-    ['massStorage', s.massStorage, expected.StorageMass ?? 0],
-    ['energyStorage', s.energyStorage, expected.StorageEnergy ?? 0],
-    ['buildCostMass', s.buildCostMass, expected.BuildCostMass ?? 0],
-    ['buildCostEnergy', s.buildCostEnergy, expected.BuildCostEnergy ?? 0],
-    ['buildTime', s.buildTime, expected.BuildTime ?? 1],
-    ['buildRate', s.buildRate, expected.BuildRate ?? 0],
-    ['maxBuildDistance', s.maxBuildDistance, expected.MaxBuildDistance ?? 0],
-  ]
-  for (const [name, got, want] of mapping) {
-    check(got === want, `statsFromBlueprint.${name} = ${got} (erwartet ${want})`)
   }
 }
 

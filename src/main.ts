@@ -22,9 +22,8 @@ import {
 import { ddsToTexture } from './viewer/textures'
 import { UnitViewer } from './viewer/unitViewer'
 import { SandboxController, type SandboxUnitAssets } from './sandbox/sandbox'
-import { statsFromBlueprint } from './sim/simWorld'
 import { LuaSim } from './sim/luaSim'
-import { Hud } from './ui/hud'
+import { Hud, type HudSource, type HudUnitInfo, type EcoSnapshot } from './ui/hud'
 import type { ScmapData } from './formats/scmap'
 import type { UnitTextures } from './viewer/unitMaterial'
 
@@ -97,14 +96,8 @@ async function connect(src: GameSource): Promise<void> {
     if (wantedSandbox) {
       await startSandbox(wantedSandbox)
       const extraSpawns = params.get('spawn')
-      if (extraSpawns && sandbox) {
-        for (const id of extraSpawns.split(',')) await sandboxSpawn(id.trim().toLowerCase())
-      }
-      const move = params.get('move')
-      if (move && sandbox) {
-        const [dx, dz] = move.split(',').map(Number)
-        sandbox.selectFirst()
-        sandbox.moveSelectedTo(spawnPoint.x + (dx || 0), spawnPoint.z + (dz || 0))
+      if (extraSpawns) {
+        for (const id of extraSpawns.split(',')) await spawnViaLua(id.trim().toLowerCase())
       }
       if (params.has('luaspawn')) {
         await spawnViaLua(params.get('luaspawn') || 'uel0001')
@@ -364,30 +357,6 @@ async function loadSandboxAssets(id: string): Promise<SandboxUnitAssets | null> 
   return bundle
 }
 
-async function sandboxSpawn(id: string): Promise<void> {
-  if (!sandbox) return
-  const assets = await loadSandboxAssets(id)
-  if (!assets) return
-
-  // versetzt um den Spawn-Punkt platzieren (goldener Winkel)
-  const n = sandbox.unitCount
-  const angle = n * 2.4
-  const radius = 2 + n * 1.2
-  const x = spawnPoint.x + Math.sin(angle) * radius
-  const z = spawnPoint.z + Math.cos(angle) * radius
-  if (!sandbox.spawn(assets, x, z, currentTeamColor())) {
-    log(`Kein freier Mass-Punkt in Reichweite für ${id.toUpperCase()}`)
-    return
-  }
-  // Floating Economy: Gebäude ziehen ihre Kosten kontinuierlich über die
-  // Bauzeit (Stall bei Ressourcenmangel) — keine Sofortbuchung wie in SC2
-  const stats = statsFromBlueprint(id, assets.bp)
-  log(
-    `Baue ${id.toUpperCase()} — ${stats.buildCostMass} Mass / ${stats.buildCostEnergy} Energy ` +
-      `über ${(stats.buildTime / 10).toFixed(0)} s`,
-  )
-}
-
 async function startSandbox(mapFolder: string): Promise<void> {
   if (!vfs || !source) return
   try {
@@ -431,16 +400,7 @@ async function startSandbox(mapFolder: string): Promise<void> {
     sandbox = new SandboxController(viewer)
     sandbox.setMassSpots(massSpots)
     if (currentScmap) {
-      hud = new Hud(vfs, viewer, sandbox, currentScmap)
-      // Ökonomie-Leiste aus der Lua-Engine speisen (die realen gespawnten Units).
-      hud.economyOverride = () => {
-        const a = luaSim?.army(1)
-        if (!a) return null
-        return {
-          mass: a.mass, massStorage: a.maxMass, massIncome: a.incomeMass, massExpense: a.expenseMass,
-          energy: a.energy, energyStorage: a.maxEnergy, energyIncome: a.incomeEnergy, energyExpense: a.expenseEnergy,
-        }
-      }
+      hud = new Hud(vfs, viewer, hudSource, currentScmap)
     }
     // ACU über die ECHTE Original-Lua-Sim spawnen (Engine-Pfad) statt als
     // SimWorld-Platzhalter. Nicht awaiten, damit die Karte sofort bedienbar ist
@@ -495,20 +455,11 @@ window.addEventListener('pointerup', (e) => {
   boxStart = null
   selectBox.hidden = true
   const moved = Math.hypot(e.clientX - start.x, e.clientY - start.y)
-  // Lua-Engine-Units haben Vorrang bei der Auswahl.
+  // Auswahl über die Lua-Engine (Klick, keine Box-Auswahl).
   if (moved <= 5 && luaSim && luaUnits.length > 0) {
     const luaMsg = selectLua(e.clientX, e.clientY)
-    if (luaMsg) {
-      log(luaMsg)
-      return
-    }
+    if (luaMsg) log(luaMsg)
   }
-  if (!sandbox) return
-  const msg =
-    moved > 5
-      ? sandbox.boxSelect(start.x, start.y, e.clientX, e.clientY)
-      : sandbox.clickSelect(e.clientX, e.clientY)
-  if (msg) log(msg)
 })
 
 viewportEl.addEventListener('contextmenu', (e) => {
@@ -520,11 +471,7 @@ viewportEl.addEventListener('contextmenu', (e) => {
       for (const u of luaUnits) if (u.selected) luaSim.moveUnit(u.id, hit.x, hit.z)
       log(`Move → ${hit.x.toFixed(0)}, ${hit.z.toFixed(0)}`)
     }
-    return
   }
-  if (!sandbox) return
-  const msg = sandbox.commandMove(e.clientX, e.clientY, e.shiftKey)
-  if (msg) log(msg)
 })
 
 window.addEventListener('keydown', (e) => {
@@ -674,12 +621,68 @@ for (const btn of document.querySelectorAll<HTMLButtonElement>('#sandbox-spawns 
 // pro Beat getickt/bewegt und hier selektierbar/gerendert.
 interface LuaSceneUnit {
   id: number
+  bpId: string
   mesh: THREE.Object3D
   ring: THREE.Mesh
   selected: boolean
+  name: string
+  army: number
+  strategicIcon: string
+  fadeZoom: number
+  caps: ReadonlySet<string>
 }
 let luaSim: LuaSim | null = null
 const luaUnits: LuaSceneUnit[] = []
+
+const DEFAULT_ECO: EcoSnapshot = {
+  mass: 150, massStorage: 650, massIncome: 0, massExpense: 0,
+  energy: 400, energyStorage: 4000, energyIncome: 0, energyExpense: 0,
+}
+
+/** RULEUCC_*-Fähigkeiten aus General.CommandCaps (bestimmt die Order-Buttons). */
+function readCaps(bp: BpObject): ReadonlySet<string> {
+  const caps = new Set<string>()
+  const raw = bpGet(bp, 'General.CommandCaps')
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    for (const [k, v] of Object.entries(raw)) if (v === true) caps.add(k)
+  }
+  return caps
+}
+
+// HUD-Datenquelle aus der Lua-Engine (Ökonomie + gespawnte Units).
+const hudSource: HudSource = {
+  economy(): EcoSnapshot {
+    const a = luaSim?.army(1)
+    if (!a) return DEFAULT_ECO
+    return {
+      mass: a.mass, massStorage: a.maxMass, massIncome: a.incomeMass, massExpense: a.expenseMass,
+      energy: a.energy, energyStorage: a.maxEnergy, energyIncome: a.incomeEnergy, energyExpense: a.expenseEnergy,
+    }
+  },
+  units(): HudUnitInfo[] {
+    if (!luaSim) return []
+    const out: HudUnitInfo[] = []
+    for (const u of luaUnits) {
+      const s = luaSim.readState(u.id)
+      if (!s) continue
+      out.push({
+        id: u.bpId, name: u.name, health: s.health, maxHealth: s.maxHealth, selected: u.selected,
+        x: s.x, y: s.y, z: s.z, army: u.army, strategicIcon: u.strategicIcon, fadeZoom: u.fadeZoom,
+      })
+    }
+    return out
+  },
+  selectedCaps(): ReadonlySet<string> {
+    const sel = luaUnits.filter((u) => u.selected)
+    if (sel.length === 0) return new Set<string>()
+    const caps = new Set(sel[0]!.caps)
+    for (const u of sel.slice(1)) for (const c of caps) if (!u.caps.has(c)) caps.delete(c)
+    return caps
+  },
+  stop(): void {
+    for (const u of luaUnits) if (u.selected) luaSim?.stopUnit(u.id)
+  },
+}
 let luaBeatAcc = 0
 let luaHookRegistered = false
 const btnLuaSpawn = document.querySelector<HTMLButtonElement>('#btn-lua-spawn')
@@ -761,7 +764,20 @@ async function spawnViaLua(id: string): Promise<void> {
     ring.visible = false
     ring.renderOrder = 10
     viewer.addHelper(ring)
-    luaUnits.push({ id: state.id, mesh: scene.mesh, ring, selected: false })
+    const strat = bpGet(assets.bp, 'StrategicIconName')
+    const fade = bpGet(assets.bp, 'Display.Mesh.IconFadeInZoom')
+    luaUnits.push({
+      id: state.id,
+      bpId: id.toLowerCase(),
+      mesh: scene.mesh,
+      ring,
+      selected: false,
+      name: stripLoc(bpGet(assets.bp, 'General.UnitName')) ?? stripLoc(bpGet(assets.bp, 'Description')) ?? id.toUpperCase(),
+      army: 1,
+      strategicIcon: typeof strat === 'string' ? strat : 'icon_land_generic',
+      fadeZoom: typeof fade === 'number' && fade > 0 ? fade : 130,
+      caps: readCaps(assets.bp),
+    })
 
     log(
       `✓ ${state.name.toUpperCase()} über Original-Unit.lua gespawnt — ` +
