@@ -4,7 +4,7 @@
  * Motion). Sichert die Blueprint-Default-Sektionen (Intel) und das
  * Scenario-Global ab, ohne die frühere OnCreate-Pfade brachen.
  *
- *   npx tsx scripts/verify-multiunit.ts
+ *   npx tsx --import ./scripts/register-lua.mjs scripts/verify-multiunit.ts
  */
 import { open, type FileHandle } from 'node:fs/promises'
 import { ZipArchive } from '../src/vfs/zipArchive'

@@ -3,7 +3,7 @@
  * WaitTicks über native Coroutinen, getrieben von __simTick() (Engine-Beat).
  * Das ist der Mechanismus, über den die Original-Unit.lua pro Tick läuft.
  *
- *   npx tsx scripts/verify-simthreads.ts
+ *   npx tsx --import ./scripts/register-lua.mjs scripts/verify-simthreads.ts
  */
 import { open, type FileHandle } from 'node:fs/promises'
 import { ZipArchive } from '../src/vfs/zipArchive'

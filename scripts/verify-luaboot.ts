@@ -2,7 +2,7 @@
  * Phase-A / A1: Bootet die Original-Lua-Sim-Umgebung (import + class.lua) im
  * eingebetteten VM und prüft, dass das Original-Modulsystem läuft.
  *
- *   npx tsx scripts/verify-luaboot.ts
+ *   npx tsx --import ./scripts/register-lua.mjs scripts/verify-luaboot.ts
  */
 import { open, type FileHandle } from 'node:fs/promises'
 import { ZipArchive } from '../src/vfs/zipArchive'

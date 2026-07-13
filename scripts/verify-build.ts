@@ -5,7 +5,7 @@
  * die Zwei-Ratio-Ökonomie, und bei Fertigstellung feuert OnStopBeingBuilt und
  * die Produktion des Generators schaltet sich ein.
  *
- *   npx tsx scripts/verify-build.ts
+ *   npx tsx --import ./scripts/register-lua.mjs scripts/verify-build.ts
  */
 import { open, type FileHandle } from 'node:fs/promises'
 import { ZipArchive } from '../src/vfs/zipArchive'

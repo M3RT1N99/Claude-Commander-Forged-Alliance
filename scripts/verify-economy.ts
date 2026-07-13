@@ -4,7 +4,7 @@
  * Reine Logik, keine Spieldateien. (Der frühere SimWorld-Nachbau wurde
  * entfernt; die Lua-Anbindung deckt verify-econ-lua.ts ab.)
  *
- *   npx tsx scripts/verify-economy.ts
+ *   npx tsx --import ./scripts/register-lua.mjs scripts/verify-economy.ts
  */
 import { distribute, ArmyEconomy } from '../src/sim/economy'
 

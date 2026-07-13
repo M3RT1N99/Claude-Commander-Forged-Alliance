@@ -5,7 +5,7 @@
  * (__advanceMotion, Entity::AdvanceCoords) bewegt sie pro Beat mit den
  * Blueprint-Werten (MaxSpeed/TurnRate/Accel) dorthin.
  *
- *   npx tsx scripts/verify-motion.ts
+ *   npx tsx --import ./scripts/register-lua.mjs scripts/verify-motion.ts
  */
 import { open, type FileHandle } from 'node:fs/promises'
 import { ZipArchive } from '../src/vfs/zipArchive'

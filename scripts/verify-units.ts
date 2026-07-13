@@ -3,7 +3,7 @@
  * `lua/defaultunits.lua`) mit ihrer kompletten import-Kaskade in den VM und
  * prüft, dass die Klassenhierarchie verlinkt ist.
  *
- *   npx tsx scripts/verify-units.ts
+ *   npx tsx --import ./scripts/register-lua.mjs scripts/verify-units.ts
  */
 import { open, type FileHandle } from 'node:fs/promises'
 import { ZipArchive } from '../src/vfs/zipArchive'

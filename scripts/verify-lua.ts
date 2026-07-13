@@ -6,7 +6,7 @@
  * Syntaxprüfung via luaparse (deterministisch, ohne VM-Zustand); die
  * Laufzeit-Kompatibilität (Shims) prüft ein zweiter Schritt im echten VM.
  *
- *   npx tsx scripts/verify-lua.ts
+ *   npx tsx --import ./scripts/register-lua.mjs scripts/verify-lua.ts
  */
 import { open, type FileHandle } from 'node:fs/promises'
 import * as luaparse from 'luaparse'

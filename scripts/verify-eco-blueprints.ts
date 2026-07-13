@@ -4,7 +4,7 @@
  * dass statsFromBlueprint sie korrekt in die Sim-Statistik überträgt.
  * Verhindert stille Drift zwischen Blueprint, Recherche und Sim.
  *
- *   npx tsx scripts/verify-eco-blueprints.ts
+ *   npx tsx --import ./scripts/register-lua.mjs scripts/verify-eco-blueprints.ts
  */
 import { open, type FileHandle } from 'node:fs/promises'
 import { ZipArchive } from '../src/vfs/zipArchive'

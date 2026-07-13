@@ -8,7 +8,7 @@
  * (Volle Struktur-OnCreate-Pfade wie Intel/Schild kommen in späteren
  * Meilensteinen; die ACU spawnt bereits vollständig über die Original-Klasse.)
  *
- *   npx tsx scripts/verify-econ-lua.ts
+ *   npx tsx --import ./scripts/register-lua.mjs scripts/verify-econ-lua.ts
  */
 import { open, type FileHandle } from 'node:fs/promises'
 import { ZipArchive } from '../src/vfs/zipArchive'

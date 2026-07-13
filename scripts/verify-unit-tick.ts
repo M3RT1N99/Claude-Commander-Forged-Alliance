@@ -3,7 +3,7 @@
  * OnCreate läuft als Thread; ein ForkThread liest pro Tick den Unit-Zustand
  * über die moho-Methoden — getrieben vom Engine-Beat (__simTick).
  *
- *   npx tsx scripts/verify-unit-tick.ts
+ *   npx tsx --import ./scripts/register-lua.mjs scripts/verify-unit-tick.ts
  */
 import { open, type FileHandle } from 'node:fs/promises'
 import { ZipArchive } from '../src/vfs/zipArchive'

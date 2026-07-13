@@ -3,7 +3,7 @@
  * (`lua/system/Blueprints.lua`) im eingebetteten VM mit einem echten
  * Unit-Blueprint und prüft, dass Registrierung + Mesh-Extraktion laufen.
  *
- *   npx tsx scripts/verify-blueprints.ts
+ *   npx tsx --import ./scripts/register-lua.mjs scripts/verify-blueprints.ts
  */
 import { open, type FileHandle } from 'node:fs/promises'
 import { ZipArchive } from '../src/vfs/zipArchive'

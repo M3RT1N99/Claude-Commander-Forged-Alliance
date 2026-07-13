@@ -37,10 +37,17 @@ wählen — oder mit lokal laufendem Dev-Server direkt
 <http://localhost:5173/?http=1> (serviert die Installation aus
 `CFA_GAME_DIR`, Standard: Steam-Pfad).
 
-Parser-Tests gegen die echte Installation:
+Verify-Suiten gegen die echte Installation (keine Mocks):
 
 ```bash
-npx tsx scripts/verify.ts
+npm test
+```
+
+Einzelne Suite (der `--import`-Loader ist nötig, weil die Engine-Lua aus echten
+`.lua`-Dateien geladen wird):
+
+```bash
+npx tsx --import ./scripts/register-lua.mjs scripts/verify-spawn.ts
 ```
 
 ## Rechtliches

@@ -3,7 +3,7 @@
  * (`units/uel0001/uel0001_script.lua` → TypeClass) und liest den von der
  * Original-Lua gesetzten Zustand zurück.
  *
- *   npx tsx scripts/verify-spawn.ts
+ *   npx tsx --import ./scripts/register-lua.mjs scripts/verify-spawn.ts
  */
 import { open, type FileHandle } from 'node:fs/promises'
 import { ZipArchive } from '../src/vfs/zipArchive'

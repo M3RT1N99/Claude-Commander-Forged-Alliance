@@ -3,7 +3,7 @@
  * fährt `OnCreate` — der Beweis, dass das Original-Unit-Verhalten im
  * eingebetteten VM läuft.
  *
- *   npx tsx scripts/verify-unit-create.ts
+ *   npx tsx --import ./scripts/register-lua.mjs scripts/verify-unit-create.ts
  */
 import { open, type FileHandle } from 'node:fs/promises'
 import { ZipArchive } from '../src/vfs/zipArchive'

@@ -18,15 +18,22 @@ import { simTick } from './simThreads'
  * und die Tests trotzdem grün waren. Genau diese Möglichkeit gibt es nicht
  * mehr: wer die Engine will, bekommt sie ganz.
  *
- * Reihenfolge = Abhängigkeitsordnung:
- *   utils.lua  → Original-Hilfsfunktionen (table.*, unpack …)
- *   moho       → C++-Basisklassen (entity_methods, unit_methods)
- *   Globals    → C++-Globals (categories, VDist, IsDestroyed, Manipulatoren …)
- *   Blueprints → Original-Pipeline (Blueprints.lua) inkl. Sound{}-DSL
- *   UnitFactory→ Spawn über die Original-Klasse (OnCreate/OnStopBeingBuilt)
- *   SimThreads → kooperativer Scheduler (ForkThread/WaitTicks)
- *   Economy    → Zwei-Ratio-Ökonomie + brain:GetEconomyStored/GiveResource
- *   Motion     → Navigator + Physik-Fortschreibung
+ * Reihenfolge (die im Code unten — dieser Kommentar hat sie schon einmal
+ * falsch behauptet, und genau so einen Kommentar liest jemand, bevor er
+ * umsortiert):
+ *
+ *   1. Engine-Primitive, wie die C++-Engine ihre luadef_*-Bindungen registriert,
+ *      BEVOR die erste Zeile Original-Lua läuft:
+ *        SimThreads → Globals → Economy → Motion → Build
+ *   2. class.lua NEU laden. Der LuaHost-Bootstrap hat es schon geladen — da war
+ *      ForkThread aber noch nil, und class.lua:78 macht
+ *      `local ForkThread = ForkThread` (Upvalue-Snapshot). Ohne diesen zweiten
+ *      Load stirbt class.lua:377 bei jedem State-Wechsel.
+ *      globals.lua enthält bewusst kein einziges Class( — nur deshalb darf es
+ *      vor dem Reload laufen. moho/units brauchen Class und stehen danach.
+ *   3. Alles, was Class braucht oder Original-Lua ist:
+ *        moho → utils.lua → Blueprints → UnitFactory → SimSync → terrainTypes
+ *   4. Session (SimInit-Schritte 3a/5a): ScenarioInfo + Brains.
  */
 export interface Engine {
   host: LuaHost
