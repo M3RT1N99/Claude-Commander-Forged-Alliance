@@ -95,6 +95,15 @@ Wirtschaft, Renderer, Netz. Lua bekommt die 543 Sim-Bindings + Callbacks.
   - Bau: `time = BuildTime / buildRate`; `energy_rate = BuildCostEnergy/time`;
     Fortschritt/Tick = `(buildRate / BuildTime) * 0.1 * ResourceConsumed`.
   - **Assist ist additiv**: effektive Rate = Σ buildRate der Helfer.
+  - **Verteilung jetzt aus dem Binary** (`func_ArmyProcessEconomy` @ 0x771B50,
+    in faf-re Stub) → [research/economy-binary.md](research/economy-binary.md):
+    **zweistufig** — Verbraucher, die *beide* Ressourcen brauchen, laufen mit
+    Ratio `r1 = min(1, min available/totalDemand)`; wer *nur eine* braucht,
+    bekommt aus dem Rest eine eigene Ratio `r2` auf der Nicht-Engpass-Ressource.
+    `mGranted` je Verbraucher; `LimitingRate = granted/requested` skaliert den
+    Fortschritt *pro Bauwerk*. Unser aktueller Ein-Faktor-Stall ist zu simpel.
+  - **Command→Task-Dispatch** (`DispatchTask` @ 0x608EF0) → 40 Befehlstypen
+    ([research/command-dispatch-binary.md](research/command-dispatch-binary.md)).
   - Reclaim: `Ticks = max(BuildCostEnergy, BuildCostMass) / buildRate`.
   - Capture: `Ticks = max(1, ((BuildTime/buildRate)/2 * CaptureTimeMultiplier) * 10)`,
     Fortschritt += Anzahl Captors.
