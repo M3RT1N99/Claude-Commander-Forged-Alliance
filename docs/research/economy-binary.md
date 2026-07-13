@@ -101,3 +101,17 @@ ist **zu simpel**: ein globaler Stall-Faktor. Das Original hat:
 → Umbau in Phase C: `EconRequest`-Liste pro Armee, dieser 7-Schritt-Tick,
 Units konsumieren über `LimitingRate`. Verifikation: 1 Energie-Extraktor +
 1 masse-limitierter Bau → Energie-Verbraucher darf voll laufen.
+
+## Status: umgesetzt
+
+Implementiert in [`Army.tick`](../../src/sim/simWorld.ts) als 7-Schritt-Tick
+mit `EconRequest`-Liste (Unterhalt fertiger Units + Baustellen), r1/r2 und
+`LimitingRate` pro Verbraucher. Verifiziert in
+[`scripts/verify-economy.ts`](../../scripts/verify-economy.ts): der Doc-Prüffall
+(Masse-Engpass → Doppel-Verbraucher r1=0.5, reiner Energie-Bau r2=1) plus
+Buchhaltung, Overflow-Klemmung und Determinismus.
+
+**Noch offen (nächste Layer):** Produktions-Drosselung unterversorgter
+Verbraucher (z. B. energie-hungriger Masse-Extraktor produziert bei
+Energie-Stall weniger Masse — braucht Unit-An/Aus-Zustand); Overflow-Sharing
+an Verbündete; echte Builder-Zuordnung statt `BUILDER_RATE`.

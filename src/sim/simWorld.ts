@@ -69,6 +69,25 @@ export function statsFromBlueprint(blueprintId: string, bp: BpObject): UnitStats
   }
 }
 
+/**
+ * Baurate des (impliziten) Konstrukteurs — Übergangslösung bis Ingenieure/
+ * Fabriken existieren; 10 = BuildRate des UEF-ACU.
+ * TODO: echte Builder-Zuordnung (Economy.BuildRate des bauenden Units).
+ */
+const BUILDER_RATE = 10
+
+/**
+ * Ein Ressourcen-Verbraucher eines Ticks (Bau oder Unterhalt) — entspricht
+ * einem Eintrag in `CEconomy::mConsumptionData`. `mass`/`energy` sind die
+ * diesen Tick angeforderten Beträge; `apply(ratio)` verrechnet die gewährte
+ * `LimitingRate` (Baufortschritt bzw. Unterhaltseffekt).
+ */
+interface EconRequest {
+  mass: number
+  energy: number
+  apply(ratio: number): void
+}
+
 /** Ressourcen-Zustand einer Armee (deterministisch, f32). */
 export class Army {
   mass = f(150) // Startressourcen wie im Original-Skirmish
@@ -80,75 +99,131 @@ export class Army {
   massExpense = 0
   energyExpense = 0
 
-  /** @internal */
+  /**
+   * Ein Wirtschafts-Tick — 1:1 nach `func_ArmyProcessEconomy` @0x771B50
+   * (aus der ForgedAlliance.exe rekonstruiert, siehe
+   * docs/research/economy-binary.md). Kern ist die Zwei-Ratio-Verteilung:
+   * Produktion ist bedingungsloses Einkommen; jeder Bau/Unterhalt ist ein
+   * eigener Request; r1 drosselt Doppel-Verbraucher (brauchen E *und* M) an
+   * der knappsten Ressource, r2 lässt Einzel-Verbraucher der reichlichen
+   * Ressource aus dem Rest weiterlaufen. Kein globaler Stall-Faktor.
+   *
+   * @internal
+   */
   tick(units: SimUnit[], armyIndex: number): void {
-    // 1. Einkommen/Unterhalt — nur fertige Einheiten produzieren/verbrauchen
-    let massIn = 0
-    let energyIn = 0
-    let massOut = 0
-    let energyOut = 0
+    // 1. Einheiten durchgehen: Produktion (bedingungslos), Lagerkapazität und
+    //    die Verbraucher-Requests (Unterhalt fertiger Units + Baustellen).
+    let massProd = 0
+    let energyProd = 0
     let massStore = f(650)
     let energyStore = f(4000)
+    const requests: EconRequest[] = []
+
     for (const u of units) {
       // health<=0 bei fertigen Einheiten = tot; Baustellen zählen weiter
       if (u.army !== armyIndex || (u.health <= 0 && u.buildProgress >= 1)) continue
-      massStore = f(massStore + u.stats.massStorage)
-      energyStore = f(energyStore + u.stats.energyStorage)
-      if (u.buildProgress < 1) continue
-      massIn = f(massIn + u.stats.massProduction)
-      energyIn = f(energyIn + u.stats.energyProduction)
-      massOut = f(massOut + u.stats.massConsumption)
-      energyOut = f(energyOut + u.stats.energyConsumption)
+      const s = u.stats
+      massStore = f(massStore + s.massStorage)
+      energyStore = f(energyStore + s.energyStorage)
+
+      if (u.buildProgress >= 1) {
+        massProd = f(massProd + s.massProduction)
+        energyProd = f(energyProd + s.energyProduction)
+        const cm = f(s.massConsumption * SIM_DT)
+        const ce = f(s.energyConsumption * SIM_DT)
+        // eslint-disable-next-line @typescript-eslint/no-empty-function
+        if (cm > 0 || ce > 0) requests.push({ mass: cm, energy: ce, apply: () => {} })
+      } else {
+        // Baustelle: Sollschritt = BuildRate/BuildTime, Kosten anteilig
+        const step = Math.min(
+          f(f(BUILDER_RATE / Math.max(s.buildTime, 1)) * SIM_DT),
+          f(1 - u.buildProgress),
+        )
+        requests.push({
+          mass: f(s.buildCostMass * step),
+          energy: f(s.buildCostEnergy * step),
+          apply: (ratio) => {
+            u.buildProgress = Math.min(f(u.buildProgress + f(step * ratio)), 1)
+            u.health = f(s.maxHealth * u.buildProgress) // Health wächst mit dem Bau
+          },
+        })
+      }
     }
 
     this.massStorage = massStore
     this.energyStorage = energyStore
-    this.mass = Math.min(f(this.mass + f(f(massIn - massOut) * SIM_DT)), massStore)
-    this.energy = Math.min(f(this.energy + f(f(energyIn - energyOut) * SIM_DT)), energyStore)
-    if (this.mass < 0) this.mass = 0
-    if (this.energy < 0) this.energy = 0
 
-    // 2. Floating Economy: Baustellen ziehen kontinuierlich Ressourcen.
-    //    Soll-Fortschritt = BuildRate/BuildTime; reicht der Vorrat nicht,
-    //    skaliert der Fortschritt auf den bezahlbaren Anteil (Stall).
-    let buildMassDrain = 0
-    let buildEnergyDrain = 0
-    for (const u of units) {
-      if (u.army !== armyIndex || u.buildProgress >= 1) continue
-      const s = u.stats
-      const step = Math.min(f(f(BUILDER_RATE / Math.max(s.buildTime, 1)) * SIM_DT), f(1 - u.buildProgress))
-      const needMass = f(s.buildCostMass * step)
-      const needEnergy = f(s.buildCostEnergy * step)
-      let fraction = 1
-      if (needMass > 0) fraction = Math.min(fraction, this.mass / needMass)
-      if (needEnergy > 0) fraction = Math.min(fraction, this.energy / needEnergy)
-      fraction = f(Math.min(Math.max(fraction, 0), 1))
+    // 2. Verfügbarer Pool = Vorrat + Einkommen dieses Ticks (Handicap = 0).
+    let availMass = f(this.mass + f(massProd * SIM_DT))
+    let availEnergy = f(this.energy + f(energyProd * SIM_DT))
 
-      const paidMass = f(needMass * fraction)
-      const paidEnergy = f(needEnergy * fraction)
-      this.mass = Math.max(f(this.mass - paidMass), 0)
-      this.energy = Math.max(f(this.energy - paidEnergy), 0)
-      buildMassDrain = f(buildMassDrain + f(paidMass / SIM_DT))
-      buildEnergyDrain = f(buildEnergyDrain + f(paidEnergy / SIM_DT))
+    // 3. Nachfrage in Doppel- (E und M) und Einzel-Verbraucher trennen.
+    let bothMass = 0
+    let bothEnergy = 0
+    let singleMass = 0
+    let singleEnergy = 0
+    for (const r of requests) {
+      if (r.mass > 0 && r.energy > 0) {
+        bothMass = f(bothMass + r.mass)
+        bothEnergy = f(bothEnergy + r.energy)
+      } else {
+        singleMass = f(singleMass + r.mass)
+        singleEnergy = f(singleEnergy + r.energy)
+      }
+    }
+    const totalMass = f(bothMass + singleMass)
+    const totalEnergy = f(bothEnergy + singleEnergy)
 
-      u.buildProgress = Math.min(f(u.buildProgress + f(step * fraction)), 1)
-      // Health wächst mit dem Baufortschritt (Original-Verhalten)
-      u.health = f(u.stats.maxHealth * u.buildProgress)
+    // 4. Primäre Ratio r1 + Engpass-Ressource (Energie zuerst prüfen).
+    let r1 = 1
+    let limitingIsMass = false
+    if (totalEnergy > 0 && f(totalEnergy * r1) > availEnergy) r1 = availEnergy / totalEnergy
+    if (totalMass > 0 && f(totalMass * r1) > availMass) {
+      r1 = availMass / totalMass
+      limitingIsMass = true
+    }
+    r1 = f(Math.max(0, Math.min(1, r1)))
+
+    // 5. Doppel-Verbraucher bedienen, Rest für die Einzel-Verbraucher.
+    const leftoverMass = f(Math.max(0, availMass - f(bothMass * r1)))
+    const leftoverEnergy = f(Math.max(0, availEnergy - f(bothEnergy * r1)))
+
+    // 6. Sekundäre Ratio r2 — nur für die reichliche (Nicht-Engpass-)Ressource.
+    let r2 = 1
+    if (limitingIsMass) {
+      if (singleEnergy > 0 && f(singleEnergy * r2) > leftoverEnergy) r2 = leftoverEnergy / singleEnergy
+    } else {
+      if (singleMass > 0 && f(singleMass * r2) > leftoverMass) r2 = leftoverMass / singleMass
+    }
+    r2 = f(Math.max(0, Math.min(1, r2)))
+
+    // 7. Verteilen: wer die Engpass-Ressource NICHT braucht, bekommt r2.
+    let spentMass = 0
+    let spentEnergy = 0
+    for (const r of requests) {
+      const needsLimiting = limitingIsMass ? r.mass > 0 : r.energy > 0
+      const ratio = needsLimiting ? r1 : r2
+      const gm = f(r.mass * ratio)
+      const ge = f(r.energy * ratio)
+      availMass = f(availMass - gm)
+      availEnergy = f(availEnergy - ge)
+      spentMass = f(spentMass + gm)
+      spentEnergy = f(spentEnergy + ge)
+      r.apply(ratio)
     }
 
-    this.massIncome = massIn
-    this.energyIncome = energyIn
-    this.massExpense = f(massOut + buildMassDrain)
-    this.energyExpense = f(energyOut + buildEnergyDrain)
+    // 8. Lager klemmen (Overflow über Kapazität geht verloren — kein Sharing).
+    this.mass = f(Math.min(Math.max(availMass, 0), massStore))
+    this.energy = f(Math.min(Math.max(availEnergy, 0), energyStore))
+
+    // Buchhaltung fürs HUD (pro Sekunde): Einkommen = Produktion, Ausgabe =
+    // tatsächlich gewährt (mLastUseActual), damit netto = Lageränderung.
+    this.massIncome = massProd
+    this.energyIncome = energyProd
+    this.massExpense = f(spentMass / SIM_DT)
+    this.energyExpense = f(spentEnergy / SIM_DT)
   }
 }
-
-/**
- * Baurate des (impliziten) Konstrukteurs — Übergangslösung bis Ingenieure/
- * Fabriken existieren; 10 = BuildRate des UEF-ACU.
- * TODO: echte Builder-Zuordnung (Economy.BuildRate des bauenden Units).
- */
-const BUILDER_RATE = 10
 
 export type UnitCommand = { type: 'move'; x: number; z: number }
 
