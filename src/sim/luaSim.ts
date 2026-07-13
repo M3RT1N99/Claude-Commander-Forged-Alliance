@@ -9,23 +9,25 @@ import {
   readLuaUnit,
   type LuaUnitState,
 } from '../lua/unitFactory'
+import { installSimThreads, simTick } from '../lua/simThreads'
+import { installMotion, motionTick } from './motion'
+import { EconomyManager, installEconomy, type ArmyEconomy } from './economy'
 
 /**
- * Browser-Fassade für die eingebettete Original-Lua-Sim. Bootet den Lua-Host
- * aus dem gemounteten Spiel-VFS und spawnt Units über ihre echten
- * Lua-Klassen (Blueprint-Pipeline + Unit.lua). Der von der Original-Lua
- * gesetzte Zustand (Position/Health/…) wird an Renderer/Sandbox gereicht.
+ * Browser-Fassade für die eingebettete Original-Lua-Sim — jetzt die
+ * Engine-first-Sim (M1–M4): die Original-Lua treibt Spawn, per-Tick-Threads,
+ * Ökonomie und Bewegung. `beat()` ist der 10-Hz-Sim-Beat in Original-
+ * Reihenfolge (Ökonomie → Lua-Threads → Physik-Fortschreibung).
  */
 export class LuaSim {
+  private readonly eco = new EconomyManager()
+
   private constructor(
     private readonly host: LuaHost,
     private readonly vfs: GameVfs,
   ) {}
 
   static async create(vfs: GameVfs, log?: LogSink): Promise<LuaSim> {
-    // Framework + Sim + Fraktionsklassen (lua/**) vorladen — import() löst
-    // synchron auf. Unit-spezifische Skripte/Blueprints kommen erst beim
-    // Spawn dazu (addFile). Transpiliert wird lazy (mountModule).
     const files = new Map<string, Uint8Array>()
     for (const path of vfs.find((p) => p.startsWith('lua/') && p.endsWith('.lua'))) {
       files.set(path, await vfs.read(path))
@@ -35,23 +37,21 @@ export class LuaSim {
     installMoho(host)
     installBlueprintPipeline(host)
     installUnitFactory(host)
-    // Nicht-implementierte Engine-Globals (BuffBlueprint, DiskToLocal, …) als
-    // Identitäts-Stubs — sonst wirft die Blueprint-DSL und safecall verschluckt
-    // die Registrierung still. (Gleis B; echte Impl. folgt inkrementell.)
+    installSimThreads(host)
+    const sim = new LuaSim(host, vfs)
+    installEconomy(host, sim.eco)
+    installMotion(host)
+    // Stub-Trap zuletzt: nicht-implementierte Engine-Globals werden No-Op.
     host.installStubTrap(() => {})
-    return new LuaSim(host, vfs)
+    return sim
   }
 
-  /**
-   * Spawnt eine Unit über ihre Original-Lua-Klasse und liefert den von
-   * `OnCreate` gesetzten Zustand. Das Blueprint wird bei Bedarf registriert.
-   */
+  /** Spawnt eine Unit über ihre Original-Klasse; liefert ihren Zustand. */
   async spawn(
     blueprintId: string,
     pos: { x: number; y: number; z: number },
     army = 1,
   ): Promise<LuaUnitState> {
-    // Unit-Script + Blueprint bei Bedarf ins VFS des Hosts nachladen.
     const scriptPath = `units/${blueprintId}/${blueprintId}_script.lua`
     if (!this.host.hasFile(scriptPath) && this.vfs.exists(scriptPath)) {
       this.host.addFile(scriptPath, await this.vfs.read(scriptPath))
@@ -64,6 +64,31 @@ export class LuaSim {
     const state = readLuaUnit(this.host, id)
     if (!state) throw new Error(`Lua-Unit ${id} nicht lesbar`)
     return state
+  }
+
+  /**
+   * Ein Sim-Beat (10 Hz) in Original-Reihenfolge: Ökonomie (Army::OnTick) →
+   * Lua-Threads (CTaskStage::DoFrame) → Physik (Entity::AdvanceCoords).
+   */
+  beat(): void {
+    this.eco.tick()
+    simTick(this.host)
+    motionTick(this.host)
+  }
+
+  /** Bewegungsbefehl: setzt der Unit ein Ziel über ihren Navigator. */
+  moveUnit(id: number, x: number, z: number): void {
+    this.host.eval(`local u = __units[${id}]; if u then u:GetNavigator():SetGoal({ ${x}, 0, ${z} }) end`)
+  }
+
+  /** Aktueller Zustand einer Unit (Position/Heading/Health). */
+  readState(id: number): LuaUnitState | null {
+    return readLuaUnit(this.host, id)
+  }
+
+  /** Ökonomie-Zustand einer Armee (für die HUD). */
+  army(n: number): ArmyEconomy {
+    return this.eco.army(n)
   }
 
   dispose(): void {

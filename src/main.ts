@@ -497,6 +497,14 @@ window.addEventListener('pointerup', (e) => {
 
 viewportEl.addEventListener('contextmenu', (e) => {
   e.preventDefault()
+  // Lua-Engine-Units: Rechtsklick = Move über den Original-Navigator.
+  if (luaSim && luaUnits.length > 0) {
+    const hit = viewer.pickTerrain(e.clientX, e.clientY)
+    if (hit) {
+      for (const u of luaUnits) luaSim.moveUnit(u.id, hit.x, hit.z)
+      log(`Move (Lua-Engine) → ${hit.x.toFixed(0)}, ${hit.z.toFixed(0)}`)
+    }
+  }
   if (!sandbox) return
   const msg = sandbox.commandMove(e.clientX, e.clientY, e.shiftKey)
   if (msg) log(msg)
@@ -645,8 +653,29 @@ for (const btn of document.querySelectorAll<HTMLButtonElement>('#sandbox-spawns 
 
 // Spawn über die eingebettete Original-Lua-Sim (Unit.lua + Blueprint-Pipeline).
 let luaSim: LuaSim | null = null
+const luaUnits: { id: number; mesh: THREE.Object3D }[] = []
+let luaBeatAcc = 0
+let luaHookRegistered = false
 const btnLuaSpawn = document.querySelector<HTMLButtonElement>('#btn-lua-spawn')
 btnLuaSpawn?.addEventListener('click', () => void spawnViaLua('uel0001'))
+
+// Treibt den Engine-Sim-Beat (10 Hz) und übernimmt Position/Heading der
+// Lua-Units pro Frame — die Original-Lua bewegt die Unit, hier wird nur
+// gerendert.
+function luaSimUpdate(dt: number): void {
+  if (!luaSim) return
+  luaBeatAcc = Math.min(luaBeatAcc + dt, 0.5)
+  while (luaBeatAcc >= 0.1) {
+    luaSim.beat()
+    luaBeatAcc -= 0.1
+  }
+  for (const u of luaUnits) {
+    const s = luaSim.readState(u.id)
+    if (!s) continue
+    u.mesh.position.set(s.x, viewer.heightAt(s.x, s.z), s.z)
+    u.mesh.rotation.set(0, s.heading, 0)
+  }
+}
 
 async function spawnViaLua(id: string): Promise<void> {
   if (!vfs) return
@@ -657,6 +686,10 @@ async function spawnViaLua(id: string): Promise<void> {
         if (lvl === 'WARN') log(`Lua-WARN: ${msg.slice(0, 80)}`)
       })
       log('Lua-Sim bereit')
+    }
+    if (!luaHookRegistered) {
+      viewer.onUpdate(luaSimUpdate)
+      luaHookRegistered = true
     }
     // etwas versetzt vom Spawn-Punkt platzieren
     const x = spawnPoint.x + 6
@@ -670,10 +703,12 @@ async function spawnViaLua(id: string): Promise<void> {
     const scale = bpGet(assets.bp, 'Display.UniformScale')
     if (typeof scale === 'number' && scale > 0) scene.mesh.scale.setScalar(scale)
     scene.mesh.position.set(state.x, y, state.z)
+    luaUnits.push({ id: state.id, mesh: scene.mesh })
 
     log(
       `✓ ${state.name.toUpperCase()} über Original-Unit.lua gespawnt — ` +
-        `HP ${Math.round(state.health)}/${state.maxHealth} (aus Lua)`,
+        `HP ${Math.round(state.health)}/${state.maxHealth} (aus Lua) — ` +
+        `Rechtsklick bewegt sie über die Engine`,
     )
   } catch (err) {
     log(`FEHLER Lua-Spawn: ${err instanceof Error ? err.message : err}`)
