@@ -114,6 +114,45 @@ function AddSelectUnits(units)
   SelectUnits(cur)
 end
 
+-- === Oekonomie (Sim -> UI) ===
+-- GetEconomyTotals() liefert genau die fuenf Tabellen, die economy.lua:271-275
+-- liest, jeweils mit den Schluesseln MASS und ENERGY.
+--
+-- WICHTIG: die Werte sind PRO TICK, nicht pro Sekunde — economy.lua:277-279
+-- multipliziert sie selbst mit GetSimTicksPerSecond(). Wer hier Werte pro
+-- Sekunde einspeist, zeigt das Zehnfache an.
+__uiEcon = {
+  maxStorage = { MASS = 0, ENERGY = 0 },
+  stored = { MASS = 0, ENERGY = 0 },
+  income = { MASS = 0, ENERGY = 0 },
+  lastUseRequested = { MASS = 0, ENERGY = 0 },
+  lastUseActual = { MASS = 0, ENERGY = 0 },
+}
+
+function GetEconomyTotals()
+  return __uiEcon
+end
+
+function GetSimTicksPerSecond()
+  return 10
+end
+
+-- Von der Engine pro Sim-Beat gefuettert (der Worker schickt den Zustand).
+function __uiSetEconomy(maxM, maxE, storedM, storedE, incM, incE, reqM, reqE, useM, useE)
+  local e = __uiEcon
+  e.maxStorage.MASS = maxM
+  e.maxStorage.ENERGY = maxE
+  e.stored.MASS = storedM
+  e.stored.ENERGY = storedE
+  -- pro Tick (die Sim rechnet in Einheiten pro Sekunde)
+  e.income.MASS = incM * 0.1
+  e.income.ENERGY = incE * 0.1
+  e.lastUseRequested.MASS = reqM * 0.1
+  e.lastUseRequested.ENERGY = reqE * 0.1
+  e.lastUseActual.MASS = useM * 0.1
+  e.lastUseActual.ENERGY = useE * 0.1
+end
+
 -- === Audio / Sprache ===
 -- Localization.lua:43 fragt, ob es fuer die Sprache vertonte Sprachausgabe gibt,
 -- und setzt danach die Audio-Sprache. Ein Audio-System gibt es noch nicht — das

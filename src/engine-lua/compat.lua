@@ -9,6 +9,23 @@ function __foriter(a, b, c)
   return a, b, c
 end
 
+-- string.format: Lua 5.0 ignorierte unsinnige Flags auf %s, Lua 5.4 wirft
+-- "invalid conversion specification". Die Original-Lua nutzt das:
+--   economy.lua:305   string.format("%+s", rateStr)
+-- Die Flags '+', '#' und ' ' ergeben fuer %s keinen Sinn und werden entfernt;
+-- '-' (linksbuendig) und Breitenangaben bleiben, die sind auch in 5.4 gueltig.
+do
+  local rawformat = string.format
+  string.format = function(fmt, ...)
+    if type(fmt) == 'string' then
+      fmt = string.gsub(fmt, '%%([-+# 0]*[%d%.]*)s', function(flags)
+        return '%' .. string.gsub(flags, '[+# ]', '') .. 's'
+      end)
+    end
+    return rawformat(fmt, ...)
+  end
+end
+
 table.getn = table.getn or function(t) return #t end
 table.setn = table.setn or function() end
 table.foreach = table.foreach or function(t, f)
