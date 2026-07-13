@@ -40,6 +40,8 @@ export interface UiFileSystem {
   textureSize?: (path: string) => [number, number] | null
   /** Breite eines Strings in Pixeln (CMauiText::GetStringAdvance, Cfile:1146720). */
   stringAdvance?: (text: string, family: string, size: number) => number
+  /** Ober-/Unterlänge der Schrift — text.lua:39 baut daraus die Höhe. */
+  fontMetrics?: (family: string, size: number) => [number, number]
 }
 
 export function installUiEngine(host: LuaHost, fs: UiFileSystem): UiEngine {
@@ -92,6 +94,11 @@ export function installUiEngine(host: LuaHost, fs: UiFileSystem): UiEngine {
   if (fs.stringAdvance) {
     host.setGlobal('__uiStringAdvance', (text: string, family: string, size: number) =>
       fs.stringAdvance!(text, family, size),
+    )
+  }
+  if (fs.fontMetrics) {
+    host.setGlobal('__uiFontMetrics', (family: string, size: number) =>
+      fs.fontMetrics!(family, size),
     )
   }
 

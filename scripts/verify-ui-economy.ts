@@ -93,6 +93,8 @@ installUiEngine(host, {
   // Ohne Schriftmetrik kein Text-Layout. Die Breite ist hier ein fester Wert
   // pro Zeichen — der Test misst KEINE Textbreiten, er prüft Textinhalte.
   stringAdvance: (text, _family, size) => text.length * size * 0.5,
+  // Test-Metrik: der Test prueft TEXTINHALTE, keine Textmasse.
+  fontMetrics: (_family, size) => [size * 0.8, size * 0.2],
 })
 setupUi(host)
 createRootFrame(host, 1920, 1080)

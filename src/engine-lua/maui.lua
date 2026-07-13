@@ -34,6 +34,7 @@ __nextMauiId = 1
 __mauiDirty = false
 __uiTextureDims = false
 __uiStringAdvance = false
+__uiFontMetrics = false
 
 -- GetTextureDimensions(filename) -> width, height  (UI-Global, scr_UserInits).
 -- bitmap.lua nutzt es indirekt: SetNewTexture fuellt daraus BitmapWidth/Height,
@@ -45,6 +46,17 @@ function GetTextureDimensions(filename)
   local d = __uiTextureDims(filename)
   if not d then return nil end
   return d[1], d[2]
+end
+
+-- Schriftmetrik: Ober- und Unterlaenge. text.lua:39 baut daraus die Hoehe eines
+-- Text-Controls. Ohne echte Werte gibt es keine Hoehe — also wird gefordert,
+-- nicht geschaetzt.
+function __mauiFontMetrics(family, size)
+  if not __uiFontMetrics then
+    error('FontAscent/FontDescent: keine Schriftmetrik gesetzt (Engine muss sie liefern)', 2)
+  end
+  local m = __uiFontMetrics(family, size)
+  return m[1], m[2]
 end
 
 -- Textbreite in Pixeln. Ohne echte Schriftmetrik kann kein Layout rechnen —
@@ -130,6 +142,18 @@ function InternalCreateText(luaobj, parent)
   luaobj.__text = ''
   luaobj.__fontFamily = ''
   luaobj.__fontSize = 12
+  -- CMauiText veroeffentlicht vier weitere LazyVars ins Lua-Table (die
+  -- vollstaendige Liste aller Engine-LazyVars steht in der Decomp:
+  -- grep 'SetObject(&this->mLuaObj, "'):
+  --   FontAscent, FontDescent, FontExternalLeading  (Cfile:1145928-1145930)
+  --   TextAdvance                                   (Breite des Textes)
+  -- text.lua:39 baut aus Ascent+Descent die Hoehe, text.lua:47 aus TextAdvance
+  -- die Breite. Ohne sie hat kein Text Groesse.
+  local LazyVar = lazyvar()
+  luaobj.FontAscent = LazyVar.Create()
+  luaobj.FontDescent = LazyVar.Create()
+  luaobj.FontExternalLeading = LazyVar.Create()
+  luaobj.TextAdvance = LazyVar.Create()
   return doInit(luaobj)
 end
 
@@ -144,6 +168,43 @@ function __mauiCreateRootFrame(width, height)
   f.Width:Set(width)
   f.Height:Set(height)
   return f
+end
+
+-- Momentaufnahme des UI-Baums fuer den Renderer. Die Layout-Zahlen werden hier
+-- GEZOGEN (LazyVar-__call) — genau dafuer ist der LazyVar-Cache gebaut: solange
+-- sich nichts aendert, kostet das Ziehen nichts.
+--
+-- Ein Control ohne vollstaendiges Layout wirft beim Ziehen "circular
+-- dependency" (lazyvar.lua:21). Das faengt der Renderer NICHT ab — ein
+-- unfertiges Layout ist ein Fehler, kein Sonderfall.
+function __mauiSnapshot()
+  local out = {}
+  local n = 0
+  for _, c in pairs(__mauiControls) do
+    if not c.__destroyed then
+      n = n + 1
+      out[n] = {
+        id = c.__id,
+        kind = c.__kind,
+        name = c.__name,
+        left = c.Left(),
+        top = c.Top(),
+        width = c.Width(),
+        height = c.Height(),
+        depth = c.Depth(),
+        hidden = c.__hidden == true,
+        alpha = c.__alpha or 1,
+        texture = c.__texture or false,
+        solidColor = c.__solidColor or false,
+        text = c.__text or false,
+        color = c.__color or false,
+        fontSize = c.__fontSize or false,
+        centerH = c.__centerH == true,
+        centerV = c.__centerV == true,
+      }
+    end
+  end
+  return out
 end
 
 function InternalCreateBorder(luaobj, parent)

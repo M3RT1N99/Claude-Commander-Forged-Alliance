@@ -7,13 +7,16 @@ import { parseDds } from '../formats/dds'
 import { bgraToRgba, decodeDxt } from '../formats/dxt'
 
 /**
- * In-Game-HUD 1:1 nach dem Original-„mini“-Layout (lua/ui/game/layouts/
- * economy_mini.lua, orders_mini.lua + unitview.lua, verifiziert gegen die
- * Original-Quellen in lua.scd):
+ * Rest-HUD — ein TS-Nachbau, der Stueck fuer Stueck verschwindet.
  *
- * - Economy-Panel: Screen-(16,3), resources_panel_bmp 324×72; Mass-Gruppe
- *   (14,9) 296×25, Energy 4 px darunter; Storage-Balken 100×10 bei (30,2);
- *   Texte/Farben wie im Original (Mass #b7e75f, Energy #f7c70f).
+ * Das Eco-Panel ist bereits WEG: es kommt jetzt aus der echten
+ * lua/ui/game/economy.lua (siehe src/ui/gameUi.ts). Was hier noch steht, ist
+ * der naechste Kandidat — Reihenfolge in docs/PLAN-UI.md:
+ *   Orders   -> lua/ui/game/orders.lua      (Schritt 5)
+ *   Unit-View-> lua/ui/game/unitview.lua    (Schritt 4)
+ *   Minimap  -> eine zweite WorldView       (Schritt 7)
+ *
+ * NICHTS Neues hier anbauen.
  * - Orders-Panel: links 17, unten 0, order-panel_bmp 332×120; Raster 2×6 à
  *   50×50 zentriert (0,−1); Slots nach standardOrdersTable (Move=1, Attack=2,
  *   Patrol=3, Stop=4, Guard=5, Modus=6); verfügbar = Union der CommandCaps.
@@ -84,7 +87,6 @@ export interface HudUnitInfo {
 
 /** Datenquelle fürs HUD — von der Lua-Engine (main.ts) bereitgestellt. */
 export interface HudSource {
-  economy(): EcoSnapshot
   units(): HudUnitInfo[]
   selectedCaps(): ReadonlySet<string>
   stop(): void
@@ -110,22 +112,6 @@ export class Hud {
     this.root.id = 'hud'
     this.root.innerHTML = `
       <div id="strat-layer"></div>
-      <div id="eco-panel">
-        <div class="eco-group" id="eco-mass">
-          <img class="eco-icon" />
-          <div class="eco-storage"><div class="eco-fill"></div></div>
-          <span class="eco-cur"></span><span class="eco-max"></span>
-          <span class="eco-rate"></span>
-          <span class="eco-income"></span><span class="eco-expense"></span>
-        </div>
-        <div class="eco-group" id="eco-energy">
-          <img class="eco-icon" />
-          <div class="eco-storage"><div class="eco-fill"></div></div>
-          <span class="eco-cur"></span><span class="eco-max"></span>
-          <span class="eco-rate"></span>
-          <span class="eco-income"></span><span class="eco-expense"></span>
-        </div>
-      </div>
       <div id="hud-minimap"><canvas width="216" height="216"></canvas></div>
       <div id="unitview-panel" hidden>
         <img id="uv-bracket" />
@@ -261,27 +247,6 @@ export class Hud {
       }
     }
 
-    // --- Economy (economy_mini.lua) ---------------------------------------
-    setBg(this.el('#eco-panel'), await this.skin('/game/resource-panel/resources_panel_bmp.dds'))
-    for (const [group, res, iconW, iconLeft] of [
-      ['#eco-mass', 'mass', 44, -8],
-      ['#eco-energy', 'energy', 36, -4],
-    ] as const) {
-      const icon = this.root.querySelector<HTMLImageElement>(`${group} .eco-icon`)!
-      const url = await this.skin(`/game/resources/${res}_btn_up.dds`)
-      if (url) icon.src = url
-      icon.style.width = `${iconW}px`
-      icon.style.left = `${iconLeft}px`
-      setBg(
-        this.el(`${group} .eco-storage`),
-        await this.skin('/game/resource-mini-bars/mini-energy-bar-back_bmp.dds'),
-      )
-      setBg(
-        this.el(`${group} .eco-fill`),
-        await this.skin(`/game/resource-bars/mini-${res}-bar_bmp.dds`),
-      )
-    }
-
     // --- Orders (orders_mini.lua) ------------------------------------------
     setBg(this.el('#orders-panel'), await this.skin('/game/orders-panel/order-panel_bmp.dds'))
     const grid = this.el('#orders-grid')
@@ -377,27 +342,6 @@ export class Hud {
   }
 
   private update(): void {
-    // Economy — Werte aus der Sim (Rate-Farben wie economy.lua: positiv
-    // grün, negativ mit Vorrat gelb, negativ ohne Vorrat rot)
-    const army: EcoSnapshot = this.source.economy()
-    for (const [group, cur, max, income, expense] of [
-      ['#eco-mass', army.mass, army.massStorage, army.massIncome, army.massExpense],
-      ['#eco-energy', army.energy, army.energyStorage, army.energyIncome, army.energyExpense],
-    ] as const) {
-      const net = income - expense
-      this.el(`${group} .eco-cur`).textContent = Math.floor(cur).toString()
-      this.el(`${group} .eco-max`).textContent = Math.floor(max).toString()
-      // max ist 0, solange die ACU ihr Lager noch nicht registriert hat —
-      // (cur / 0) * 100 ist NaN und ergibt `width: NaN%`.
-      const fillPct = max > 0 ? Math.min(100, (cur / max) * 100) : 0
-      this.el(`${group} .eco-fill`).style.width = `${fillPct}%`
-      const rate = this.el(`${group} .eco-rate`)
-      rate.textContent = `${net >= 0 ? '+' : ''}${net.toFixed(0)}`
-      rate.style.color = net >= 0 ? '#b7e75f' : cur > 1 ? '#ffff00' : '#ff0000'
-      this.el(`${group} .eco-income`).textContent = `+${income.toFixed(1)}`
-      this.el(`${group} .eco-expense`).textContent = `-${expense.toFixed(1)}`
-    }
-
     // Orders — verfügbar = Union der CommandCaps der Auswahl (Original)
     const caps = this.source.selectedCaps()
     for (const b of this.orderButtons) {

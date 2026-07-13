@@ -25,6 +25,7 @@ import { SandboxController, type SandboxUnitAssets } from './sandbox/sandbox'
 import { LuaSimClient } from './sim/luaSimClient'
 import type { HeightfieldData } from './sim/terrain'
 import { Hud, type HudSource, type HudUnitInfo, type EcoSnapshot } from './ui/hud'
+import { GameUi } from './ui/gameUi'
 import type { ScmapData } from './formats/scmap'
 import type { UnitTextures } from './viewer/unitMaterial'
 
@@ -333,6 +334,7 @@ async function loadMap(folder: string): Promise<void> {
 
 let sandbox: SandboxController | null = null
 let hud: Hud | null = null
+let gameUi: GameUi | null = null
 let currentScmap: ScmapData | null = null
 let spawnPoint = new THREE.Vector3(20, 0, 20)
 let massSpots: { x: number; z: number }[] = []
@@ -417,6 +419,19 @@ async function startSandbox(mapFolder: string): Promise<void> {
     if (currentScmap) {
       hud = new Hud(vfs, viewer, hudSource, currentScmap)
     }
+
+    // Die ECHTE lua/ui in einer zweiten Lua-VM (wie im Original: Sim und UI
+    // haben getrennte States). Sie baut das Eco-Panel aus economy.lua — der
+    // TS-Nachbau in hud.ts ist dafür raus.
+    gameUi?.dispose()
+    gameUi = await GameUi.create(vfs, log)
+
+    // Beide Frame-Hooks an EINER Stelle registrieren, nach dem Karten-Laden
+    // (setMap → clearContent wirft alle Hooks weg). Sie vorher oder verteilt zu
+    // setzen war schon einmal die Ursache dafür, dass sich ab dem zweiten
+    // Sandbox-Start nichts mehr bewegte.
+    viewer.onUpdate(luaSimUpdate)
+    viewer.onUpdate(() => gameUi?.render())
     // ACU über die ECHTE Original-Lua-Sim spawnen (Engine-Pfad) statt als
     // SimWorld-Platzhalter. Nicht awaiten, damit die Karte sofort bedienbar ist
     // (die Lua-VM bootet einmalig im Hintergrund).
@@ -701,11 +716,9 @@ function readCaps(bp: BpObject): ReadonlySet<string> {
   return caps
 }
 
-// HUD-Datenquelle aus der Lua-Engine (Ökonomie + gespawnte Units).
+// HUD-Datenquelle aus der Lua-Engine. Die Ökonomie steht NICHT mehr drin: die
+// zeigt jetzt die echte lua/ui/game/economy.lua an (src/ui/gameUi.ts).
 const hudSource: HudSource = {
-  economy(): EcoSnapshot {
-    return luaSim?.economySnapshot() ?? EMPTY_ECO
-  },
   units(): HudUnitInfo[] {
     if (!luaSim) return []
     const out: HudUnitInfo[] = []
@@ -760,6 +773,10 @@ function hasLuaSelection(): boolean {
 // gerendert (kein VM-Aufruf, kein Freeze).
 function luaSimUpdate(): void {
   if (!luaSim) return
+  // Der Sim-Zustand geht in die UI-VM; die Original-_BeatFunction (economy.lua:251)
+  // rechnet daraus die Anzeige.
+  const eco = luaSim.economySnapshot()
+  if (eco && gameUi) gameUi.beat(eco)
   for (const u of luaUnits) {
     const s = luaSim.state(u.id)
     if (!s) continue
@@ -777,10 +794,6 @@ async function spawnViaLua(id: string): Promise<void> {
   if (!vfs) return
   try {
     const sim = await getLuaSim()
-    // Nicht über ein eigenes Flag merken: clearContent() (Kartenwechsel) wirft
-    // alle Hooks weg — das Flag blieb true und ab dem 2. Sandbox-Start bewegte
-    // sich nichts mehr. Den Viewer fragen, der weiß es.
-    if (!viewer.hasUpdateHooks()) viewer.onUpdate(luaSimUpdate)
     // Exakt auf den Spawn-Marker der Karte. Der frühere Versatz von +6/+6 war
     // erfunden; im Original steht die ACU auf dem ARMY_n-Marker.
     const x = spawnPoint.x

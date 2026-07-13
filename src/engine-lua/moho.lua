@@ -428,15 +428,32 @@ local TEXT_NAMES = {
   'SetDropShadow', 'SetNewClipToWidth', 'SetNewColor', 'SetNewFont', 'SetText',
 }
 
+-- TextAdvance ist die Breite des gesetzten Textes (text.lua:47 macht daraus die
+-- Breite des Controls). Sie haengt an Text UND Schrift — also nach jeder
+-- Aenderung von beidem neu ziehen.
+local function refreshTextAdvance(self)
+  self.TextAdvance:Set(
+    __mauiStringAdvance(self.__text or '', self.__fontFamily or '', self.__fontSize or 12)
+  )
+end
+
 local text = withNoops(TEXT_NAMES, {
   SetText = function(self, str)
     self.__text = str or ''
+    refreshTextAdvance(self)
     __mauiDirty = true
   end,
   GetText = function(self) return self.__text or '' end,
   SetNewFont = function(self, family, pointSize)
     self.__fontFamily = family
     self.__fontSize = pointSize
+    -- Die Engine fuellt FontAscent/FontDescent/FontExternalLeading aus der
+    -- Schrift (Cfile:1145928-1145930); text.lua:39 macht daraus die Hoehe.
+    local asc, desc = __mauiFontMetrics(family, pointSize)
+    self.FontAscent:Set(asc)
+    self.FontDescent:Set(desc)
+    self.FontExternalLeading:Set(0)
+    refreshTextAdvance(self)
     __mauiDirty = true
   end,
   SetNewColor = function(self, color)
