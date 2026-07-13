@@ -310,6 +310,155 @@ local cursor = withNoops(CURSOR_NAMES, {
 })
 
 -- ---------------------------------------------------------------------
+-- control_methods (CMauiControl) — 25 bindings, UI VM only.
+-- Control (control.lua:28) derives from this. The LazyVars (Left/Top/…) are
+-- attached by InternalCreate* (see maui.lua), not by these methods.
+-- ---------------------------------------------------------------------
+local CONTROL_NAMES = {
+  'AbandonKeyboardFocus', 'AcquireKeyboardFocus', 'ApplyFunction', 'ClearChildren',
+  'Destroy', 'DisableHitTest', 'EnableHitTest', 'GetAlpha', 'GetCurrentFocusControl',
+  'GetName', 'GetParent', 'GetRenderPass', 'GetRootFrame', 'Hide', 'HitTest',
+  'IsHidden', 'IsHitTestDisabled', 'NeedsFrameUpdate', 'SetAlpha', 'SetHidden',
+  'SetName', 'SetNeedsFrameUpdate', 'SetParent', 'SetRenderPass', 'Show',
+}
+
+local control = withNoops(CONTROL_NAMES, {
+  GetParent = function(self) return self.__parent or nil end,
+  SetParent = function(self, parent)
+    self.__parent = parent or false
+    if parent then
+      parent.__children[table.getn(parent.__children) + 1] = self
+    end
+    __mauiDirty = true
+  end,
+  ClearChildren = function(self)
+    for _, c in ipairs(self.__children or {}) do c:Destroy() end
+    self.__children = {}
+    __mauiDirty = true
+  end,
+  Destroy = function(self)
+    self:ClearChildren()
+    if self.OnDestroy then self:OnDestroy() end
+    __mauiControls[self.__id] = nil
+    self.__destroyed = true
+    __mauiDirty = true
+  end,
+
+  GetName = function(self) return self.__name end,
+  SetName = function(self, name) self.__name = name end,
+
+  Hide = function(self) self:SetHidden(true) end,
+  Show = function(self) self:SetHidden(false) end,
+  SetHidden = function(self, hidden)
+    self.__hidden = hidden == true
+    __mauiDirty = true
+  end,
+  IsHidden = function(self) return self.__hidden == true end,
+
+  SetAlpha = function(self, alpha, children)
+    self.__alpha = alpha
+    if children then
+      for _, c in ipairs(self.__children or {}) do c:SetAlpha(alpha, true) end
+    end
+    __mauiDirty = true
+  end,
+  GetAlpha = function(self) return self.__alpha or 1 end,
+
+  DisableHitTest = function(self) self.__hitTest = false end,
+  EnableHitTest = function(self) self.__hitTest = true end,
+  IsHitTestDisabled = function(self) return self.__hitTest == false end,
+
+  SetNeedsFrameUpdate = function(self, needs) self.__needsFrameUpdate = needs == true end,
+  NeedsFrameUpdate = function(self) return self.__needsFrameUpdate == true end,
+  SetRenderPass = function(self, pass) self.__renderPass = pass end,
+  GetRenderPass = function(self) return self.__renderPass or 0 end,
+
+  GetRootFrame = function(self)
+    local c = self
+    while c.__parent do c = c.__parent end
+    return c
+  end,
+})
+
+-- ---------------------------------------------------------------------
+-- bitmap_methods (CMauiBitmap) — 18 bindings.
+-- SetNewTexture fuellt BitmapWidth/BitmapHeight aus den Texturmassen
+-- (Cfile:1118647) — darum bemisst sich ein Bitmap ohne Layout-Helfer nach
+-- seiner DDS (bitmap.lua:69-70).
+-- ---------------------------------------------------------------------
+local BITMAP_NAMES = {
+  'GetFrame', 'GetNumFrames', 'InternalSetSolidColor', 'Loop', 'Play',
+  'SetBackwardPattern', 'SetForwardPattern', 'SetFrame', 'SetFramePattern',
+  'SetFrameRate', 'SetLoopPingPongPattern', 'SetNewTexture', 'SetPingPongPattern',
+  'SetTiled', 'SetUV', 'ShareTextures', 'Stop', 'UseAlphaHitTest',
+}
+
+local bitmap = withNoops(BITMAP_NAMES, {
+  SetNewTexture = function(self, filename, border)
+    self.__texture = filename
+    self.__border = border or 1
+    local w, h = GetTextureDimensions(filename)
+    self.BitmapWidth:Set(w or 0)
+    self.BitmapHeight:Set(h or 0)
+    __mauiDirty = true
+  end,
+  InternalSetSolidColor = function(self, color)
+    self.__solidColor = color
+    __mauiDirty = true
+  end,
+  SetUV = function(self, u0, v0, u1, v1)
+    self.__uv = { u0, v0, u1, v1 }
+    __mauiDirty = true
+  end,
+  SetTiled = function(self, tiled) self.__tiled = tiled == true end,
+  ShareTextures = function(self, other)
+    if other and other.__texture then self:SetNewTexture(other.__texture, other.__border) end
+  end,
+  GetFrame = function(self) return self.__frame or 0 end,
+  GetNumFrames = function(self) return 1 end,
+}, control)
+
+-- ---------------------------------------------------------------------
+-- text_methods (CMauiText) — 9 bindings.
+-- GetStringAdvance ist Pflicht: ohne Textbreite kann kein Layout rechnen
+-- (Cfile:1146720). Die Breite kommt aus der Engine (Schriftmetrik).
+-- ---------------------------------------------------------------------
+local TEXT_NAMES = {
+  'GetStringAdvance', 'GetText', 'SetCenteredHorizontally', 'SetCenteredVertically',
+  'SetDropShadow', 'SetNewClipToWidth', 'SetNewColor', 'SetNewFont', 'SetText',
+}
+
+local text = withNoops(TEXT_NAMES, {
+  SetText = function(self, str)
+    self.__text = str or ''
+    __mauiDirty = true
+  end,
+  GetText = function(self) return self.__text or '' end,
+  SetNewFont = function(self, family, pointSize)
+    self.__fontFamily = family
+    self.__fontSize = pointSize
+    __mauiDirty = true
+  end,
+  SetNewColor = function(self, color)
+    self.__color = color
+    __mauiDirty = true
+  end,
+  SetCenteredHorizontally = function(self, on) self.__centerH = on == true end,
+  SetCenteredVertically = function(self, on) self.__centerV = on == true end,
+  GetStringAdvance = function(self, str)
+    return __mauiStringAdvance(str or '', self.__fontFamily or '', self.__fontSize or 12)
+  end,
+}, control)
+
+-- ---------------------------------------------------------------------
+-- frame_methods (CMauiFrame) — 3 bindings.
+-- ---------------------------------------------------------------------
+local FRAME_NAMES = { 'GetTargetHead', 'GetTopmostDepth', 'SetTargetHead' }
+local frame = withNoops(FRAME_NAMES, {
+  GetTopmostDepth = function(self) return 5000000 end,
+}, control)
+
+-- ---------------------------------------------------------------------
 -- Publish. Unknown moho.<x> keys become empty classes on demand, so a script
 -- deriving from a subsystem we have not built yet still loads (and then fails
 -- loudly at the first real call, which is what we want).
@@ -327,3 +476,11 @@ rawset(moho, 'unit_methods', Class(moho.entity_methods) (unit))
 rawset(moho, 'weapon_methods', Class(moho.entity_methods) (weapon))
 rawset(moho, 'aibrain_methods', Class() (aibrain))
 rawset(moho, 'cursor_methods', Class() (cursor))
+
+-- maui (nur UI-VM). group_methods hat keine eigenen Bindungen — ein Group ist
+-- ein CMauiControl mit der Klasse "group" (deshalb steht CMauiGroup auch nicht
+-- in der Decomp-Liste). Die leere Klasse liefert das lazy-moho von selbst.
+rawset(moho, 'control_methods', Class() (control))
+rawset(moho, 'bitmap_methods', Class(moho.control_methods) (bitmap))
+rawset(moho, 'text_methods', Class(moho.control_methods) (text))
+rawset(moho, 'frame_methods', Class(moho.control_methods) (frame))

@@ -4,6 +4,7 @@ import { installEngineGlobals } from './engineGlobals'
 import { installSimThreads } from './simThreads'
 import UI_GLOBALS_LUA from '../engine-lua/ui-globals.lua?raw'
 import UI_GLOBALS_MISSING_LUA from '../engine-lua/ui-globals-missing.lua?raw'
+import MAUI_LUA from '../engine-lua/maui.lua?raw'
 
 /**
  * Die UI-VM — der zweite Lua-State.
@@ -27,10 +28,18 @@ export interface UiEngine {
   host: LuaHost
 }
 
-/** Zugriff der UI-VM auf die Spieldateien (VFS) — für DiskGetFileInfo/DiskFindFiles. */
+/**
+ * Was die UI-VM von der Engine braucht: den Dateizugriff (VFS), die Maße einer
+ * Textur und die Schriftmetrik. Alles drei sind echte Engine-Dienste — ohne sie
+ * kann die maui-Lua ihr Layout nicht rechnen.
+ */
 export interface UiFileSystem {
   exists: (path: string) => boolean
   find: (dir: string, pattern: string) => string[]
+  /** Maße einer DDS-Textur — daraus bemisst sich ein Bitmap ohne Layout-Helfer. */
+  textureSize?: (path: string) => [number, number] | null
+  /** Breite eines Strings in Pixeln (CMauiText::GetStringAdvance, Cfile:1146720). */
+  stringAdvance?: (text: string, family: string, size: number) => number
 }
 
 export function installUiEngine(host: LuaHost, fs: UiFileSystem): UiEngine {
@@ -73,6 +82,19 @@ export function installUiEngine(host: LuaHost, fs: UiFileSystem): UiEngine {
   host.loadGlobal('/lua/system/MultiEvent.lua')
   host.loadGlobal('/lua/system/collapse.lua')
 
+  // maui-Substrat: die LazyVar-Instanzen, die InternalCreate*-Globals und
+  // DoInit → OnInit. Muss NACH class.lua/moho stehen (die Controls sind
+  // Lua-Klassen) und VOR jeder UI-Lua, die Controls erzeugt.
+  host.eval(MAUI_LUA)
+  if (fs.textureSize) {
+    host.setGlobal('__uiTextureDims', (path: string) => fs.textureSize!(normalize(path)))
+  }
+  if (fs.stringAdvance) {
+    host.setGlobal('__uiStringAdvance', (text: string, family: string, size: number) =>
+      fs.stringAdvance!(text, family, size),
+    )
+  }
+
   // Alle noch nicht gebauten UI-Globals bekommen eine Funktion, die beim AUFRUF
   // mit ihrem Namen scheitert. Referenzieren geht (die UI-Lua baut daraus beim
   // Laden Tabellen), Aufrufen knallt — kein stiller Stub, sondern eine Liste
@@ -80,6 +102,15 @@ export function installUiEngine(host: LuaHost, fs: UiFileSystem): UiEngine {
   host.eval(UI_GLOBALS_MISSING_LUA)
 
   return { host }
+}
+
+/**
+ * Erzeugt den Root-Frame (GetFrame(0)) — die Wurzel des UI-Baums, die die
+ * Engine beim Start anlegt und mit der Fenstergröße versorgt. Die Klasse ist
+ * die Original-`Frame` (frame.lua:6).
+ */
+export function createRootFrame(host: LuaHost, width: number, height: number): void {
+  host.eval(`__mauiCreateRootFrame(${width}, ${height})`)
 }
 
 /** `/textures/x.dds` → `textures/x.dds` (das VFS führt Pfade ohne führenden /). */
