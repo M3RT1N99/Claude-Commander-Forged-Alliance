@@ -42,7 +42,7 @@ let total = 0
 let ok = 0
 let bytecode = 0
 const failures: string[] = []
-const stats = { hashComments: 0, notEquals: 0, forInTable: 0, continues: 0 }
+const stats = { hashComments: 0, notEquals: 0, forInTable: 0, continues: 0, varargArg: 0 }
 const openFiles: NodeFile[] = []
 
 for (const archive of ['lua.scd', 'mohodata.scd', 'units.scd', 'projectiles.scd']) {
@@ -64,6 +64,7 @@ for (const archive of ['lua.scd', 'mohodata.scd', 'units.scd', 'projectiles.scd'
     stats.notEquals += s.notEquals
     stats.forInTable += s.forInTable
     stats.continues += s.continues
+    stats.varargArg += s.varargArg
 
     try {
       // 5.3: goto/Labels (für `continue`) und C-Bitoperatoren (`|`, `&`),
@@ -80,7 +81,8 @@ for (const archive of ['lua.scd', 'mohodata.scd', 'units.scd', 'projectiles.scd'
 
 console.log(
   `\nTranspiler: ${stats.hashComments} '#'-Kommentare, ${stats.notEquals} '!=', ` +
-    `${stats.forInTable} 'for-in-Tabelle', ${stats.continues} 'continue' umgeschrieben`,
+    `${stats.forInTable} 'for-in-Tabelle', ${stats.continues} 'continue', ` +
+    `${stats.varargArg} 'arg'-Vararg umgeschrieben`,
 )
 console.log(
   `Ergebnis: ${ok}/${total} Original-Lua-Dateien parsen als Standard-Lua` +

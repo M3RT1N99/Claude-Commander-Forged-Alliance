@@ -24,6 +24,7 @@ export interface TranspileResult {
     notEquals: number
     forInTable: number
     continues: number
+    varargArg: number
   }
 }
 
@@ -31,7 +32,7 @@ export interface TranspileResult {
 const VALID_ESCAPES = new Set(['a', 'b', 'f', 'n', 'r', 't', 'v', '\\', '"', "'", '\n', 'x', 'z'])
 
 export function transpileFaLua(source: string): TranspileResult {
-  const stats = { hashComments: 0, notEquals: 0, forInTable: 0, continues: 0 }
+  const stats = { hashComments: 0, notEquals: 0, forInTable: 0, continues: 0, varargArg: 0 }
   let out = ''
   let mode: Mode = 'code'
   let quote = ''
@@ -162,7 +163,72 @@ export function transpileFaLua(source: string): TranspileResult {
     i++
   }
 
-  return { code: rewriteContinue(rewriteForIn(out, stats), stats), stats }
+  return {
+    code: rewriteContinue(rewriteVarargArg(rewriteForIn(out, stats), stats), stats),
+    stats,
+  }
+}
+
+/**
+ * Lua 5.0 stellte in Vararg-Funktionen implizit eine Tabelle `arg`
+ * (`{n = Anzahl, [1..n] = Werte}`) bereit; ab 5.1 gibt es nur noch `...`.
+ * FA-Skripte nutzen `arg` (z. B. `class.lua` `ClassMeta:__call`). Wir
+ * injizieren `local arg = table.pack(...)` direkt nach der Parameterliste
+ * jeder Vararg-Funktion — verhaltensäquivalent (`table.pack` setzt `.n`).
+ *
+ * Nur Funktionen mit `...` in der Signatur werden angefasst; Strings und
+ * Kommentare bleiben unberührt (Lexer-Skip).
+ */
+function rewriteVarargArg(code: string, stats: { varargArg: number }): string {
+  const edits: { pos: number; text: string }[] = []
+  let i = 0
+  const isWord = (c: string): boolean => /[A-Za-z0-9_]/.test(c)
+
+  while (i < code.length) {
+    const c = code[i]!
+    if (c === '-' && code[i + 1] === '-') {
+      const nl = code.indexOf('\n', i)
+      i = nl < 0 ? code.length : nl
+      continue
+    }
+    if (c === '"' || c === "'") {
+      const q = c
+      i++
+      while (i < code.length && code[i] !== q) {
+        if (code[i] === '\\') i++
+        i++
+      }
+      i++
+      continue
+    }
+    if (!isWord(c)) {
+      i++
+      continue
+    }
+    const start = i
+    while (i < code.length && isWord(code[i]!)) i++
+    if (code.slice(start, i) !== 'function') continue
+
+    // Parameterliste finden: bis zur öffnenden Klammer (Name überspringen)
+    let p = i
+    while (p < code.length && code[p] !== '(' && code[p] !== '\n') p++
+    if (code[p] !== '(') continue
+    const open = p
+    let close = code.indexOf(')', open)
+    if (close < 0) continue
+    const params = code.slice(open + 1, close)
+    if (/(^|[,\s])\.\.\.\s*$/.test(params)) {
+      edits.push({ pos: close + 1, text: ' local arg = table.pack(...);' })
+      stats.varargArg++
+    }
+    i = close + 1
+  }
+
+  if (edits.length === 0) return code
+  edits.sort((a, b) => b.pos - a.pos)
+  let out = code
+  for (const e of edits) out = out.slice(0, e.pos) + e.text + out.slice(e.pos)
+  return out
 }
 
 /**
