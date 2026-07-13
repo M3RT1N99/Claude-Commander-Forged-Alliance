@@ -128,8 +128,18 @@ Base-Engine nicht; Intel/Schild/Stealth-Abschaltung bei Energiemangel ist
 Lua-getrieben und betrifft die Masse-Produktion nicht. → Die aktuelle Impl ist
 hier bereits 1:1; der Lock-Test in verify-economy.ts sichert das ab.
 
-**Noch offen:** echte Builder-Zuordnung statt `BUILDER_RATE` — Formel binär
-bestätigt (`delta = buildRate/BuildTime · ResourceConsumed · 0.1` je Bauer,
-additiv über alle auf dasselbe Ziel gerichteten Bauer, CBuildTaskHelper::
-UpdateWorkProgress @0x5f5f2c). Braucht Bauer→Ziel-Zuordnung (`issueBuild`) +
-Sandbox-Bauauftrag-Verdrahtung, damit Baustellen sich nicht mehr selbst bauen.
+## Builder-BuildRate: Mechanik umgesetzt
+
+Die echte Bauformel ist eingebaut (`buildRequest` in simWorld.ts, binär
+bestätigt: `delta = buildRate/BuildTime · ratio · 0.1` je Bauer, CBuildTask
+Helper::UpdateWorkProgress @0x5f5f2c). `SimUnit.buildTarget` + `issueBuild`
+weisen einen fertigen Bauer einer Baustelle zu; mehrere Bauer wirken **additiv**
+(Assist), Reichweite über `Economy.MaxBuildDistance` gegatet. `BUILDER_RATE`
+bleibt nur noch als Fallback für Baustellen OHNE jede Zuweisung (hält die
+Sandbox lauffähig). Verifiziert (Timing, Assist-Stacking, Reichweiten-Gate).
+
+**Noch offen:** (1) Sandbox-Bauauftrag statt Direkt-Spawn — der Bauer soll per
+Kommando zur Baustelle laufen (Approach-State CUnitMobileBuildTask::Execute ist
+im Decomp NICHT geliftet; aktuell statisches Distanz-Gate als Stand-in) und
+dann bauen, damit der Selbstbau-Fallback entfällt. (2) Fabrik-Rolloff,
+OnStartBuild/OnStopBeingBuilt-Lua-Callbacks, Adjacency-Buffs.

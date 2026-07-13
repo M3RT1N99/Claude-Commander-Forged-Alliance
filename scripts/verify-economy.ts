@@ -28,6 +28,8 @@ function stats(over: Partial<UnitStats>): UnitStats {
     buildCostMass: 0,
     buildCostEnergy: 0,
     buildTime: 1,
+    buildRate: 0,
+    maxBuildDistance: 0,
     ...over,
   }
 }
@@ -195,6 +197,66 @@ console.log('\n== Sharing-Determinismus ==')
     return `${w.army(2).incomeCarryMass}|${w.army(3).incomeCarryMass}|${w.army(1).mass}`
   }
   check(run() === run(), `identische Sharing-Läufe (${run()})`)
+}
+
+// ── 7. Echte Builder-BuildRate: Fortschritt = buildRate/BuildTime, additiv ──
+// Binär: delta = buildRate/BuildTime · ratio · 0.1 je Bauer (CBuildTaskHelper::
+// UpdateWorkProgress @0x5f5f2c); mehrere Bauer auf dasselbe Ziel wirken additiv.
+console.log('\n== Builder-BuildRate: Timing, Assist-Stacking, Reichweiten-Gate ==')
+{
+  const w = new SimWorld()
+  const target = w.spawn(stats({ buildCostMass: 100, buildCostEnergy: 200, buildTime: 100, maxHealth: 1000 }), 0, 0)
+  target.buildProgress = 0
+  target.health = 0
+  const builder = w.spawn(stats({ buildRate: 10 }), 0, 0) // fertig, in Reichweite
+  const army = w.army(1)
+  army.mass = 100000
+  army.energy = 100000
+  w.issueBuild(builder, target)
+
+  w.tick() // step = 10/100*0.1 = 0.01
+  check(near(target.buildProgress, 0.01), `1 Bauer: Fortschritt ${target.buildProgress.toFixed(4)} (erwartet 0.0100)`)
+  check(near(target.health, 10), `Health ${target.health.toFixed(1)} = maxHealth·progress (erwartet 10)`)
+  check(near(army.massExpense, 10, 1e-2), `massExpense ${army.massExpense.toFixed(2)}/s (100·0.01/Tick → 10/s)`)
+  check(near(army.energyExpense, 20, 1e-2), `energyExpense ${army.energyExpense.toFixed(2)}/s (200·0.01/Tick → 20/s)`)
+
+  for (let i = 0; i < 99; i++) w.tick() // gesamt 100 Ticks = BuildTime/buildRate = 10 s
+  check(near(target.buildProgress, 1), `nach 100 Ticks fertig: ${target.buildProgress.toFixed(4)}`)
+  const massBefore = army.mass
+  w.tick()
+  check(near(army.mass, massBefore), 'nach Fertigstellung kein weiterer Drain')
+}
+{
+  // Assist-Stacking: zwei Bauer (Rate 10) → effektive Rate 20 (additiv)
+  const w = new SimWorld()
+  const target = w.spawn(stats({ buildCostMass: 100, buildCostEnergy: 200, buildTime: 100, maxHealth: 1000 }), 0, 0)
+  target.buildProgress = 0
+  target.health = 0
+  const b1 = w.spawn(stats({ buildRate: 10 }), 0, 0)
+  const b2 = w.spawn(stats({ buildRate: 10 }), 0, 0)
+  const army = w.army(1)
+  army.mass = 100000
+  army.energy = 100000
+  w.issueBuild(b1, target)
+  w.issueBuild(b2, target)
+  w.tick()
+  check(near(target.buildProgress, 0.02), `2 Bauer additiv: Fortschritt ${target.buildProgress.toFixed(4)} (erwartet 0.0200)`)
+  check(near(army.massExpense, 20, 1e-2), `massExpense ${army.massExpense.toFixed(2)}/s (2× → 20/s)`)
+}
+{
+  // Reichweiten-Gate: Bauer außerhalb MaxBuildDistance trägt NICHT bei
+  const w = new SimWorld()
+  const target = w.spawn(stats({ buildCostMass: 100, buildCostEnergy: 200, buildTime: 100, maxHealth: 1000 }), 0, 0)
+  target.buildProgress = 0
+  target.health = 0
+  const farBuilder = w.spawn(stats({ buildRate: 10, maxBuildDistance: 5 }), 10, 0) // Distanz 10 > 5
+  const army = w.army(1)
+  army.mass = 100000
+  army.energy = 100000
+  w.issueBuild(farBuilder, target)
+  w.tick()
+  check(target.buildProgress === 0, `außer Reichweite: kein Fortschritt (${target.buildProgress})`)
+  check(near(army.massExpense, 0), `außer Reichweite: kein Drain (${army.massExpense})`)
 }
 
 console.log(failures === 0 ? '\nECONOMY BESTANDEN' : `\n${failures} CHECK(S) FEHLGESCHLAGEN`)

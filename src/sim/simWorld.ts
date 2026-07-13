@@ -39,6 +39,10 @@ export interface UnitStats {
   buildCostEnergy: number
   /** Bauzeit-Einheiten (Economy.BuildTime) */
   buildTime: number
+  /** Baurate als Bauer (Economy.BuildRate) */
+  buildRate: number
+  /** Reichweite als Bauer (Economy.MaxBuildDistance); 0 = ungeprüft */
+  maxBuildDistance: number
 }
 
 /** Leitet die Sim-Statistik aus einem UnitBlueprint ab. */
@@ -66,13 +70,17 @@ export function statsFromBlueprint(blueprintId: string, bp: BpObject): UnitStats
     buildCostMass: f(num('Economy.BuildCostMass', 0)),
     buildCostEnergy: f(num('Economy.BuildCostEnergy', 0)),
     buildTime: f(num('Economy.BuildTime', 1)),
+    buildRate: f(num('Economy.BuildRate', 0)),
+    maxBuildDistance: f(num('Economy.MaxBuildDistance', 0)),
   }
 }
 
 /**
- * Baurate des (impliziten) Konstrukteurs — Übergangslösung bis Ingenieure/
- * Fabriken existieren; 10 = BuildRate des UEF-ACU.
- * TODO: echte Builder-Zuordnung (Economy.BuildRate des bauenden Units).
+ * Baurate des impliziten Fallback-Konstrukteurs für Baustellen OHNE
+ * zugewiesenen Bauer (Interim, hält die Sandbox lauffähig, bis ein echtes
+ * Bau-Kommando-System existiert). 10 = BuildRate des UEF-ACU. Sobald ein
+ * echter Bauer via issueBuild zugewiesen ist, treibt DESSEN Economy.BuildRate
+ * den Bau (siehe buildRequest / Army.tick).
  */
 const BUILDER_RATE = 10
 
@@ -86,6 +94,30 @@ interface EconRequest {
   mass: number
   energy: number
   apply(ratio: number): void
+}
+
+/**
+ * Ein Bau-Request für ein Ziel, angetrieben von einer Baurate (eines echten
+ * Bauers oder des impliziten Fallback-Konstrukteurs). Sollschritt pro Tick =
+ * builderRate/BuildTime · dt (binär: `delta = buildRate/BuildTime · ratio · 0.1`,
+ * CBuildTaskHelper::UpdateWorkProgress @0x5f5f2c). Mehrere Bauer auf dasselbe
+ * Ziel erzeugen je einen Request → additive Assist-Rate (Σ buildRate). Kosten
+ * und Fortschritt skalieren mit derselben gewährten `ratio`.
+ */
+function buildRequest(target: SimUnit, builderRate: number): EconRequest {
+  const ts = target.stats
+  const step = Math.min(
+    f(f(builderRate / Math.max(ts.buildTime, 1)) * SIM_DT),
+    f(1 - target.buildProgress),
+  )
+  return {
+    mass: f(ts.buildCostMass * step),
+    energy: f(ts.buildCostEnergy * step),
+    apply: (ratio) => {
+      target.buildProgress = Math.min(f(target.buildProgress + f(step * ratio)), 1)
+      target.health = f(ts.maxHealth * target.buildProgress) // Health wächst mit dem Bau
+    },
+  }
 }
 
 /** Ressourcen-Zustand einer Armee (deterministisch, f32). */
@@ -126,6 +158,8 @@ export class Army {
     let massStore = f(650)
     let energyStore = f(4000)
     const requests: EconRequest[] = []
+    const buildSites: SimUnit[] = []
+    const assigned = new Set<SimUnit>() // Ziele mit zugewiesenem Bauer (egal ob in Reichweite)
 
     for (const u of units) {
       // health<=0 bei fertigen Einheiten = tot; Baustellen zählen weiter
@@ -134,28 +168,37 @@ export class Army {
       massStore = f(massStore + s.massStorage)
       energyStore = f(energyStore + s.energyStorage)
 
-      if (u.buildProgress >= 1) {
-        massProd = f(massProd + s.massProduction)
-        energyProd = f(energyProd + s.energyProduction)
-        const cm = f(s.massConsumption * SIM_DT)
-        const ce = f(s.energyConsumption * SIM_DT)
-        // eslint-disable-next-line @typescript-eslint/no-empty-function
-        if (cm > 0 || ce > 0) requests.push({ mass: cm, energy: ce, apply: () => {} })
-      } else {
-        // Baustelle: Sollschritt = BuildRate/BuildTime, Kosten anteilig
-        const step = Math.min(
-          f(f(BUILDER_RATE / Math.max(s.buildTime, 1)) * SIM_DT),
-          f(1 - u.buildProgress),
-        )
-        requests.push({
-          mass: f(s.buildCostMass * step),
-          energy: f(s.buildCostEnergy * step),
-          apply: (ratio) => {
-            u.buildProgress = Math.min(f(u.buildProgress + f(step * ratio)), 1)
-            u.health = f(s.maxHealth * u.buildProgress) // Health wächst mit dem Bau
-          },
-        })
+      if (u.buildProgress < 1) {
+        buildSites.push(u) // Selbstbau-Entscheidung erst nach den echten Bauern
+        continue
       }
+
+      // Fertige Einheit: Produktion (bedingungslos) + Unterhalt
+      massProd = f(massProd + s.massProduction)
+      energyProd = f(energyProd + s.energyProduction)
+      const cm = f(s.massConsumption * SIM_DT)
+      const ce = f(s.energyConsumption * SIM_DT)
+      // eslint-disable-next-line @typescript-eslint/no-empty-function
+      if (cm > 0 || ce > 0) requests.push({ mass: cm, energy: ce, apply: () => {} })
+
+      // Echter Bauer: trägt mit SEINER Economy.BuildRate zum Ziel bei, sofern
+      // in Reichweite. Mehrere Bauer auf dasselbe Ziel wirken additiv. Ein
+      // zugewiesenes Ziel (auch außer Reichweite) unterdrückt den Selbstbau —
+      // die Baustelle wartet auf ihren Bauer.
+      const t = u.buildTarget
+      if (t && t.buildProgress < 1 && t.army === armyIndex && s.buildRate > 0) {
+        assigned.add(t)
+        const inRange =
+          s.maxBuildDistance <= 0 ||
+          f(Math.hypot(f(t.x - u.x), f(t.z - u.z))) <= s.maxBuildDistance
+        if (inRange) requests.push(buildRequest(t, f(s.buildRate)))
+      }
+    }
+
+    // Baustellen OHNE jede Bauer-Zuweisung: impliziter Konstrukteur (Interim,
+    // hält die Sandbox lauffähig, bis ein echtes Bau-Kommando-System existiert).
+    for (const site of buildSites) {
+      if (!assigned.has(site)) requests.push(buildRequest(site, BUILDER_RATE))
     }
 
     this.massStorage = massStore
@@ -276,6 +319,9 @@ export class SimUnit {
    */
   buildProgress = 1
 
+  /** Ziel-Baustelle, zu der diese (fertige) Einheit als Bauer beiträgt. */
+  buildTarget: SimUnit | null = null
+
   /** Zustand des vorherigen Ticks (für Render-Interpolation) */
   prevX: number
   prevZ: number
@@ -317,6 +363,15 @@ export class SimWorld {
     this.units.push(unit)
     while (this.armies.length < army) this.armies.push(new Army())
     return unit
+  }
+
+  /**
+   * Weist einem (fertigen) Bauer eine Baustelle als Ziel zu. Der Bauer trägt
+   * pro Tick mit seiner Economy.BuildRate bei, solange er in Reichweite ist;
+   * mehrere Bauer auf dasselbe Ziel wirken additiv (Assist).
+   */
+  issueBuild(builder: SimUnit, target: SimUnit): void {
+    builder.buildTarget = target
   }
 
   army(index: number): Army {

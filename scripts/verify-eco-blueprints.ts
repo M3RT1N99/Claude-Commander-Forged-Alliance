@@ -103,6 +103,8 @@ for (const [id, expected] of Object.entries(EXPECTED)) {
     ['buildCostMass', s.buildCostMass, expected.BuildCostMass ?? 0],
     ['buildCostEnergy', s.buildCostEnergy, expected.BuildCostEnergy ?? 0],
     ['buildTime', s.buildTime, expected.BuildTime ?? 1],
+    ['buildRate', s.buildRate, expected.BuildRate ?? 0],
+    ['maxBuildDistance', s.maxBuildDistance, expected.MaxBuildDistance ?? 0],
   ]
   for (const [name, got, want] of mapping) {
     check(got === want, `statsFromBlueprint.${name} = ${got} (erwartet ${want})`)
