@@ -1,5 +1,9 @@
 # Plan: 1:1-Spielbarkeit — was aus der Engine übernommen ist und was fehlt
 
+> **Überholt durch [MASTERPLAN.md](MASTERPLAN.md)** (vollständige Inventur,
+> Lua-Einbettungs-Entscheidung, Phasen A–F). Dieses Dokument bleibt als
+> Kurzüberblick über den Asset-/Render-Stand.
+
 Ziel: Forged Alliance im Browser **1:1 wie im Original** spielen. Referenz
 ist die rekonstruierte Moho-Engine (faf-re, `src/sdk/moho/*`) plus die
 Original-Daten (lua.scd, mohodata.scd, Blueprints, Shader). Wir übernehmen
