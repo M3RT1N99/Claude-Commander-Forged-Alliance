@@ -77,9 +77,20 @@ const OVERRIDES: Record<string, string> = {
   GetHealth: 'function(self) return self.__health or 0 end',
   GetMaxHealth: 'function(self) return (self.__bp and self.__bp.Defense and self.__bp.Defense.MaxHealth) or 0 end',
   GetFractionComplete: 'function(self) return self.__fraction or 1 end',
-  GetPosition: 'function(self) return {0, 0, 0} end',
-  GetPositionXYZ: 'function(self) return 0, 0, 0 end',
-  GetHeading: 'function(self) return 0 end',
+  // Zustand in Instanz-Feldern (self.__pos {x,y,z}, self.__orient, self.__health,
+  // self.__meshBp). TS liest/schreibt diese Felder für Renderer und Sim.
+  GetPosition: 'function(self) return self.__pos or {0, 0, 0} end',
+  GetPositionXYZ:
+    'function(self) local p = self.__pos or {0,0,0}; return p[1], p[2], p[3] end',
+  SetPosition: 'function(self, pos) self.__pos = pos end',
+  GetOrientation: 'function(self) return self.__orient or {0, 0, 0, 1} end',
+  SetOrientation: 'function(self, o) self.__orient = o end',
+  GetHeading: 'function(self) return self.__heading or 0 end',
+  SetHealth:
+    'function(self, inst, h) self.__health = math.max(0, math.min(h, self:GetMaxHealth())) end',
+  AdjustHealth:
+    'function(self, inst, delta) self.__health = math.max(0, math.min((self.__health or 0) + delta, self:GetMaxHealth())) end',
+  SetMesh: 'function(self, mesh) self.__meshBp = mesh end',
   IsValidBone: 'function(self) return false end',
   GetUnitId: 'function(self) return (self.__bp and self.__bp.BlueprintId) or self.__id end',
   IsBeingBuilt: 'function(self) return self.__beingBuilt or false end',
