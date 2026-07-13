@@ -29,6 +29,7 @@ interface StatesMsg {
 }
 type OutMsg =
   | { type: 'booted' }
+  | { type: 'reset-done' }
   | { type: 'log'; level: string; msg: string }
   | { type: 'spawned'; reqId: number; uid: number }
   | { type: 'spawnError'; reqId: number; error: string }
@@ -39,6 +40,7 @@ export class LuaSimClient {
   private economy: EcoSnapshot | null = null
   private nextReq = 1
   private bootResolve: (() => void) | null = null
+  private resetResolve: (() => void) | null = null
   private readonly spawnPending = new Map<number, { resolve: (uid: number) => void; reject: (e: Error) => void }>()
 
   private constructor(
@@ -84,6 +86,9 @@ export class LuaSimClient {
       case 'booted':
         this.bootResolve?.()
         break
+      case 'reset-done':
+        this.resetResolve?.()
+        break
       case 'log':
         log(m.level, m.msg)
         break
@@ -118,6 +123,21 @@ export class LuaSimClient {
       this.spawnPending.set(reqId, { resolve, reject })
       this.worker.postMessage({ type: 'spawn', reqId, id, scriptPath, scriptBytes, bpBytes, pos, army })
     })
+  }
+
+  /**
+   * Setzt die Sitzung zurück: frischer Lua-Host, frische Engine, neues Gelände.
+   * Ohne das stapeln sich beim zweiten Sandbox-Start ACUs — und mit ihnen der
+   * doppelte Startvorrat aus GiveInitialResources.
+   */
+  async reset(terrain: HeightfieldData): Promise<void> {
+    const done = new Promise<void>((res) => {
+      this.resetResolve = res
+    })
+    this.statesById.clear()
+    this.economy = null
+    this.worker.postMessage({ type: 'reset', terrain })
+    await done
   }
 
   move(id: number, x: number, z: number): void {

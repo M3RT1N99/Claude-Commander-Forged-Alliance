@@ -18,6 +18,8 @@ import { Heightfield, type HeightfieldData } from './terrain'
 const ctx = self as unknown as Worker
 let host: LuaHost | null = null
 let engine: Engine | null = null
+/** Die Lua-Dateien bleiben liegen — ein Reset baut daraus einen frischen Host. */
+let bootFiles: Map<string, Uint8Array> | null = null
 
 interface Vec3 {
   x: number
@@ -29,10 +31,12 @@ type InMsg =
   | { type: 'spawn'; reqId: number; id: string; scriptPath: string; scriptBytes: Uint8Array | null; bpBytes: Uint8Array | null; pos: Vec3; army: number }
   | { type: 'move'; id: number; x: number; z: number }
   | { type: 'stop'; id: number }
+  | { type: 'reset'; terrain: HeightfieldData }
 
 ctx.onmessage = async (e: MessageEvent<InMsg>): Promise<void> => {
   const msg = e.data
   if (msg.type === 'boot') {
+    bootFiles = msg.files
     const h = await LuaHost.create(msg.files, (level, m) => ctx.postMessage({ type: 'log', level, msg: m }))
     // Der EINE Engine-Boot — derselbe wie in jeder Testsuite. Vorher stellte
     // sich der Worker die Engine selbst zusammen und vergaß dabei das
@@ -46,6 +50,12 @@ ctx.onmessage = async (e: MessageEvent<InMsg>): Promise<void> => {
     host = h
     ctx.postMessage({ type: 'booted' })
     setInterval(tickAndPost, 100) // 10-Hz-Sim-Beat im Worker-Thread
+    return
+  }
+  if (msg.type === 'reset') {
+    if (!bootFiles) return
+    await resetSession(bootFiles, msg.terrain)
+    ctx.postMessage({ type: 'reset-done' })
     return
   }
   if (!host) return
@@ -65,6 +75,24 @@ ctx.onmessage = async (e: MessageEvent<InMsg>): Promise<void> => {
   }
 }
 
+/**
+ * Sitzung neu aufsetzen (neue Karte/Sandbox-Neustart).
+ *
+ * Es reicht NICHT, die Units zu löschen: die Armee-Ökonomie hält Lager und
+ * Vorrat, und jede neue ACU schenkt beim Spawn erneut ihr Lager
+ * (GiveInitialResources). Ohne echten Reset stand nach dem zweiten Start das
+ * doppelte Startkapital da. Also: frischer LuaHost, frischer Engine-Boot —
+ * derselbe Weg wie beim ersten Mal.
+ */
+async function resetSession(files: Map<string, Uint8Array>, terrain: HeightfieldData): Promise<void> {
+  host?.close()
+  const h = await LuaHost.create(files, (level, m) => ctx.postMessage({ type: 'log', level, msg: m }))
+  engine = installEngine(h)
+  const hf = new Heightfield(terrain)
+  setTerrainSource(h, (x, z) => hf.at(x, z))
+  host = h
+}
+
 function tickAndPost(): void {
   if (!host || !engine) return
   // Ein Sim-Beat: Bau-Bedarf → Ökonomie → gewährte Rate → Lua-Threads → Physik.
@@ -77,6 +105,7 @@ function tickAndPost(): void {
     economy: {
       mass: a.mass, massStorage: a.maxMass, massIncome: a.incomeMass, massExpense: a.expenseMass,
       energy: a.energy, energyStorage: a.maxEnergy, energyIncome: a.incomeEnergy, energyExpense: a.expenseEnergy,
+      massRequested: a.requestedMass, energyRequested: a.requestedEnergy,
     },
   })
 }

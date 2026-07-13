@@ -365,6 +365,20 @@ async function startSandbox(mapFolder: string): Promise<void> {
     setMode('sandbox')
     await loadMap(mapFolder)
 
+    // Läuft schon eine Sim? Dann zurücksetzen, statt eine zweite ACU auf die
+    // alte Sitzung zu stapeln (mit doppeltem Startvorrat aus
+    // GiveInitialResources) — und mit dem Gelände der NEUEN Karte.
+    if (luaSim && currentScmap) {
+      luaUnits.length = 0
+      await luaSim.reset({
+        data: currentScmap.heightmap,
+        width: currentScmap.width,
+        height: currentScmap.height,
+        scale: currentScmap.heightScale,
+      })
+      log('Lua-Sim zurückgesetzt (neue Karte)')
+    }
+
     // Spawn-Punkt der Armee 1 aus der _save.lua
     const files = await source.list(`maps/${mapFolder}`)
     const saveFile = files.find((f) => f.name.toLowerCase().endsWith('_save.lua'))
@@ -674,6 +688,7 @@ const luaUnits: LuaSceneUnit[] = []
 const EMPTY_ECO: EcoSnapshot = {
   mass: 0, massStorage: 0, massIncome: 0, massExpense: 0,
   energy: 0, energyStorage: 0, energyIncome: 0, energyExpense: 0,
+  massRequested: 0, energyRequested: 0,
 }
 
 /** RULEUCC_*-Fähigkeiten aus General.CommandCaps (bestimmt die Order-Buttons). */

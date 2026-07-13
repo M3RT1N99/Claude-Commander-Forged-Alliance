@@ -32,7 +32,13 @@ interface OrderDef {
   action?: (s: HudSource) => void
 }
 
-/** standardOrdersTable, Slots 1–6 (orders.lua) */
+/**
+ * Handkopie der standardOrdersTable (orders.lua) — genau das, was hier nicht
+ * stehen duerfte. Bleibt nur, bis orders.lua wirklich laeuft (docs/PLAN-UI.md).
+ *
+ * Ohne `action` kann die Sim den Befehl noch nicht: solche Knoepfe werden
+ * DEAKTIVIERT gerendert, statt so zu tun, als taeten sie etwas.
+ */
 const COMMON_ORDERS: OrderDef[] = [
   { cap: 'RULEUCC_Move', bitmap: 'move', slot: 1 },
   { cap: 'RULEUCC_Attack', bitmap: 'attack', slot: 2 },
@@ -52,6 +58,13 @@ export interface EcoSnapshot {
   energyStorage: number
   energyIncome: number
   energyExpense: number
+  /**
+   * Angeforderte Menge VOR der Drosselung (Original: lastUseRequested).
+   * economy.lua schaltet die Ausgabe-Anzeige zwischen lastUseActual und
+   * lastUseRequested um — ohne diesen Wert ist das nicht nachvollziehbar.
+   */
+  massRequested: number
+  energyRequested: number
 }
 
 /** Momentaufnahme einer Einheit fürs HUD (Unit-Panel, Minimap, Strategic Icons). */
@@ -153,39 +166,26 @@ export class Hud {
   // -------------------------------------------------------------------------
 
   private readonly stratPool: HTMLImageElement[] = []
-  private readonly tintCache = new Map<string, string | 'pending'>()
+  private readonly stratIconCache = new Map<string, string | 'pending'>()
 
-  private static readonly ARMY_COLORS: Record<number, string> = {
-    1: '#2a6dbb',
-    2: '#e23c2c',
-  }
-
-  private tintedIcon(name: string, state: 'rest' | 'selected', army: number): string | null {
-    const key = `${name}|${state}|${army}`
-    const cached = this.tintCache.get(key)
+  /**
+   * Strategisches Icon, UNGEFÄRBT.
+   *
+   * Hier stand ein Canvas-'multiply'-Tinting mit einer erfundenen Farbtabelle
+   * ({1:'#2a6dbb', 2:'#e23c2c'}). Im Original kommen die Armeefarben aus
+   * /lua/gamecolors.lua (über GetArmiesTable) — die Datei wird importiert,
+   * sobald die UI-VM steht (docs/PLAN-UI.md, Schritt 3). Eine zweite erfundene
+   * Farbe ersetzt keine erste.
+   */
+  private strategicIcon(name: string, state: 'rest' | 'selected'): string | null {
+    const key = `${name}|${state}`
+    const cached = this.stratIconCache.get(key)
     if (cached && cached !== 'pending') return cached
     if (cached === 'pending') return null
-    this.tintCache.set(key, 'pending')
+    this.stratIconCache.set(key, 'pending')
     void this.skin(`/game/strategicicons/${name}_${state}.dds`).then((base) => {
-      if (!base) {
-        this.tintCache.delete(key)
-        return
-      }
-      const img = new Image()
-      img.onload = () => {
-        const canvas = document.createElement('canvas')
-        canvas.width = img.width
-        canvas.height = img.height
-        const ctx = canvas.getContext('2d')!
-        ctx.drawImage(img, 0, 0)
-        ctx.globalCompositeOperation = 'multiply'
-        ctx.fillStyle = Hud.ARMY_COLORS[army] ?? '#999999'
-        ctx.fillRect(0, 0, canvas.width, canvas.height)
-        ctx.globalCompositeOperation = 'destination-in'
-        ctx.drawImage(img, 0, 0)
-        this.tintCache.set(key, canvas.toDataURL())
-      }
-      img.src = base
+      if (!base) this.stratIconCache.delete(key)
+      else this.stratIconCache.set(key, base)
     })
     return null
   }
@@ -215,7 +215,7 @@ export class Hud {
         img.style.display = 'none'
         continue
       }
-      const url = this.tintedIcon(u.strategicIcon, u.selected ? 'selected' : 'rest', u.army)
+      const url = this.strategicIcon(u.strategicIcon, u.selected ? 'selected' : 'rest')
       if (!url) {
         img.style.display = 'none'
         continue
@@ -387,7 +387,10 @@ export class Hud {
       const net = income - expense
       this.el(`${group} .eco-cur`).textContent = Math.floor(cur).toString()
       this.el(`${group} .eco-max`).textContent = Math.floor(max).toString()
-      this.el(`${group} .eco-fill`).style.width = `${Math.min(100, (cur / max) * 100)}%`
+      // max ist 0, solange die ACU ihr Lager noch nicht registriert hat —
+      // (cur / 0) * 100 ist NaN und ergibt `width: NaN%`.
+      const fillPct = max > 0 ? Math.min(100, (cur / max) * 100) : 0
+      this.el(`${group} .eco-fill`).style.width = `${fillPct}%`
       const rate = this.el(`${group} .eco-rate`)
       rate.textContent = `${net >= 0 ? '+' : ''}${net.toFixed(0)}`
       rate.style.color = net >= 0 ? '#b7e75f' : cur > 1 ? '#ffff00' : '#ff0000'
@@ -398,7 +401,11 @@ export class Hud {
     // Orders — verfügbar = Union der CommandCaps der Auswahl (Original)
     const caps = this.source.selectedCaps()
     for (const b of this.orderButtons) {
-      const enabled = caps.has(b.def.cap)
+      // Aktiv nur, wenn die Unit die Cap HAT *und* die Sim den Befehl ausfuehren
+      // kann. Move/Attack/Patrol/Guard/Retaliate haben noch keine action — sie
+      // werden deaktiviert gerendert (die _dis-Bitmap gibt es), statt so zu tun,
+      // als taeten sie etwas. Sie kommen mit orders.lua wieder (docs/PLAN-UI.md).
+      const enabled = caps.has(b.def.cap) && b.def.action !== undefined
       if (enabled !== b.enabled) {
         b.enabled = enabled
         b.img.src = enabled ? b.img.dataset.up! : b.img.dataset.dis!
