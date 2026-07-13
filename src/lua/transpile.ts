@@ -401,23 +401,24 @@ function rewriteContinue(code: string, stats: { continues: number }): string {
 }
 
 /**
- * Lua 5.0 erlaubte `for k,v in tbl do` (implizite Tabellen-Iteration).
- * Ab 5.1 muss dort ein Iterator stehen → `pairs(tbl)`. Nur umschreiben,
- * wenn der Ausdruck weder Funktionsaufruf noch bekannter Iterator ist.
+ * FA nutzt LuaPlus 5.0, dessen generisches `for` gepatcht ist: liefert der
+ * `in`-Ausdruck eine **Tabelle** (statt eines Iterator-Tripels), wird sie wie
+ * mit `pairs`/`next` iteriert — auch wenn die Tabelle aus einem Funktions-
+ * aufruf kommt (`for k,f in DiskFindFiles(...) do`). Standard-Lua ≥ 5.1 kennt
+ * das nicht.
+ *
+ * Lösung: jeden `in`-Ausdruck durch den Dispatcher `__foriter(...)`
+ * (siehe COMPAT_LUA) schleusen. Weil der Ausdruck das einzige/letzte Argument
+ * ist, expandieren seine Mehrfachrückgaben vollständig in die Parameter —
+ * `pairs(t)`/`ipairs(t)`/`next,t` werden also korrekt durchgereicht, während
+ * eine reine Tabelle auf `next, tbl, nil` umgebogen wird.
  */
 function rewriteForIn(code: string, stats: { forInTable: number }): string {
   return code.replace(
     /\bfor\s+([A-Za-z_]\w*(?:\s*,\s*[A-Za-z_]\w*)*)\s+in\s+([^\n]+?)\s+do\b/g,
-    (match, vars: string, expr: string) => {
-      const e = expr.trim()
-      // Funktionsaufruf (pairs(...), ipairs(...), next, eigene Iteratoren)
-      if (/[)\]]\s*$/.test(e) || /\bnext\b/.test(e) || e.includes(',')) return match
-      // reiner Bezeichner/Feldzugriff → Tabelle
-      if (/^[A-Za-z_][\w.:]*$/.test(e) || /^self\.[\w.]+$/.test(e)) {
-        stats.forInTable++
-        return `for ${vars} in pairs(${e}) do`
-      }
-      return match
+    (_match, vars: string, expr: string) => {
+      stats.forInTable++
+      return `for ${vars} in __foriter(${expr.trim()}) do`
     },
   )
 }
@@ -428,6 +429,16 @@ function rewriteForIn(code: string, stats: { forInTable: number }): string {
  */
 export const COMPAT_LUA = `
 -- Lua-5.0-Kompatibilität für FA-Skripte
+
+-- Generic-for-Dispatcher (siehe rewriteForIn): Tabelle -> pairs/next,
+-- Iterator-Tripel unveraendert durchreichen.
+function __foriter(a, b, c)
+  if type(a) == 'table' then
+    return next, a, nil
+  end
+  return a, b, c
+end
+
 table.getn = table.getn or function(t) return #t end
 table.setn = table.setn or function() end
 table.foreach = table.foreach or function(t, f)

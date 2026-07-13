@@ -101,6 +101,42 @@ export class LuaHost {
     return this.lua.doStringSync(`return import(${JSON.stringify(name)})`)
   }
 
+  /** Setzt/überschreibt ein globales Symbol (Engine-Funktion, Tabelle). */
+  setGlobal(name: string, value: unknown): void {
+    this.lua.global.set(name, value)
+  }
+
+  /** Führt ein Boot-Modul im globalen Environment aus (öffentlich für Setup). */
+  loadGlobal(name: string): void {
+    this.runModuleGlobally(name)
+  }
+
+  /**
+   * Installiert einen nachsichtigen Trap: Zugriff auf ein nicht definiertes
+   * Global liefert einen No-Op-Stub statt eines Fehlers und meldet den Namen.
+   * Werkzeug zum Entdecken der von den Original-Skripten benötigten
+   * Engine-API (statt zu raten). Nicht für den Produktivbetrieb.
+   */
+  installStubTrap(onMissing: (name: string) => void): void {
+    this.lua.global.set('__onMissingGlobal', (name: string) => onMissing(name))
+    this.lua.doStringSync(`
+      local seen = {}
+      -- Identitaets-Stub: gibt das erste Argument zurueck. Passt fuer die
+      -- Blueprint-DSL-Konstruktoren (Sound{...} -> {...}) und ist harmlos
+      -- fuer void-Engine-Aufrufe.
+      local stub = function(a) return a end
+      setmetatable(_G, {
+        __index = function(_, k)
+          if type(k) == 'string' and not seen[k] then
+            seen[k] = true
+            __onMissingGlobal(k)
+          end
+          return stub
+        end,
+      })
+    `)
+  }
+
   /** Direkter Lua-Ausdruck (Tests/Diagnose). */
   eval(code: string): unknown {
     return this.lua.doStringSync(code)
@@ -114,14 +150,28 @@ export class LuaHost {
 /** Engine-Bootstrap in Lua: doscript + __runGlobal auf Basis von loadfile. */
 const BOOT_LUA = `
 __diskwatch = {}
+__currentSource = nil
 
--- Engine-Hook: Modul in gegebener Umgebung ausfuehren (import.lua ruft das)
+-- Engine-Hook: Modul in gegebener Umgebung ausfuehren (import.lua ruft das).
+-- Verfolgt zusaetzlich das aktuell geladene File fuer GetSource() (die
+-- Blueprint-Pipeline leitet daraus die BlueprintId ab).
 function doscript(name, env)
     local fsPath = __mountModule(name)
     if not fsPath then error("module not found: " .. tostring(name), 2) end
-    local chunk, err = loadfile(fsPath, "t", env)
+    -- Ohne env laeuft das Modul im globalen Environment (Blueprints/Boot).
+    -- Explizites nil als 4. load-Argument wuerde _ENV auf nil setzen.
+    local chunk, err = loadfile(fsPath, "t", env or _G)
     if not chunk then error(err, 2) end
-    return chunk()
+    local prev = __currentSource
+    __currentSource = name
+    local r = chunk()
+    __currentSource = prev
+    return r
+end
+
+-- Engine-Funktion: Pfad des gerade per doscript geladenen Files
+function GetSource()
+    return __currentSource
 end
 
 -- Boot-Skripte im globalen _ENV ausfuehren; gibt Fehlermeldung oder nil
