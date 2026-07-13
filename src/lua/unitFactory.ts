@@ -68,6 +68,11 @@ end
 -- Sound{}: Blueprint-DSL-Konstruktor -> Argument zurueck
 Sound = Sound or function(t) return t end
 
+-- Scenario: Sim-Global mit den Kartendaten (Marker). Minimal leer, damit
+-- OnCreate-Pfade wie GetMarkers() (scenarioutilities.lua) fehlerfrei laufen;
+-- echte Marker aus der geladenen Karte kommen spaeter.
+Scenario = Scenario or { MasterChain = { _MASTERCHAIN_ = { Markers = {} } }, Armies = {}, Props = {} }
+
 -- categories: FAs magisches Global; categories.X liefert ein EntityCategory,
 -- das +/-/* unterstuetzt. Fuer den Lifecycle reicht, dass die Ausdruecke
 -- fehlerfrei evaluieren (echtes Category-Matching kommt spaeter).
@@ -186,7 +191,13 @@ export function installBlueprintPipeline(host: LuaHost): void {
     __active_mods = {}
     __registered = { Unit={}, Mesh={}, Prop={}, Projectile={}, Emitter={}, TrailEmitter={}, Beam={} }
     local function collector(g) return function(bp) __registered[g][bp.BlueprintId or '?'] = bp end end
-    RegisterUnitBlueprint=collector('Unit'); RegisterMeshBlueprint=collector('Mesh')
+    -- Unit-Blueprints: Default-Sektionen ergaenzen (Engine-Nachbearbeitung).
+    -- Unit.lua greift ungeprueft auf bp.Intel/... zu; nicht alle .bp haben sie.
+    function RegisterUnitBlueprint(bp)
+      bp.Intel = bp.Intel or {}
+      __registered.Unit[bp.BlueprintId or '?'] = bp
+    end
+    RegisterMeshBlueprint=collector('Mesh')
     RegisterPropBlueprint=collector('Prop'); RegisterProjectileBlueprint=collector('Projectile')
     RegisterEmitterBlueprint=collector('Emitter'); RegisterTrailEmitterBlueprint=collector('TrailEmitter')
     RegisterBeamBlueprint=collector('Beam')

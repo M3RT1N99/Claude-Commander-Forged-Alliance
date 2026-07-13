@@ -656,7 +656,9 @@ btnSandboxStart.addEventListener('click', () => {
   void startSandbox(mapSelect.value || 'SCMP_037')
 })
 for (const btn of document.querySelectorAll<HTMLButtonElement>('#sandbox-spawns .spawn')) {
-  btn.addEventListener('click', () => void sandboxSpawn(btn.dataset.unit!))
+  // Über die ECHTE Original-Lua-Sim spawnen (Engine-Pfad), nicht als
+  // SimWorld-Platzhalter — alle Fraktions-Units laufen über ihre Unit.lua.
+  btn.addEventListener('click', () => void spawnViaLua(btn.dataset.unit!))
 }
 
 // Engine-Sim (Original-Lua): Units werden über ihre echte Unit.lua gespawnt,
