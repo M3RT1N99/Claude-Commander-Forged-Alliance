@@ -161,6 +161,26 @@ function __spawnUnit(scriptPath, bpId, x, y, z, army)
   return id, (ok and '' or tostring(err))
 end
 
+-- Alle Units in einem Aufruf lesen (ein Eval pro Beat für den Renderer/Worker).
+function __readAllUnits()
+  local out = {}
+  local n = 0
+  for id, u in pairs(__units) do
+    local p = u.__pos or { 0, 0, 0 }
+    n = n + 1
+    out[n] = {
+      id = id,
+      name = (u.__bp and u.__bp.BlueprintId) or '?',
+      x = p[1], y = p[2], z = p[3],
+      heading = u.__heading or 0,
+      health = u.__health or 0,
+      maxHealth = u:GetMaxHealth(),
+      moving = (u.__goal ~= nil and u.__goal ~= false),
+    }
+  end
+  return out
+end
+
 function __readUnit(id)
   local u = __units[id]
   if not u then return nil end
