@@ -104,7 +104,12 @@ function __getBrain(army)
   return b
 end
 function __econRegister() end
-function __econSetActive() end
+function __econSetComplete() end
+function __econSetProductionActive() end
+function __econSetConsumptionActive() end
+function __econSetBuildRequest() end
+function __econClearBuildRequest() end
+function __econBuildRate() return 0 end
 -- Default-Navigator (installMotion überschreibt ihn); echt definiert, damit der
 -- Stub-Trap ihn nicht zur Identität (Zahl) macht.
 function __getNavigator(id)
@@ -161,6 +166,19 @@ function __spawnUnit(scriptPath, bpId, x, y, z, army)
   return id, (ok and '' or tostring(err))
 end
 
+-- Baustelle: wie __spawnUnit, aber UNFERTIG (FractionComplete 0, Health 0,
+-- IsBeingBuilt). Produktion/Unterhalt bleiben inaktiv bis zur Fertigstellung.
+function __spawnBuildSite(scriptPath, bpId, x, y, z, army)
+  local id, err = __spawnUnit(scriptPath, bpId, x, y, z, army)
+  if id < 0 then return id, err end
+  local u = __units[id]
+  u.__fraction = 0
+  u.__health = 0
+  u.__beingBuilt = true
+  __econSetComplete(army, id, false)
+  return id, err
+end
+
 -- Alle Units in einem Aufruf lesen (ein Eval pro Beat für den Renderer/Worker).
 function __readAllUnits()
   local out = {}
@@ -176,6 +194,7 @@ function __readAllUnits()
       health = u.__health or 0,
       maxHealth = u:GetMaxHealth(),
       moving = (u.__goal ~= nil and u.__goal ~= false),
+      fraction = u.__fraction or 1,
     }
   end
   return out
@@ -261,6 +280,26 @@ export function spawnLuaUnit(
     )}, ${pos.x}, ${pos.y}, ${pos.z}, ${army}); return { id = id, err = err }`,
   ) as { id: number; err: string }
   if (res.err) throw new Error(`spawn ${blueprintId}: ${res.err}`)
+  return res.id
+}
+
+/**
+ * Spawnt eine UNFERTIGE Baustelle (FractionComplete 0, IsBeingBuilt) über die
+ * Original-Klasse; Produktion/Unterhalt bleiben bis zur Fertigstellung aus.
+ */
+export function spawnBuildSite(
+  host: LuaHost,
+  blueprintId: string,
+  pos: { x: number; y: number; z: number },
+  army = 1,
+): number {
+  const scriptPath = `/units/${blueprintId}/${blueprintId}_script.lua`
+  const res = host.eval(
+    `local id, err = __spawnBuildSite(${JSON.stringify(scriptPath)}, ${JSON.stringify(
+      blueprintId,
+    )}, ${pos.x}, ${pos.y}, ${pos.z}, ${army}); return { id = id, err = err }`,
+  ) as { id: number; err: string }
+  if (res.err) throw new Error(`build-site ${blueprintId}: ${res.err}`)
   return res.id
 }
 

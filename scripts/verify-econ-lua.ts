@@ -100,7 +100,7 @@ check(army.incomeEnergy === 20, `Einkommen zurück = ${army.incomeEnergy} nach W
 
 console.log('\n== Stall: Groß-Verbraucher, Vorrat klemmt bei 0 (kein negativer Wert) ==')
 army.energy = 0
-army.register(9999, { prodM: 0, prodE: 0, consM: 0, consE: 1000, storeM: 0, storeE: 0, active: true })
+army.register(9999, { prodM: 0, prodE: 0, consM: 0, consE: 1000, storeM: 0, storeE: 0, complete: true, prodActive: true, consActive: true })
 for (let i = 0; i < 3; i++) beat()
 check(army.energy >= 0, `Energie bleibt >= 0 (${army.energy.toFixed(2)})`)
 check(army.expenseEnergy > 0 && army.expenseEnergy <= army.incomeEnergy + 0.01, `Ausgabe auf Einkommen gedrosselt (${army.expenseEnergy.toFixed(1)}/s, LimitingRate < 1)`)

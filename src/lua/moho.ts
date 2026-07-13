@@ -111,9 +111,9 @@ const OVERRIDES: Record<string, string> = {
   GetConsumptionPerSecondMass:
     'function(self) return (self.__bp and self.__bp.Economy and self.__bp.Economy.MaintenanceConsumptionPerSecondMass) or 0 end',
   SetProductionActive:
-    'function(self, a) if __econSetActive then __econSetActive(self.__army or 1, self.__id, a) end end',
+    'function(self, a) __econSetProductionActive(self.__army or 1, self.__id, a) end',
   SetConsumptionActive:
-    'function(self, a) if __econSetActive then __econSetActive(self.__army or 1, self.__id, a) end end',
+    'function(self, a) __econSetConsumptionActive(self.__army or 1, self.__id, a) end',
   GetResourceConsumed: 'function(self) return self.__resourceConsumed or 1 end',
   // Bewegung: Navigator (installMotion) + Zustand aus der Physik-Fortschreibung.
   GetNavigator: 'function(self) return self.__navigator end',

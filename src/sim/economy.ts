@@ -21,7 +21,12 @@ export interface UnitEcon {
   consE: number
   storeM: number
   storeE: number
-  active: boolean
+  /** Fertig gebaut? Baustellen tragen weder Produktion noch Lager bei. */
+  complete: boolean
+  /** Unit:SetProductionActive — getrennt vom Verbrauch (wie im Original). */
+  prodActive: boolean
+  /** Unit:SetConsumptionActive */
+  consActive: boolean
 }
 
 interface Consumer {
@@ -103,13 +108,35 @@ export class ArmyEconomy {
   expenseEnergy = 0
 
   private readonly units = new Map<number, UnitEcon>()
+  /** Transiente Bau-Requests (pro Tick vom Bau-System gesetzt). */
+  private readonly buildReqs = new Map<number, Consumer>()
 
   register(id: number, e: UnitEcon): void {
     this.units.set(id, e)
   }
-  setActive(id: number, active: boolean): void {
+
+  /** Ressourcen-Bedarf einer Bau-Aufgabe für diesen Tick anmelden. */
+  setBuildRequest(taskId: number, mass: number, energy: number): void {
+    this.buildReqs.set(taskId, { mass, energy, rate: 0 })
+  }
+  clearBuildRequest(taskId: number): void {
+    this.buildReqs.delete(taskId)
+  }
+  /** Gewährte LimitingRate der Bau-Aufgabe (gültig nach tick()). */
+  buildRate(taskId: number): number {
+    return this.buildReqs.get(taskId)?.rate ?? 0
+  }
+  setComplete(id: number, complete: boolean): void {
     const u = this.units.get(id)
-    if (u) u.active = active
+    if (u) u.complete = complete
+  }
+  setProductionActive(id: number, active: boolean): void {
+    const u = this.units.get(id)
+    if (u) u.prodActive = active
+  }
+  setConsumptionActive(id: number, active: boolean): void {
+    const u = this.units.get(id)
+    if (u) u.consActive = active
   }
   remove(id: number): void {
     this.units.delete(id)
@@ -123,15 +150,22 @@ export class ArmyEconomy {
     let maxE = f(4000)
     const consumers: Consumer[] = []
     for (const u of this.units.values()) {
-      if (!u.active) continue
+      if (!u.complete) continue // Baustellen tragen weder Produktion noch Lager bei
       maxM = f(maxM + u.storeM)
       maxE = f(maxE + u.storeE)
-      prodM = f(prodM + u.prodM)
-      prodE = f(prodE + u.prodE)
-      const cm = f(u.consM * DT)
-      const ce = f(u.consE * DT)
-      if (cm > 0 || ce > 0) consumers.push({ mass: cm, energy: ce, rate: 1 })
+      if (u.prodActive) {
+        prodM = f(prodM + u.prodM)
+        prodE = f(prodE + u.prodE)
+      }
+      if (u.consActive) {
+        const cm = f(u.consM * DT)
+        const ce = f(u.consE * DT)
+        if (cm > 0 || ce > 0) consumers.push({ mass: cm, energy: ce, rate: 1 })
+      }
     }
+    // Bau-Aufgaben sind ebenfalls Verbraucher (CEconRequest); ihre gewährte
+    // LimitingRate skaliert den Baufortschritt.
+    for (const r of this.buildReqs.values()) consumers.push(r)
     this.maxMass = maxM
     this.maxEnergy = maxE
 
@@ -184,11 +218,32 @@ export class EconomyManager {
  */
 export function installEconomy(host: LuaHost, mgr: EconomyManager): void {
   host.setGlobal('__econRegister', (army: number, id: number, pm: number, pe: number, cm: number, ce: number, sm: number, se: number) => {
-    mgr.army(army).register(id, { prodM: pm, prodE: pe, consM: cm, consE: ce, storeM: sm, storeE: se, active: true })
+    mgr.army(army).register(id, {
+      prodM: pm, prodE: pe, consM: cm, consE: ce, storeM: sm, storeE: se,
+      complete: true, prodActive: true, consActive: true,
+    })
   })
-  host.setGlobal('__econSetActive', (army: number, id: number, active: boolean) => {
-    mgr.army(army).setActive(id, active !== false)
+  // Getrennte Toggles wie im Original (Produktion ≠ Verbrauch), plus der
+  // Fertig-Zustand (Baustellen tragen nichts bei).
+  host.setGlobal('__econSetComplete', (army: number, id: number, v: boolean) => {
+    mgr.army(army).setComplete(id, v !== false)
   })
+  host.setGlobal('__econSetProductionActive', (army: number, id: number, v: boolean) => {
+    mgr.army(army).setProductionActive(id, v !== false)
+  })
+  host.setGlobal('__econSetConsumptionActive', (army: number, id: number, v: boolean) => {
+    mgr.army(army).setConsumptionActive(id, v !== false)
+  })
+  // Bau-Requests: das Bau-System meldet vor dem Tick den Bedarf an und liest
+  // danach die gewährte LimitingRate zurück (CEconRequest::LimitingRate).
+  host.setGlobal('__econSetBuildRequest', (army: number, taskId: number, mass: number, energy: number) => {
+    mgr.army(army).setBuildRequest(taskId, mass, energy)
+  })
+  host.setGlobal('__econClearBuildRequest', (army: number, taskId: number) => {
+    mgr.army(army).clearBuildRequest(taskId)
+  })
+  host.setGlobal('__econBuildRate', (army: number, taskId: number) => mgr.army(army).buildRate(taskId))
+
   host.setGlobal('__econStored', (army: number, res: string) => mgr.army(army).stored((res === 'MASS' ? 'MASS' : 'ENERGY')))
   host.setGlobal('__econStoredRatio', (army: number, res: string) => mgr.army(army).storedRatio(res === 'MASS' ? 'MASS' : 'ENERGY'))
   host.setGlobal('__econIncome', (army: number, res: string) => mgr.army(army).income(res === 'MASS' ? 'MASS' : 'ENERGY'))

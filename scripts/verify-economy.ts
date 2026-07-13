@@ -32,7 +32,7 @@ console.log('\n== Zwei-Ratio-Verteilung (r1 Doppel, r2 Einzel) ==')
 console.log('\n== ArmyEconomy: Produktion akkumuliert bis Lagerkapazität ==')
 {
   const a = new ArmyEconomy()
-  a.register(1, { prodM: 0, prodE: 20, consM: 0, consE: 0, storeM: 0, storeE: 0, active: true })
+  a.register(1, { prodM: 0, prodE: 20, consM: 0, consE: 0, storeM: 0, storeE: 0, complete: true, prodActive: true, consActive: true })
   const e0 = a.energy
   for (let i = 0; i < 10; i++) a.tick()
   check(near(a.energy, e0 + 20, 1e-1), `Energie ${a.energy.toFixed(1)} (Start ${e0} + 20 über 1 s)`)
@@ -44,8 +44,8 @@ console.log('\n== Stall: Vorrat klemmt bei 0, LimitingRate < 1 ==')
 {
   const a = new ArmyEconomy()
   a.energy = 0
-  a.register(1, { prodM: 0, prodE: 20, consM: 0, consE: 0, storeM: 0, storeE: 0, active: true }) // 20/s Einkommen
-  a.register(2, { prodM: 0, prodE: 0, consM: 0, consE: 1000, storeM: 0, storeE: 0, active: true }) // 1000/s Bedarf
+  a.register(1, { prodM: 0, prodE: 20, consM: 0, consE: 0, storeM: 0, storeE: 0, complete: true, prodActive: true, consActive: true }) // 20/s Einkommen
+  a.register(2, { prodM: 0, prodE: 0, consM: 0, consE: 1000, storeM: 0, storeE: 0, complete: true, prodActive: true, consActive: true }) // 1000/s Bedarf
   for (let i = 0; i < 5; i++) a.tick()
   check(a.energy >= 0, `Energie bleibt >= 0 (${a.energy.toFixed(2)})`)
   check(a.expenseEnergy > 0 && a.expenseEnergy <= a.incomeEnergy + 1e-2, `Ausgabe auf Einkommen gedrosselt (${a.expenseEnergy.toFixed(1)}/s)`)
@@ -56,7 +56,7 @@ console.log('\n== Determinismus (float32, stabile Iteration) ==')
 {
   const run = (): string => {
     const a = new ArmyEconomy()
-    a.register(1, { prodM: 3, prodE: 25, consM: 0, consE: 2, storeM: 100, storeE: 200, active: true })
+    a.register(1, { prodM: 3, prodE: 25, consM: 0, consE: 2, storeM: 100, storeE: 200, complete: true, prodActive: true, consActive: true })
     for (let i = 0; i < 100; i++) a.tick()
     return `${a.mass}|${a.energy}`
   }
