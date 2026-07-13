@@ -3,6 +3,10 @@ dist/
 *.local
 .DS_Store
 .mcp.json
+# IDA-Dekompilat der Engine (aus Copyright-Binary abgeleitet — nie einchecken)
+/cfile
+Cfile/
+*.exe.c
 # Niemals Original-Game-Assets einchecken (Copyright!)
 assets/
 extracted/
