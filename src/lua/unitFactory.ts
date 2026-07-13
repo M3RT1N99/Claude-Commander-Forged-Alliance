@@ -108,7 +108,15 @@ function __spawnUnit(scriptPath, bpId, x, y, z, army)
   u.Trash = TrashBag()
   __units[id] = u
 
-  local ok, err = pcall(function() u:OnCreate() end)
+  -- OnCreate läuft als Thread (Original: Unit-Logik ist kooperativ). Der erste
+  -- Slice läuft sofort (Sofort-Zustand); WaitTicks/ForkThread darin laufen auf
+  -- den folgenden Beats weiter. Fallback ohne Scheduler: direkter pcall.
+  local ok, err
+  if __startThread then
+    ok, err = __startThread(function() u:OnCreate() end)
+  else
+    ok, err = pcall(function() u:OnCreate() end)
+  end
   return id, (ok and '' or tostring(err))
 end
 

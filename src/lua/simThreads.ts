@@ -40,6 +40,23 @@ function ForkThread(fn, ...)
     return t
 end
 
+-- __startThread(fn): erster Slice SOFORT (setzt Sofort-Zustand, z. B. Unit-
+-- OnCreate), Rest als regulärer Thread. Ermöglicht WaitTicks/ForkThread in
+-- OnCreate, ohne die synchrone Sofortwirkung zu verlieren. -> ok, err.
+function __startThread(fn)
+    local t = { co = coroutine.create(fn), wait = 0 }
+    __currentThread = t
+    local ok, res = coroutine.resume(t.co)
+    __currentThread = nil
+    if not ok then return false, res end
+    if coroutine.status(t.co) ~= 'dead' then
+        if res == -1 then t.suspended = true else t.wait = tonumber(res) or 1 end
+        nthreads = nthreads + 1
+        threads[nthreads] = t
+    end
+    return true
+end
+
 -- WaitTicks(n): aktuellen Thread n Ticks schlafen legen (coroutine.yield).
 function WaitTicks(n)
     coroutine.yield(n or 1)
