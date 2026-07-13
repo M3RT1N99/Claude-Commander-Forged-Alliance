@@ -100,6 +100,21 @@ const OVERRIDES: Record<string, string> = {
   IsStunned: 'function(self) return false end',
   GetBuildRate: 'function(self) return (self.__bp and self.__bp.Economy and self.__bp.Economy.BuildRate) or 0 end',
   GetWeaponCount: 'function(self) return (self.__bp and self.__bp.Weapon and table.getn(self.__bp.Weapon)) or 0 end',
+  // Ökonomie: Werte aus dem Blueprint, Aktiv-Zustand an die Engine-Ökonomie
+  // (installEconomy stellt __econSetActive; ohne sie harmloser No-Op).
+  GetProductionPerSecondEnergy:
+    'function(self) return (self.__bp and self.__bp.Economy and self.__bp.Economy.ProductionPerSecondEnergy) or 0 end',
+  GetProductionPerSecondMass:
+    'function(self) return (self.__bp and self.__bp.Economy and self.__bp.Economy.ProductionPerSecondMass) or 0 end',
+  GetConsumptionPerSecondEnergy:
+    'function(self) return (self.__bp and self.__bp.Economy and self.__bp.Economy.MaintenanceConsumptionPerSecondEnergy) or 0 end',
+  GetConsumptionPerSecondMass:
+    'function(self) return (self.__bp and self.__bp.Economy and self.__bp.Economy.MaintenanceConsumptionPerSecondMass) or 0 end',
+  SetProductionActive:
+    'function(self, a) if __econSetActive then __econSetActive(self.__army or 1, self.__id, a) end end',
+  SetConsumptionActive:
+    'function(self, a) if __econSetActive then __econSetActive(self.__army or 1, self.__id, a) end end',
+  GetResourceConsumed: 'function(self) return self.__resourceConsumed or 1 end',
 }
 
 function methodSpec(names: string[]): string {

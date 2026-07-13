@@ -85,6 +85,22 @@ categories = setmetatable({}, {
   end,
 })
 
+-- Brain + Economy-Hooks: echte Default-Funktionen (installEconomy
+-- überschreibt sie). Als echte Globals werden sie NICHT vom Stub-Trap als
+-- Identitätsfunktion geschattet — sonst würde z. B. __getBrain(army) die Zahl
+-- army liefern und self:GetAIBrain() eine Zahl statt einer Tabelle sein.
+__brains = {}
+function __getBrain(army)
+  local b = __brains[army]
+  if not b then
+    b = { __army = army, GetArmyIndex = function() return army end }
+    __brains[army] = b
+  end
+  return b
+end
+function __econRegister() end
+function __econSetActive() end
+
 -- Unit spawnen: Original-Script-Klasse instanziieren + OnCreate ----------
 function __spawnUnit(scriptPath, bpId, x, y, z, army)
   local bp = __registered.Unit[bpId]
@@ -99,7 +115,7 @@ function __spawnUnit(scriptPath, bpId, x, y, z, army)
   u.__bp = bp
   u.__id = id
   u.__army = army
-  u.__brain = {}
+  u.__brain = __getBrain(army)
   u.__pos = { x, y, z }
   u.__heading = 0
   u.__health = (bp.Defense and bp.Defense.MaxHealth) or 0
@@ -107,6 +123,14 @@ function __spawnUnit(scriptPath, bpId, x, y, z, army)
   -- Engine-bereitgestellte Instanz-Felder (vor OnCreate vorhanden)
   u.Trash = TrashBag()
   __units[id] = u
+
+  -- Blueprint-Ökonomie in die Engine-Ökonomie der Armee einklinken (Original:
+  -- CEconomy im CArmyImpl; die Unit registriert Produktion/Unterhalt).
+  local e = bp.Economy or {}
+  __econRegister(army, id,
+    e.ProductionPerSecondMass or 0, e.ProductionPerSecondEnergy or 0,
+    e.MaintenanceConsumptionPerSecondMass or 0, e.MaintenanceConsumptionPerSecondEnergy or 0,
+    e.StorageMass or 0, e.StorageEnergy or 0)
 
   -- OnCreate läuft als Thread (Original: Unit-Logik ist kooperativ). Der erste
   -- Slice läuft sofort (Sofort-Zustand); WaitTicks/ForkThread darin laufen auf
