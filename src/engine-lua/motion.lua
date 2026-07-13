@@ -88,6 +88,7 @@ function __advanceMotion()
       if m.maxSpeed <= 0 or dist <= math.max(speed, 0.05) then
         p[1] = goal[1]
         p[3] = goal[2]
+        p[2] = GetSurfaceHeight(p[1], p[3])
         u.__goal = false
         u.__speed = 0
       else
@@ -124,6 +125,10 @@ function __advanceMotion()
         u.__speed = speed
         p[1] = p[1] + math.sin(u.__heading) * speed
         p[3] = p[3] + math.cos(u.__heading) * speed
+        -- A land unit follows the ground. Without this the sim drives at height
+        -- 0 through the hills while the renderer paints something else — the
+        -- two positions drift apart in Y forever.
+        p[2] = GetSurfaceHeight(p[1], p[3])
       end
     end
   end

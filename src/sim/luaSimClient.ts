@@ -1,4 +1,5 @@
 import type { GameVfs } from '../vfs/vfs'
+import type { HeightfieldData } from './terrain'
 import type { EcoSnapshot } from '../ui/hud'
 
 /**
@@ -45,7 +46,16 @@ export class LuaSimClient {
     private readonly vfs: GameVfs,
   ) {}
 
-  static async create(vfs: GameVfs, log: (level: string, msg: string) => void): Promise<LuaSimClient> {
+  /**
+   * Bootet die Sim. Das Terrain ist PFLICHT — die Original-Lua liest
+   * GetSurfaceHeight schon in OnCreate-Pfaden, und die Engine liefert dafür
+   * keine stille 0 mehr, sondern knallt. Ohne Karte gibt es keine Sim.
+   */
+  static async create(
+    vfs: GameVfs,
+    terrain: HeightfieldData,
+    log: (level: string, msg: string) => void,
+  ): Promise<LuaSimClient> {
     // ALLE lua/-Dateien, auch lua/ui/. Die UI des Originals ist Lua (maui) und
     // soll ausgeführt werden, nicht in TS/HTML nachgebaut — sie hier
     // auszuschließen hat genau das verhindert. Der Sim-Host lädt ohnehin nur,
@@ -64,7 +74,7 @@ export class LuaSimClient {
       client.bootResolve = res
     })
     worker.onmessage = (e: MessageEvent<OutMsg>) => client.onMessage(e.data, log)
-    worker.postMessage({ type: 'boot', files })
+    worker.postMessage({ type: 'boot', files, terrain })
     await booted
     return client
   }

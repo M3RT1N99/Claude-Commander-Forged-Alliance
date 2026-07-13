@@ -23,6 +23,7 @@ import { ddsToTexture } from './viewer/textures'
 import { UnitViewer } from './viewer/unitViewer'
 import { SandboxController, type SandboxUnitAssets } from './sandbox/sandbox'
 import { LuaSimClient } from './sim/luaSimClient'
+import type { HeightfieldData } from './sim/terrain'
 import { Hud, type HudSource, type HudUnitInfo, type EcoSnapshot } from './ui/hud'
 import type { ScmapData } from './formats/scmap'
 import type { UnitTextures } from './viewer/unitMaterial'
@@ -642,8 +643,18 @@ let luaSimBoot: Promise<LuaSimClient> | null = null
 
 async function getLuaSim(): Promise<LuaSimClient> {
   if (!luaSimBoot) {
+    if (!currentScmap) throw new Error('Sim ohne Karte: kein Gelände, kein Spawn')
     log('Boote Original-Lua-Sim (Lua-VM)…')
-    luaSimBoot = LuaSimClient.create(vfs!, (lvl, msg) => {
+    // Das Gelände geht MIT in den Boot: die Original-Lua liest GetSurfaceHeight
+    // schon beim Erzeugen einer Unit, und die Engine liefert dafür keine stille
+    // 0 mehr.
+    const terrain: HeightfieldData = {
+      data: currentScmap.heightmap,
+      width: currentScmap.width,
+      height: currentScmap.height,
+      scale: currentScmap.heightScale,
+    }
+    luaSimBoot = LuaSimClient.create(vfs!, terrain, (lvl, msg) => {
       if (lvl === 'WARN') log(`Lua-WARN: ${msg.slice(0, 80)}`)
     }).then((sim) => {
       luaSim = sim
@@ -704,7 +715,6 @@ const hudSource: HudSource = {
     for (const u of luaUnits) if (u.selected) luaSim?.stop(u.id)
   },
 }
-let luaHookRegistered = false
 const btnLuaSpawn = document.querySelector<HTMLButtonElement>('#btn-lua-spawn')
 btnLuaSpawn?.addEventListener('click', () => void spawnViaLua('uel0001'))
 
@@ -738,11 +748,13 @@ function luaSimUpdate(): void {
   for (const u of luaUnits) {
     const s = luaSim.state(u.id)
     if (!s) continue
-    const y = viewer.heightAt(s.x, s.z)
-    u.mesh.position.set(s.x, y, s.z)
+    // Die Y-Koordinate kommt aus der SIM (motion.lua schreibt sie über
+    // GetSurfaceHeight fort). Vorher rechnete der Renderer seine eigene Höhe —
+    // zwei Wahrheiten, die dauerhaft auseinanderliefen.
+    u.mesh.position.set(s.x, s.y, s.z)
     u.mesh.rotation.set(0, s.heading, 0)
     u.ring.visible = u.selected
-    if (u.selected) u.ring.position.set(s.x, y + 0.05, s.z)
+    if (u.selected) u.ring.position.set(s.x, s.y + 0.05, s.z)
   }
 }
 
@@ -750,13 +762,14 @@ async function spawnViaLua(id: string): Promise<void> {
   if (!vfs) return
   try {
     const sim = await getLuaSim()
-    if (!luaHookRegistered) {
-      viewer.onUpdate(luaSimUpdate)
-      luaHookRegistered = true
-    }
-    // etwas versetzt vom Spawn-Punkt platzieren
-    const x = spawnPoint.x + 6
-    const z = spawnPoint.z + 6
+    // Nicht über ein eigenes Flag merken: clearContent() (Kartenwechsel) wirft
+    // alle Hooks weg — das Flag blieb true und ab dem 2. Sandbox-Start bewegte
+    // sich nichts mehr. Den Viewer fragen, der weiß es.
+    if (!viewer.hasUpdateHooks()) viewer.onUpdate(luaSimUpdate)
+    // Exakt auf den Spawn-Marker der Karte. Der frühere Versatz von +6/+6 war
+    // erfunden; im Original steht die ACU auf dem ARMY_n-Marker.
+    const x = spawnPoint.x
+    const z = spawnPoint.z
     const y = viewer.heightAt(x, z)
     const uid = await sim.spawn(id, { x, y, z }, 1)
 

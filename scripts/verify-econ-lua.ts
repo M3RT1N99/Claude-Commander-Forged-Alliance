@@ -15,6 +15,8 @@ import { ZipArchive } from '../src/vfs/zipArchive'
 import type { RandomAccessFile } from '../src/vfs/randomAccess'
 import { LuaHost } from '../src/lua/host'
 import { installEngine } from '../src/lua/engine'
+import { setTerrainSource } from '../src/lua/engineGlobals'
+import { FLAT_TEST_TERRAIN } from '../src/sim/terrain'
 import { installUnitFactory, installBlueprintPipeline, loadUnitBlueprint, spawnLuaUnit } from '../src/lua/unitFactory'
 import { installSimThreads, simTick } from '../src/lua/simThreads'
 import { EconomyManager, installEconomy } from '../src/sim/economy'
@@ -59,6 +61,8 @@ const near = (a: number, b: number, eps = 0.2): boolean => Math.abs(a - b) < eps
 const warnings: string[] = []
 const host = await LuaHost.create(files, (level, msg) => { if (level === 'WARN') warnings.push(msg) })
 const { economy: eco } = installEngine(host)
+// Flaches Testgelaende — EXPLIZIT, weil die Engine ohne Karte knallt (kein stiller 0-Wert).
+setTerrainSource(host, FLAT_TEST_TERRAIN)
 loadUnitBlueprint(host, 'uel0001', acuBp)
 
 const beat = (): void => { eco.tick(); simTick(host) }

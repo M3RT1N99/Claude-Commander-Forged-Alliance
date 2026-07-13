@@ -389,12 +389,18 @@ end
 function DiskToLocal(path) return path end
 function DiskGetFileInfo(path) return false end
 
--- === Terrain (wird von der Engine mit der geladenen Karte versorgt) ===
--- Ohne Karte 0 — aber eine EHRLICHE Funktion, kein Identitaets-Stub.
+-- === Terrain ===
+-- The engine feeds this from the loaded map (setTerrainSource). Without a map
+-- it must FAIL, not quietly answer 0: the original Lua reads GetSurfaceHeight
+-- for layer changes (land/water), amphibious movement and effects, and a silent
+-- 0 makes every one of those decisions wrong while looking fine. A test that
+-- wants flat ground says so explicitly.
 __terrainHeight = nil
 function GetTerrainHeight(x, z)
-  if __terrainHeight then return __terrainHeight(x, z) end
-  return 0
+  if not __terrainHeight then
+    error('GetTerrainHeight: no terrain loaded — the engine must call setTerrainSource()', 2)
+  end
+  return __terrainHeight(x, z)
 end
 function GetSurfaceHeight(x, z) return GetTerrainHeight(x, z) end
 

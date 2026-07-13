@@ -214,6 +214,16 @@ export class UnitViewer {
     return unit
   }
 
+  /**
+   * Ist ein Update-Hook registriert? `clearContent()` (Karten-/Unit-Wechsel)
+   * wirft alle Hooks weg. Wer sich das nur in einem eigenen Flag merkt, hat nach
+   * dem zweiten Karten-Ladevorgang keinen Hook mehr und wundert sich, warum sich
+   * nichts mehr bewegt — genau das war der Fall.
+   */
+  hasUpdateHooks(): boolean {
+    return this.updateHooks.length > 0
+  }
+
   onUpdate(hook: (dt: number) => void): void {
     this.updateHooks.push(hook)
   }

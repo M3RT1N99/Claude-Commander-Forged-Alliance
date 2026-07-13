@@ -12,6 +12,8 @@
 import { LuaHost } from '../lua/host'
 import { installEngine, beat, type Engine } from '../lua/engine'
 import { loadUnitBlueprint, spawnLuaUnit } from '../lua/unitFactory'
+import { setTerrainSource } from '../lua/engineGlobals'
+import { Heightfield, type HeightfieldData } from './terrain'
 
 const ctx = self as unknown as Worker
 let host: LuaHost | null = null
@@ -23,7 +25,7 @@ interface Vec3 {
   z: number
 }
 type InMsg =
-  | { type: 'boot'; files: Map<string, Uint8Array> }
+  | { type: 'boot'; files: Map<string, Uint8Array>; terrain: HeightfieldData }
   | { type: 'spawn'; reqId: number; id: string; scriptPath: string; scriptBytes: Uint8Array | null; bpBytes: Uint8Array | null; pos: Vec3; army: number }
   | { type: 'move'; id: number; x: number; z: number }
   | { type: 'stop'; id: number }
@@ -36,6 +38,11 @@ ctx.onmessage = async (e: MessageEvent<InMsg>): Promise<void> => {
     // sich der Worker die Engine selbst zusammen und vergaß dabei das
     // Bau-System (build.ts lief im Browser überhaupt nicht).
     engine = installEngine(h)
+    // Das Gelände der geladenen Karte, VOR dem ersten Spawn: OnCreate-Pfade der
+    // Original-Lua lesen GetSurfaceHeight, und ohne Quelle knallt es jetzt (statt
+    // still 0 zu liefern). Dieselbe bilineare Abfrage wie im Renderer.
+    const hf = new Heightfield(msg.terrain)
+    setTerrainSource(h, (x, z) => hf.at(x, z))
     host = h
     ctx.postMessage({ type: 'booted' })
     setInterval(tickAndPost, 100) // 10-Hz-Sim-Beat im Worker-Thread
