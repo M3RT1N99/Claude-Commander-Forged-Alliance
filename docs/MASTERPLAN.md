@@ -104,6 +104,11 @@ Wirtschaft, Renderer, Netz. Lua bekommt die 543 Sim-Bindings + Callbacks.
     Fortschritt *pro Bauwerk*. Unser aktueller Ein-Faktor-Stall ist zu simpel.
   - **Command→Task-Dispatch** (`DispatchTask` @ 0x608EF0) → 40 Befehlstypen
     ([research/command-dispatch-binary.md](research/command-dispatch-binary.md)).
+  - **Bau-Task-Ablauf** komplett ([research/build-task-binary.md](research/build-task-binary.md)):
+    `delta = (buildRate/BuildTime) * resourceConsumed * 0.1`, HP wächst linear
+    mit dem Fortschritt, Fertigstellung → `OnStopBeingBuilt` (Lua) + Adjacency-
+    Scan; `resourceConsumed` = `LimitingRate` aus der Econ-Verteilung (beide
+    Systeme greifen ineinander).
   - Reclaim: `Ticks = max(BuildCostEnergy, BuildCostMass) / buildRate`.
   - Capture: `Ticks = max(1, ((BuildTime/buildRate)/2 * CaptureTimeMultiplier) * 10)`,
     Fortschritt += Anzahl Captors.
@@ -316,7 +321,7 @@ Verhaltens-/Screenshot-Test, Commit.
 | --- | --- |
 | Lua-Semantik (5.4 ≠ 5.0) | **Bestätigt gemessen** → Gleis A (eigener 5.0-Build) |
 | Lua-Performance bei 1000+ Units | offen → früher Benchmark, Hot Paths in TS |
-| Decomp-Lücken (Econ-Verteilung, Command-Dispatch, Build-Tasks, SIM_Damage) | **entschärft: IDA-MCP auf der FAF-Binary verfügbar** — Adressen aus faf-re treffen die IDB exakt (3× verifiziert). `SIM_Damage` bereits vollständig rekonstruiert; Rest genauso holen statt raten. |
+| Decomp-Lücken | **geschlossen: alle vier per IDA-MCP aus der FAF-Binary rekonstruiert** — SIM_Damage ([damage-binary.md](research/damage-binary.md)), Econ-Verteilung ([economy-binary.md](research/economy-binary.md)), Command-Dispatch ([command-dispatch-binary.md](research/command-dispatch-binary.md)), Bau-Tasks ([build-task-binary.md](research/build-task-binary.md)). Weitere Details bei Bedarf direkt aus der IDB. |
 | Props/Partikel-Menge (46k Props, tausende Partikel) | Instancing + GPU-Partikel (Physik im Shader wie im Original) |
 | XACT-Audioformat | Parser nötig; Referenz: Open-Source-XACT-Implementierungen |
 | Rechtliches | unverändert: keine Assets/Code im Repo, BYO-Game ([LEGAL.md](LEGAL.md)) |
