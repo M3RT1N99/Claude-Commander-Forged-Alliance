@@ -99,6 +99,14 @@ export class Army {
   massExpense = 0
   energyExpense = 0
 
+  /** Resource-Sharing aktiv (Original: CAiBrain:SetResourceSharing). */
+  resourceSharing = false
+  /** Verbündete Armee-Nummern (1-basiert), an die Overflow geteilt wird. */
+  readonly allies = new Set<number>()
+  /** Zufluss aus Verbündeten-Overflow, im eigenen nächsten Tick verrechnet. */
+  incomeCarryMass = 0
+  incomeCarryEnergy = 0
+
   /**
    * Ein Wirtschafts-Tick — 1:1 nach `func_ArmyProcessEconomy` @0x771B50
    * (aus der ForgedAlliance.exe rekonstruiert, siehe
@@ -110,7 +118,7 @@ export class Army {
    *
    * @internal
    */
-  tick(units: SimUnit[], armyIndex: number): void {
+  tick(units: SimUnit[], armyIndex: number, world: SimWorld): void {
     // 1. Einheiten durchgehen: Produktion (bedingungslos), Lagerkapazität und
     //    die Verbraucher-Requests (Unterhalt fertiger Units + Baustellen).
     let massProd = 0
@@ -153,9 +161,12 @@ export class Army {
     this.massStorage = massStore
     this.energyStorage = energyStore
 
-    // 2. Verfügbarer Pool = Vorrat + Einkommen dieses Ticks (Handicap = 0).
-    let availMass = f(this.mass + f(massProd * SIM_DT))
-    let availEnergy = f(this.energy + f(energyProd * SIM_DT))
+    // 2. Verfügbarer Pool = Vorrat + Einkommen dieses Ticks (Handicap = 0) +
+    //    erhaltener Verbündeten-Overflow (wird hier verrechnet, dann geleert).
+    let availMass = f(this.mass + f(massProd * SIM_DT) + this.incomeCarryMass)
+    let availEnergy = f(this.energy + f(energyProd * SIM_DT) + this.incomeCarryEnergy)
+    this.incomeCarryMass = 0
+    this.incomeCarryEnergy = 0
 
     // 3. Nachfrage in Doppel- (E und M) und Einzel-Verbraucher trennen.
     let bothMass = 0
@@ -212,7 +223,32 @@ export class Army {
       r.apply(ratio)
     }
 
-    // 8. Lager klemmen (Overflow über Kapazität geht verloren — kein Sharing).
+    // 8. Overflow über Kapazität; bei Resource-Sharing anteilig an Verbündete
+    //    mit freiem Lager (Waterfilling in aufsteigender Armee-Reihenfolge),
+    //    sonst verloren. Der Geber klemmt sein Lager IMMER auf die Kapazität.
+    const overflowMass = f(Math.max(0, availMass - massStore))
+    const overflowEnergy = f(Math.max(0, availEnergy - energyStore))
+    if (this.resourceSharing && (overflowMass > 0 || overflowEnergy > 0)) {
+      const recips = [...this.allies]
+        .sort((a, b) => a - b)
+        .map((n) => world.army(n))
+        .filter((a) => a !== this && (a.mass < a.massStorage || a.energy < a.energyStorage))
+      let remaining = recips.length
+      let remMass = overflowMass
+      let remEnergy = overflowEnergy
+      for (const a of recips) {
+        if (remaining <= 0) break
+        const roomMass = f(a.massStorage - a.mass)
+        const roomEnergy = f(a.energyStorage - a.energy)
+        const givenMass = roomMass > 0 ? Math.min(f(remMass / remaining), roomMass) : 0
+        const givenEnergy = roomEnergy > 0 ? Math.min(f(remEnergy / remaining), roomEnergy) : 0
+        a.incomeCarryMass = f(a.incomeCarryMass + givenMass)
+        a.incomeCarryEnergy = f(a.incomeCarryEnergy + givenEnergy)
+        remMass = f(Math.max(0, remMass - givenMass))
+        remEnergy = f(Math.max(0, remEnergy - givenEnergy))
+        remaining--
+      }
+    }
     this.mass = f(Math.min(Math.max(availMass, 0), massStore))
     this.energy = f(Math.min(Math.max(availEnergy, 0), energyStore))
 
@@ -287,6 +323,16 @@ export class SimWorld {
     return this.armies[index - 1] ?? this.armies[0]!
   }
 
+  /**
+   * Verbündet zwei Armeen (1-basiert, symmetrisch) für Resource-Sharing.
+   * Legt fehlende Armeen an. Für einseitige Allianz nur eine Seite setzen.
+   */
+  setAlliance(armyA: number, armyB: number): void {
+    while (this.armies.length < Math.max(armyA, armyB)) this.armies.push(new Army())
+    this.army(armyA).allies.add(armyB)
+    this.army(armyB).allies.add(armyA)
+  }
+
   issueMove(unit: SimUnit, x: number, z: number, append = false): void {
     if (!append) unit.queue.length = 0
     unit.queue.push({ type: 'move', x: f(x), z: f(z) })
@@ -305,7 +351,7 @@ export class SimWorld {
       this.tickUnit(u)
     }
     for (let i = 0; i < this.armies.length; i++) {
-      this.armies[i]!.tick(this.units, i + 1)
+      this.armies[i]!.tick(this.units, i + 1, this)
     }
     this.tickCount++
   }

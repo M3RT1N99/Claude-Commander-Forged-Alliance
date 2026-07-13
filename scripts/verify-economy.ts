@@ -120,5 +120,82 @@ console.log('\n== Determinismus: identische Läufe → identischer Endzustand ==
   check(run() === run(), `Endzustände identisch (${run()})`)
 }
 
+// ── 5. Produktion ist bedingungslos (Engine koppelt sie NICHT an die Ratio) ──
+// Binär belegt: func_ArmyProcessEconomy verteilt nur an Verbraucher; passive
+// Produktion läuft bei Stall voll weiter. Dieser Test sichert die verifizierte
+// Wahrheit ab — ein energie-gestallter Masse-Extraktor produziert VOLLE Masse.
+console.log('\n== Produktion bedingungslos: Masse-Extraktor produziert bei Energie-Stall voll ==')
+{
+  const w = new SimWorld()
+  w.spawn(stats({ massProduction: 2, energyConsumption: 2 }), 0, 0) // wie ueb1103
+  const army = w.army(1)
+  army.energy = 0 // harter Energie-Stall, kein Energieproduzent
+  army.mass = 0
+  w.tick()
+  check(near(army.massIncome, 2), `massIncome = ${army.massIncome} trotz 0 Energie (Produktion bedingungslos)`)
+  check(near(army.mass, 0.2), `Masse +0.2/Tick trotz ungewährter Maintenance: ${army.mass.toFixed(3)}`)
+  check(near(army.energy, 0), `Energie bleibt 0 (Maintenance nicht gewährt, r1=0): ${army.energy.toFixed(3)}`)
+  check(near(army.energyExpense, 0), `energyExpense = ${army.energyExpense} (nichts gewährt bei leerem Pool)`)
+}
+
+// ── 6. Overflow-Sharing: Waterfilling an Verbündete mit freiem Lager ──
+console.log('\n== Overflow-Sharing: Waterfilling an Verbündete (aufsteigende Reihenfolge) ==')
+{
+  const w = new SimWorld()
+  w.setAlliance(1, 2)
+  w.setAlliance(1, 3) // Armee 1 ist mit 2 und 3 verbündet
+  const a = w.army(1)
+  const b = w.army(2)
+  const c = w.army(3)
+  a.resourceSharing = true
+  a.mass = 1000 // Overflow = 1000 − 650 (Basis-Lager) = 350
+  b.mass = 600 // freies Lager 50
+  c.mass = 0 // freies Lager 650
+  a.tick([], 1, w)
+  check(near(b.incomeCarryMass, 50), `Ally 2 erhält min(share 175, room 50) = ${b.incomeCarryMass.toFixed(2)}`)
+  check(near(c.incomeCarryMass, 300), `Ally 3 erhält Rest 300/1 = ${c.incomeCarryMass.toFixed(2)}`)
+  check(near(a.mass, 650), `Geber klemmt auf Lagerkapazität: ${a.mass.toFixed(2)}`)
+}
+
+console.log('\n== Overflow ohne Sharing / volle Allys überspringen ==')
+{
+  // (a) kein Sharing → Overflow verloren, niemand bekommt etwas
+  const w1 = new SimWorld()
+  w1.setAlliance(1, 2)
+  w1.army(1).resourceSharing = false
+  w1.army(1).mass = 1000
+  w1.army(1).tick([], 1, w1)
+  check(near(w1.army(1).mass, 650), `ohne Sharing: Geber klemmt auf 650 (${w1.army(1).mass.toFixed(1)})`)
+  check(near(w1.army(2).incomeCarryMass, 0), `ohne Sharing: Ally bekommt nichts (${w1.army(2).incomeCarryMass})`)
+
+  // (b) voller Ally (beide Lanes) wird übersprungen, Rest fließt an den nächsten
+  const w2 = new SimWorld()
+  w2.setAlliance(1, 2)
+  w2.setAlliance(1, 3)
+  w2.army(1).resourceSharing = true
+  w2.army(1).mass = 1000
+  w2.army(2).mass = 650 // Lager voll (Masse) …
+  w2.army(2).energy = 4000 // … und Energie → aus Filter entfernt
+  w2.army(3).mass = 0
+  w2.army(1).tick([], 1, w2)
+  check(near(w2.army(2).incomeCarryMass, 0), `voller Ally 2 übersprungen (${w2.army(2).incomeCarryMass})`)
+  check(near(w2.army(3).incomeCarryMass, 350), `Ally 3 erhält vollen Overflow 350 (${w2.army(3).incomeCarryMass.toFixed(1)})`)
+}
+
+console.log('\n== Sharing-Determinismus ==')
+{
+  const run = (): string => {
+    const w = new SimWorld()
+    w.setAlliance(1, 2)
+    w.setAlliance(1, 3)
+    w.army(1).resourceSharing = true
+    w.army(1).mass = 1000
+    w.army(2).mass = 600
+    w.army(1).tick([], 1, w)
+    return `${w.army(2).incomeCarryMass}|${w.army(3).incomeCarryMass}|${w.army(1).mass}`
+  }
+  check(run() === run(), `identische Sharing-Läufe (${run()})`)
+}
+
 console.log(failures === 0 ? '\nECONOMY BESTANDEN' : `\n${failures} CHECK(S) FEHLGESCHLAGEN`)
 process.exit(failures === 0 ? 0 : 1)

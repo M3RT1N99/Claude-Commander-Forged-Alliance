@@ -106,12 +106,30 @@ Units konsumieren über `LimitingRate`. Verifikation: 1 Energie-Extraktor +
 
 Implementiert in [`Army.tick`](../../src/sim/simWorld.ts) als 7-Schritt-Tick
 mit `EconRequest`-Liste (Unterhalt fertiger Units + Baustellen), r1/r2 und
-`LimitingRate` pro Verbraucher. Verifiziert in
-[`scripts/verify-economy.ts`](../../scripts/verify-economy.ts): der Doc-Prüffall
-(Masse-Engpass → Doppel-Verbraucher r1=0.5, reiner Energie-Bau r2=1) plus
-Buchhaltung, Overflow-Klemmung und Determinismus.
+`LimitingRate` pro Verbraucher. **Overflow-Sharing** (Schritt 8) verteilt
+Overflow bei aktivem `resourceSharing` per Waterfilling in aufsteigender
+Armee-Reihenfolge an Verbündete mit freiem Lager (Rest verloren); Geber klemmt
+immer auf Kapazität. Verifiziert in
+[`scripts/verify-economy.ts`](../../scripts/verify-economy.ts): Doc-Prüffall
+(Masse-Engpass → Doppel r1=0.5, reiner Energie-Bau r2=1), Buchhaltung,
+Overflow-Klemmung, Sharing-Fälle und Determinismus.
 
-**Noch offen (nächste Layer):** Produktions-Drosselung unterversorgter
-Verbraucher (z. B. energie-hungriger Masse-Extraktor produziert bei
-Energie-Stall weniger Masse — braucht Unit-An/Aus-Zustand); Overflow-Sharing
-an Verbündete; echte Builder-Zuordnung statt `BUILDER_RATE`.
+## Korrektur: Produktion wird NICHT gedrosselt
+
+Frühere Annahme (unterversorgter Extraktor produziert weniger Masse) ist
+**binär widerlegt** (`func_ArmyProcessEconomy` @0x771B50, vollständig gelesen):
+die Zwei-Ratio-Verteilung fasst **nur Verbraucher** (`mConsumptionData`) an —
+passive Produktion (`mResources`) ist bedingungsloses Einkommen und wird nie
+an die Grant-Ratio gekoppelt. `Unit::SetProductionActive` @0x6AAA90 setzt nur
+ein Flag, keine Economy-Kopplung. Die `LimitingRate` wirkt **ausschließlich auf
+Arbeit** (Bau/Reparatur/Reclaim/Capture über `Unit::ResourceConsumed` +0x53C),
+nie auf Produktion. Einen „unpowered"-Abschalter für Produktion gibt es im
+Base-Engine nicht; Intel/Schild/Stealth-Abschaltung bei Energiemangel ist
+Lua-getrieben und betrifft die Masse-Produktion nicht. → Die aktuelle Impl ist
+hier bereits 1:1; der Lock-Test in verify-economy.ts sichert das ab.
+
+**Noch offen:** echte Builder-Zuordnung statt `BUILDER_RATE` — Formel binär
+bestätigt (`delta = buildRate/BuildTime · ResourceConsumed · 0.1` je Bauer,
+additiv über alle auf dasselbe Ziel gerichteten Bauer, CBuildTaskHelper::
+UpdateWorkProgress @0x5f5f2c). Braucht Bauer→Ziel-Zuordnung (`issueBuild`) +
+Sandbox-Bauauftrag-Verdrahtung, damit Baustellen sich nicht mehr selbst bauen.
