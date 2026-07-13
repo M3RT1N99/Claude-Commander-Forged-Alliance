@@ -432,6 +432,15 @@ async function startSandbox(mapFolder: string): Promise<void> {
     sandbox.setMassSpots(massSpots)
     if (currentScmap) {
       hud = new Hud(vfs, viewer, sandbox, currentScmap)
+      // Ökonomie-Leiste aus der Lua-Engine speisen (die realen gespawnten Units).
+      hud.economyOverride = () => {
+        const a = luaSim?.army(1)
+        if (!a) return null
+        return {
+          mass: a.mass, massStorage: a.maxMass, massIncome: a.incomeMass, massExpense: a.expenseMass,
+          energy: a.energy, energyStorage: a.maxEnergy, energyIncome: a.incomeEnergy, energyExpense: a.expenseEnergy,
+        }
+      }
     }
     // ACU über die ECHTE Original-Lua-Sim spawnen (Engine-Pfad) statt als
     // SimWorld-Platzhalter. Nicht awaiten, damit die Karte sofort bedienbar ist

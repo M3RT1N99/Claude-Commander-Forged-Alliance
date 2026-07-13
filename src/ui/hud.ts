@@ -43,7 +43,21 @@ const COMMON_ORDERS: OrderDef[] = [
   { cap: 'RULEUCC_RetaliateToggle', bitmap: 'stand-ground', slot: 6 },
 ]
 
+/** Ökonomie-Momentaufnahme fürs HUD (SimWorld.Army oder Lua-Engine-Adapter). */
+export interface EcoSnapshot {
+  mass: number
+  massStorage: number
+  massIncome: number
+  massExpense: number
+  energy: number
+  energyStorage: number
+  energyIncome: number
+  energyExpense: number
+}
+
 export class Hud {
+  /** Optionale Ökonomie-Quelle (Lua-Engine); überschreibt die SimWorld-Armee. */
+  economyOverride: (() => EcoSnapshot | null) | null = null
   private readonly root: HTMLDivElement
   private readonly refs = new Map<string, HTMLElement>()
   private readonly orderButtons: { def: OrderDef; img: HTMLImageElement; enabled: boolean }[] = []
@@ -345,7 +359,7 @@ export class Hud {
   private update(): void {
     // Economy — Werte aus der Sim (Rate-Farben wie economy.lua: positiv
     // grün, negativ mit Vorrat gelb, negativ ohne Vorrat rot)
-    const army = this.controller.world.army(1)
+    const army: EcoSnapshot = this.economyOverride?.() ?? this.controller.world.army(1)
     for (const [group, cur, max, income, expense] of [
       ['#eco-mass', army.mass, army.massStorage, army.massIncome, army.massExpense],
       ['#eco-energy', army.energy, army.energyStorage, army.energyIncome, army.energyExpense],
