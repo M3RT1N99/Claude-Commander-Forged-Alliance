@@ -119,9 +119,15 @@ Wirtschaft, Renderer, Netz. Lua bekommt die 543 Sim-Bindings + Callbacks.
 - Projektile: Gravitation **(0, −4.9, 0)**; Defaults UseGravity=1, Lifetime=15,
   LeadTarget=1, TrackTarget=0; `MuzzleVelocity` überschreibt InitialSpeed
   (mit Gauss-Jitter + Nahbereichsdämpfung).
-- **Schaden hat KEIN Distanz-Falloff** — `CDamage` kennt nur Method
-  (SINGLE/AREA/RING) + MinMax-Radius: voller Betrag auf jedes Ziel im Radius.
-- Formel: `effektiv = amount * ArmorMult(damageType) * (1 - Handicap)`.
+- **Schaden — jetzt direkt aus dem Binary rekonstruiert** (IDA; in faf-re ist
+  `SIM_Damage` nur ein Stub) → [research/damage-binary.md](research/damage-binary.md):
+  - **Kein Distanz-Falloff** (belegt): voller Betrag an jede Entity im Radius.
+  - Formel: `effektiv = amount * ArmorMult(damageType) / (1 + Handicap)`
+    — **Division**, nicht `*(1-Handicap)` wie zuvor angenommen.
+  - Kategorie **`NOSPLASHDAMAGE`** ist immun gegen Flächenschaden.
+  - Schild-Absorption wird **vor** dem Einzelschaden abgezogen.
+  - Selbstschaden: Projektil wird auf seinen Launcher aufgelöst.
+  - Health-Abzug/Tod passiert in **Lua** (`Unit.lua:OnDamage`), nicht in der Engine.
 - Overkill: `overkillRatio > 1` ⇒ **kein Wrack**; Wrack-Masse =
   `BuildCostMass * Wreckage.MassMult * (1-overkill) * FractionComplete`.
 - Schilde: Absorption = `min(shieldHP, amount*ArmorMult*(1-Handicap))`,
@@ -301,7 +307,7 @@ Verhaltens-/Screenshot-Test, Commit.
 | --- | --- |
 | Lua-Semantik (5.4 ≠ 5.0) | **Bestätigt gemessen** → Gleis A (eigener 5.0-Build) |
 | Lua-Performance bei 1000+ Units | offen → früher Benchmark, Hot Paths in TS |
-| Decomp-Lücken (Econ-Verteilung, Command-Dispatch, Build-Tasks, SIM_Damage) | aus Lua + Aufrufern ableiten, **numerisch gegen Blueprints verifizieren** |
+| Decomp-Lücken (Econ-Verteilung, Command-Dispatch, Build-Tasks, SIM_Damage) | **entschärft: IDA-MCP auf der FAF-Binary verfügbar** — Adressen aus faf-re treffen die IDB exakt (3× verifiziert). `SIM_Damage` bereits vollständig rekonstruiert; Rest genauso holen statt raten. |
 | Props/Partikel-Menge (46k Props, tausende Partikel) | Instancing + GPU-Partikel (Physik im Shader wie im Original) |
 | XACT-Audioformat | Parser nötig; Referenz: Open-Source-XACT-Implementierungen |
 | Rechtliches | unverändert: keine Assets/Code im Repo, BYO-Game ([LEGAL.md](LEGAL.md)) |

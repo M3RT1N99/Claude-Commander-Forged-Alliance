@@ -2,7 +2,7 @@ node_modules/
 dist/
 *.local
 .DS_Store
-
+.mcp.json
 # Niemals Original-Game-Assets einchecken (Copyright!)
 assets/
 extracted/
