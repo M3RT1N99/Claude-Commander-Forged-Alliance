@@ -46,7 +46,7 @@ ctx.onmessage = async (e: MessageEvent<InMsg>): Promise<void> => {
     h.installStubTrap(() => {})
     host = h
     ctx.postMessage({ type: 'booted' })
-    setInterval(tickAndPost, 100) // 10-Hz-Sim-Beat
+    setInterval(tickAndPost, 100) // 10-Hz-Sim-Beat im Worker-Thread
     return
   }
   if (!host) return

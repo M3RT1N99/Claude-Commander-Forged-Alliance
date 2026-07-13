@@ -22,7 +22,7 @@ import {
 import { ddsToTexture } from './viewer/textures'
 import { UnitViewer } from './viewer/unitViewer'
 import { SandboxController, type SandboxUnitAssets } from './sandbox/sandbox'
-import { LuaSim } from './sim/luaSim'
+import { LuaSimClient } from './sim/luaSimClient'
 import { Hud, type HudSource, type HudUnitInfo, type EcoSnapshot } from './ui/hud'
 import type { ScmapData } from './formats/scmap'
 import type { UnitTextures } from './viewer/unitMaterial'
@@ -468,7 +468,7 @@ viewportEl.addEventListener('contextmenu', (e) => {
   if (luaSim && hasLuaSelection()) {
     const hit = viewer.pickTerrain(e.clientX, e.clientY)
     if (hit) {
-      for (const u of luaUnits) if (u.selected) luaSim.moveUnit(u.id, hit.x, hit.z)
+      for (const u of luaUnits) if (u.selected) luaSim.move(u.id, hit.x, hit.z)
       log(`Move → ${hit.x.toFixed(0)}, ${hit.z.toFixed(0)}`)
     }
   }
@@ -631,7 +631,7 @@ interface LuaSceneUnit {
   fadeZoom: number
   caps: ReadonlySet<string>
 }
-let luaSim: LuaSim | null = null
+let luaSim: LuaSimClient | null = null
 const luaUnits: LuaSceneUnit[] = []
 
 const DEFAULT_ECO: EcoSnapshot = {
@@ -652,18 +652,13 @@ function readCaps(bp: BpObject): ReadonlySet<string> {
 // HUD-Datenquelle aus der Lua-Engine (Ökonomie + gespawnte Units).
 const hudSource: HudSource = {
   economy(): EcoSnapshot {
-    const a = luaSim?.army(1)
-    if (!a) return DEFAULT_ECO
-    return {
-      mass: a.mass, massStorage: a.maxMass, massIncome: a.incomeMass, massExpense: a.expenseMass,
-      energy: a.energy, energyStorage: a.maxEnergy, energyIncome: a.incomeEnergy, energyExpense: a.expenseEnergy,
-    }
+    return luaSim?.economySnapshot() ?? DEFAULT_ECO
   },
   units(): HudUnitInfo[] {
     if (!luaSim) return []
     const out: HudUnitInfo[] = []
     for (const u of luaUnits) {
-      const s = luaSim.readState(u.id)
+      const s = luaSim.state(u.id)
       if (!s) continue
       out.push({
         id: u.bpId, name: u.name, health: s.health, maxHealth: s.maxHealth, selected: u.selected,
@@ -680,10 +675,9 @@ const hudSource: HudSource = {
     return caps
   },
   stop(): void {
-    for (const u of luaUnits) if (u.selected) luaSim?.stopUnit(u.id)
+    for (const u of luaUnits) if (u.selected) luaSim?.stop(u.id)
   },
 }
-let luaBeatAcc = 0
 let luaHookRegistered = false
 const btnLuaSpawn = document.querySelector<HTMLButtonElement>('#btn-lua-spawn')
 btnLuaSpawn?.addEventListener('click', () => void spawnViaLua('uel0001'))
@@ -700,7 +694,7 @@ function selectLua(clientX: number, clientY: number): string | null {
   let name: string | null = null
   for (const u of luaUnits) {
     u.selected = hit != null && hit.mesh === u.mesh
-    if (u.selected) name = luaSim?.readState(u.id)?.name.toUpperCase() ?? 'Einheit'
+    if (u.selected) name = u.name
   }
   return name ? `Ausgewählt: ${name}` : null
 }
@@ -710,18 +704,13 @@ function hasLuaSelection(): boolean {
   return luaUnits.some((u) => u.selected)
 }
 
-// Treibt den Engine-Sim-Beat (10 Hz) und übernimmt Position/Heading + Auswahl-
-// ring der Lua-Units pro Frame — die Original-Lua bewegt die Unit, hier wird
-// nur gerendert.
-function luaSimUpdate(dt: number): void {
+// Übernimmt Position/Heading + Auswahlring der Lua-Units pro Frame aus dem
+// Worker-Zustands-Cache — der Beat läuft im Worker-Thread, hier wird nur
+// gerendert (kein VM-Aufruf, kein Freeze).
+function luaSimUpdate(): void {
   if (!luaSim) return
-  luaBeatAcc = Math.min(luaBeatAcc + dt, 0.5)
-  while (luaBeatAcc >= 0.1) {
-    luaSim.beat()
-    luaBeatAcc -= 0.1
-  }
   for (const u of luaUnits) {
-    const s = luaSim.readState(u.id)
+    const s = luaSim.state(u.id)
     if (!s) continue
     const y = viewer.heightAt(s.x, s.z)
     u.mesh.position.set(s.x, y, s.z)
@@ -736,7 +725,7 @@ async function spawnViaLua(id: string): Promise<void> {
   try {
     if (!luaSim) {
       log('Boote Original-Lua-Sim (Lua-VM)…')
-      luaSim = await LuaSim.create(vfs, (lvl, msg) => {
+      luaSim = await LuaSimClient.create(vfs, (lvl, msg) => {
         if (lvl === 'WARN') log(`Lua-WARN: ${msg.slice(0, 80)}`)
       })
       log('Lua-Sim bereit')
@@ -749,14 +738,14 @@ async function spawnViaLua(id: string): Promise<void> {
     const x = spawnPoint.x + 6
     const z = spawnPoint.z + 6
     const y = viewer.heightAt(x, z)
-    const state = await luaSim.spawn(id, { x, y, z }, 1)
+    const uid = await luaSim.spawn(id, { x, y, z }, 1)
 
     const assets = await loadSandboxAssets(id)
     if (!assets) return
     const scene = viewer.addUnit(assets.model, assets.textures, currentTeamColor(), assets.shader)
     const scale = bpGet(assets.bp, 'Display.UniformScale')
     if (typeof scale === 'number' && scale > 0) scene.mesh.scale.setScalar(scale)
-    scene.mesh.position.set(state.x, y, state.z)
+    scene.mesh.position.set(x, y, z)
     const ring = new THREE.Mesh(
       luaRingGeo,
       new THREE.MeshBasicMaterial({ color: 0x44ff66, transparent: true, opacity: 0.9, depthTest: false }),
@@ -766,13 +755,16 @@ async function spawnViaLua(id: string): Promise<void> {
     viewer.addHelper(ring)
     const strat = bpGet(assets.bp, 'StrategicIconName')
     const fade = bpGet(assets.bp, 'Display.Mesh.IconFadeInZoom')
+    const maxHp = bpGet(assets.bp, 'Defense.MaxHealth')
+    const name =
+      stripLoc(bpGet(assets.bp, 'General.UnitName')) ?? stripLoc(bpGet(assets.bp, 'Description')) ?? id.toUpperCase()
     luaUnits.push({
-      id: state.id,
+      id: uid,
       bpId: id.toLowerCase(),
       mesh: scene.mesh,
       ring,
       selected: false,
-      name: stripLoc(bpGet(assets.bp, 'General.UnitName')) ?? stripLoc(bpGet(assets.bp, 'Description')) ?? id.toUpperCase(),
+      name,
       army: 1,
       strategicIcon: typeof strat === 'string' ? strat : 'icon_land_generic',
       fadeZoom: typeof fade === 'number' && fade > 0 ? fade : 130,
@@ -780,9 +772,8 @@ async function spawnViaLua(id: string): Promise<void> {
     })
 
     log(
-      `✓ ${state.name.toUpperCase()} über Original-Unit.lua gespawnt — ` +
-        `HP ${Math.round(state.health)}/${state.maxHealth} (aus Lua) — ` +
-        `Linksklick wählt, Rechtsklick bewegt`,
+      `✓ ${name.toUpperCase()} über Original-Unit.lua (Worker) gespawnt — ` +
+        `HP ${typeof maxHp === 'number' ? maxHp : '?'} — Linksklick wählt, Rechtsklick bewegt`,
     )
   } catch (err) {
     log(`FEHLER Lua-Spawn: ${err instanceof Error ? err.message : err}`)
