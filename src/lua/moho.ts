@@ -38,10 +38,10 @@ const UNIT_METHODS = [
   'AddBuildRestriction', 'AddCommandCap', 'AddToggleCap', 'AlterArmor',
   'CalculateWorldPositionFromRelative', 'ClearFocusEntity', 'GetArmorMult', 'GetAttacker',
   'GetBuildRate', 'GetConsumptionPerSecondEnergy', 'GetConsumptionPerSecondMass',
-  'GetFireState', 'GetFocusUnit', 'GetGuards', 'GetHealth', 'GetNumBuildOrders',
+  'GetFireState', 'GetFocusUnit', 'GetGuards', 'GetHealth', 'GetNavigator', 'GetNumBuildOrders',
   'GetProductionPerSecondEnergy', 'GetProductionPerSecondMass', 'GetResourceConsumed',
-  'GetScriptBit', 'GetTargetEntity', 'GetUnitId', 'GetWeapon', 'GetWeaponCount',
-  'IsBeingBuilt', 'IsIdleState', 'IsPaused', 'IsStunned', 'IsUnitState', 'IsValidTarget',
+  'GetScriptBit', 'GetTargetEntity', 'GetUnitId', 'GetVelocity', 'GetWeapon', 'GetWeaponCount',
+  'IsBeingBuilt', 'IsIdleState', 'IsMoving', 'IsPaused', 'IsStunned', 'IsUnitState', 'IsValidTarget',
   'KillManipulator', 'KillManipulators', 'RemoveBuildRestriction', 'RemoveCommandCap',
   'RemoveToggleCap', 'RestoreBuildRestrictions', 'RestoreCommandCaps', 'RestoreToggleCaps',
   'RevertElevation', 'RevertRegenRate', 'ScaleGetBuiltEmitter', 'SetAccMult', 'SetAutoMode',
@@ -115,6 +115,10 @@ const OVERRIDES: Record<string, string> = {
   SetConsumptionActive:
     'function(self, a) if __econSetActive then __econSetActive(self.__army or 1, self.__id, a) end end',
   GetResourceConsumed: 'function(self) return self.__resourceConsumed or 1 end',
+  // Bewegung: Navigator (installMotion) + Zustand aus der Physik-Fortschreibung.
+  GetNavigator: 'function(self) return self.__navigator end',
+  IsMoving: 'function(self) if self.__goal then return true else return false end end',
+  GetVelocity: 'function(self) local s = self.__speed or 0; local h = self.__heading or 0; return math.sin(h)*s, 0, math.cos(h)*s end',
 }
 
 function methodSpec(names: string[]): string {

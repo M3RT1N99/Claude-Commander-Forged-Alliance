@@ -100,6 +100,14 @@ function __getBrain(army)
 end
 function __econRegister() end
 function __econSetActive() end
+-- Default-Navigator (installMotion überschreibt ihn); echt definiert, damit der
+-- Stub-Trap ihn nicht zur Identität (Zahl) macht.
+function __getNavigator(id)
+  return {
+    SetGoal = function() end, AbortMove = function() end,
+    AtGoal = function() return true end, GetGoalPos = function() end,
+  }
+end
 
 -- Unit spawnen: Original-Script-Klasse instanziieren + OnCreate ----------
 function __spawnUnit(scriptPath, bpId, x, y, z, army)
@@ -118,6 +126,10 @@ function __spawnUnit(scriptPath, bpId, x, y, z, army)
   u.__brain = __getBrain(army)
   u.__pos = { x, y, z }
   u.__heading = 0
+  u.__navigator = __getNavigator(id)
+  -- echte Felder (nicht der wrapInstance-Stub) für die Physik-Fortschreibung
+  u.__goal = false
+  u.__speed = 0
   u.__health = (bp.Defense and bp.Defense.MaxHealth) or 0
   u.__fraction = 1
   -- Engine-bereitgestellte Instanz-Felder (vor OnCreate vorhanden)
