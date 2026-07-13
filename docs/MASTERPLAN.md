@@ -263,14 +263,21 @@ Wirtschaft, Renderer, Netz. Lua bekommt die 543 Sim-Bindings + Callbacks.
 Jede Phase endet mit: Typecheck, `verify*.ts` gegen Originaldaten,
 Verhaltens-/Screenshot-Test, Commit.
 
-### Phase A — Lua-Fundament ✳ läuft
-1. ✅ **FA-Lua-Transpiler** — 1316/1316 Skripte parsen (Gleis B).
-2. **Lua 5.0.1 + GPG-Patches nach WASM** bauen (Gleis A) — beseitigt
-   Semantik-Deltas (Integer-Subtyp, `arg`, `getn`).
-3. **`moho`-API v1**: Entity/Unit-Basis, Globals, `class.lua` +
-   `Blueprints.lua` booten; Missing-Method-Trap protokolliert Lücken.
-4. **Meilenstein**: ACU entsteht über die Original-`Unit.lua`;
-   `OnCreate`/`OnStopBeingBuilt` feuern; Werte kommen aus dem Original.
+### Phase A — Lua-Fundament ✅ Meilenstein erreicht
+1. ✅ **FA-Lua-Transpiler** — 1316/1316 Skripte parsen (`scripts/verify-lua.ts`).
+   Dialekt-Eigenheiten gelöst: `#`-Kommentar, `!=`, `continue`→goto,
+   `arg`-Vararg→`table.pack`, generic-for→`__foriter`-Dispatcher,
+   Zahl-an-Keyword (`0then`), `{&1&4}`, BOM, ungültige Escapes.
+2. ✅ **A1** Host bootet `import.lua` + `class.lua` (`verify-luaboot.ts`).
+3. ✅ **A2** Original-`LoadBlueprints()`-Pipeline lädt echtes Blueprint
+   (`verify-blueprints.ts`).
+4. ✅ **A3** echte `Unit.lua` (142 KB) + `defaultunits.lua` (33 Klassen)
+   laden mit voller Import-Kaskade (`verify-units.ts`).
+5. ✅ **A4 Meilenstein**: Unit über Original-`Unit.lua` instanziiert,
+   `OnCreate` läuft durch, liest Original-Blueprint-Werte
+   (`verify-unit-create.ts`). moho-API v1 (105 Unit- + 72 Entity-Methoden).
+6. **offen — Gleis A**: Lua 5.0.1 + GPG-Patches nach WASM (exakte Semantik,
+   ersetzt Transpiler); moho-Stubs schrittweise durch echte Sim-Anbindung.
 
 ### Phase B — Kampf
 5. Waffen-API + `defaultweapons.lua`-Zustandsmaschine, Fire-Clock
