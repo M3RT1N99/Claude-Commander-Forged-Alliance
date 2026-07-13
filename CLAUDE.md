@@ -184,12 +184,19 @@ suchen.
 
 ## Bekannte Löcher (Stand: Juli 2026)
 
+Der Weg zur echten UI steht in [docs/PLAN-UI.md](docs/PLAN-UI.md) — mit Decomp-Belegen.
+
 - **`src/ui/hud.ts`** ist ein TS/HTML-Nachbau von
   `lua/ui/game/{economy,orders,unitview}.lua`, inklusive erfundener Farben. Größter
   offener Verstoß gegen das Kernprinzip. Dort **nichts Neues anbauen** — der Weg ist
   der maui-Layer + die echte `lua/ui`.
 - **`setTerrainSource()` wird nie gerufen.** `GetTerrainHeight` liefert daher überall
-  0, ohne jede Fehlermeldung. Das ist die Naht zur geladenen Karte.
+  0, ohne jede Fehlermeldung — ein stiller Stub im Produktivpfad, also verboten.
+- **Die Karte wird in TS geparst** (`main.ts` liest `Scenario.MasterChain…Markers`
+  selbst), statt `ScenarioUtilities.lua` auszuführen. Folge: keine Armee-Gruppen,
+  keine Props, kein `CreateInitialArmyGroup`.
+- **Das Blueprint wird zweimal gelesen** — einmal vom TS-Parser (`main.ts`, fürs HUD)
+  und einmal von der echten `LoadBlueprints()`-Pipeline (Worker). Zwei Wahrheiten.
 - **Ökonomie-Lua-API ist noch No-Op:** `SetProductionPerSecond*`,
   `SetConsumptionPerSecond*`, `SetBuildRate` schreiben nichts in die Engine-Ökonomie
   (Werte kommen bisher nur aus dem Blueprint).
