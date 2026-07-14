@@ -21,6 +21,12 @@ let host: LuaHost | null = null
 let engine: Engine | null = null
 /** Die Lua-Dateien bleiben liegen — ein Reset baut daraus einen frischen Host. */
 let bootFiles: Map<string, Uint8Array> | null = null
+/**
+ * Pause: die WELT steht (CWldSession::RequestPause). Der Beat setzt aus — kein
+ * Tick, keine Ökonomie, keine Threads. Die UI läuft weiter (sie hat ihre eigene
+ * VM und ihren eigenen Frame-Takt), genau wie im Original.
+ */
+let paused = false
 
 interface Vec3 {
   x: number
@@ -33,6 +39,9 @@ type InMsg =
   | { type: 'move'; id: number; x: number; z: number }
   | { type: 'stop'; id: number }
   | { type: 'reset'; terrain: HeightfieldData }
+  // SessionRequestPause/SessionResume (mHelp: „Pause the world simulation.").
+  // Die Engine hält die WELT an — der Beat läuft nicht weiter, die UI schon.
+  | { type: 'pause'; paused: boolean }
   // Ein Bau-Befehl: Baustelle setzen (CreateUnit mit beingBuilt=1, wie
   // Sim::CreateUnit es tut) und dem Bauer den Auftrag geben.
   | {
@@ -83,6 +92,10 @@ ctx.onmessage = async (e: MessageEvent<InMsg>): Promise<void> => {
     if (!bootFiles) return
     await resetSession(bootFiles, msg.terrain)
     ctx.postMessage({ type: 'reset-done' })
+    return
+  }
+  if (msg.type === 'pause') {
+    paused = msg.paused
     return
   }
   if (!host) return
@@ -143,6 +156,9 @@ async function resetSession(files: Map<string, Uint8Array>, terrain: Heightfield
 
 function tickAndPost(): void {
   if (!host || !engine) return
+  // Pause: kein Beat. Der Zustand wird trotzdem gemeldet — die UI zeigt weiter
+  // an, was steht (die Engine rendert im Pausenzustand auch weiter).
+  if (paused) return
   // Ein Sim-Beat: Bau-Bedarf → Ökonomie → gewährte Rate → Lua-Threads → Physik.
   beat(engine)
   // Der Zustand kommt als JSON-STRING (LuaHost.pull), nicht als Rückgabewert:

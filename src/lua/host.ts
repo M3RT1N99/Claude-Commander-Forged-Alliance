@@ -212,6 +212,25 @@ export class LuaHost {
     `)
   }
 
+  /**
+   * Ruft ein Lua-Global mit SKALAREN Argumenten auf (Zahlen, Strings, Booleans).
+   *
+   * Das ist der Weg, auf dem die Engine-Seite Daten in die VM gibt, ohne Lua in
+   * TS-Template-Literalen zusammenzubauen (CLAUDE.md verbietet das):
+   * `host.call('__uiSessionAddArmy', 1, 'ARMY_1', 'Commander', 1, true)`.
+   *
+   * KEINE Objekte/Arrays übergeben: wasmoon reicht JS-Objekte als *userdata*
+   * durch, nicht als Lua-Tabelle — `for i, v in tbl` der Original-Lua läuft
+   * darüber nicht. Tabellen baut die Lua-Seite selbst.
+   */
+  call(name: string, ...args: (string | number | boolean)[]): unknown {
+    const fn = this.lua.global.get(name) as unknown
+    if (typeof fn !== 'function') {
+      throw new Error(`Lua-Global "${name}" ist keine Funktion (${typeof fn})`)
+    }
+    return (fn as (...a: unknown[]) => unknown)(...args)
+  }
+
   /** Direkter Lua-Ausdruck (Tests/Diagnose). */
   eval(code: string): unknown {
     return this.lua.doStringSync(code)

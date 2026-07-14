@@ -1,4 +1,5 @@
 import type { LuaHost } from './host'
+import type { SessionInfo } from '../sim/session'
 import { installMoho } from './moho'
 import { installBlueprintPipeline } from './unitFactory'
 import { installEngineGlobals } from './engineGlobals'
@@ -212,6 +213,38 @@ export function loadUiBlueprints(host: LuaHost, bpPaths: string[]): number {
 /** `/textures/x.dds` → `textures/x.dds` (das VFS führt Pfade ohne führenden /). */
 function normalize(path: string): string {
   return path.replace(/^\/+/, '').toLowerCase()
+}
+
+/**
+ * Die SESSION in die UI-VM spiegeln — dieselben Angaben, die auch die Sim
+ * bekommt (`setupSession`, src/sim/session.ts).
+ *
+ * Danach liefern `GetArmiesTable()` und `SessionGetScenarioInfo()` echte Daten.
+ * Welche Felder eine Armee trägt, steht nicht zur Debatte: die Engine setzt sie
+ * in cfunc_GetArmiesTableL einzeln (Cfile:1267023-1267111) — name, nickname,
+ * faction (0-BASIERT), color, iconColor, showScore, civilian, human, outOfGame,
+ * authorizedCommandSources.
+ *
+ * Muss VOR setupGameUi laufen: avatars.lua:30 liest
+ * `GetArmiesTable().armiesTable[GetFocusArmy()].faction` schon beim Import,
+ * tabs.lua:20 `SessionGetScenarioInfo().Options.Timeouts`.
+ *
+ * Die Daten gehen als SKALARE in die VM (host.call) — kein Lua in TS-Literalen.
+ */
+export function applySession(host: LuaHost, info: SessionInfo, playerName = 'Commander'): void {
+  host.call('__uiSessionBegin', info.type, info.map ?? '', info.map ?? '')
+  for (const a of info.armies) {
+    host.call('__uiSessionAddArmy', a.index, a.name, a.human ? playerName : a.name, a.faction, a.human)
+  }
+  for (const [key, value] of Object.entries(info.options ?? {})) {
+    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+      host.call('__uiSessionSetOption', key, value)
+    }
+  }
+  // Genau EIN Client (der Spieler). Die Engine zählt Befehlsquellen 1-basiert
+  // (Cfile:1330618: `mLocalCmdSrc + 1`; 255 → 0 „can't issue commands").
+  host.call('__uiSessionSetCommandSources', playerName, 1)
+  host.call('__uiSessionSetFocusArmy', info.armies.find((a) => a.human)?.index ?? 1)
 }
 
 /**

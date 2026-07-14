@@ -28,7 +28,9 @@ import {
   setupGameUi,
   createRootFrame,
   loadUiBlueprints,
+  applySession,
 } from '../src/lua/uiEngine'
+import { SANDBOX_SESSION } from '../src/sim/session'
 import { findFiles } from '../src/vfs/glob'
 import { parseDds } from '../src/formats/dds'
 import { FontBook } from '../src/ui/fonts'
@@ -133,6 +135,54 @@ check(arial[0] > 10 && arial[0] < 16, `Arial-Oberlänge bei 14px = ${arial[0].to
 const bpCount = loadUiBlueprints(host, bpPaths)
 check(bpCount > 500, `${bpCount} Blueprints in der UI-VM (echte Pipeline)`)
 
+console.log('\n== Die Session (GetArmiesTable / SessionGetScenarioInfo) ==')
+// Ohne Session melden die Session-Globals „no active session." — wie das
+// Original (Cfile:1330339). Nichts wird still behauptet.
+const noSession = host.eval(`
+  local ok, err = pcall(SessionRequestPause)
+  return tostring(ok) .. '|' .. tostring(err)
+`) as string
+check(
+  noSession.startsWith('false') && noSession.includes('no active session'),
+  `ohne Session knallt SessionRequestPause: ${noSession.split('|')[1]?.replace(/\[string "[\s\S]*?"\]:?\d*:?\s*/, '')}`,
+)
+
+// Dieselbe Session, die auch die Sim bekommt (SANDBOX_SESSION) — EIN Weg für
+// Browser und Test (applySession in src/lua/uiEngine.ts).
+applySession(host, { ...SANDBOX_SESSION, map: 'SCMP_009' })
+check(Number(host.eval('return GetArmiesTable().numArmies')) === 1, 'GetArmiesTable(): 1 Armee')
+check(Number(host.eval('return GetArmiesTable().focusArmy')) === 1, 'focusArmy = 1 (1-basiert wie die Engine)')
+// faction ist 0-BASIERT: gamemain.lua:109 rechnet `faction + 1` in factions.lua.
+check(
+  Number(host.eval('return GetArmiesTable().armiesTable[1].faction')) === 0,
+  'faction der UEF-Armee = 0 (die Lua rechnet +1, Cfile:1267057)',
+)
+check(
+  String(host.eval('return GetArmiesTable().armiesTable[1].nickname')) === 'Commander',
+  'nickname aus der Session (gamemain.lua:83 setzt damit den ACU-Namen)',
+)
+check(
+  host.eval('return GetArmiesTable().armiesTable[1].human') === true &&
+    host.eval('return GetArmiesTable().armiesTable[1].showScore') === true,
+  'human/showScore gesetzt (die Engine setzt beide, Cfile:1267068/1267076)',
+)
+check(
+  String(host.eval("return type(SessionGetScenarioInfo().Options)")) === 'table',
+  'SessionGetScenarioInfo().Options existiert (tabs.lua:21, diplomacy.lua:34 greifen ungeprüft zu)',
+)
+check(Number(host.eval('return SessionGetLocalCommandSource()')) === 1, 'lokale Befehlsquelle = 1')
+
+// Pause: die UI verlangt sie, die Engine reicht sie an die SIM weiter. Ohne
+// Naht knallt es (kein stiller No-Op) — hier wird die Naht gesetzt und geprüft.
+let paused: boolean | null = null
+host.setGlobal('__uiPauseSink', (p: boolean) => {
+  paused = p
+})
+host.eval('SessionRequestPause()')
+check(paused === true && host.eval('return SessionIsPaused()') === true, 'SessionRequestPause hält die Sim an')
+host.eval('SessionResume()')
+check(paused === false && host.eval('return SessionIsPaused()') === false, 'SessionResume lässt sie weiterlaufen')
+
 console.log('\n== Die vier Original-Panels aufbauen (gamemain.lua:145-153) ==')
 setupGameUi(host, log)
 // Erst ein Frame, dann messen: die Grids der Original-UI legen ihre Kinder in
@@ -166,6 +216,46 @@ const outside = host.eval(`
 check(
   outside === '',
   `kein Control fällt komplett aus dem Bild (1920×1080)${outside ? ' — draußen: ' + outside : ''}`,
+)
+
+console.log('\n== Die Reiter oben: Menü, Diplomatie, Pause (tabs.lua) ==')
+// Genau der Ast, der im Browser gestorben ist: tabs.lua:482 BuildContent baut
+// den Inhalt — 'main' aus seiner eigenen Menü-Tabelle, 'diplomacy' über
+// diplomacy.lua:CreateContent (das schon beim Import SessionGetScenarioInfo()
+// ruft). Ohne Session war beides tot; CollapseWindow lief danach auf ein
+// `false` und riss die UI mit.
+const tabMenu = host.eval(`
+  local ok, err = pcall(function() import('/lua/ui/game/tabs.lua').BuildContent('main') end)
+  return tostring(ok) .. '|' .. tostring(err)
+`) as string
+check(tabMenu.startsWith('true'), `Reiter „Menü" öffnet sich${tabMenu.startsWith('true') ? '' : ' — ' + tabMenu}`)
+check(
+  Number(host.eval(`return table.getn(import('/lua/ui/game/tabs.lua').controls.contentGroup.Buttons)`)) === 7,
+  '7 Knöpfe im Spielmenü (Save/Load/Options/Restart/End/Exit/Close — tabs.lua:63-100)',
+)
+
+// Das Aufklappen ist eine ANIMATION über mehrere Bilder (tabs.lua:561-584: der
+// Rahmen wächst, dann fährt der Boden aus, dann blendet der Inhalt ein). Sie
+// muss ZU ENDE laufen, bevor der nächste Reiter dran ist — im Spiel sperrt
+// `animationLock` genau dafür (tabs.lua:544). Ohne Frames dazwischen prüfte der
+// Test einen Zustand, den die Engine nie erreicht.
+const frames = (n: number) => {
+  for (let i = 0; i < n; i++) host.eval('__mauiFrame(0.016)')
+}
+frames(30)
+
+// Umschalten auf Diplomatie: erst CollapseWindow (Ausblenden), dann ruft der
+// Callback BuildContent erneut — und der baut diplomacy.CreateContent.
+// diplomacy.lua liest schon beim Import SessionGetScenarioInfo().Options.TeamLock.
+host.eval(`import('/lua/ui/game/tabs.lua').BuildContent('diplomacy')`)
+frames(60)
+const diplo = host.eval(`
+  local t = import('/lua/ui/game/tabs.lua')
+  return tostring(t.controls.contentGroup and t.controls.contentGroup:GetName() or 'nichts')
+`) as string
+check(
+  diplo !== 'nichts',
+  `Reiter „Diplomatie" baut seinen Inhalt (diplomacy.lua:34 liest Options.TeamLock): ${diplo}`,
 )
 
 console.log('\n== Hit-Test: die freie Spielfläche gehört der Welt ==')

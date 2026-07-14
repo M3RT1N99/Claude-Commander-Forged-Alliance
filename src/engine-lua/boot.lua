@@ -76,6 +76,56 @@ do
   -- In Lua 5.4 hat ein Thread keine Metatable; getmetatable() gaebe nil und
   -- config.lua:35 stuerbe an setmetatable(nil, ...).
   debug.setmetatable(coroutine.create(function() end), {})
+
+  -- ---------------------------------------------------------------------
+  -- VERGLEICHE UEBER TYPGRENZEN KNALLEN IN FA NICHT.
+  --
+  -- Die Engine hat luaV_lessthan gepatcht (Cfile:1442257):
+  --
+  --     if ( l->tt != r->tt )
+  --         return l_tt < r->tt;      // <-- die TYP-TAGS, kein Fehler!
+  --     if ( l_tt == LUA_TNUMBER ) ...
+  --
+  -- und luaV_lessequal genauso (Cfile:1442275). Standard-Lua wirft hier
+  -- "attempt to compare number with nil" — FA liefert still das Ergebnis des
+  -- Tag-Vergleichs (nil=0, boolean=1, lightuserdata=2, number=3, string=4,
+  -- table=5, function=6, userdata=7, thread=8).
+  --
+  -- Das ist kein Kuriosum, die Original-UI RECHNET damit:
+  --
+  --   diplomacy.lua:24   parent.Items = {}        -- Attribut auf `false`
+  --   diplomacy.lua:107  parent = Group(inParent) -- jetzt ein Control ...
+  --   diplomacy.lua:123  if table.getsize(parent.Items) > 0 then
+  --
+  -- `parent.Items` ist auf dem frischen Control nil, table.getsize(nil) liefert
+  -- nil (utils.lua:279), und `nil > 0` ist in FA schlicht false — die Zeile
+  -- ueberspringt den Aufraeum-Block. In Standard-Lua stirbt der Diplomatie-Reiter
+  -- genau dort.
+  --
+  -- Bei GLEICHEN Typen bleibt alles wie gehabt: Zahlen/Strings vergleicht Lua
+  -- selbst (die Metamethode wird dann gar nicht gerufen), und nil<nil oder
+  -- Tabelle<Tabelle ohne __lt geht in call_orderTM — dort knallt es, wie im
+  -- Original.
+  local TYPE_TAG = {
+    ['nil'] = 0, boolean = 1, number = 3, string = 4,
+    table = 5, ['function'] = 6, userdata = 7, thread = 8,
+  }
+  local function faOrder(a, b)
+    local ta, tb = TYPE_TAG[type(a)] or 9, TYPE_TAG[type(b)] or 9
+    if ta ~= tb then return ta < tb end
+    error('attempt to compare two ' .. type(a) .. ' values', 3)
+  end
+
+  -- Lua 5.4 sucht die Metamethode beim ERSTEN Operanden und, wenn er keine hat,
+  -- beim ZWEITEN. Es reicht also, sie an die Typen zu haengen, die eine
+  -- Typ-Metatable haben — jeder gemischte Vergleich hat mindestens einen davon.
+  for _, mt in ipairs({
+    debug.getmetatable(nil), debug.getmetatable(0), debug.getmetatable(''),
+    debug.getmetatable(true), debug.getmetatable(function() end),
+  }) do
+    mt.__lt = faOrder
+    mt.__le = faOrder
+  end
 end
 
 -- Engine-Hook: Modul in gegebener Umgebung ausfuehren (import.lua ruft das).

@@ -93,8 +93,33 @@ in CLAUDE.md. Vor Arbeit an einem der Themen: den passenden Abschnitt lesen.*
   keine Lua-Datei lädt es, die Engine tut es). Es bringt `Sync`, `UnitData`,
   `OnSync()` — ohne `UnitData` scheitert orders.lua:909 an der ersten Selektion.
 
+- **Die Session in der UI-VM:** `GetArmiesTable()` (cfunc_GetArmiesTableL,
+  Cfile:1267023-1267111) liefert `{ numArmies, focusArmy (1-basiert),
+  armiesTable }`; je Armee genau: `name, nickname, faction, color, iconColor,
+  showScore, civilian, human, outOfGame, authorizedCommandSources`.
+  **`faction` ist 0-basiert** — die Lua rechnet überall `faction + 1`
+  (gamemain.lua:109, orders.lua:675, avatars.lua:664). `SessionGetScenarioInfo()`
+  gibt die Tabelle zurück, die beim Start an die Sim ging (`.Options` wird
+  ungeprüft gelesen: tabs.lua:21, diplomacy.lua:34).
+  `SessionGetLocalCommandSource()` ist der **Client**-Index (1-basiert; 0 = darf
+  nicht befehligen, Cfile:1330618), **nicht** die Armee. Ohne Session werfen alle
+  Session-Globals „…(): no active session." (Cfile:1330339).
+- **`SessionRequestPause`/`SessionResume` halten die SIM an**
+  (CWldSession::RequestPause) — die UI läuft weiter (eigene VM, eigener
+  Frame-Takt).
+
 ## Lua-Host
 
+- **FA-Lua knallt bei Vergleichen über Typgrenzen NICHT.** Die Engine hat
+  `luaV_lessthan` (Cfile:1442257) und `luaV_lessequal` (Cfile:1442275) gepatcht:
+  bei ungleichen Typen liefern sie den Vergleich der **Typ-Tags**
+  (nil=0, boolean=1, number=3, string=4, table=5, function=6, userdata=7) statt
+  „attempt to compare number with nil". Die Original-UI rechnet damit:
+  diplomacy.lua:24 hängt `Items` an den Boolean `false`, Zeile 107 ersetzt
+  `parent` durch ein Control (dort ist `Items` nil), und Zeile 123 fragt
+  `table.getsize(parent.Items) > 0` — `nil > 0` ist in FA einfach `false`.
+  Nachgebildet über `__lt`/`__le` auf den Typ-Metatables
+  ([boot.lua](../../src/engine-lua/boot.lua)).
 - **wasmoon: eine JS-Funktion darf NIE `null` zurückgeben** — wasmoon prüft
   `typeof target !== 'object'` und greift dann auf `target.then` zu
   (dist/index.js:1020-1026); für `null` ist `typeof` „object", die VM stirbt

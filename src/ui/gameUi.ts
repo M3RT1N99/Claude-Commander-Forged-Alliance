@@ -6,6 +6,7 @@ import {
   startFrontEnd,
   createRootFrame,
   loadUiBlueprints,
+  applySession,
 } from '../lua/uiEngine'
 import { MauiRenderer, type WorldViewRect } from './mauiRenderer'
 import { findFiles } from '../vfs/glob'
@@ -21,6 +22,7 @@ import {
 import type { GameVfs } from '../vfs/vfs'
 import type { EcoSnapshot } from './hud'
 import type { LuaUnitSnapshot } from '../sim/luaSimClient'
+import type { SessionInfo } from '../sim/session'
 
 /**
  * Die Spiel-UI — die ECHTE `lua/ui`, in einer eigenen Lua-VM im Main-Thread.
@@ -59,6 +61,12 @@ export class GameUi {
      * C++-Seite ui_KeyboardPanSpeed und cam_ZoomAmount in ihren Schleifen liest.
      */
     conVarChanged?: (name: string, value: string | number | boolean) => void,
+    /**
+     * Die laufende Session (dieselbe, die auch die Sim bekommt). Sie muss VOR
+     * dem Bau der Panels stehen: avatars.lua:30 und tabs.lua:20 lesen
+     * `GetArmiesTable()` bzw. `SessionGetScenarioInfo()` schon beim Import.
+     */
+    session?: SessionInfo,
   ): Promise<GameUi> {
     // Die Schriften des Spiels (<GameDir>/fonts). Sie liefern die Metrik, mit der
     // die Original-Lua ihr Text-Layout rechnet (text.lua:39/47) — und sie werden
@@ -163,6 +171,11 @@ export class GameUi {
       // __blueprints[...], construction.lua:1681 fragt EntityCategoryGetUnitList.
       const bpCount = loadUiBlueprints(host, bpPaths)
       log(`UI: ${bpCount} Blueprints geladen (echte Pipeline)`)
+
+      // Die SESSION steht vor den Panels: avatars.lua:30 liest
+      // `GetArmiesTable().armiesTable[GetFocusArmy()].faction` schon beim
+      // Import, tabs.lua:20 `SessionGetScenarioInfo().Options.Timeouts`.
+      if (session) applySession(host, session)
 
       // Ab hier baut die Original-Lua die UI — in der Reihenfolge aus
       // gamemain.lua:145-153. Denselben Weg nimmt die Verify-Suite.
@@ -356,6 +369,21 @@ export class GameUi {
   /** Die Naht für Befehle, die direkt an eine Unit gehen (SetFireState, SetPaused …). */
   connectSim(send: (name: string, ids: number[], value: unknown) => void): void {
     this.host.setGlobal('__uiSimCommand', send)
+  }
+
+  /**
+   * Die Session anhalten/fortsetzen (SessionRequestPause/SessionResume,
+   * mHelp: „Pause the world simulation."). Das ist ein Eingriff in die SIM,
+   * nicht in die UI — der Pause-Reiter oben (tabs.lua:425/428) hängt daran.
+   * Ohne diese Naht KNALLT SessionRequestPause, statt still nichts zu tun.
+   */
+  connectPause(pause: (paused: boolean) => void): void {
+    this.host.setGlobal('__uiPauseSink', pause)
+  }
+
+  /** Die Session in die UI-VM spiegeln (siehe `applySession`). */
+  setSession(info: SessionInfo, playerName?: string): void {
+    applySession(this.host, info, playerName)
   }
 
   /**

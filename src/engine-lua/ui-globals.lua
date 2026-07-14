@@ -505,6 +505,17 @@ end
 -- Die Armeen kommen aus der SESSION (Szenario + Lobby), nicht aus der UI. Bis es
 -- eine echte Session gibt, traegt sie die Engine-Seite hier ein (__uiSetArmies);
 -- ohne Session ist die Liste LEER — das ist die Wahrheit, keine Attrappe.
+--
+-- Welche Felder je Armee drinstehen, steht NICHT zur Debatte — die Engine setzt
+-- sie in cfunc_GetArmiesTableL (Cfile:1267023-1267111) einzeln:
+--   name, nickname, faction, color, iconColor, showScore, civilian, human,
+--   outOfGame, authorizedCommandSources
+-- und oben numArmies + focusArmy (1-basiert; -1 bleibt -1).
+--
+-- WICHTIG: `faction` ist 0-BASIERT (mVarDat.mFaction). Die Lua rechnet ueberall
+-- `faction + 1`, um in /lua/factions.lua zu indizieren (gamemain.lua:109,
+-- orders.lua:675, avatars.lua:664). Wer hier 1..4 eintraegt, gibt jedem Spieler
+-- die falsche Fraktion — still.
 __uiArmies = {}
 __uiFocusArmy = 1
 
@@ -527,6 +538,149 @@ end
 
 function SetFocusArmy(index)
   __uiFocusArmy = index
+end
+
+-- === Die laufende Session ===
+--
+-- mHelp woertlich:
+--   SessionGetScenarioInfo()  "Return the table of scenario info that was
+--                              originally passed to the sim on launch."
+--   SessionRequestPause()     "Pause the world simulation."
+--   SessionResume()           "Resume the world simulation."
+--   SessionIsPaused()         "Return true iff the session is paused."
+--   SessionGetLocalCommandSource()  "Return the local command source. Returns 0
+--                                    if the local client can't issue commands."
+--
+-- Die Szenario-Info ist GENAU die Tabelle, die beim Start an die Sim ging
+-- (ScenarioInfo aus <map>_scenario.lua) — die Engine gibt sie unveraendert
+-- zurueck. diplomacy.lua:34 greift ungeprueft auf `.Options.TeamLock` zu, also
+-- muss sie da sein, sobald eine Session laeuft. Ohne Session: nil — die Wahrheit.
+__uiScenarioInfo = false
+__uiSessionPaused = false
+__uiPauseSink = false
+__uiCommandSources = {}
+__uiLocalCommandSource = 0
+
+--- Eine SESSION aufsetzen (was CWldSession beim Start tut).
+---
+--- Aufgerufen von der Engine-Seite mit denselben Angaben, die auch die Sim
+--- bekommt (src/sim/session.ts) — die UI erfindet hier NICHTS, sie spiegelt die
+--- Session. Ohne Session bleibt alles leer, und die Session-Globals knallen
+--- genau wie im Original ("no active session.", Cfile:1330339).
+function __uiSessionBegin(sessionType, mapPath, mapName)
+  __uiArmies = {}
+  __uiFocusArmy = 1
+  __uiCommandSources = {}
+  __uiLocalCommandSource = 0
+  __uiSessionPaused = false
+  __uiScenarioInfo = {
+    type = sessionType or 'skirmish',
+    map = mapPath or '',
+    name = mapName or '',
+    Options = {},
+    ArmySetup = {},
+  }
+end
+
+--- Eine Armee eintragen. `faction` ist 1..4 (wie im ArmySetup der Sim); die
+--- armiesTable traegt sie 0-basiert, weil die Engine das so tut.
+--- Die Farbe kommt aus /lua/GameColors.lua (PlayerColors/ArmyColors) — der
+--- Tabelle des Spiels, nicht aus der Luft.
+function __uiSessionAddArmy(index, name, nickname, faction, human)
+  local colors = import('/lua/GameColors.lua').GameColors
+  __uiArmies[index] = {
+    name = name,
+    nickname = nickname or name,
+    faction = faction - 1,
+    color = colors.PlayerColors[index] or colors.UnidentifiedColor,
+    iconColor = colors.ArmyColors[index] or colors.UnidentifiedColor,
+    showScore = true,
+    civilian = false,
+    human = human == true,
+    outOfGame = false,
+    authorizedCommandSources = { 1 },
+  }
+  __uiScenarioInfo.ArmySetup[name] = {
+    ArmyIndex = index,
+    ArmyName = name,
+    Human = human == true,
+    Civilian = false,
+    Faction = faction,
+    AIPersonality = '',
+  }
+end
+
+--- Die Befehlsquellen (die Clients). Im Einzelspieler genau eine — der Spieler.
+--- Die Engine liefert den lokalen Index 1-basiert, 0 wenn der Client nicht
+--- befehligen darf (Cfile:1330618: `mLocalCmdSrc + 1`, 255 -> 0).
+function __uiSessionSetCommandSources(name, localIndex)
+  __uiCommandSources = { name }
+  __uiLocalCommandSource = localIndex or 0
+end
+
+--- Welche Armee der Spieler sieht (1-basiert; -1 = Beobachter).
+function __uiSessionSetFocusArmy(index)
+  __uiFocusArmy = index or 1
+end
+
+function __uiSessionSetOption(key, value)
+  if __uiScenarioInfo then __uiScenarioInfo.Options[key] = value end
+end
+
+function SessionGetScenarioInfo()
+  return __uiScenarioInfo or nil
+end
+
+function SessionIsPaused()
+  return __uiSessionPaused == true
+end
+
+-- Pause ist ein Eingriff in die SIM, nicht in die UI: die Engine haelt die
+-- WELT an (CWldSession::RequestPause). Ohne Session wirft die Engine
+-- "SessionRequestPause(): no active session." — hier ebenso, statt still nichts
+-- zu tun.
+function SessionRequestPause()
+  if not __uiScenarioInfo then error('SessionRequestPause(): no active session.', 2) end
+  if not __uiPauseSink then
+    error('SessionRequestPause: kein Weg in die Sim (__uiPauseSink fehlt)', 2)
+  end
+  __uiSessionPaused = true
+  __uiPauseSink(true)
+end
+
+function SessionResume()
+  if not __uiScenarioInfo then error('SessionResume(): no active session.', 2) end
+  if not __uiPauseSink then
+    error('SessionResume: kein Weg in die Sim (__uiPauseSink fehlt)', 2)
+  end
+  __uiSessionPaused = false
+  __uiPauseSink(false)
+end
+
+--- "Return a table of command sources." (mHelp). Ohne Session: Fehler.
+function SessionGetCommandSourceNames()
+  if not __uiScenarioInfo then error('SessionGetCommandSourceNames(): no active session.', 2) end
+  return __uiCommandSources
+end
+
+--- "Return the local command source. Returns 0 if the local client can't issue
+--- commands." — 1-basiert, NICHT die Armee.
+function SessionGetLocalCommandSource()
+  if not __uiScenarioInfo then error('SessionGetLocalCommandSource(): no active session.', 2) end
+  return __uiLocalCommandSource
+end
+
+function SessionIsActive()
+  return __uiScenarioInfo ~= false
+end
+
+--- "Return true iff the active session is a replay session." — wir spielen live.
+function SessionIsReplay()
+  return false
+end
+
+function SessionIsMultiplayer()
+  return table.getn(__uiCommandSources) > 1
 end
 
 -- === Konsolen-Ausgabe ===

@@ -232,6 +232,15 @@ export class LuaSimClient {
     this.worker.postMessage({ type: 'stop', id })
   }
 
+  /**
+   * Die Welt anhalten/weiterlaufen lassen — was SessionRequestPause/SessionResume
+   * in der Engine tun (CWldSession::RequestPause). Der Pause-Reiter der
+   * Original-UI (tabs.lua:425/428) landet hier.
+   */
+  setPaused(paused: boolean): void {
+    this.worker.postMessage({ type: 'pause', paused })
+  }
+
   /** Letzter bekannter Zustand einer Unit (aus dem Worker-Beat). */
   state(id: number): LuaUnitSnapshot | undefined {
     return this.statesById.get(id)

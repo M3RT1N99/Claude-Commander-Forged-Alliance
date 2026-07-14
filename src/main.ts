@@ -23,6 +23,7 @@ import { ddsToTexture } from './viewer/textures'
 import { UnitViewer } from './viewer/unitViewer'
 import { SandboxController, type SandboxUnitAssets } from './sandbox/sandbox'
 import { LuaSimClient } from './sim/luaSimClient'
+import { SANDBOX_SESSION, type SessionInfo } from './sim/session'
 import type { HeightfieldData } from './sim/terrain'
 import { Hud, type HudSource, type HudUnitInfo, type EcoSnapshot } from './ui/hud'
 import { GameUi } from './ui/gameUi'
@@ -514,8 +515,19 @@ async function startSandbox(mapFolder: string): Promise<void> {
     // haben getrennte States). Sie baut das Eco-Panel aus economy.lua — der
     // TS-Nachbau in hud.ts ist dafür raus.
     gameUi?.dispose()
-    gameUi = await GameUi.create(vfs, await loadGameFonts(), log, 'game', conVarChanged)
+    // Die SESSION geht in beide VMs: die Sim bekommt sie über setupSession
+    // (ScenarioInfo + Brains), die UI über dieselben Angaben — GetArmiesTable()
+    // und SessionGetScenarioInfo() sind die Engine-Sicht darauf. Ohne sie
+    // knallen die Session-Globals ehrlich mit „no active session".
+    const session: SessionInfo = { ...SANDBOX_SESSION, map: mapFolder }
+    gameUi = await GameUi.create(vfs, await loadGameFonts(), log, 'game', conVarChanged, session)
     gameUi.attachEvents()
+    // Der Pause-Reiter der Original-UI (tabs.lua:425/428) hält die WELT an —
+    // die Sim, nicht die UI.
+    gameUi.connectPause((paused) => {
+      luaSim?.setPaused(paused)
+      log(paused ? 'Session pausiert' : 'Session läuft weiter')
+    })
     // Die Bau-Vorschau (Geistergebäude am Raster) — Engine-Rendering mit den
     // echten Blueprint-Modellen.
     buildPreview = new BuildPreview(viewer, loadSandboxAssets)
