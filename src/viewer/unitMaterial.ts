@@ -1,107 +1,10 @@
 import * as THREE from 'three'
 
-/**
- * Port des Original-Unit-Shaders (effects/mesh.fx, NormalMappedPS) aus den
- * Spieldaten:
- *   - Normal-Map: tangent-space, x/y aus den G/A-Kanälen der DXT5-Textur
- *     (`2 * tex.gaa - 1`, z rekonstruiert), gesampelt mit UV1
- *   - SpecTeam:  R = Environment-Reflexion, G = Phong-Spekular,
- *                B = Glow/Emissive, A = Team-Color-Maske
- *   - Team-Color: albedo.rgb = lerp(teamColor, albedo.rgb, 1 - specular.a)
- *   - Farbe: albedo * (emissive + licht + envReflexion) + phongAdditive
- * Environment-Cubemap ist (noch) durch eine Konstante angenähert.
- */
-
-const vertexShader = /* glsl */ `
-  attribute vec3 scmTangent;
-  attribute vec3 scmBinormal;
-  attribute vec2 scmUv1;
-  attribute float scmBoneIndex;
-
-  uniform mat4 boneMatrices[MAX_BONES];
-
-  varying vec2 vUv0;
-  varying vec2 vUv1;
-  varying vec3 vNormal;
-  varying vec3 vTangent;
-  varying vec3 vBinormal;
-  varying vec3 vWorldPos;
-
-  void main() {
-    vUv0 = uv;
-    vUv1 = scmUv1;
-
-    // FA-Skinning ist rigid: genau ein Bone pro Vertex
-    mat4 skin = boneMatrices[int(scmBoneIndex + 0.5)];
-    vec4 skinned = skin * vec4(position, 1.0);
-    mat3 skinRot = mat3(skin);
-
-    mat3 nm = mat3(modelMatrix) * skinRot;
-    vNormal = nm * normal;
-    vTangent = nm * scmTangent;
-    vBinormal = nm * scmBinormal;
-    vec4 worldPos = modelMatrix * skinned;
-    vWorldPos = worldPos.xyz;
-    gl_Position = projectionMatrix * viewMatrix * worldPos;
-  }
-`
-
-const fragmentShader = /* glsl */ `
-  precision highp float;
-
-  uniform sampler2D albedoMap;
-  uniform sampler2D normalsMap;
-  uniform sampler2D specTeamMap;
-  uniform vec3 teamColor;
-  uniform vec3 sunDirection;   // Richtung ZUR Sonne, Weltkoordinaten
-  uniform vec3 sunColor;
-  uniform vec3 ambientColor;
-  uniform float glowMultiplier;
-
-  varying vec2 vUv0;
-  varying vec2 vUv1;
-  varying vec3 vNormal;
-  varying vec3 vTangent;
-  varying vec3 vBinormal;
-  varying vec3 vWorldPos;
-
-  void main() {
-    // mesh.fx ComputeNormal: normal.xy aus G/A, z rekonstruiert,
-    // rotiert mit float3x3(binormal, tangent, normal)
-    vec2 nmga = texture2D(normalsMap, vUv1).ga;
-    vec3 tsn;
-    tsn.xy = nmga * 2.0 - 1.0;
-    tsn.z = sqrt(max(0.0, 1.0 - dot(tsn.xy, tsn.xy)));
-    vec3 normal = normalize(
-      tsn.x * normalize(vBinormal) +
-      tsn.y * normalize(vTangent) +
-      tsn.z * normalize(vNormal)
-    );
-
-    vec4 albedo = texture2D(albedoMap, vUv0);
-    vec4 specular = texture2D(specTeamMap, vUv0);
-    vec3 viewDir = normalize(cameraPosition - vWorldPos);
-
-    // Team-Color (mesh.fx): lerp(teamColor, albedo, 1 - specular.a)
-    albedo.rgb = mix(teamColor, albedo.rgb, 1.0 - specular.a);
-
-    float dotLightNormal = max(dot(sunDirection, normal), 0.0);
-    vec3 light = ambientColor + sunColor * dotLightNormal;
-
-    float phongAmount = clamp(dot(reflect(-sunDirection, normal), viewDir), 0.0, 1.0);
-    vec3 phongAdditive = sunColor * 0.5 * pow(phongAmount, 9.0) * specular.g;
-
-    // Environment-Reflexion angenähert (Original: texCUBE * 2 * specular.r)
-    float fresnel = pow(1.0 - max(dot(normal, viewDir), 0.0), 2.0);
-    vec3 environment = mix(vec3(0.15, 0.17, 0.20), vec3(0.5, 0.55, 0.6), fresnel);
-    vec3 phongMultiplicative = 2.0 * environment * specular.r;
-
-    float emissive = glowMultiplier * specular.b;
-
-    vec3 color = albedo.rgb * (emissive + light + phongMultiplicative) + phongAdditive;
-    gl_FragColor = vec4(color, 1.0);
-  }
-`
+// Shader-Quellen liegen als .glsl-Dateien daneben (siehe src/viewer/shaders/);
+// diese Datei ist nur Loader + three.js-Aufbau.
+import UNIT_VS from './shaders/unit.vert.glsl?raw'
+import UNIT_FS from './shaders/unit.frag.glsl?raw'
+import UNIT_SERAPHIM_FS from './shaders/unitSeraphim.frag.glsl?raw'
 
 export interface UnitTextures {
   albedo: THREE.Texture
@@ -110,62 +13,6 @@ export interface UnitTextures {
   /** Falloff-Ramp für den Seraphim-Shader */
   lookup?: THREE.Texture | null
 }
-
-/**
- * Port des Seraphim-Unit-Shaders (mesh.fx, UnitFalloffPS):
- * Falloff-Ramp-Lookup über pow(1−N·V, 0.6) (v = fractionComplete = 1),
- * Rim-Glow = fallOff.rgb · diffuse.a, Sonnenanteil 0 (shadow=0 im
- * Original), Phong (0.5,0.6,0.7)·spec.g⁹, Environment ≈ konstant · spec.r
- * · fallOff.a.
- */
-const seraphimFragmentShader = /* glsl */ `
-  precision highp float;
-
-  uniform sampler2D albedoMap;
-  uniform sampler2D normalsMap;
-  uniform sampler2D specTeamMap;
-  uniform sampler2D lookupMap;
-  uniform vec3 sunDirection;
-  uniform vec3 sunAmbience;
-  uniform vec3 shadowFillColor;
-
-  varying vec2 vUv0;
-  varying vec2 vUv1;
-  varying vec3 vNormal;
-  varying vec3 vTangent;
-  varying vec3 vBinormal;
-  varying vec3 vWorldPos;
-
-  void main() {
-    vec2 nmga = texture2D(normalsMap, vUv1).ga;
-    vec3 tsn;
-    tsn.xy = nmga * 2.0 - 1.0;
-    tsn.z = sqrt(max(0.0, 1.0 - dot(tsn.xy, tsn.xy)));
-    vec3 normal = normalize(
-      tsn.x * normalize(vBinormal) + tsn.y * normalize(vTangent) + tsn.z * normalize(vNormal));
-
-    vec4 diffuse = texture2D(albedoMap, vUv0);
-    vec4 specular = texture2D(specTeamMap, vUv0);
-    vec3 viewDir = normalize(cameraPosition - vWorldPos);
-
-    float ndotv = pow(1.0 - clamp(dot(viewDir, normal), 0.0, 1.0), 0.6);
-    vec4 fallOff = texture2D(lookupMap, vec2(ndotv, 1.0));
-
-    float specularAmount = clamp(dot(reflect(-sunDirection, normal), viewDir), 0.0, 1.0);
-    vec3 phongAdditive = vec3(0.5, 0.6, 0.7) * pow(specularAmount, 9.0) * specular.g;
-
-    float fresnel = pow(1.0 - max(dot(normal, viewDir), 0.0), 2.0);
-    vec3 environment = mix(vec3(0.15, 0.17, 0.2), vec3(0.5, 0.55, 0.6), fresnel)
-      * specular.r * fallOff.a;
-
-    // Original: shadow = 0 -> Sonnenanteil entfällt
-    vec3 light = sunAmbience;
-    light = light + (1.0 - light) * shadowFillColor;
-
-    vec3 color = diffuse.rgb * light + environment + phongAdditive + fallOff.rgb * diffuse.a;
-    gl_FragColor = vec4(color, 1.0);
-  }
-`
 
 export function createUnitMaterial(
   textures: UnitTextures,
@@ -179,8 +26,8 @@ export function createUnitMaterial(
   flatNormal.needsUpdate = true
 
   return new THREE.ShaderMaterial({
-    vertexShader,
-    fragmentShader: shader === 'Seraphim' && textures.lookup ? seraphimFragmentShader : fragmentShader,
+    vertexShader: UNIT_VS,
+    fragmentShader: shader === 'Seraphim' && textures.lookup ? UNIT_SERAPHIM_FS : UNIT_FS,
     defines: { MAX_BONES: Math.max(skinMatrices.length, 1) },
     uniforms: {
       lookupMap: { value: textures.lookup ?? white },

@@ -858,6 +858,38 @@ local scrollbar = withNoops(SCROLLBAR_NAMES, {
   end,
 }, control)
 
+-- ---------------------------------------------------------------------
+-- movie_methods (CMauiMovie) — 7 Bindungen (mHelp woertlich):
+--
+--   bool Movie:InternalSet(filename)
+--   Play()   Stop()   Loop(bool)   IsLoaded()
+--   number GetFrameRate() - returns the frame rate of the movie in FPS
+--   int GetNumFrames() - returns the number of frames in the movie
+--
+-- Es gibt keinen SFD-Decoder — und dafuer hat die Engine einen dokumentierten
+-- Weg: CMauiMovie::LoadFile gibt FALSE zurueck, wenn kein Film geladen werden
+-- kann (Cfile:1143020-1143035; genau das passiert auch mit /nomovie auf der
+-- Kommandozeile). movie.lua:32-53 faengt das ab und ruft OnStopped().
+--
+-- Damit laeuft der ECHTE Weg: splash.lua zieht durch zum Hauptmenue, und
+-- main.lua baut sein Menue ohne Hintergrundfilm — beides ohne einen einzigen
+-- Sonderfall im Code. Ein Film, der nie geladen wurde, hat 0 Bilder und 0 FPS;
+-- das ist keine erfundene Zahl, sondern die Wahrheit ueber ein leeres Movie.
+local MOVIE_NAMES = { 'GetFrameRate', 'GetNumFrames', 'InternalSet', 'IsLoaded', 'Loop', 'Play', 'Stop' }
+local movie = withNoops(MOVIE_NAMES, {
+  InternalSet = function(self, filename)
+    self.__file = filename or false
+    self.__playing = false
+    return false
+  end,
+  IsLoaded = function(self) return false end,
+  Play = function(self) self.__playing = true end,
+  Stop = function(self) self.__playing = false end,
+  Loop = function(self, loop) self.__loop = loop == true end,
+  GetFrameRate = function(self) return 0 end,
+  GetNumFrames = function(self) return 0 end,
+}, control)
+
 rawset(moho, 'bitmap_methods', Class(moho.control_methods) (bitmap))
 rawset(moho, 'text_methods', Class(moho.control_methods) (text))
 rawset(moho, 'frame_methods', Class(moho.control_methods) (frame))
@@ -865,6 +897,7 @@ rawset(moho, 'border_methods', Class(moho.control_methods) (border))
 rawset(moho, 'item_list_methods', Class(moho.control_methods) (item_list))
 rawset(moho, 'edit_methods', Class(moho.control_methods) (edit))
 rawset(moho, 'scrollbar_methods', Class(moho.control_methods) (scrollbar))
+rawset(moho, 'movie_methods', Class(moho.control_methods) (movie))
 
 
 -- CMauiLuaDragger: KEIN Control (kein Layout, kein Parent) — die Engine haelt

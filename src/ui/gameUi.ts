@@ -30,6 +30,9 @@ import type { LuaUnitSnapshot } from '../sim/luaSimClient'
  * Texte, die Farben und die Anzeigelogik kommen aus `lua/ui/game/economy.lua`
  * und ihren Layout-Dateien, nicht aus TypeScript.
  */
+/** Wo die Einstellungen im Browser liegen (das Gegenstück zu Game.prefs). */
+const PREFS_KEY = 'ccfa.prefs'
+
 export class GameUi {
   private knownUnits = new Set<number>()
 
@@ -118,6 +121,21 @@ export class GameUi {
       textureSize: (p) => dims.get(p) ?? null,
       stringAdvance: (text, family, size) => fonts.advance(text, family, size),
       fontMetrics: (family, size) => fonts.metrics(family, size),
+      // Die Einstellungen überleben das Neuladen. Die Engine schreibt sie als
+      // Lua-Quelltext nach `Game.prefs` — hier ist es derselbe Text, nur die
+      // Ablage ist der localStorage. Ohne das war jede Option, jedes Profil und
+      // jede Lautstärke nach dem nächsten Aufruf wieder auf Anfang.
+      prefs: {
+        load: () => localStorage.getItem(PREFS_KEY),
+        save: (luaText) => {
+          try {
+            localStorage.setItem(PREFS_KEY, luaText)
+          } catch (e) {
+            // Voller/gesperrter Speicher: sagen, nicht schlucken.
+            log(`Prefs: konnten nicht gespeichert werden — ${e instanceof Error ? e.message : e}`)
+          }
+        },
+      },
     })
     // Root-Frame ZUERST, dann SetupUI — so macht es die Engine
     // (CUIManager::SetNewLuaState: Frame Cfile:1273621-1273666, SetupUI erst

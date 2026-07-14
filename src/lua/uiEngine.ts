@@ -4,6 +4,8 @@ import { installBlueprintPipeline } from './unitFactory'
 import { installEngineGlobals } from './engineGlobals'
 import { installSimThreads } from './simThreads'
 import UI_GLOBALS_LUA from '../engine-lua/ui-globals.lua?raw'
+import PREFS_LUA from '../engine-lua/prefs.lua?raw'
+import UI_BOOT_LUA from '../engine-lua/ui-boot.lua?raw'
 import UI_GLOBALS_MISSING_LUA from '../engine-lua/ui-globals-missing.lua?raw'
 import MAUI_LUA from '../engine-lua/maui.lua?raw'
 import pkg from '../../package.json' with { type: 'json' }
@@ -44,6 +46,18 @@ export interface UiFileSystem {
   stringAdvance?: (text: string, family: string, size: number) => number
   /** Ober-/Unterlänge der Schrift — text.lua:39 baut daraus die Höhe. */
   fontMetrics?: (family: string, size: number) => [number, number]
+  /**
+   * Die Einstellungen des Nutzers, dauerhaft.
+   *
+   * Die Engine schreibt sie als LUA-QUELLTEXT nach `Game.prefs` (nachgesehen in
+   * der Installation: `PreGameData = { CurrentMapDir = '/maps/…' }`). Hier ist es
+   * derselbe Text, nur die Ablage ist anders (Browser: localStorage).
+   * Ohne diesen Haken ist jede Einstellung nach dem Neuladen weg.
+   */
+  prefs?: {
+    load: () => string | null
+    save: (luaText: string) => void
+  }
 }
 
 export function installUiEngine(host: LuaHost, fs: UiFileSystem): UiEngine {
@@ -58,6 +72,20 @@ export function installUiEngine(host: LuaHost, fs: UiFileSystem): UiEngine {
   // also steht unsere Version drin. Im Hauptmenü ist sie sichtbar (main.lua:172).
   host.setGlobal('__engineVersion', `${pkg.name} ${pkg.version}`)
   host.eval(UI_GLOBALS_LUA)
+  host.eval(PREFS_LUA)
+
+  // Die gespeicherten Einstellungen zurückholen — VOR allem, was sie liest
+  // (prefs.lua:96 greift ungeprüft auf das Profil zu, main.lua:151 fragt
+  // `mainmenu_bgmovie`, uimain.lua:31 das Skin).
+  if (fs.prefs) {
+    const stored = fs.prefs.load()
+    if (stored) {
+      host.setGlobal('__prefsStored', stored)
+      const ok = host.eval('return __prefsLoad(__prefsStored)')
+      if (ok !== true) host.eval('__prefsStored = nil')
+    }
+    host.setGlobal('__uiSavePrefs', (luaText: string) => fs.prefs!.save(luaText))
+  }
 
   // DiskGetFileInfo ist die Naht zum VFS. UIUtil.UIFile/SkinnableFile bauen
   // darauf ihre Skin-Fallback-Kette (uiutil.lua:310) — ohne echte Antwort
@@ -122,6 +150,11 @@ export function installUiEngine(host: LuaHost, fs: UiFileSystem): UiEngine {
   // dessen, was als Nächstes zu bauen ist.
   host.eval(UI_GLOBALS_MISSING_LUA)
 
+  // Der Boot-Ablauf der Engine (Profil, Optionen anwenden, Front-End, Spiel-UI)
+  // — in Lua, nicht in TS-Template-Literalen. Definiert nur Funktionen, gerufen
+  // wird nichts; deshalb steht es am Ende.
+  host.eval(UI_BOOT_LUA)
+
   return { host }
 }
 
@@ -173,48 +206,26 @@ function normalize(path: string): string {
  * nehmen ihn beide — sonst prüft der Test etwas anderes, als der Browser tut.
  */
 export function setupGameUi(host: LuaHost, log: (msg: string) => void): void {
-  // Der Bildschirm-Baum, exakt wie gamemain.lua ihn aufspannt: EINE Screen-Group,
-  // darin die vier Cluster von borders.lua. Alle Panels haengen an diesen Gruppen
-  // — wer sie stattdessen an GetFrame(0) haengt, bekommt jedes Panel an die
-  // falsche Stelle (die Layout-Dateien rechnen gegen den Cluster, nicht gegen den
-  // Bildschirm).
-  host.eval('__ui = {}')
-  host.eval(`
-    UIUtil = import('/lua/ui/uiutil.lua')
-    __ui.gameParent = UIUtil.CreateScreenGroup(GetFrame(0), "GameMain ScreenGroup")
-    __ui.controlCluster, __ui.statusCluster, __ui.mapGroup, __ui.windowGroup =
-      import('/lua/ui/game/borders.lua').SetupBorderControl(__ui.gameParent)
-  `)
+  // Der Lua-Code dazu steht in ui-boot.lua — hier wird er nur gerufen. Jedes
+  // Panel einzeln, damit ein fehlendes Engine-Teil nur SEIN Panel kostet und
+  // benannt wird, statt den ganzen Aufbau mitzureißen.
+  host.eval('__uiCreateScreenTree()')
 
-  for (const [name, code] of [
-    ['economy', `Economy = import('/lua/ui/game/economy.lua')
-                 Economy.CreateEconomyBar(__ui.statusCluster)`],
-    ['multifunction', `__ui.mfd = import('/lua/ui/game/multifunction.lua').Create(__ui.controlCluster)`],
-    ['orders', `__ui.ordersModule = import('/lua/ui/game/orders.lua')
-                __ui.orders = __ui.ordersModule.SetupOrdersControl(__ui.controlCluster, __ui.mfd)`],
-    ['construction', `__ui.construction = import('/lua/ui/game/construction.lua')
-                        .SetupConstructionControl(__ui.controlCluster, __ui.mfd, __ui.orders)`],
-    ['unitview', `import('/lua/ui/game/unitview.lua')
-                    .SetupUnitViewLayout(__ui.mapGroup, __ui.orders)`],
-    // gamemain.lua:154 — die Detailansicht (Rollover-Tooltip). construction.lua
-    // ruft sie ungeprüft (UnitViewDetail.Hide()), also MUSS sie stehen.
-    ['unitviewDetail', `import('/lua/ui/game/unitviewDetail.lua')
-                          .SetupUnitViewLayout(__ui.mapGroup, __ui.mapGroup)`],
-  ] as const) {
-    try {
-      host.eval(code)
+  const count = Number(host.eval('return __uiPanelCount()'))
+  for (let i = 1; i <= count; i++) {
+    const name = String(host.eval(`return __uiPanelName(${i})`))
+    const err = host.eval(`return __uiBuildPanel(${i})`)
+    if (err === undefined || err === null) {
       log(`UI: ${name}.lua läuft`)
-    } catch (e) {
+    } else {
       // Ohne das Abschneiden des [string "…"]-Präfixes verschluckt die Ausgabe
       // die eigentliche Lua-Meldung.
-      const msg = (e as Error).message.replace(/\[string "[\s\S]*?"\]/g, '').split('\n')[0]
+      const msg = String(err).replace(/\[string "[\s\S]*?"\]/g, '').split('\n')[0]
       log(`UI: ${name}.lua NOCH NICHT — ${msg?.slice(0, 200)}`)
     }
   }
 
-  // Ab jetzt gibt es Empfänger für Selektions-Ereignisse (im Original registriert
-  // die Engine den SelectionListener erst beim Session-Start, Cfile:1294170).
-  host.eval('__uiSessionActive = true')
+  host.eval('__uiSessionStarted()')
 }
 
 /**
@@ -231,15 +242,15 @@ export function setupGameUi(host: LuaHost, log: (msg: string) => void): void {
  * die main.lua:151-153 abfragt. Kein Sonderfall im Code.
  */
 export function startFrontEnd(host: LuaHost): void {
-  ensureProfile(host)
-  host.eval(`
-    local Prefs = import('/lua/user/prefs.lua')
-    Prefs.SetOption('mainmenu_bgmovie', false)
-    SetPreference('movie.nologo', true)
-  `)
+  host.eval('__uiEnsureProfile()')
+  // Die Optionen anwenden — genau das tut Moho::OPTIONS_Apply() beim Start
+  // (Cfile:1368338: optionslogic.Apply(true)). Ohne diesen Aufruf wirkt KEINE
+  // gespeicherte Option: der Wert steht in den Prefs, aber niemand trägt ihn in
+  // die Engine.
+  host.eval('__uiApplyOptions()')
   // Der Weg beginnt beim Splash — genau wie im Spiel. Dass er sofort ins
   // Front-End durchreicht, entscheidet die Original-Lua, nicht wir.
-  host.eval('EngineStartSplashScreens()')
+  host.eval('__uiStartFrontEnd()')
 }
 
 /**
@@ -249,21 +260,7 @@ export function startFrontEnd(host: LuaHost): void {
  * und Cursor — alles aus der Original-Lua, nichts aus TS.
  */
 export function setupUi(host: LuaHost): void {
-  ensureProfile(host)
-  host.eval(`import('/lua/ui/uimain.lua').SetupUI()`)
-}
-
-function ensureProfile(host: LuaHost): void {
-  // Ein Benutzerprofil muss existieren (prefs.lua:96 greift ungeprüft darauf
-  // zu, und main.lua:57-62 baut ohne `profile.current` den Profil-Dialog statt
-  // des Menüs). Angelegt wird es über den Original-Weg — `Prefs.CreateProfile`
-  // (prefs.lua:31), dieselbe Funktion, die das Spiel benutzt, wenn jemand zum
-  // ersten Mal startet; sie setzt `profile.current` selbst (prefs.lua:57).
-  // Kein handgeschnitztes Profil-Table.
-  host.eval(`
-    local Prefs = import('/lua/user/prefs.lua')
-    if not Prefs.ProfilesExist() then
-      Prefs.CreateProfile('Commander')
-    end
-  `)
+  host.eval('__uiEnsureProfile()')
+  host.eval('__uiApplyOptions()')
+  host.eval('__uiSetupUi()')
 }

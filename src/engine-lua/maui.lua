@@ -191,6 +191,30 @@ function InternalCreateEdit(luaobj, parent)
   return doInit(luaobj)
 end
 
+-- CMauiMovie (Cfile:1143258) — der Film.
+--
+-- Zwei LazyVars gehoeren dazu (Cfile:1142984-1142985): MovieWidth/MovieHeight.
+-- movie.lua:22-23 haengt Width/Height des Controls daran.
+--
+-- Ohne SFD-Decoder laedt hier nichts — und genau dafuer hat die Engine einen
+-- dokumentierten Weg: CMauiMovie::LoadFile liefert FALSE, wenn kein Film da ist
+-- (Cfile:1143020-1143035, u. a. bei /nomovie auf der Kommandozeile). movie.lua:32
+-- faengt das ab (`local ok = self:InternalSet(filename)` ... `else self:OnStopped()`).
+-- Das ist kein Stub, sondern Engine-Verhalten: splash.lua zieht dann durch zum
+-- Hauptmenue, und main.lua baut sein Menue ohne Hintergrundfilm.
+function InternalCreateMovie(luaobj, parent)
+  attachControl(luaobj, parent, 'movie')
+  local LazyVar = lazyvar()
+  luaobj.MovieWidth = LazyVar.Create()
+  luaobj.MovieHeight = LazyVar.Create()
+  luaobj.MovieWidth:Set(0)
+  luaobj.MovieHeight:Set(0)
+  luaobj.__file = false
+  luaobj.__playing = false
+  luaobj.__loop = false
+  return doInit(luaobj)
+end
+
 -- CMauiScrollbar (Cfile:1144735). `axis` ist der Lexical-String der
 -- EMauiScrollAxis ("Vert"/"Horz", scrollbar.lua:9-12).
 --

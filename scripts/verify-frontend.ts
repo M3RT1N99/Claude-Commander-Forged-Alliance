@@ -112,13 +112,23 @@ const host = await LuaHost.create(files, (level, msg) => {
   }
   logs.push(`${level}: ${msg}`)
 })
-installUiEngine(host, {
-  exists: (p) => allPaths.has(p),
-  find: (dir, pattern) => findFiles(allPaths, dir, pattern),
+// Die Ablage der Einstellungen (im Browser der localStorage, hier eine Variable).
+// Sie ist Teil des Tests: die Prefs müssen einen VM-Neustart überleben.
+let prefsStore: string | null = null
+const uiFs = {
+  exists: (p: string) => allPaths.has(p),
+  find: (dir: string, pattern: string) => findFiles(allPaths, dir, pattern),
   textureSize,
-  stringAdvance: (text, family, size) => fonts.advance(text, family, size),
-  fontMetrics: (family, size) => fonts.metrics(family, size),
-})
+  stringAdvance: (text: string, family: string, size: number) => fonts.advance(text, family, size),
+  fontMetrics: (family: string, size: number) => fonts.metrics(family, size),
+  prefs: {
+    load: (): string | null => prefsStore,
+    save: (luaText: string): void => {
+      prefsStore = luaText
+    },
+  },
+}
+installUiEngine(host, uiFs)
 // Der Root-Frame steht VOR SetupUI — CUIManager::SetNewLuaState legt ihn
 // zuerst an (Cfile:1273621-1273666), SetupUI kommt erst danach (1273680).
 createRootFrame(host, 1920, 1080)
@@ -374,6 +384,44 @@ const stopped = cueList()
   .split(' ')
   .filter((c) => c.startsWith('Main_Menu:'))
 check(stopped.every((c) => c.endsWith(':aus')), 'nach dem Abräumen ist die Musik über ihr Handle gestoppt')
+
+console.log('\n== Die Einstellungen überleben den Neustart ==')
+// Zwei Dinge zusammen, und beide fehlten:
+//
+//  1. `SavePreferences()` war ein Nullaufruf (`__uiSavePrefs` wurde nie gesetzt)
+//     — jede Option, jedes Profil, jede Lautstärke war nach dem Neuladen weg.
+//     Die Engine schreibt Game.prefs als LUA-QUELLTEXT; genau das tun wir jetzt.
+//  2. `optionslogic.Apply(true)` ruft die Engine beim Start selbst
+//     (Moho::OPTIONS_Apply, Cfile:1368338 — Call_True_Obj = Apply(true)). Ohne
+//     diesen Aufruf steht der gespeicherte Wert zwar in den Prefs, aber niemand
+//     trägt ihn in die Engine: es wirkte KEINE einzige Option.
+{
+  host.eval(`
+    local Prefs = import('/lua/user/prefs.lua')
+    Prefs.SetOption('music_volume', 42)
+    SavePreferences()
+  `)
+  check(prefsStore !== null && prefsStore.includes('42'), 'die Option landet als Lua-Text in der Ablage')
+
+  // Eine FRISCHE VM — dieselbe Ablage. Das ist der Neustart.
+  const host2 = await LuaHost.create(files, () => {})
+  installUiEngine(host2, uiFs)
+  createRootFrame(host2, 1920, 1080)
+  const restored = Number(
+    host2.eval(`return import('/lua/user/prefs.lua').GetOption('music_volume')`),
+  )
+  check(restored === 42, `nach dem Neustart steht der Wert wieder da (${restored})`)
+
+  // … und er WIRKT: Apply(true) trägt ihn über SetVolume in die Engine
+  // (options.lua:735 → SetVolume('Music', value/100)).
+  startFrontEnd(host2)
+  const musicVolume = Number(host2.eval(`return GetVolume('Music')`))
+  check(
+    Math.abs(musicVolume - 0.42) < 0.001,
+    `und Apply(true) trägt ihn ein: GetVolume('Music') = ${musicVolume}`,
+  )
+  host2.close()
+}
 
 if (warnings.length > 0) {
   console.log(`\n  (${warnings.length} WARN aus der UI-Lua:)`)

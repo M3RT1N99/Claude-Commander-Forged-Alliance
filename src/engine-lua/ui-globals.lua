@@ -45,6 +45,13 @@ function SetCursor(c)
   return c
 end
 
+-- GetCursor() (Cfile:1274426) — das aktuelle Cursor-Objekt. uimain.lua:23 setzt
+-- es bei JEDEM Zustandswechsel neu; splash.lua:27/52 blendet es waehrend der
+-- Filme aus. Vorher warf es aus der Fehl-Liste und riss den Splash mit.
+function GetCursor()
+  return __cursor or nil
+end
+
 -- === Preferences (GetPreference/SetPreference/SavePreferences) ===
 -- The engine keeps them in the user profile; the browser keeps them in
 -- localStorage. Keys are dotted paths ('profile.profiles', 'options.foo').
@@ -76,11 +83,22 @@ function SetPreference(key, value)
     node = node[parts[i]]
   end
   node[parts[#parts]] = value
-  if __uiSavePrefs then __uiSavePrefs() end
+  __prefsFlush()
 end
 
 function SavePreferences()
-  if __uiSavePrefs then __uiSavePrefs() end
+  __prefsFlush()
+end
+
+-- Der Weg nach draussen: die Engine schreibt Game.prefs als LUA-QUELLTEXT
+-- (nachgesehen in der Installation: `PreGameData = { CurrentMapDir = '...' }`).
+-- __prefsSerialize() (prefs.lua) macht genau diesen Text; __uiSavePrefs legt ihn
+-- ab (im Browser: localStorage). Ohne den Haken war SavePreferences() ein
+-- Nullaufruf und jede Einstellung nach dem Neuladen weg.
+function __prefsFlush()
+  if __uiSavePrefs then
+    __uiSavePrefs(__prefsSerialize())
+  end
 end
 
 -- GetOptions(key): the engine's option store (video, sound, gameplay).
