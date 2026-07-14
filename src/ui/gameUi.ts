@@ -7,7 +7,7 @@ import {
   createRootFrame,
   loadUiBlueprints,
 } from '../lua/uiEngine'
-import { MauiRenderer } from './mauiRenderer'
+import { MauiRenderer, type WorldViewRect } from './mauiRenderer'
 import { findFiles } from '../vfs/glob'
 import { parseDds } from '../formats/dds'
 import { FontBook } from './fonts'
@@ -246,6 +246,19 @@ export class GameUi {
   select(ids: number[]): number {
     const list = ids.join(',')
     return Number(this.host.eval(`return __uiSelectByIds({ ${list} })`))
+  }
+
+  /**
+   * Die Weltansichten, die die Original-Lua gebaut hat — mit Lage und Größe.
+   *
+   * Im Original sind es echte Controls (CUIWorldView): die Hauptansicht
+   * (gamemain.lua:142) und die Minimap (minimap.lua:115, `isMiniMap = true` →
+   * kartografisch). Die 3D-Seite rendert IN diese Rechtecke; wo sie liegen,
+   * entscheidet die Lua, nicht TypeScript. Genau deshalb lässt sich die Minimap
+   * im Original verschieben.
+   */
+  worldViews(): WorldViewRect[] {
+    return this.renderer.worldViews()
   }
 
   /** Die Unit unter dem Mauszeiger (unitview.lua liest sie über GetRolloverInfo). */

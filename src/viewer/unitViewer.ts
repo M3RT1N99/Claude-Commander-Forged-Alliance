@@ -110,8 +110,92 @@ export class UnitViewer {
       for (const unit of this.units) unit.update(dt)
       if (this.rts.enabled) this.updateRtsCamera(dt)
       else this.controls.update()
-      this.renderer.render(this.scene, this.camera)
+      this.renderWorldViews()
     })
+  }
+
+  /**
+   * Die Weltansichten der Original-Lua, mit ihren Rechtecken.
+   *
+   * Im Original ist die Weltansicht ein Control (CUIWorldView) — und die Minimap
+   * ist DASSELBE Control, nur kartografisch (minimap.lua:115, isMiniMap = true).
+   * Die Lua entscheidet, wo sie liegen; hier wird nur dorthin gerendert. Genau
+   * deshalb kann man die Minimap im Original verschieben.
+   */
+  private worldViewRects: {
+    left: number
+    top: number
+    width: number
+    height: number
+    cartographic: boolean
+  }[] = []
+
+  setWorldViews(
+    views: { left: number; top: number; width: number; height: number; cartographic: boolean }[],
+  ): void {
+    this.worldViewRects = views
+  }
+
+  /** Die kartografische Kamera der Minimap: Draufsicht auf die ganze Karte. */
+  private readonly mapCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 4000)
+
+  private renderWorldViews(): void {
+    const width = this.canvas.clientWidth
+    const height = this.canvas.clientHeight
+    const dpr = this.renderer.getPixelRatio()
+
+    // Keine WorldView (Unit-Viewer, Karten-Viewer): die ganze Fläche.
+    if (this.worldViewRects.length === 0) {
+      this.renderer.setScissorTest(false)
+      this.renderer.setViewport(0, 0, width, height)
+      this.renderer.render(this.scene, this.camera)
+      return
+    }
+
+    this.renderer.setScissorTest(true)
+    this.renderer.clear()
+    for (const view of this.worldViewRects) {
+      const w = Math.max(1, Math.round(view.width))
+      const h = Math.max(1, Math.round(view.height))
+      const x = Math.round(view.left)
+      // WebGL zählt von UNTEN, die UI von oben.
+      const y = Math.round(height - view.top - view.height)
+      this.renderer.setViewport(x, y, w, h)
+      this.renderer.setScissor(x, y, w, h)
+
+      if (view.cartographic) {
+        this.renderer.render(this.scene, this.mapCameraFor(w, h))
+      } else {
+        this.camera.aspect = w / h
+        this.camera.updateProjectionMatrix()
+        this.renderer.render(this.scene, this.camera)
+      }
+    }
+    this.renderer.setScissorTest(false)
+    void dpr
+  }
+
+  /** Draufsicht auf die ganze Karte, in das Seitenverhältnis des Controls gepasst. */
+  private mapCameraFor(w: number, h: number): THREE.OrthographicCamera {
+    const hf = this.heightfield
+    const mapW = hf ? hf.width : 256
+    const mapH = hf ? hf.height : 256
+    // Die Karte ganz zeigen, ohne sie zu verzerren.
+    const scale = Math.max(mapW / w, mapH / h)
+    const halfW = (w * scale) / 2
+    const halfH = (h * scale) / 2
+    const cam = this.mapCamera
+    cam.left = -halfW
+    cam.right = halfW
+    cam.top = halfH
+    cam.bottom = -halfH
+    cam.near = 0.1
+    cam.far = 4000
+    cam.position.set(mapW / 2, 1000, mapH / 2)
+    cam.up.set(0, 0, -1)
+    cam.lookAt(mapW / 2, 0, mapH / 2)
+    cam.updateProjectionMatrix()
+    return cam
   }
 
   private clearContent(): void {

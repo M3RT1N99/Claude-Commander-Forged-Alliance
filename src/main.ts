@@ -507,7 +507,7 @@ async function startSandbox(mapFolder: string): Promise<void> {
     // Ressourcen-Vorkommen über ScenarioUtilities.lua anlegt und die Engine
     // ihre Original-Icons rendert.
     if (currentScmap) {
-      hud = new Hud(vfs, viewer, hudSource, currentScmap)
+      hud = new Hud(vfs, viewer, hudSource)
     }
 
     // Die ECHTE lua/ui in einer zweiten Lua-VM (wie im Original: Sim und UI
@@ -538,7 +538,13 @@ async function startSandbox(mapFolder: string): Promise<void> {
     // setzen war schon einmal die Ursache dafür, dass sich ab dem zweiten
     // Sandbox-Start nichts mehr bewegte.
     viewer.onUpdate(luaSimUpdate)
-    viewer.onUpdate(() => gameUi?.render())
+    viewer.onUpdate(() => {
+      gameUi?.render()
+      // Die Original-Lua sagt, WO die Weltansichten liegen: die Hauptansicht
+      // (gamemain.lua:142) und die Minimap (minimap.lua:115, kartografisch).
+      // Die 3D-Seite rendert in genau diese Rechtecke — sie legt sie nicht fest.
+      if (gameUi) viewer.setWorldViews(gameUi.worldViews())
+    })
     // ACU über die ECHTE Original-Lua-Sim spawnen (Engine-Pfad) statt als
     // SimWorld-Platzhalter. Nicht awaiten, damit die Karte sofort bedienbar ist
     // (die Lua-VM bootet einmalig im Hintergrund).

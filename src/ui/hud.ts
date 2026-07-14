@@ -7,8 +7,7 @@ import { parseDds } from '../formats/dds'
 import { bgraToRgba, decodeDxt } from '../formats/dxt'
 
 /**
- * Was von der Weltansicht noch in TypeScript steht: Minimap und strategische
- * Icons.
+ * Was von der Weltansicht noch in TypeScript steht: NUR die strategischen Icons.
  *
  * Der Rest ist WEG — und zwar nicht ersetzt, sondern durch die Original-Lua
  * abgelöst:
@@ -16,6 +15,11 @@ import { bgraToRgba, decodeDxt } from '../formats/dxt'
  *   Orders     → lua/ui/game/orders.lua
  *   Unit-View  → lua/ui/game/unitview.lua + unitviewDetail.lua
  *   Bau-Menü   → lua/ui/game/construction.lua
+ *   MINIMAP    → lua/ui/game/minimap.lua — sie ist eine zweite WorldView
+ *                (minimap.lua:115, `isMiniMap = true`), also ein echtes Control.
+ *                Genau deshalb lässt sie sich im Original VERSCHIEBEN. Der
+ *                TS-Nachbau hier war ein festgenageltes <canvas>; er ist
+ *                gelöscht, seit die WorldView ein maui-Control ist.
  * Alles läuft in der UI-VM (src/ui/gameUi.ts) und rendert über den maui-Layer.
  *
  * Hier stand einmal eine Handkopie der `standardOrdersTable` samt Slot-Nummern
@@ -23,9 +27,8 @@ import { bgraToRgba, decodeDxt } from '../formats/dxt'
  * dieselbe Sache zeichnet, ist der TS-Nachbau kein „Fallback", sondern ein
  * zweiter, abweichender Zustand.
  *
- * NICHTS Neues hier anbauen. Minimap und Icons gehören ebenfalls in die
- * Original-Lua (`minimap.lua` ist eine zweite WorldView, die Icons zeichnet die
- * Engine); solange die Weltansicht kein maui-Control ist, bleiben sie hier.
+ * NICHTS Neues hier anbauen. Auch die Icons gehören in die Engine (sie zeichnet
+ * sie im Original selbst, ui_RenderIcons/ui_AlwaysRenderStrategicIcons).
  */
 
 const FACTION_SKIN = 'uef'
@@ -72,41 +75,22 @@ export interface HudSource {
 export class Hud {
   private readonly root: HTMLDivElement
   private readonly refs = new Map<string, HTMLElement>()
-  private minimapImage: ImageBitmap | null = null
-  private readonly minimapCanvas: HTMLCanvasElement
-  private readonly interval: number
 
   constructor(
     private readonly vfs: GameVfs,
     private readonly viewer: UnitViewer,
     private readonly source: HudSource,
-    private readonly scmap: ScmapData,
   ) {
     this.root = document.createElement('div')
     this.root.id = 'hud'
-    this.root.innerHTML = `
-      <div id="strat-layer"></div>
-      <div id="hud-minimap"><canvas width="216" height="216"></canvas></div>
-    `
+    this.root.innerHTML = `<div id="strat-layer"></div>`
     document.body.appendChild(this.root)
-    this.minimapCanvas = this.root.querySelector('canvas')!
 
-    void this.build()
-
-    this.minimapCanvas.addEventListener('pointerdown', (e) => {
-      const rect = this.minimapCanvas.getBoundingClientRect()
-      const wx = ((e.clientX - rect.left) / rect.width) * this.scmap.width
-      const wz = ((e.clientY - rect.top) / rect.height) * this.scmap.height
-      this.viewer.focusOn(new THREE.Vector3(wx, this.viewer.heightAt(wx, wz), wz), 60)
-    })
-
-    this.interval = window.setInterval(() => this.update(), 100)
     // Strategic Icons müssen der Kamera pro Frame folgen
     viewer.onUpdate(() => this.updateStrategicIcons())
   }
 
   dispose(): void {
-    clearInterval(this.interval)
     this.root.remove()
   }
 
@@ -203,59 +187,4 @@ export class Hud {
     return e
   }
 
-  private async build(): Promise<void> {
-    // --- Minimap-Preview ---------------------------------------------------------
-    try {
-      const dds = parseDds(this.scmap.previewDds)
-      const mip = dds.mips[0]!
-      const rgba =
-        dds.format === 'BGRA8'
-          ? bgraToRgba(mip.data)
-          : decodeDxt(mip.data, mip.width, mip.height, dds.format)
-      this.minimapImage = await createImageBitmap(
-        new ImageData(new Uint8ClampedArray(rgba), mip.width, mip.height),
-      )
-    } catch {
-      this.minimapImage = null
-    }
-    const framePiece = async (name: string): Promise<string | null> =>
-      this.skin(`/game/mini-map-brd01/mini-map_brd_${name}.dds`)
-    const frame = this.el('#hud-minimap')
-    for (const [cls, name] of [
-      ['hud-mm-ul', 'ul'],
-      ['hud-mm-um', 'horz_um'],
-      ['hud-mm-ur', 'ur'],
-      ['hud-mm-l', 'vert_l'],
-      ['hud-mm-r', 'vert_r'],
-      ['hud-mm-ll', 'll'],
-      ['hud-mm-lm', 'lm'],
-      ['hud-mm-lr', 'lr'],
-    ] as const) {
-      const url = await framePiece(name)
-      if (!url) continue
-      const div = document.createElement('div')
-      div.className = `mm-frame ${cls}`
-      div.style.backgroundImage = `url(${url})`
-      frame.appendChild(div)
-    }
-  }
-
-  private update(): void {
-    const units = this.source.units()
-    const ctx = this.minimapCanvas.getContext('2d')!
-    const w = this.minimapCanvas.width
-    const h = this.minimapCanvas.height
-    ctx.clearRect(0, 0, w, h)
-    if (this.minimapImage) ctx.drawImage(this.minimapImage, 0, 0, w, h)
-    for (const u of units) {
-      ctx.fillStyle = u.army === 1 ? '#3d8bff' : '#e23c2c'
-      const x = (u.x / this.scmap.width) * w
-      const y = (u.z / this.scmap.height) * h
-      ctx.fillRect(x - 2, y - 2, u.selected ? 5 : 4, u.selected ? 5 : 4)
-      if (u.selected) {
-        ctx.strokeStyle = '#ffffff'
-        ctx.strokeRect(x - 3.5, y - 3.5, 7, 7)
-      }
-    }
-  }
 }

@@ -333,10 +333,6 @@ select.inline {
    Die Regeln dafuer standen hier — mit handgezaehlten Pixeln. Sie sind weg:
    das Layout kommt jetzt aus orders_mini.lua und unitview_mini.lua. */
 
-#hud-minimap {
-  background: rgba(8, 12, 18, 0.85);
-  background-size: 100% 100%;
-}
 
 #strat-layer {
   position: absolute;
@@ -353,17 +349,4 @@ select.inline {
 }
 
 /* Minimap-Rahmen aus den Original-9-Slice-Teilen */
-.mm-frame {
-  position: absolute;
-  background-size: 100% 100%;
-  pointer-events: none;
-}
 
-.hud-mm-ul { top: -14px; left: -14px; width: 28px; height: 28px; }
-.hud-mm-ur { top: -14px; right: -14px; width: 28px; height: 28px; }
-.hud-mm-ll { bottom: -14px; left: -14px; width: 28px; height: 28px; }
-.hud-mm-lr { bottom: -14px; right: -14px; width: 28px; height: 28px; }
-.hud-mm-um { top: -14px; left: 14px; right: 14px; height: 28px; }
-.hud-mm-lm { bottom: -14px; left: 14px; right: 14px; height: 28px; }
-.hud-mm-l  { top: 14px; bottom: 14px; left: -14px; width: 28px; }
-.hud-mm-r  { top: 14px; bottom: 14px; right: -14px; width: 28px; }

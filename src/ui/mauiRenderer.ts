@@ -63,6 +63,11 @@ interface MauiControl {
         // Edit
         text?: string
         caret?: number
+        // WorldView
+        camera?: string
+        miniMap?: boolean
+        cartographic?: boolean
+        resourceIcons?: boolean
         // Scrollbar
         axis?: string
         thumbStart?: number
@@ -72,10 +77,30 @@ interface MauiControl {
       }
 }
 
+/**
+ * Eine Weltansicht, wie die Original-Lua sie hingelegt hat.
+ *
+ * Die 3D-Seite rendert in dieses Rechteck. Die Hauptansicht ist perspektivisch,
+ * die Minimap kartografisch (Draufsicht) — `miniMap`/`cartographic` kommen aus
+ * dem Control (minimap.lua:115 setzt `isMiniMap = true`).
+ */
+export interface WorldViewRect {
+  id: number
+  name: string
+  left: number
+  top: number
+  width: number
+  height: number
+  camera: string
+  miniMap: boolean
+  cartographic: boolean
+}
+
 export class MauiRenderer {
   private readonly root: HTMLDivElement
   private readonly els = new Map<number, HTMLDivElement>()
   private readonly textures = new Map<string, string | 'pending'>()
+  private lastWorldViews: WorldViewRect[] = []
 
   constructor(
     private readonly host: LuaHost,
@@ -151,6 +176,11 @@ export class MauiRenderer {
         el.style.lineHeight = `${c.height}px`
         el.style.whiteSpace = 'pre'
         el.style.overflow = 'hidden'
+      } else if (c.kind === 'worldview') {
+        // Die Welt zeichnet die 3D-Engine, nicht der maui-Renderer. Das Control
+        // sagt nur, WO und WIE GROSS — hier bleibt ein Loch.
+        el.style.background = 'none'
+        el.textContent = ''
       } else if (c.kind === 'scrollbar') {
         this.drawScrollbar(el, c)
       } else if (c.kind === 'text') {
@@ -173,6 +203,26 @@ export class MauiRenderer {
         this.els.delete(id)
       }
     }
+
+    // Die Weltansichten merken — die 3D-Seite fragt sie pro Bild ab.
+    this.lastWorldViews = controls
+      .filter((c) => c.kind === 'worldview' && !c.hidden)
+      .map((c) => ({
+        id: c.id,
+        name: c.name,
+        left: c.left,
+        top: c.top,
+        width: c.width,
+        height: c.height,
+        camera: String((c.list && c.list.camera) || 'WorldCamera'),
+        miniMap: Boolean(c.list && c.list.miniMap),
+        cartographic: Boolean(c.list && c.list.cartographic),
+      }))
+  }
+
+  /** Die Weltansichten der Original-Lua (Hauptansicht, Minimap) mit ihren Rechtecken. */
+  worldViews(): WorldViewRect[] {
+    return this.lastWorldViews
   }
 
   /**
