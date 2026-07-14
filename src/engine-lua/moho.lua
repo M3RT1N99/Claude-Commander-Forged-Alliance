@@ -90,7 +90,15 @@ local entity = withNoops(ENTITY_NAMES, {
   GetFractionComplete = function(self) return self.__fraction or 1 end,
 
   -- Transform. __pos is {x, y, z}, __orient a quaternion.
-  GetPosition = function(self) return self.__pos or { 0, 0, 0 } end,
+  --
+  -- Die Engine liefert einen VEKTOR, keinen nackten Array: die Original-Lua
+  -- greift auf BEIDES zu — `pos[1]` (aeonweapons.lua:105) und `pos.x`
+  -- (effectutilities.lua:274). Ohne die Felder stirbt jeder Bau-Effekt an
+  -- "attempt to perform arithmetic on a nil value".
+  GetPosition = function(self)
+    local p = self.__pos or { 0, 0, 0 }
+    return Vector(p[1] or p.x or 0, p[2] or p.y or 0, p[3] or p.z or 0)
+  end,
   GetPositionXYZ = function(self)
     local p = self.__pos or { 0, 0, 0 }
     return p[1], p[2], p[3]

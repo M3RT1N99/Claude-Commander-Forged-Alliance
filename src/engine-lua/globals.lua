@@ -62,8 +62,21 @@ function VAdd(a, b) local ax,ay,az = vxyz(a); local bx,by,bz = vxyz(b); return {
 function VSub(a, b) local ax,ay,az = vxyz(a); local bx,by,bz = vxyz(b); return { ax-bx, ay-by, az-bz } end
 function VDiff(a, b) return VSub(a, b) end
 function VMult(a, s) local ax,ay,az = vxyz(a); return { ax*s, ay*s, az*s } end
-function Vector(x, y, z) return { x, y, z } end
-function Vector2(x, y) return { x, y } end
+-- Ein Engine-Vektor traegt BEIDE Zugriffe — und das ist kein Komfort, sondern
+-- Voraussetzung: die Original-Lua benutzt wirklich beide Formen.
+--
+--   aeonweapons.lua:105     VDist2(unitPos[1], unitPos[3], …)     -- Index
+--   effectutilities.lua:274 2 * (endVec2.x - endVec1.x)           -- Feld
+--
+-- Ein Vektor nur mit Indizes laesst jeden Bau-Effekt an "attempt to perform
+-- arithmetic on a nil value" sterben (genau das stand im Log).
+function Vector(x, y, z)
+  return { x or 0, y or 0, z or 0, x = x or 0, y = y or 0, z = z or 0 }
+end
+
+function Vector2(x, y)
+  return { x or 0, y or 0, x = x or 0, y = y or 0 }
+end
 
 -- === Entity-Praedikate (cfunc_IsDestroyed/IsUnit/…) ===
 function IsDestroyed(e)
