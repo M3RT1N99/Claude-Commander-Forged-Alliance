@@ -173,11 +173,20 @@ export class GameVfs {
         if (b) out.set(key, b)
       }
     }
-    // Lose Dateien (maps, movies) einzeln — sie liegen nicht in einem Archiv,
-    // also gibt es nichts zusammenzufassen.
-    for (const key of onDisk) {
-      out.set(key, await this.read(key))
-    }
+    // Lose Dateien (maps, movies) liegen in keinem Archiv — da gibt es nichts
+    // zusammenzufassen. Aber sie NACHEINANDER zu lesen kostet die volle Latenz
+    // pro Datei: die ~250 Karten-Skripte allein haben den UI-Boot um Minuten
+    // verlängert. Also mehrere gleichzeitig in der Luft.
+    const PARALLEL = 8
+    let next = 0
+    await Promise.all(
+      Array.from({ length: Math.min(PARALLEL, onDisk.length) }, async () => {
+        while (next < onDisk.length) {
+          const key = onDisk[next++]!
+          out.set(key, await this.read(key))
+        }
+      }),
+    )
     return out
   }
 
