@@ -65,6 +65,29 @@ local function prefPath(key)
   return parts
 end
 
+-- Die Engine gibt eine KOPIE in die Lua, keine Referenz: cfunc_GetPreferenceL
+-- ruft `Moho::SCR_Copy(&a1, v5, esi0)` (Cfile:1370179), cfunc_GetOptionsL
+-- genauso (Cfile:1370017). Das ist kein Detail, sondern der Grund, warum
+-- `Prefs.SetOption` ueberhaupt funktioniert:
+--
+--   SetOption holt sich mit optionslogic.GetCurrent() die Options-Tabelle,
+--   aendert EINEN Wert darin und uebergibt sie an SetCurrent(). SetCurrent
+--   vergleicht sie dann gegen GetCurrent() — und ruft `item.set` nur fuer die
+--   Werte, die sich UNTERSCHEIDEN (optionslogic.lua:100-123).
+--
+-- Gaeben wir die lebende Tabelle heraus, waere die "alte" Tabelle dieselbe wie
+-- die "neue": SetOption haette den Wert schon im Profil geaendert, der Vergleich
+-- faende keinen Unterschied, und `set` liefe NIE. Die Option landete brav in den
+-- Prefs — und wirkte trotzdem nichts.
+local function deepCopy(value)
+  if type(value) ~= 'table' then return value end
+  local out = {}
+  for k, v in pairs(value) do
+    out[k] = deepCopy(v)
+  end
+  return out
+end
+
 function GetPreference(key, default)
   local node = __prefs
   for _, part in ipairs(prefPath(key)) do
@@ -72,7 +95,7 @@ function GetPreference(key, default)
     node = node[part]
     if node == nil then return default end
   end
-  return node
+  return deepCopy(node)
 end
 
 function SetPreference(key, value)
@@ -116,8 +139,9 @@ function GetOptions(key)
   if not profile or not profile.current or not profile.profiles then return nil end
   local current = profile.profiles[profile.current]
   if not current or not current.options then return nil end
-  if key == nil then return current.options end
-  return current.options[key]
+  -- Auch hier eine KOPIE (Moho::SCR_Copy, Cfile:1370017) — siehe GetPreference.
+  if key == nil then return deepCopy(current.options) end
+  return deepCopy(current.options[key])
 end
 
 -- =====================================================================
@@ -872,12 +896,8 @@ function HasLocalizedVO(la) return false end
 function AudioSetLanguage(la) __uiAudioLanguage = la end
 
 -- === Console ===
--- ConExecute runs an engine console command ('ui_SelectTolerance 5.0' …).
--- There is no console yet — log it instead of pretending it ran.
-function ConExecute(cmd)
-  LOG('ConExecute (nicht ausgefuehrt): ' .. tostring(cmd))
-end
-function ConExecuteSave(cmd) ConExecute(cmd) end
+-- ConExecute/ConExecuteSave stehen in console.lua — mit einer echten
+-- ConVar-Tabelle. 19 der 37 Optionen wirken ueber genau diesen Weg.
 
 -- === Front-End: Zustand, Einstiege, Daten ===
 --

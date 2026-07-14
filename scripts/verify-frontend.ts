@@ -423,6 +423,38 @@ console.log('\n== Die Einstellungen überleben den Neustart ==')
   host2.close()
 }
 
+console.log('\n== ConExecute ist eine echte Konsole — 19 Optionen hängen daran ==')
+// options.lua setzt die Hälfte seiner Optionen über Konsolenbefehle:
+//     set = function(key, value, startup) ConExecute("ui_KeyboardPanSpeed " .. value) end
+// Dahinter liegen in der Engine echte Variablen (Moho::TConVar), die die
+// C++-Seite in ihren Schleifen liest. Solange ConExecute nur LOGGTE, war jede
+// dieser Optionen eine Attrappe.
+{
+  // Die Startwerte stehen in der Decomp — nicht geraten.
+  check(
+    Math.abs(Number(host.eval(`return __conGet('ui_KeyboardPanSpeed')`)) - 90) < 0.001,
+    'ui_KeyboardPanSpeed = 90 (Cfile:421739)',
+  )
+  check(
+    Math.abs(Number(host.eval(`return __conGet('cam_ZoomAmount')`)) - 0.4) < 0.001,
+    'cam_ZoomAmount = 0.4 (Cfile:421825)',
+  )
+  // Die Namen sind NICHT case-sensitiv: options.lua schreibt `ren_Skydome`,
+  // die Engine heißt Moho::ren_SkyDome. Wer exakt vergleicht, verliert sie.
+  host.eval(`ConExecute('ren_Skydome false')`)
+  check(host.eval(`return __conGet('ren_SkyDome')`) === false, 'ren_Skydome ↔ ren_SkyDome (Groß/Klein egal)')
+
+  // Und der ganze Weg: Option ändern → optionslogic → ConExecute → ConVar.
+  host.eval(`
+    local Prefs = import('/lua/user/prefs.lua')
+    Prefs.SetOption('keyboard_pan_speed', 150)
+  `)
+  check(
+    Math.abs(Number(host.eval(`return __conGet('ui_KeyboardPanSpeed')`)) - 150) < 0.001,
+    'eine geänderte Option schlägt bis in die ConVar durch (90 → 150)',
+  )
+}
+
 if (warnings.length > 0) {
   console.log(`\n  (${warnings.length} WARN aus der UI-Lua:)`)
   for (const w of warnings.slice(0, 8)) console.log(`   · ${w.split('\n')[0]?.slice(0, 160)}`)

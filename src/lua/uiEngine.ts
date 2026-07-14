@@ -5,6 +5,7 @@ import { installEngineGlobals } from './engineGlobals'
 import { installSimThreads } from './simThreads'
 import UI_GLOBALS_LUA from '../engine-lua/ui-globals.lua?raw'
 import PREFS_LUA from '../engine-lua/prefs.lua?raw'
+import CONSOLE_LUA from '../engine-lua/console.lua?raw'
 import UI_BOOT_LUA from '../engine-lua/ui-boot.lua?raw'
 import UI_GLOBALS_MISSING_LUA from '../engine-lua/ui-globals-missing.lua?raw'
 import MAUI_LUA from '../engine-lua/maui.lua?raw'
@@ -47,6 +48,15 @@ export interface UiFileSystem {
   /** Ober-/Unterlänge der Schrift — text.lua:39 baut daraus die Höhe. */
   fontMetrics?: (family: string, size: number) => [number, number]
   /**
+   * Die Engine erfährt, wenn eine ConVar sich ändert.
+   *
+   * `ConExecute("ui_KeyboardPanSpeed 90")` setzt in der Engine eine echte
+   * Variable, die die C++-Seite in ihren Schleifen liest (die WorldView fragt
+   * pro Bild ui_KeyboardPanSpeed, die Kamera cam_ZoomAmount). Die Engine hier
+   * ist TypeScript — also muss sie es erfahren.
+   */
+  conVarChanged?: (name: string, value: string | number | boolean) => void
+  /**
    * Die Einstellungen des Nutzers, dauerhaft.
    *
    * Die Engine schreibt sie als LUA-QUELLTEXT nach `Game.prefs` (nachgesehen in
@@ -73,6 +83,10 @@ export function installUiEngine(host: LuaHost, fs: UiFileSystem): UiEngine {
   host.setGlobal('__engineVersion', `${pkg.name} ${pkg.version}`)
   host.eval(UI_GLOBALS_LUA)
   host.eval(PREFS_LUA)
+  // Die Konsole der Engine (ConExecute + ConVars). 19 der 37 Optionen wirken
+  // ueber genau diesen Weg — vorher hat ConExecute nur geloggt, und damit war
+  // jede davon eine Attrappe.
+  host.eval(CONSOLE_LUA)
 
   // Die gespeicherten Einstellungen zurückholen — VOR allem, was sie liest
   // (prefs.lua:96 greift ungeprüft auf das Profil zu, main.lua:151 fragt
@@ -85,6 +99,12 @@ export function installUiEngine(host: LuaHost, fs: UiFileSystem): UiEngine {
       if (ok !== true) host.eval('__prefsStored = nil')
     }
     host.setGlobal('__uiSavePrefs', (luaText: string) => fs.prefs!.save(luaText))
+  }
+
+  if (fs.conVarChanged) {
+    host.setGlobal('__uiConSink', (name: string, value: string | number | boolean) =>
+      fs.conVarChanged!(name, value),
+    )
   }
 
   // DiskGetFileInfo ist die Naht zum VFS. UIUtil.UIFile/SkinnableFile bauen
