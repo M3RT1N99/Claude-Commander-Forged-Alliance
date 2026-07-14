@@ -563,6 +563,37 @@ function SetPaused(units, paused)
   sendSim('SetPaused', units, paused == true)
 end
 
+-- === Die Uhr der UI-VM ===
+--
+-- Die UI-VM hat KEINEN Tick-Scheduler. `userinit.lua:13-21` (die Engine laedt
+-- die Datei selbst) definiert:
+--
+--   WaitFrames = coroutine.yield
+--   function WaitSeconds(n)
+--       local later = CurrentTime() + n
+--       WaitFrames(1)
+--       while CurrentTime() < later do WaitFrames(1) end
+--   end
+--
+-- Ein UI-Thread wartet also auf BILDER, und `WaitSeconds` pollt die echte Uhr.
+-- Deshalb ueberschreibt die UI-VM hier das Tick-basierte WaitSeconds aus
+-- threads.lua (das gilt nur in der Sim). __uiTime zaehlt __mauiFrame(delta) hoch.
+function CurrentTime()
+  return __uiTime
+end
+
+function WaitFrames(n)
+  coroutine.yield(n or 1)
+end
+
+function WaitSeconds(n)
+  local later = CurrentTime() + (n or 0)
+  WaitFrames(1)
+  while CurrentTime() < later do
+    WaitFrames(1)
+  end
+end
+
 -- === Extra-Select-Liste der Session ===
 --
 -- Moho::CWldSession haelt eine WeakSet<UserEntity> (Cfile:29945-29947), die die

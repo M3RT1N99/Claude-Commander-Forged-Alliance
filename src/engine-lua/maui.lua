@@ -195,7 +195,28 @@ end
 -- das SetNeedsFrameUpdate(true) verlangt hat (Cfile:1118936 prueft
 -- mNeedsFrameUpdate). Darauf bauen u. a. die Grids ihr Layout auf —
 -- gamemain.lua:136-140 nutzt es als One-Shot-Init.
+-- Die UI-Uhr. CurrentTime() ist in der UI-VM die ECHTE Zeit (Sekunden seit
+-- Start), nicht der Sim-Tick — userinit.lua:15-21 baut WaitSeconds daraus:
+--
+--   WaitFrames = coroutine.yield
+--   function WaitSeconds(n)
+--       local later = CurrentTime() + n
+--       WaitFrames(1)
+--       while CurrentTime() < later do WaitFrames(1) end
+--   end
+--
+-- Die UI-VM hat also KEINEN Tick-Scheduler: ihre Threads laufen pro BILD. Bei
+-- uns liefen sie bisher gar nicht — der Sim-Scheduler war installiert, aber
+-- niemand hat ihn getickt. Daran haengen die Menue-Animationen und der
+-- Cursor-Thread (cursor.lua:34-43).
+__uiTime = 0
+
 function __mauiFrame(delta)
+  -- Erst die Uhr, dann die Threads: ein Thread, der auf CurrentTime() wartet,
+  -- muss die neue Zeit sehen.
+  __uiTime = __uiTime + (delta or 0)
+  if __simAdvanceThreads then __simAdvanceThreads() end
+
   for _, c in pairs(__mauiControls) do
     if not c.__destroyed and c.__needsFrameUpdate and c.OnFrame then
       c:OnFrame(delta)
@@ -231,6 +252,11 @@ local function draws(c)
     return (c.__texture ~= nil and c.__texture ~= false)
       or (c.__solidColor ~= nil and c.__solidColor ~= false)
   end
+  -- Ein Border zeichnet acht Kacheln (vier Kanten, vier Ecken) — aber erst,
+  -- wenn er Texturen bekommen hat (border.lua setzt sie einzeln nach).
+  if c.__kind == 'border' then
+    return c.__border ~= nil and c.__border.vertical ~= nil
+  end
   return c.__kind == 'text'
 end
 
@@ -264,6 +290,8 @@ function __mauiSnapshot()
         id = c.__id,
         kind = c.__kind,
         name = c.__name,
+        -- Der 9-Slice-Rahmen (nur bei kind == 'border' gesetzt).
+        __border = c.__border,
         left = c.Left(),
         top = c.Top(),
         width = c.Width(),
@@ -320,12 +348,38 @@ local function jsonOpt(v)
   return jsonStr(v)
 end
 
+-- Der 9-Slice-Rahmen: sechs Texturen + die beiden LazyVars, aus denen die
+-- Kantenbreite kommt. Der Renderer setzt daraus acht Kacheln zusammen.
+local function borderJson(c)
+  local b = c.__border
+  if not b then return 'false' end
+  local ctrl = __mauiControls[c.id]
+  local bw, bh = 0, 0
+  if ctrl then
+    local ok = pcall(function()
+      bw = ctrl.BorderWidth()
+      bh = ctrl.BorderHeight()
+    end)
+    if not ok then bw, bh = 0, 0 end
+  end
+  return '{"vertical":' .. jsonOpt(b.vertical)
+    .. ',"horizontal":' .. jsonOpt(b.horizontal)
+    .. ',"upperLeft":' .. jsonOpt(b.upperLeft)
+    .. ',"upperRight":' .. jsonOpt(b.upperRight)
+    .. ',"lowerLeft":' .. jsonOpt(b.lowerLeft)
+    .. ',"lowerRight":' .. jsonOpt(b.lowerRight)
+    .. ',"borderWidth":' .. jsonNum(bw)
+    .. ',"borderHeight":' .. jsonNum(bh)
+    .. '}'
+end
+
 function __mauiSnapshotJson()
   local parts = {}
   local n = 0
   for _, c in ipairs(__mauiSnapshot()) do
     n = n + 1
     parts[n] = '{"id":' .. c.id
+      .. ',"border":' .. borderJson(c)
       .. ',"kind":' .. jsonStr(c.kind)
       .. ',"name":' .. jsonStr(c.name)
       .. ',"left":' .. jsonNum(c.left)
@@ -380,10 +434,28 @@ end
 -- Die Gruppen sehen ihre Events trotzdem: __mauiDispatch schickt das Event vom
 -- getroffenen Control die ELTERN-Kette hoch (CMauiControl::HandleEvent,
 -- Cfile:1124525) — genau wie im Original.
+-- Ist `c` ein Nachfahre von `root` (oder root selbst)?
+local function isUnder(c, root)
+  local node = c
+  while node do
+    if node == root then return true end
+    node = node.__parent or nil
+  end
+  return false
+end
+
 function __mauiHitTest(x, y)
+  -- MODALITAET: ist der Capture-Stack nicht leer, beginnt der Hit-Test nicht am
+  -- Root-Frame, sondern beim obersten Capture-Control (Cfile:1147376-1147390).
+  -- Ein Klick daneben trifft dann NICHTS — genau das macht einen Dialog modal
+  -- (uiutil.lua:615 MakeInputModal).
+  local capture = GetInputCapture()
+
   local best = nil
   for _, c in pairs(__mauiControls) do
-    if not c.__destroyed and visible(c) and c.__hitTest ~= false and draws(c) then
+    if capture and not isUnder(c, capture) then
+      -- ausserhalb des modalen Zweigs: unsichtbar fuer die Maus
+    elseif not c.__destroyed and visible(c) and c.__hitTest ~= false and draws(c) then
       -- Ohne Layout gibt es keine Flaeche, also auch keinen Treffer. Das ist
       -- kein Fehlerfall: die Mini-Ansicht laesst leere Gruppen ohne Layout
       -- stehen (borders_mini.lua), und die Engine fragt sie nie.
@@ -453,6 +525,15 @@ function __mauiMouse(evType, x, y, mods, keyCode)
 
   local hit = __mauiHitTest(x, y)
 
+  -- Ein ButtonPress auf ein ANDERES Control entzieht den Tastatur-Fokus
+  -- (Cfile:1147523-1147531). Sonst tippt man weiter in ein Eingabefeld, das man
+  -- laengst verlassen hat.
+  if evType == 'ButtonPress' and __mauiFocus and hit ~= __mauiFocus then
+    local old = __mauiFocus
+    __mauiFocus = false
+    if old.OnLoseKeyboardFocus then old:OnLoseKeyboardFocus() end
+  end
+
   if hit ~= __mauiHover then
     if __mauiHover then
       __mauiDispatch(__mauiHover, { Type = 'MouseExit', MouseX = x, MouseY = y, Modifiers = mods })
@@ -484,6 +565,94 @@ function __mauiWheel(x, y, rotation, mods)
     WheelRotation = rotation, WheelDelta = rotation,
     Modifiers = mods,
   })
+end
+
+-- =====================================================================
+-- Tastatur, Fokus und InputCapture — die drei Dinge, ohne die es keine
+-- Modalitaet gibt.
+--
+-- FOKUS (Cfile:1125718/1125768/1125828):
+--   AcquireKeyboardFocus(exclusive) / AbandonKeyboardFocus() /
+--   GetCurrentFocusControl()
+-- Ein ButtonPress auf ein ANDERES Control entzieht den Fokus
+-- (Cfile:1147523-1147531).
+--
+-- INPUT-CAPTURE-STACK (std::vector sInputCapture, Cfile:430346):
+--   AddInputCapture(control) (1147871), RemoveInputCapture(control) — "always
+--   first from back" (1147921), GetInputCapture() (1147818), AnyInputCapture()
+--   (1147773).
+-- Wirkung: ist der Stack nicht leer, startet der Maus-Hit-Test NICHT am
+-- Root-Frame, sondern bei back() (Cfile:1147376-1147390). Genau DAS ist die
+-- Modalitaet — ein Dialog schluckt die Klicks daneben.
+--
+-- ROUTING EINES TASTEN-EVENTS (drei identische Dispatcher: MET_KeyDown
+-- Cfile:1147634, MET_KeyUp 1147668, MET_Char 1147745):
+--   1. Hat ein Control Keyboard-Fokus -> NUR dieses bekommt HandleEvent.
+--      Liefert es false, wird der Capture-Stack NICHT gefragt; das Event gilt
+--      als "skipped" und geht an die Konsolen-Keymap (M3).
+--   2. Sonst: das oberste Capture-Control.
+--   3. Sonst: skipped.
+-- =====================================================================
+__mauiFocus = false
+__mauiCapture = {}
+
+function GetCurrentFocusControl()
+  return __mauiFocus or nil
+end
+
+function AnyInputCapture()
+  return table.getn(__mauiCapture) > 0
+end
+
+function GetInputCapture()
+  local n = table.getn(__mauiCapture)
+  if n == 0 then return nil end
+  return __mauiCapture[n]
+end
+
+function AddInputCapture(control)
+  if not control then return end
+  __mauiCapture[table.getn(__mauiCapture) + 1] = control
+end
+
+-- "always first from back" (Cfile:1147921): von hinten suchen, den ersten
+-- Treffer entfernen.
+function RemoveInputCapture(control)
+  for i = table.getn(__mauiCapture), 1, -1 do
+    if __mauiCapture[i] == control then
+      table.remove(__mauiCapture, i)
+      return
+    end
+  end
+end
+
+-- Ein Tasten-Event. Typ ist 'KeyDown', 'KeyUp' oder 'Char'.
+--
+-- KeyCode ist im Original ein wx-Code, RawKeyCode der MSW-VK (uiutil.lua:81:
+-- UIUtil.VK_PAUSE = 310 = WXK_PAUSE). Beide gehen ins Event, damit die
+-- Original-Lua beide lesen kann.
+--
+-- Rueckgabe: true, wenn jemand das Event behandelt hat. false heisst "skipped" —
+-- dann darf die Keymap ran (M3).
+function __mauiKey(evType, keyCode, rawKeyCode, mods)
+  local event = {
+    Type = evType,
+    KeyCode = keyCode or 0,
+    RawKeyCode = rawKeyCode or keyCode or 0,
+    Modifiers = mods or {},
+  }
+
+  if __mauiFocus and not __mauiFocus.__destroyed then
+    -- Nur das Fokus-Control. Liefert es false, ist das Event "skipped" — der
+    -- Capture-Stack wird NICHT gefragt (Cfile:1147634-1147650).
+    return __mauiFocus:HandleEvent(event) == true
+  end
+
+  local top = GetInputCapture()
+  if top then
+    return __mauiDispatch(top, event)
+  end
+  return false
 end
 
 -- =====================================================================

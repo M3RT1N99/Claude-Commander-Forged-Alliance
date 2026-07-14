@@ -71,7 +71,16 @@ for (const archive of archives) {
 // Also werden die Texturen dieses Tests vorher geladen. Wird eine andere
 // verlangt, KNALLT es — statt still 0×0 zu behaupten.
 const textureBytes = new Map<string, Uint8Array>()
-const PRELOAD = ['textures/ui/uef/game/resource-panel/resources_panel_bmp.dds']
+const PRELOAD = [
+  'textures/ui/uef/game/resource-panel/resources_panel_bmp.dds',
+  // Ein echter 9-Slice-Rahmen des Spiels (orders.lua:427-434 baut ihn daraus).
+  'textures/ui/uef/game/ability_brd/chat_brd_vert_l.dds',
+  'textures/ui/uef/game/ability_brd/chat_brd_horz_um.dds',
+  'textures/ui/uef/game/ability_brd/chat_brd_ul.dds',
+  'textures/ui/uef/game/ability_brd/chat_brd_ur.dds',
+  'textures/ui/uef/game/ability_brd/chat_brd_ll.dds',
+  'textures/ui/uef/game/ability_brd/chat_brd_lr.dds',
+]
 for (const p of PRELOAD) {
   for (const zip of zips) {
     const entry = zip.get(p)
@@ -145,6 +154,132 @@ try {
   circErr = /circular dependency/.test((e as Error).message)
 }
 check(circErr, 'Zu wenig gesetzte Variablen → "circular dependency" (lazyvar.lua:21)')
+
+console.log('\n== M1: Der Border ist ein echtes Control (CMauiBorder) ==')
+// border.lua:11-13 sagt es selbst: "SetTextures will set the BorderWidth and
+// BorderHeight lazy vars." Die Engine nimmt die Maße aus den TEXTUREN
+// (Cfile:1122728/1122748) — nicht aus einer Zahl im Skript.
+const vertDds = parseDds(textureBytes.get('textures/ui/uef/game/ability_brd/chat_brd_vert_l.dds')!)
+const horzDds = parseDds(textureBytes.get('textures/ui/uef/game/ability_brd/chat_brd_horz_um.dds')!)
+host.eval(`
+  Border = import('/lua/maui/border.lua').Border
+  brd = Border(root, 'testBorder')
+  brd:SetTextures(
+    UIUtil.UIFile('/game/ability_brd/chat_brd_vert_l.dds'),
+    UIUtil.UIFile('/game/ability_brd/chat_brd_horz_um.dds'),
+    UIUtil.UIFile('/game/ability_brd/chat_brd_ul.dds'),
+    UIUtil.UIFile('/game/ability_brd/chat_brd_ur.dds'),
+    UIUtil.UIFile('/game/ability_brd/chat_brd_ll.dds'),
+    UIUtil.UIFile('/game/ability_brd/chat_brd_lr.dds'))
+  brd:LayoutAroundControl(child, 0)
+`)
+const bw = Number(host.eval('return brd.BorderWidth()'))
+const bh = Number(host.eval('return brd.BorderHeight()'))
+check(bw === vertDds.width, `BorderWidth() = ${bw} — die Breite der vertical-DDS (${vertDds.width})`)
+check(bh === horzDds.height, `BorderHeight() = ${bh} — die Höhe der horizontal-DDS (${horzDds.height})`)
+// LayoutAroundControl legt ihn UM das Control: Left = child.Left − BorderWidth.
+check(
+  Number(host.eval('return brd.Left()')) === 16 - bw,
+  `Der Rahmen liegt außen herum (Left = child.Left − BorderWidth)`,
+)
+const inSnapshot = host.eval(`
+  for _, c in ipairs(__mauiSnapshot()) do
+    if c.kind == 'border' then return true end
+  end
+  return false
+`)
+check(inSnapshot === true, 'Der Border steht im Snapshot — der Renderer bekommt seine 8 Kacheln')
+
+console.log('\n== M1: Tastatur-Fokus — wer tippt, bekommt die Tasten allein ==')
+// Cfile:1147634-1147650: hat ein Control Fokus, geht das KeyDown NUR an dieses.
+// Liefert es false, wird der Capture-Stack NICHT gefragt — das Event ist
+// "skipped" und gehört ab dann der Keymap (M3).
+host.eval(`
+  focusA = Group(root, 'focusA')
+  focusA.Left:Set(0) focusA.Top:Set(0) focusA.Width:Set(10) focusA.Height:Set(10)
+  focusB = Group(root, 'focusB')
+  focusB.Left:Set(0) focusB.Top:Set(0) focusB.Width:Set(10) focusB.Height:Set(10)
+  gotA, gotB = 0, 0
+  focusA.HandleEvent = function(self, event) gotA = gotA + 1 return true end
+  focusB.HandleEvent = function(self, event) gotB = gotB + 1 return true end
+  focusA:AcquireKeyboardFocus(false)
+`)
+check(host.eval('return GetCurrentFocusControl() == focusA') === true, 'AcquireKeyboardFocus setzt den Fokus')
+host.eval(`__mauiKey('KeyDown', 65, 65, {})`)
+check(
+  Number(host.eval('return gotA')) === 1 && Number(host.eval('return gotB')) === 0,
+  'Das KeyDown geht NUR an das Fokus-Control',
+)
+// Ein ButtonPress woanders entzieht den Fokus (Cfile:1147523-1147531).
+host.eval(`__mauiMouse('ButtonPress', 900, 900, { Left = true }, 1)`)
+check(
+  host.eval('return GetCurrentFocusControl() == nil') === true,
+  'Ein Klick daneben entzieht den Tastatur-Fokus',
+)
+
+console.log('\n== M1: InputCapture — so wird ein Dialog modal ==')
+// Cfile:1147376-1147390: ist der Stack nicht leer, startet der Hit-Test beim
+// obersten Capture-Control statt am Root-Frame. Alles daneben ist für die Maus
+// unsichtbar — das ist uiutil.lua:615 MakeInputModal.
+host.eval(`
+  dialog = Bitmap(root)
+  dialog:SetSolidColor('ff102030')
+  dialog.Left:Set(500) dialog.Top:Set(500) dialog.Width:Set(100) dialog.Height:Set(100)
+  outside = Bitmap(root)
+  outside:SetSolidColor('ff204060')
+  outside.Left:Set(100) outside.Top:Set(100) outside.Width:Set(100) outside.Height:Set(100)
+`)
+check(
+  host.eval(`return __mauiHitTest(150, 150) == outside`) === true,
+  'Ohne Capture trifft der Klick das Control daneben',
+)
+host.eval('AddInputCapture(dialog)')
+check(host.eval('return AnyInputCapture()') === true, 'AddInputCapture setzt den Stack')
+check(
+  host.eval(`return __mauiHitTest(150, 150) == nil`) === true,
+  'MIT Capture trifft ein Klick daneben NICHTS mehr (modal)',
+)
+check(
+  host.eval(`return __mauiHitTest(550, 550) == dialog`) === true,
+  'Der Dialog selbst bleibt anklickbar',
+)
+host.eval('RemoveInputCapture(dialog)')
+check(
+  host.eval(`return AnyInputCapture() == false and __mauiHitTest(150, 150) == outside`) === true,
+  'RemoveInputCapture gibt die Maus wieder frei',
+)
+
+console.log('\n== M1: Die UI-VM tickt pro BILD, nicht pro Sim-Tick ==')
+// userinit.lua:13-21 — WaitFrames = coroutine.yield, WaitSeconds pollt
+// CurrentTime(). Die UI-VM hat keinen Tick-Scheduler; ihre Threads laufen mit
+// den Bildern. Bei uns liefen sie bisher GAR NICHT (der Sim-Scheduler war
+// installiert, aber niemand hat ihn getickt) — daran hängen die
+// Menü-Animationen und der Cursor-Thread (cursor.lua:34-43).
+host.eval(`
+  frames = 0
+  animThread = ForkThread(function()
+    while true do
+      frames = frames + 1
+      WaitFrames(1)
+    end
+  end)
+`)
+check(Number(host.eval('return frames')) === 0, 'Vor dem ersten Bild hat der Thread nichts getan')
+for (let i = 0; i < 5; i++) host.eval('__mauiFrame(0.016)')
+check(Number(host.eval('return frames')) === 5, `Nach 5 Bildern lief der Thread 5-mal`)
+
+// WaitSeconds pollt die Uhr — nach 0,5 s (bei 0,1 s/Bild) ist er weiter.
+host.eval(`
+  waited = false
+  ForkThread(function()
+    WaitSeconds(0.5)
+    waited = true
+  end)
+`)
+for (let i = 0; i < 4; i++) host.eval('__mauiFrame(0.1)')
+check(host.eval('return waited') === false, 'Nach 0,4 s wartet der Thread noch')
+for (let i = 0; i < 3; i++) host.eval('__mauiFrame(0.1)')
+check(host.eval('return waited') === true, 'Nach 0,6 s ist er durch (WaitSeconds pollt CurrentTime)')
 
 host.close()
 for (const f of openFiles) await f.close()

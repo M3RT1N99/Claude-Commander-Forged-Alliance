@@ -31,6 +31,19 @@ interface MauiControl {
   color: string | false
   fontSize: number | false
   fontFamily: string | false
+  /** Nur bei kind === 'border': der 9-Slice-Rahmen (vier Kanten, vier Ecken). */
+  border:
+    | false
+    | {
+        vertical: string | false
+        horizontal: string | false
+        upperLeft: string | false
+        upperRight: string | false
+        lowerLeft: string | false
+        lowerRight: string | false
+        borderWidth: number
+        borderHeight: number
+      }
   centerH: boolean
   centerV: boolean
 }
@@ -100,6 +113,8 @@ export class MauiRenderer {
         } else if (c.solidColor) {
           el.style.background = argb(c.solidColor)
         }
+      } else if (c.kind === 'border' && c.border) {
+        this.drawBorder(el, c)
       } else if (c.kind === 'text') {
         el.textContent = c.text === false ? '' : String(c.text)
         el.style.color = c.color ? argb(c.color) : '#ffffff'
@@ -120,6 +135,62 @@ export class MauiRenderer {
         this.els.delete(id)
       }
     }
+  }
+
+  /**
+   * Der 9-Slice-Rahmen: vier Kanten + vier Ecken, die MITTE bleibt frei.
+   *
+   * So beschreibt es die Original-Lua selbst (border.lua:9-12: „Border textures
+   * assume a texture border of 1", „Adjacent corner textures must have matching
+   * widths and heights"). Die Kantenstärke kommt nicht aus einer Zahl im Skript,
+   * sondern aus den Texturmaßen: `BorderWidth` = Breite der vertical-Kachel,
+   * `BorderHeight` = Höhe der horizontal-Kachel (Cfile:1122728/1122748).
+   *
+   * Der Rahmen liegt AUSSERHALB des Controls — deshalb sitzen die Kacheln bei
+   * negativen Offsets. Die Kanten kacheln (repeat), die Ecken nicht.
+   */
+  private drawBorder(el: HTMLDivElement, c: MauiControl): void {
+    const b = c.border
+    if (!b) return
+    const bw = b.borderWidth || 0
+    const bh = b.borderHeight || 0
+    el.style.background = 'none'
+    el.style.overflow = 'visible'
+
+    // Acht Kacheln als Kinder — sie folgen dem Control, also einmal anlegen.
+    if (el.children.length !== 8) {
+      el.textContent = ''
+      for (let i = 0; i < 8; i++) {
+        const tile = document.createElement('div')
+        tile.style.position = 'absolute'
+        el.appendChild(tile)
+      }
+    }
+    const tiles = [...el.children] as HTMLDivElement[]
+    const put = (
+      i: number,
+      tex: string | false,
+      css: Partial<CSSStyleDeclaration>,
+      repeat: string,
+    ): void => {
+      const t = tiles[i]!
+      const url = tex ? this.texture(tex) : null
+      t.style.backgroundImage = url ? `url(${url})` : 'none'
+      t.style.backgroundRepeat = repeat
+      t.style.backgroundSize = repeat === 'no-repeat' ? '100% 100%' : 'auto'
+      Object.assign(t.style, css)
+    }
+
+    // Ecken (fest), dann Kanten (gekachelt) — genau die sechs Texturen, die
+    // SetNewTextures bekommt.
+    put(0, b.upperLeft, { left: `${-bw}px`, top: `${-bh}px`, width: `${bw}px`, height: `${bh}px` }, 'no-repeat')
+    put(1, b.upperRight, { right: `${-bw}px`, top: `${-bh}px`, width: `${bw}px`, height: `${bh}px` }, 'no-repeat')
+    put(2, b.lowerLeft, { left: `${-bw}px`, bottom: `${-bh}px`, width: `${bw}px`, height: `${bh}px` }, 'no-repeat')
+    put(3, b.lowerRight, { right: `${-bw}px`, bottom: `${-bh}px`, width: `${bw}px`, height: `${bh}px` }, 'no-repeat')
+    put(4, b.horizontal, { left: '0', top: `${-bh}px`, width: '100%', height: `${bh}px` }, 'repeat-x')
+    put(5, b.horizontal, { left: '0', bottom: `${-bh}px`, width: '100%', height: `${bh}px` }, 'repeat-x')
+    put(6, b.vertical, { left: `${-bw}px`, top: '0', width: `${bw}px`, height: '100%' }, 'repeat-y')
+    put(7, b.vertical, { right: `${-bw}px`, top: '0', width: `${bw}px`, height: '100%' }, 'repeat-y')
   }
 
   /** DDS aus dem VFS als Data-URL (asynchron nachgeladen, dann gecacht). */

@@ -411,6 +411,27 @@ local control = withNoops(CONTROL_NAMES, {
   EnableHitTest = function(self) self.__hitTest = true end,
   IsHitTestDisabled = function(self) return self.__hitTest == false end,
 
+  -- Tastatur-Fokus (Cfile:1125718/1125768/1125828). Hat ein Control den Fokus,
+  -- bekommt NUR es die Tasten — und die Keymap schweigt (M3: IsKeyDown liefert
+  -- dann false, Cfile:1141557). Genau deshalb loest ein Hotkey nicht aus,
+  -- waehrend jemand im Chat tippt.
+  AcquireKeyboardFocus = function(self, exclusive)
+    local old = __mauiFocus
+    if old and old ~= self and old.OnLoseKeyboardFocus then old:OnLoseKeyboardFocus() end
+    __mauiFocus = self
+    self.__focusExclusive = exclusive == true
+    if self.OnKeyboardFocusChange then self:OnKeyboardFocusChange() end
+  end,
+  AbandonKeyboardFocus = function(self)
+    if __mauiFocus == self then
+      __mauiFocus = false
+      if self.OnLoseKeyboardFocus then self:OnLoseKeyboardFocus() end
+    end
+  end,
+  GetCurrentFocusControl = function(self)
+    return __mauiFocus or nil
+  end,
+
   SetNeedsFrameUpdate = function(self, needs) self.__needsFrameUpdate = needs == true end,
   NeedsFrameUpdate = function(self) return self.__needsFrameUpdate == true end,
   SetRenderPass = function(self, pass) self.__renderPass = pass end,
@@ -523,6 +544,54 @@ local frame = withNoops(FRAME_NAMES, {
 }, control)
 
 -- ---------------------------------------------------------------------
+-- border_methods (CMauiBorder) — 2 Bindungen.
+--
+-- Ein Border ist der 9-Slice-Rahmen der Original-UI (Dialoge, Panels): vier
+-- Kanten + vier Ecken, die Mitte bleibt frei.
+--
+--   SetNewTextures(vertical, horizontal, upperLeft, upperRight, lowerLeft, lowerRight)
+--   SetSolidColor(color)
+--
+-- (mHelp woertlich, Cfile:1123156.) Die Methode setzt dabei die beiden LazyVars,
+-- die die Engine dem Control mitgibt: BorderWidth aus der BREITE der
+-- vertical-Textur, BorderHeight aus der HOEHE der horizontal-Textur
+-- (Cfile:1122728/1122748 — SetValue(mBorderWidthLV, width) bzw.
+-- SetValue(mBorderHeightLV, height)). border.lua:11-13 sagt es selbst:
+-- "SetTextures will set the BorderWidth and BorderHeight lazy vars."
+--
+-- Jedes Argument darf nil sein: border.lua:28 ruft die Methode SECHSMAL, jedes
+-- Mal mit genau einer gesetzten Textur (eine LazyVar je Kachel, OnDirty).
+local BORDER_NAMES = { 'SetNewTextures', 'SetSolidColor' }
+local border = withNoops(BORDER_NAMES, {
+  SetNewTextures = function(self, vertical, horizontal, upperLeft, upperRight, lowerLeft, lowerRight)
+    self.__border = self.__border or {}
+    local b = self.__border
+    if vertical then b.vertical = vertical end
+    if horizontal then b.horizontal = horizontal end
+    if upperLeft then b.upperLeft = upperLeft end
+    if upperRight then b.upperRight = upperRight end
+    if lowerLeft then b.lowerLeft = lowerLeft end
+    if lowerRight then b.lowerRight = lowerRight end
+
+    -- Die Masse kommen aus den TEXTUREN, nicht aus einer Zahl im Skript.
+    if b.vertical then
+      local w = GetTextureDimensions(b.vertical)
+      if w then self.BorderWidth:Set(w) end
+    end
+    if b.horizontal then
+      local _, h = GetTextureDimensions(b.horizontal)
+      if h then self.BorderHeight:Set(h) end
+    end
+    __mauiDirty = true
+  end,
+  SetSolidColor = function(self, color)
+    self.__border = self.__border or {}
+    self.__border.solidColor = color
+    __mauiDirty = true
+  end,
+}, control)
+
+-- ---------------------------------------------------------------------
 -- Publish. Unknown moho.<x> keys become empty classes on demand, so a script
 -- deriving from a subsystem we have not built yet still loads (and then fails
 -- loudly at the first real call, which is what we want).
@@ -548,6 +617,8 @@ rawset(moho, 'control_methods', Class() (control))
 rawset(moho, 'bitmap_methods', Class(moho.control_methods) (bitmap))
 rawset(moho, 'text_methods', Class(moho.control_methods) (text))
 rawset(moho, 'frame_methods', Class(moho.control_methods) (frame))
+rawset(moho, 'border_methods', Class(moho.control_methods) (border))
+
 
 -- CMauiLuaDragger: KEIN Control (kein Layout, kein Parent) — die Engine haelt
 -- ihn separat und ruft OnMove/OnRelease/OnCancel (Cfile:1130393-1130413).
