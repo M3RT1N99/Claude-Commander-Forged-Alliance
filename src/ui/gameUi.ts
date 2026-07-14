@@ -13,6 +13,7 @@ import { FontBook } from './fonts'
 import {
   worldClick,
   getCommandMode,
+  footprintOf,
   type CommandMode,
   type WorldCommandSim,
 } from './worldCommands'
@@ -221,6 +222,15 @@ export class GameUi {
   /** Der aktuelle Command-Mode (was der nächste Klick in der Welt tut). */
   commandMode(): CommandMode {
     return getCommandMode(this.host)
+  }
+
+  /**
+   * Die ganzzahligen Footprint-Maße eines Blueprints (`Footprint.SizeX/SizeZ`).
+   * Dieselben Zahlen, mit denen die Engine das Gebäude aufs Raster setzt — die
+   * Bau-Vorschau kann also nicht von der Platzierung abweichen.
+   */
+  footprint(blueprintId: string): [number, number] {
+    return footprintOf(this.host, blueprintId)
   }
 
   /** Command-Mode abbrechen — das tut im Original der Rechtsklick. */

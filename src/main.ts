@@ -26,6 +26,7 @@ import { LuaSimClient } from './sim/luaSimClient'
 import type { HeightfieldData } from './sim/terrain'
 import { Hud, type HudSource, type HudUnitInfo, type EcoSnapshot } from './ui/hud'
 import { GameUi } from './ui/gameUi'
+import { BuildPreview } from './ui/buildPreview'
 import type { ScmapData } from './formats/scmap'
 import type { UnitTextures } from './viewer/unitMaterial'
 
@@ -343,6 +344,7 @@ async function loadMap(folder: string): Promise<void> {
 let sandbox: SandboxController | null = null
 let hud: Hud | null = null
 let gameUi: GameUi | null = null
+let buildPreview: BuildPreview | null = null
 let currentScmap: ScmapData | null = null
 let spawnPoint = new THREE.Vector3(20, 0, 20)
 let massSpots: { x: number; z: number }[] = []
@@ -457,6 +459,9 @@ async function startSandbox(mapFolder: string): Promise<void> {
     gameUi?.dispose()
     gameUi = await GameUi.create(vfs, await loadGameFonts(), log)
     gameUi.attachEvents()
+    // Die Bau-Vorschau (Geistergebäude am Raster) — Engine-Rendering mit den
+    // echten Blueprint-Modellen.
+    buildPreview = new BuildPreview(viewer, loadSandboxAssets)
     // Die Naht, über die Befehle der UI in die Sim gehen. Ohne sie KNALLT jeder
     // Befehl — statt still zu verpuffen (ui-globals.lua: __uiSimCommand).
     gameUi.connectSim((name, ids, value) => {
@@ -518,10 +523,37 @@ async function runSelftest(blueprintId: string): Promise<void> {
     return
   }
   log(`SELFTEST: ACU ${acu.id} ausgewählt`)
+  await new Promise((r) => setTimeout(r, 800))
+  {
+    // Was zeigt die Original-UI wirklich? Zählt, was im DOM ankommt — Bilder
+    // inklusive. Ein Bitmap ohne Hintergrundbild ist eine fehlende Textur.
+    const divs = [...document.querySelectorAll<HTMLDivElement>('#maui-root div')]
+    const sichtbar = divs.filter((d) => d.style.display !== 'none')
+    const bitmaps = sichtbar.filter((d) => d.dataset.kind === 'bitmap')
+    const mitBild = bitmaps.filter((d) => d.style.backgroundImage.startsWith('url('))
+    const ohneBild = bitmaps.filter((d) => !d.style.backgroundImage.startsWith('url('))
+    log(
+      `SELFTEST-UI: ${sichtbar.length} sichtbare Controls | Bitmaps ${bitmaps.length} ` +
+        `(${mitBild.length} mit Bild, ${ohneBild.length} ohne) | ` +
+        `Texte ${sichtbar.filter((d) => d.dataset.kind === 'text').length}`,
+    )
+    for (const d of ohneBild.slice(0, 6)) {
+      log(`SELFTEST-UI: ohne Bild → ${d.dataset.name} ${d.style.width}×${d.style.height}`)
+    }
+  }
   gameUi.startCommandMode('build', blueprintId)
   const s = luaSim.state(acu.id)
   if (!s) return
-  await issueWorldCommand({ x: s.x + 9, z: s.z + 9 }, false)
+
+  // Die Bau-Vorschau muss VOR dem Setzen stehen — und exakt dort, wo das Gebäude
+  // landet. Beides prüft der Selbsttest.
+  const ziel = { x: s.x + 9, z: s.z + 9 }
+  const fp = gameUi.footprint(blueprintId)
+  await buildPreview?.show(blueprintId, ziel, fp)
+  await new Promise((r) => setTimeout(r, 600))
+  log(`SELFTEST: Bau-Vorschau ${buildPreview?.debugPosition() ?? 'FEHLT'} (Footprint ${fp[0]}×${fp[1]})`)
+
+  await issueWorldCommand(ziel, false)
 
   // Wächst der Bau? Die Zahlen kommen aus der Sim, nicht von hier.
   let factoryId = 0
@@ -582,6 +614,21 @@ window.addEventListener('pointermove', (e) => {
   if (spaceHeld && sandbox) {
     viewer.rotateAroundTarget(e.movementX, e.movementY)
   }
+  // Bau-Modus: das Geistergebäude folgt dem Cursor — auf dem Raster, mit dem
+  // die Sim es gleich setzt (src/ui/buildPreview.ts).
+  if (sandbox && gameUi && buildPreview) {
+    const cm = gameUi.commandMode()
+    if (cm.mode === 'build' || cm.mode === 'buildanchored') {
+      const hit = viewer.pickTerrain(e.clientX, e.clientY)
+      if (hit && cm.name) {
+        void buildPreview.show(cm.name, hit, gameUi.footprint(cm.name))
+      } else {
+        buildPreview.hide()
+      }
+    } else {
+      buildPreview.hide()
+    }
+  }
   if (boxStart && sandbox) {
     const w = Math.abs(e.clientX - boxStart.x)
     const h = Math.abs(e.clientY - boxStart.y)
@@ -624,6 +671,7 @@ viewportEl.addEventListener('contextmenu', (e) => {
   // EndCommandMode(true)) — genau wie im Original.
   if (gameUi.commandMode().mode !== false) {
     gameUi.cancelCommandMode()
+    buildPreview?.hide()
     log('Befehl abgebrochen')
     return
   }
@@ -641,6 +689,9 @@ async function issueWorldCommand(hit: { x: number; z: number }, queue: boolean):
   try {
     const msg = await gameUi.worldClick(luaSim, hit, (x, z) => viewer.heightAt(x, z), queue)
     if (msg) log(msg)
+    // Gesetzt (oder Befehl erteilt) → der Geist hat ausgedient, bis der nächste
+    // Bau-Modus startet.
+    if (gameUi.commandMode().mode === false) buildPreview?.hide()
   } catch (err) {
     log(`FEHLER Befehl: ${err instanceof Error ? err.message : err}`)
   }
