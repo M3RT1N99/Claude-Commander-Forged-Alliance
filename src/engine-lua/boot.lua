@@ -55,6 +55,20 @@ do
     __newindex = function(_, k, v) boolAttrs[k] = v end,
   })
 
+  -- FUNKTIONEN koennen ebenfalls Attribute tragen — dieselbe LuaPlus-Eigenschaft.
+  -- multifunction.lua:979 haengt ein Feld an eine Funktion:
+  --
+  --     bg.MouseClickFunc.OnDestroy = function(self) ... end
+  --
+  -- In Standard-Lua ist das "attempt to index a function value". Ohne diese
+  -- Metatable stirbt genau dort das strategische Ansichts-Menue (der Aufklapper
+  -- der Multifunktionsanzeige).
+  local funcAttrs = {}
+  debug.setmetatable(function() end, {
+    __index = funcAttrs,
+    __newindex = function(_, k, v) funcAttrs[k] = v end,
+  })
+
   -- Coroutines brauchen ebenfalls eine Metatable, denn config.lua:35 haengt
   -- ihre eigene daran:  local thread_mt = { Destroy = KillThread }
   -- Genau das ist das Thread-Objekt mit :Destroy(), das die Original-Lua in den

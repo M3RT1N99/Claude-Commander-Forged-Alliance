@@ -491,6 +491,99 @@ function IssueBlueprintCommand(command, blueprintId, count, clear)
   sendSim(command, sel, { blueprint = blueprintId, count = count or 1, clear = clear == true })
 end
 
+-- === Die Armeen der Session ===
+--
+-- "armyInfo GetArmiesTable()" (scr_UserInits). Die UI liest daraus:
+--   .armiesTable  Liste der Armeen (nickname, faction, color, iconColor, human …)
+--   .focusArmy    welche Armee der Spieler sieht (1-basiert)
+--   .numArmies
+--
+-- Nutzer: avatars.lua:30, chat.lua:1027, score.lua:193, createunit.lua:320,
+-- worldview.lua:318 (`GetArmiesTable().focusArmy - 1` — die Ping-Owner sind
+-- 0-basiert, die Tabelle 1-basiert).
+--
+-- Die Armeen kommen aus der SESSION (Szenario + Lobby), nicht aus der UI. Bis es
+-- eine echte Session gibt, traegt sie die Engine-Seite hier ein (__uiSetArmies);
+-- ohne Session ist die Liste LEER — das ist die Wahrheit, keine Attrappe.
+__uiArmies = {}
+__uiFocusArmy = 1
+
+function __uiSetArmies(armies, focusArmy)
+  __uiArmies = armies or {}
+  __uiFocusArmy = focusArmy or 1
+end
+
+function GetArmiesTable()
+  return {
+    armiesTable = __uiArmies,
+    focusArmy = __uiFocusArmy,
+    numArmies = table.getn(__uiArmies),
+  }
+end
+
+function GetFocusArmy()
+  return __uiFocusArmy
+end
+
+function SetFocusArmy(index)
+  __uiFocusArmy = index
+end
+
+-- === Konsolen-Ausgabe ===
+--
+-- "handler AddConsoleOutputReciever(func(text))" / "RemoveConsoleOutputReciever(handler)"
+-- (Schreibfehler im Original: "Reciever"). consoleecho.lua:35 haengt sich damit
+-- an die Konsolenausgabe, um sie im Spiel einzublenden.
+__uiConsoleReceivers = {}
+
+function AddConsoleOutputReciever(func)
+  table.insert(__uiConsoleReceivers, func)
+  return func -- das Handle ist die Funktion selbst
+end
+
+function RemoveConsoleOutputReciever(handler)
+  for i = table.getn(__uiConsoleReceivers), 1, -1 do
+    if __uiConsoleReceivers[i] == handler then
+      table.remove(__uiConsoleReceivers, i)
+    end
+  end
+end
+
+--- Eine Konsolenzeile an alle Empfaenger (die Engine ruft das bei jeder Ausgabe).
+function __uiConsoleOutput(text)
+  for _, func in ipairs(__uiConsoleReceivers) do
+    pcall(func, text)
+  end
+end
+
+-- === Befehle an die aktuelle Auswahl ===
+--
+-- mHelp woertlich:
+--   IssueCommand(command, [string], [clear])                 Cfile: luadef_IssueCommand
+--   IssueUnitCommand(unitList, command, [string], [clear])
+--   IssueDockCommand(clear)
+--
+-- Das zweite Argument ist NICHT immer ein String: construction.lua:980 uebergibt
+-- eine TABELLE (orderData mit TaskName/Enhancement) fuer ein ACU-Upgrade. Die
+-- Engine reicht sie unveraendert an die Sim durch — also tun wir das auch, statt
+-- sie zu einem String zu verbiegen.
+function IssueCommand(command, data, clear)
+  local sel = GetSelectedUnits()
+  if not sel then return end
+  sendSim(command, sel, { data = data, clear = clear == true })
+end
+
+function IssueUnitCommand(unitList, command, data, clear)
+  sendSim(command, unitList or {}, { data = data, clear = clear == true })
+end
+
+-- "IssueDockCommand(clear)" — die Auswahl andocken (Traeger/Transport).
+function IssueDockCommand(clear)
+  local sel = GetSelectedUnits()
+  if not sel then return end
+  sendSim('UNITCOMMAND_Dock', sel, { clear = clear == true })
+end
+
 -- === Bau-Vorlagen ===
 --
 -- Die Engine haelt EINE aktive Vorlage (eine Liste aus Blueprint + Versatz), die

@@ -145,6 +145,71 @@ __uiPanels = {
       import('/lua/ui/game/unitviewDetail.lua').SetupUnitViewLayout(__ui.mapGroup, __ui.mapGroup)
     end,
   },
+  -- Ab hier der REST von gamemain.lua:146-165, in der Original-Reihenfolge.
+  {
+    -- gamemain.lua:146 — die Reiter oben (Diplomatie, Ziele, Punkte …).
+    name = 'tabs',
+    build = function()
+      import('/lua/ui/game/tabs.lua').Create(__ui.mapGroup)
+    end,
+  },
+  {
+    -- gamemain.lua:155 — die Spieler-Avatare (oben rechts).
+    name = 'avatars',
+    build = function()
+      import('/lua/ui/game/avatars.lua').CreateAvatarUI(__ui.mapGroup)
+    end,
+  },
+  {
+    -- gamemain.lua:156 — die Kontrollgruppen-Anzeige (Strg+1 …).
+    name = 'controlgroups',
+    build = function()
+      import('/lua/ui/game/controlgroups.lua').CreateUI(__ui.mapGroup)
+    end,
+  },
+  {
+    -- gamemain.lua:157 — das Funkprotokoll (Kampagnen-Meldungen).
+    name = 'transmissionlog',
+    build = function()
+      import('/lua/ui/game/transmissionlog.lua').CreateTransmissionLog()
+    end,
+  },
+  {
+    -- gamemain.lua:158 — die Hilfetexte.
+    name = 'helptext',
+    build = function()
+      import('/lua/ui/game/helptext.lua').CreateHelpText(__ui.mapGroup)
+    end,
+  },
+  {
+    -- gamemain.lua:159 — die Spielzeit-Uhr.
+    name = 'timer',
+    build = function()
+      import('/lua/ui/game/timer.lua').CreateTimerDialog(__ui.mapGroup)
+    end,
+  },
+  {
+    -- gamemain.lua:160 — das Konsolen-Echo.
+    name = 'consoleecho',
+    build = function()
+      import('/lua/ui/game/consoleecho.lua').CreateConsoleEcho(__ui.mapGroup)
+    end,
+  },
+  {
+    -- gamemain.lua:161-162 — Bau-Vorlagen und Verhoehnungen.
+    name = 'templates+taunt',
+    build = function()
+      import('/lua/ui/game/build_templates.lua').Init()
+      import('/lua/ui/game/taunt.lua').Init()
+    end,
+  },
+  {
+    -- gamemain.lua:164 — das Chat-Fenster. Auch ein `Window` (verschiebbar).
+    name = 'chat',
+    build = function()
+      import('/lua/ui/game/chat.lua').SetupChatLayout(__ui.windowGroup)
+    end,
+  },
   {
     -- gamemain.lua:165 — DIE MINIMAP. Sie haengt in einem `Window`
     -- (lua/maui/window.lua): verschiebbar, in der Groesse aenderbar, mit
