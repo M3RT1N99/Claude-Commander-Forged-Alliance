@@ -1,5 +1,6 @@
 import type { LuaHost } from './host'
 import { installMoho } from './moho'
+import { installBlueprintPipeline } from './unitFactory'
 import { installEngineGlobals } from './engineGlobals'
 import { installSimThreads } from './simThreads'
 import UI_GLOBALS_LUA from '../engine-lua/ui-globals.lua?raw'
@@ -118,6 +119,26 @@ export function installUiEngine(host: LuaHost, fs: UiFileSystem): UiEngine {
  */
 export function createRootFrame(host: LuaHost, width: number, height: number): void {
   host.eval(`__mauiCreateRootFrame(${width}, ${height})`)
+}
+
+/**
+ * Lädt die Unit-Blueprints in die UI-VM.
+ *
+ * Die Engine füllt `__blueprints` in BEIDEN Lua-States — die UI liest daraus
+ * direkt (`unitview.lua:180`: `__blueprints[info.blueprintId]`), und
+ * `construction.lua:1681` fragt über `EntityCategoryGetUnitList(cat)` die
+ * baubaren Einheiten ab. Beides geht nur, wenn die UI-VM die Blueprints kennt.
+ *
+ * Gefahren wird die ECHTE Pipeline (`Blueprints.lua`), dieselbe wie in der Sim.
+ */
+export function loadUiBlueprints(host: LuaHost, bpPaths: string[]): number {
+  installBlueprintPipeline(host)
+  const list = bpPaths.map((p) => `'/${p}'`).join(',')
+  host.eval(`__bpFiles = { ${list} }; LoadBlueprints()`)
+  // Die Original-Lua erwartet die Blueprints unter dem Global `__blueprints`
+  // (so heisst die Tabelle, die die Engine in den State legt).
+  host.eval(`__blueprints = __registered.Unit`)
+  return Number(host.eval('local n = 0 for _ in pairs(__blueprints) do n = n + 1 end return n'))
 }
 
 /** `/textures/x.dds` → `textures/x.dds` (das VFS führt Pfade ohne führenden /). */

@@ -56,7 +56,11 @@ export class MauiRenderer {
   }
 
   /** Zieht den Zustand aus der UI-VM und schreibt ihn ins DOM. */
-  update(): void {
+  update(deltaSeconds = 1 / 60): void {
+    // Erst die Frame-Pumpe: die Engine ruft pro Bild OnFrame(delta) auf jedem
+    // Control, das SetNeedsFrameUpdate(true) verlangt hat (Cfile:1118936).
+    // Die Grids der Original-UI bauen darin ihr Layout auf.
+    this.host.eval(`__mauiFrame(${deltaSeconds})`)
     // wasmoon reicht eine Lua-Tabelle je nach Inhalt als Array ODER als Objekt
     // mit numerischen Schlüsseln heraus. Beides akzeptieren — ein stiller
     // `return`, wenn die Form nicht passt, hat den ganzen Renderer lautlos

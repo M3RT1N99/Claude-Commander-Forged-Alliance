@@ -1,10 +1,11 @@
 import { LuaHost } from '../lua/host'
-import { installUiEngine, setupUi, createRootFrame } from '../lua/uiEngine'
+import { installUiEngine, setupUi, createRootFrame, loadUiBlueprints } from '../lua/uiEngine'
 import { MauiRenderer } from './mauiRenderer'
 import { findFiles } from '../vfs/glob'
 import { parseDds } from '../formats/dds'
 import type { GameVfs } from '../vfs/vfs'
 import type { EcoSnapshot } from './hud'
+import type { LuaUnitSnapshot } from '../sim/luaSimClient'
 
 /**
  * Die Spiel-UI — die ECHTE `lua/ui`, in einer eigenen Lua-VM im Main-Thread.
@@ -15,6 +16,8 @@ import type { EcoSnapshot } from './hud'
  * und ihren Layout-Dateien, nicht aus TypeScript.
  */
 export class GameUi {
+  private knownUnits = new Set<number>()
+
   private constructor(
     private readonly host: LuaHost,
     private readonly renderer: MauiRenderer,
@@ -25,7 +28,10 @@ export class GameUi {
     // aus /loc/<sprache>/strings_db.lua (localization.lua:15) — die liegt
     // außerhalb von lua/. Wer hier filtert, bricht den Boot an einer Stelle, die
     // nichts mit dem Filter zu tun hat.
-    const luaPaths = vfs.find((p) => p.endsWith('.lua'))
+    // Dazu die .bp-Dateien: LoadBlueprints() führt sie als Lua aus, und
+    // `unitview.lua`/`construction.lua` brauchen `__blueprints`.
+    const bpPaths = vfs.find((p) => /^units\/[^/]+\/[^/]+_unit\.bp$/.test(p))
+    const luaPaths = [...vfs.find((p) => p.endsWith('.lua')), ...bpPaths]
     const files = new Map<string, Uint8Array>()
     const BATCH = 64
     for (let i = 0; i < luaPaths.length; i += BATCH) {
@@ -69,13 +75,53 @@ export class GameUi {
     setupUi(host)
     createRootFrame(host, window.innerWidth, window.innerHeight)
 
-    // Ab hier baut die Original-Lua die UI.
+    // Die Blueprints gehören in BEIDE VMs: unitview.lua:180 liest
+    // __blueprints[...], construction.lua:1681 fragt EntityCategoryGetUnitList.
+    const bpCount = loadUiBlueprints(host, bpPaths)
+    log(`UI: ${bpCount} Blueprints geladen (echte Pipeline)`)
+
+    // Ab hier baut die Original-Lua die UI — in der Reihenfolge aus
+    // gamemain.lua:145-153.
     host.eval(`
       Economy = import('/lua/ui/game/economy.lua')
       Economy.CreateEconomyBar(GetFrame(0))
     `)
+    // Orders, Bau-Menü, Unit-View — dieselben Aufrufe wie gamemain.lua:145-153.
+    //
+    // Die Handles leben in einer TABELLE, nicht in Globals: `x = nil` legt
+    // unter dem strengen _G (config.lua:56) keinen Schlüssel an, und der
+    // spätere Lesezugriff wirft dann "access to nonexistent global variable".
+    // In gamemain sind das `local`s — Tabellenfelder sind das Äquivalent, das
+    // über mehrere eval-Aufrufe hinweg hält.
+    host.eval('__ui = {}')
+    for (const [name, code] of [
+      // gamemain.lua:148 — Orders und Construction positionieren sich am
+      // Multifunction-Display; ohne das fehlt ihnen der Bezugspunkt.
+      ['multifunction', `__ui.mfd = import('/lua/ui/game/multifunction.lua').Create(GetFrame(0))`],
+      ['orders', `Orders = import('/lua/ui/game/orders.lua')
+                  __ui.orders = Orders.SetupOrdersControl(GetFrame(0), __ui.mfd)`],
+      ['construction', `import('/lua/ui/game/construction.lua')
+                    .SetupConstructionControl(GetFrame(0), __ui.mfd, __ui.orders)`],
+      ['unitview', `import('/lua/ui/game/unitview.lua')
+                    .SetupUnitViewLayout(GetFrame(0), __ui.orders)`],
+    ] as const) {
+      try {
+        host.eval(code)
+        log(`UI: ${name}.lua läuft`)
+      } catch (e) {
+        // Ohne das Abschneiden des [string "…"]-Präfixes verschluckt die
+        // Ausgabe die eigentliche Lua-Meldung.
+        const msg = (e as Error).message.replace(/\[string "[\s\S]*?"\]/g, '').split('\n')[0]
+        log(`UI: ${name}.lua NOCH NICHT — ${msg?.slice(0, 150)}`)
+      }
+    }
+
+    // Ab jetzt gibt es Empfänger für Selektions-Ereignisse (im Original
+    // registriert die Engine den SelectionListener erst beim Session-Start).
+    host.eval('__uiSessionActive = true')
+
     const count = Number(host.eval('return table.getn(__mauiSnapshot())'))
-    log(`UI: economy.lua läuft (Original, kein Nachbau) — ${count} maui-Controls`)
+    log(`UI: ${count} maui-Controls aus der Original-Lua`)
 
     const renderer = new MauiRenderer(host, vfs)
     renderer.update()
@@ -86,7 +132,22 @@ export class GameUi {
    * Ein Sim-Beat: Ökonomie in die UI-VM, dann die Original-`_BeatFunction`
    * (economy.lua:251) rechnen lassen. Sie schreibt den Text in die Controls.
    */
-  beat(eco: EcoSnapshot): void {
+  beat(eco: EcoSnapshot, units: LuaUnitSnapshot[]): void {
+    // Der Zustand der Units in die UI-VM (die Engine spiegelt ihn clientseitig:
+    // UserUnit::UpdateUnitData @0x8C0750). Erst danach kann die UI ihn zeigen.
+    const seen = new Set<number>()
+    for (const u of units) {
+      seen.add(u.id)
+      this.host.eval(
+        `__uiSetUnit(${u.id}, '${u.name}', 1, ${u.x}, ${u.y}, ${u.z}, ` +
+          `${u.health}, ${u.maxHealth}, ${u.fraction ?? 1}, ${!u.moving})`,
+      )
+    }
+    for (const id of this.knownUnits) {
+      if (!seen.has(id)) this.host.eval(`__uiRemoveUnit(${id})`)
+    }
+    this.knownUnits = seen
+
     this.host.eval(`__uiSetEconomy(
       ${eco.massStorage}, ${eco.energyStorage},
       ${eco.mass}, ${eco.energy},
@@ -94,6 +155,22 @@ export class GameUi {
       ${eco.massRequested}, ${eco.energyRequested},
       ${eco.massExpense}, ${eco.energyExpense})`)
     this.host.eval('Economy._BeatFunction()')
+  }
+
+  /**
+   * Auswahl setzen. Das Picking (Maus → Unit) macht die Engine; die UI-VM
+   * baut daraus UserUnits, ruft `SelectUnits` und damit
+   * `gamemain.OnSelectionChanged` — genau die Kette aus
+   * Moho::SelectionListener::Receive (Cfile:1294170).
+   */
+  select(ids: number[]): number {
+    const list = ids.join(',')
+    return Number(this.host.eval(`return __uiSelectByIds({ ${list} })`))
+  }
+
+  /** Die Unit unter dem Mauszeiger (unitview.lua liest sie über GetRolloverInfo). */
+  setRollover(id: number | null): void {
+    this.host.eval(id === null ? '__uiSetRollover(nil)' : `__uiSetRollover(${id})`)
   }
 
   /** Pro Frame: den maui-Baum ins DOM schreiben. */

@@ -32,6 +32,7 @@
 __mauiControls = {}
 __nextMauiId = 1
 __mauiDirty = false
+__mauiBroken = {}
 __uiTextureDims = false
 __uiStringAdvance = false
 __uiFontMetrics = false
@@ -177,11 +178,59 @@ end
 -- Ein Control ohne vollstaendiges Layout wirft beim Ziehen "circular
 -- dependency" (lazyvar.lua:21). Das faengt der Renderer NICHT ab — ein
 -- unfertiges Layout ist ein Fehler, kein Sonderfall.
+-- Ein Control ist nur sichtbar, wenn weder es selbst noch ein Vorfahr versteckt
+-- ist. Versteckte Controls rendert die Engine nicht — und zieht folglich auch
+-- ihr Layout nicht. Ein Control, das nie positioniert wurde, weil es nie
+-- angezeigt wird, ist also KEIN Fehler.
+local function visible(c)
+  local node = c
+  while node do
+    if node.__hidden then return false end
+    node = node.__parent or nil
+  end
+  return true
+end
+
+-- Die Frame-Pumpe: die Engine ruft pro Bild OnFrame(delta) auf jedem Control,
+-- das SetNeedsFrameUpdate(true) verlangt hat (Cfile:1118936 prueft
+-- mNeedsFrameUpdate). Darauf bauen u. a. die Grids ihr Layout auf —
+-- gamemain.lua:136-140 nutzt es als One-Shot-Init.
+function __mauiFrame(delta)
+  for _, c in pairs(__mauiControls) do
+    if not c.__destroyed and c.__needsFrameUpdate and c.OnFrame then
+      c:OnFrame(delta)
+    end
+  end
+end
+
+-- Die Elternkette eines Controls, fuer Fehlermeldungen.
+local function chainOf(c)
+  local chain = tostring(c.__name) .. '(' .. tostring(c.__kind) .. ')'
+  local p = c.__parent
+  while p do
+    chain = tostring(p.__name) .. '(' .. tostring(p.__kind) .. ') > ' .. chain
+    p = p.__parent or nil
+  end
+  return chain
+end
+
 function __mauiSnapshot()
   local out = {}
   local n = 0
   for _, c in pairs(__mauiControls) do
-    if not c.__destroyed then
+    -- Laeuft das Ziehen der Layout-Zahlen in "circular dependency"
+    -- (lazyvar.lua:21), hat jemand weniger als vier der sechs Layout-Variablen
+    -- gesetzt. Das Control wird uebersprungen und EINMAL laut gemeldet — nicht
+    -- verschwiegen, aber es reisst auch nicht die restliche UI mit.
+    local laidOut = false
+    if not c.__destroyed and visible(c) then
+      laidOut = pcall(function() return c.Left(), c.Top() end)
+      if not laidOut and not __mauiBroken[c.__id] then
+        __mauiBroken[c.__id] = true
+        WARN('maui-Layout unvollstaendig, Control uebersprungen: ' .. chainOf(c))
+      end
+    end
+    if laidOut then
       n = n + 1
       out[n] = {
         id = c.__id,

@@ -20,6 +20,8 @@ export interface LuaUnitSnapshot {
   health: number
   maxHealth: number
   moving: boolean
+  /** Baufortschritt (1 = fertig). __readAllUnits schickt es, es wurde nur nie gelesen. */
+  fraction: number
 }
 
 interface StatesMsg {
@@ -151,6 +153,11 @@ export class LuaSimClient {
   state(id: number): LuaUnitSnapshot | undefined {
     return this.statesById.get(id)
   }
+  /** Alle bekannten Unit-Zustände (letzter Beat). */
+  allStates(): LuaUnitSnapshot[] {
+    return [...this.statesById.values()]
+  }
+
   /** Letzte Armee-Ökonomie (Armee 1). */
   economySnapshot(): EcoSnapshot | null {
     return this.economy

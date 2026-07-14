@@ -754,13 +754,24 @@ const luaRingGeo = (() => {
 })()
 
 /** Links-Klick: Lua-Unit unter dem Cursor auswählen (oder Auswahl leeren). */
+/**
+ * Selektion. Das Picking (Bildschirmpunkt → Unit) ist Engine-Arbeit; die
+ * AUSWAHL selbst gehört der UI: `SelectUnits` in der UI-VM ruft
+ * `gamemain.OnSelectionChanged`, und daraus speisen sich orders.lua,
+ * construction.lua und unitview.lua (Cfile:1294170).
+ */
 function selectLua(clientX: number, clientY: number): string | null {
   const hit = viewer.pickUnit(clientX, clientY)
   let name: string | null = null
+  const ids: number[] = []
   for (const u of luaUnits) {
     u.selected = hit != null && hit.mesh === u.mesh
-    if (u.selected) name = u.name
+    if (u.selected) {
+      name = u.name
+      ids.push(u.id)
+    }
   }
+  gameUi?.select(ids)
   return name ? `Ausgewählt: ${name}` : null
 }
 
@@ -777,7 +788,7 @@ function luaSimUpdate(): void {
   // Der Sim-Zustand geht in die UI-VM; die Original-_BeatFunction (economy.lua:251)
   // rechnet daraus die Anzeige.
   const eco = luaSim.economySnapshot()
-  if (eco && gameUi) gameUi.beat(eco)
+  if (eco && gameUi) gameUi.beat(eco, luaSim.allStates())
   for (const u of luaUnits) {
     const s = luaSim.state(u.id)
     if (!s) continue
