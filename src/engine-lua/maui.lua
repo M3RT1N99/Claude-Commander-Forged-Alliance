@@ -158,6 +158,54 @@ function InternalCreateText(luaobj, parent)
   return doInit(luaobj)
 end
 
+-- CMauiItemList (Cfile:1140074) — die Zeilenliste. Sie ist die Grundlage jedes
+-- Dropdowns (combo.lua:117), der Kartenauswahl, der Punkteliste und des
+-- Chat-Fensters. Die Engine haelt die Zeilen, die Auswahl und den Scroll-Zustand
+-- SELBST (18 Methoden, alle in C++) — deshalb liegt der Zustand hier und nicht in
+-- der Lua.
+function InternalCreateItemList(luaobj, parent)
+  attachControl(luaobj, parent, 'itemlist')
+  luaobj.__items = {}
+  luaobj.__selection = -1 -- keine Auswahl (GetSelection liefert -1)
+  luaobj.__top = 0 -- erste sichtbare Zeile
+  luaobj.__fontFamily = ''
+  luaobj.__fontSize = 12
+  luaobj.__colors = {}
+  luaobj.__showSelection = true
+  luaobj.__showMouseover = true
+  return doInit(luaobj)
+end
+
+-- CMauiEdit (Cfile:1133710) — das Textfeld. Das Text-Editing selbst liegt in C++
+-- (CMauiEdit::HandleKeyEvent auf MET_Char); hier steht der Zustand, den die 31
+-- Bindungen lesen und schreiben.
+function InternalCreateEdit(luaobj, parent)
+  attachControl(luaobj, parent, 'edit')
+  luaobj.__text = ''
+  luaobj.__caret = 0
+  luaobj.__maxChars = 0
+  luaobj.__enabled = true
+  luaobj.__fontFamily = ''
+  luaobj.__fontSize = 12
+  luaobj.__colors = {}
+  return doInit(luaobj)
+end
+
+-- CMauiScrollbar (Cfile:1144735). `axis` ist der Lexical-String der
+-- EMauiScrollAxis ("Vert"/"Horz", scrollbar.lua:9-12).
+--
+-- Der Scrollbar rechnet NICHT selbst: er fragt sein Scrollable-Objekt per
+-- RunScript (Cfile:1124664/1124731/1124775). Das Protokoll ist Lua, nicht C++:
+--
+--   GetScrollValues(axis) -> rangeMin, rangeMax, visibleMin, visibleMax
+--   ScrollLines(axis, delta)   ScrollPages(axis, delta)   ScrollSetTop(axis, top)
+function InternalCreateScrollbar(luaobj, parent, axis)
+  attachControl(luaobj, parent, 'scrollbar')
+  luaobj.__axis = axis or 'Vert'
+  luaobj.__scrollable = false
+  return doInit(luaobj)
+end
+
 -- Der Root-Frame: die Wurzel des UI-Baums, die GetFrame(0) liefert. Die Engine
 -- erzeugt ihn beim Start und gibt ihm die Fenstergroesse; die Klasse dafuer ist
 -- die Original-Frame (frame.lua:6, setzt Depth auf 0).
@@ -292,7 +340,12 @@ local function draws(c)
   if c.__kind == 'border' then
     return c.__border ~= nil and c.__border.vertical ~= nil
   end
+  -- ItemList, Edit und Scrollbar zeichnen immer: die Engine rendert sie selbst
+  -- (Zeilen, Text, Thumb), sie brauchen keine Textur von aussen.
   return c.__kind == 'text'
+    or c.__kind == 'itemlist'
+    or c.__kind == 'edit'
+    or c.__kind == 'scrollbar'
 end
 
 -- Die vier Zahlen eines Controls — oder nil, wenn das Layout unvollstaendig ist
@@ -408,12 +461,111 @@ local function borderJson(c)
     .. '}'
 end
 
+-- === Das Scrollable-Protokoll ===
+--
+-- Ein Scrollbar rechnet nichts selbst: er fragt sein Scrollable
+-- (Cfile:1124664/1124731/1124775). Zwei Faelle, und der Unterschied ist echt:
+--
+--  * Eine ItemList scrollt in der ENGINE (C++) — sie haelt Zeilen und
+--    Scroll-Position selbst. Ihre Lua-Klasse darf die Protokoll-Methoden gar
+--    nicht haben: `control.lua:104-118` definiert sie schon, und zwei
+--    Basisklassen mit demselben Feld sind laut class.lua:147 "ambiguous".
+--  * Jedes andere Control (Grid, Gruppen in filepicker/mapselect/keybindings)
+--    definiert sie in Lua — dort wird ganz normal die Methode gerufen.
+local function itemListRows(ctrl)
+  local ok, rh = pcall(function() return ctrl:GetRowHeight() end)
+  return math.max(1, math.floor(ctrl.Height() / math.max(1, ok and rh or 12)))
+end
+
+function __mauiScrollValues(scrollable, axis)
+  if not scrollable then return 0, 0, 0, 0 end
+  if scrollable.__kind == 'itemlist' then
+    local rows = itemListRows(scrollable)
+    local n = table.getn(scrollable.__items)
+    return 0, n, scrollable.__top, math.min(n, scrollable.__top + rows)
+  end
+  if scrollable.GetScrollValues then
+    return scrollable:GetScrollValues(axis)
+  end
+  return 0, 0, 0, 0
+end
+
+function __mauiScroll(scrollable, axis, unit, delta)
+  if not scrollable then return end
+  if scrollable.__kind == 'itemlist' then
+    local rows = itemListRows(scrollable)
+    local step = delta
+    if unit == 'pages' then step = delta * rows end
+    local n = table.getn(scrollable.__items)
+    local maxTop = math.max(0, n - rows)
+    scrollable.__top = math.max(0, math.min(maxTop, math.floor(scrollable.__top + step + 0.5)))
+    __mauiDirty = true
+    return
+  end
+  if unit == 'pages' and scrollable.ScrollPages then
+    scrollable:ScrollPages(axis, delta)
+  elseif scrollable.ScrollLines then
+    scrollable:ScrollLines(axis, delta)
+  end
+end
+
+-- Die Zeilen einer ItemList, der Text eines Edits, der Thumb eines Scrollbars.
+-- Alles drei rendert im Original die Engine — also kommt es aus dem Zustand des
+-- Controls, nicht aus der Lua.
+local function listJson(ctrl)
+  if not ctrl then return 'false' end
+  if ctrl.__kind == 'itemlist' then
+    local rows = {}
+    for i, item in ipairs(ctrl.__items) do
+      rows[i] = jsonStr(item)
+    end
+    local ok, rh = pcall(function() return ctrl:GetRowHeight() end)
+    local c = ctrl.__colors or {}
+    return '{"items":[' .. table.concat(rows, ',') .. ']'
+      .. ',"top":' .. jsonNum(ctrl.__top)
+      .. ',"selection":' .. jsonNum(ctrl.__selection)
+      .. ',"rowHeight":' .. jsonNum(ok and rh or 12)
+      .. ',"fg":' .. jsonOpt(c.fg) .. ',"bg":' .. jsonOpt(c.bg)
+      .. ',"selFg":' .. jsonOpt(c.selFg) .. ',"selBg":' .. jsonOpt(c.selBg)
+      .. ',"showSelection":' .. tostring(ctrl.__showSelection ~= false)
+      .. '}'
+  end
+  if ctrl.__kind == 'edit' then
+    local c = ctrl.__colors or {}
+    return '{"text":' .. jsonStr(ctrl.__text or '')
+      .. ',"caret":' .. jsonNum(ctrl.__caret or 0)
+      .. ',"fg":' .. jsonOpt(c.fg) .. ',"bg":' .. jsonOpt(c.bg)
+      .. '}'
+  end
+  if ctrl.__kind == 'scrollbar' then
+    -- Der Scrollbar fragt sein Scrollable (Cfile:1124664) — daraus entsteht die
+    -- Thumb-Geometrie, in Anteilen (0..1) des Balkens.
+    local rangeMin, rangeMax, visMin, visMax = 0, 1, 0, 1
+    local ok, a, b, cc, d = pcall(function()
+      return __mauiScrollValues(ctrl.__scrollable, ctrl.__axis)
+    end)
+    if ok and a and b and b > a then rangeMin, rangeMax, visMin, visMax = a, b, cc, d end
+    local span = math.max(1, rangeMax - rangeMin)
+    local t = ctrl.__textures or {}
+    return '{"axis":' .. jsonStr(ctrl.__axis or 'Vert')
+      .. ',"thumbStart":' .. jsonNum((visMin - rangeMin) / span)
+      .. ',"thumbEnd":' .. jsonNum((visMax - rangeMin) / span)
+      .. ',"background":' .. jsonOpt(t.background)
+      .. ',"thumbMiddle":' .. jsonOpt(t.thumbMiddle)
+      .. ',"thumbTop":' .. jsonOpt(t.thumbTop)
+      .. ',"thumbBottom":' .. jsonOpt(t.thumbBottom)
+      .. '}'
+  end
+  return 'false'
+end
+
 function __mauiSnapshotJson()
   local parts = {}
   local n = 0
   for _, c in ipairs(__mauiSnapshot()) do
     n = n + 1
     parts[n] = '{"id":' .. c.id
+      .. ',"list":' .. listJson(__mauiControls[c.id])
       .. ',"border":' .. borderJson(c)
       .. ',"kind":' .. jsonStr(c.kind)
       .. ',"name":' .. jsonStr(c.name)

@@ -657,10 +657,214 @@ rawset(moho, 'cursor_methods', Class() (cursor))
 -- ein CMauiControl mit der Klasse "group" (deshalb steht CMauiGroup auch nicht
 -- in der Decomp-Liste). Die leere Klasse liefert das lazy-moho von selbst.
 rawset(moho, 'control_methods', Class() (control))
+-- ---------------------------------------------------------------------
+-- item_list_methods (CMauiItemList) — 18 Bindungen.
+--
+-- Die Zeilenliste des Spiels: JEDES Dropdown ist eine (combo.lua:117), dazu
+-- Kartenauswahl, Punkteliste, Chat, EULA. Die Engine haelt Zeilen, Auswahl und
+-- Scroll-Position selbst — die mHelp-Strings (Cfile:1140151-1141154) sind hier
+-- woertlich die Signatur:
+--
+--   itemlist = ItemList:AddItem('newitem')      item = ItemList:GetItem(index)
+--   ItemList:ModifyItem(index, string)          ItemList:DeleteItem(index)
+--   int ItemList:GetItemCount()                 bool ItemList:Empty()
+--   index = ItemList:GetSelection()             ItemList:SetSelection(index)
+--   float ItemList:GetRowHeight()               ItemList:ShowItem(index)
+--   bool NeedsScrollBar()                       ItemList:ScrollToTop()
+--   SetNewColors(fg, bg, selFg, selBg)          SetNewFont(family, pointsize)
+--
+-- Die Auswahl ist 0-BASIERT (combo.lua rechnet mit index+1 in Lua-Tabellen), und
+-- "keine Auswahl" ist -1.
+-- ---------------------------------------------------------------------
+local ITEM_LIST_NAMES = {
+  'AddItem', 'DeleteAllItems', 'DeleteItem', 'Empty', 'GetItem', 'GetItemCount',
+  'GetRowHeight', 'GetSelection', 'GetStringAdvance', 'ModifyItem', 'NeedsScrollBar',
+  'ScrollToTop', 'SetNewColors', 'SetNewFont', 'SetSelection', 'ShowItem',
+  'ShowMouseoverItem', 'ShowSelection',
+}
+local item_list = withNoops(ITEM_LIST_NAMES, {
+  AddItem = function(self, text)
+    self.__items[table.getn(self.__items) + 1] = tostring(text)
+    __mauiDirty = true
+    return self
+  end,
+  ModifyItem = function(self, index, text)
+    self.__items[index + 1] = tostring(text)
+    __mauiDirty = true
+    return self
+  end,
+  DeleteItem = function(self, index)
+    table.remove(self.__items, index + 1)
+    __mauiDirty = true
+    return self
+  end,
+  DeleteAllItems = function(self)
+    self.__items = {}
+    self.__selection = -1
+    self.__top = 0
+    __mauiDirty = true
+    return self
+  end,
+  GetItem = function(self, index) return self.__items[index + 1] end,
+  GetItemCount = function(self) return table.getn(self.__items) end,
+  Empty = function(self) return table.getn(self.__items) == 0 end,
+  GetSelection = function(self) return self.__selection end,
+  SetSelection = function(self, index)
+    self.__selection = index
+    __mauiDirty = true
+  end,
+
+  -- Die Zeilenhoehe kommt aus der SCHRIFT, nicht aus einer Konstanten: die
+  -- Engine misst Ober- und Unterlaenge der gesetzten Schrift (dieselbe Metrik,
+  -- die text.lua:39 benutzt). combo.lua rechnet daraus seine Hoehe.
+  GetRowHeight = function(self)
+    local a, d = __mauiFontMetrics(self.__fontFamily, self.__fontSize)
+    return math.floor(a + d + 0.5)
+  end,
+  GetStringAdvance = function(self, str)
+    return __mauiStringAdvance(str, self.__fontFamily, self.__fontSize)
+  end,
+
+  SetNewFont = function(self, family, pointsize)
+    self.__fontFamily = family or ''
+    self.__fontSize = pointsize or 12
+    __mauiDirty = true
+  end,
+  SetNewColors = function(self, fg, bg, selFg, selBg)
+    self.__colors = { fg = fg, bg = bg, selFg = selFg, selBg = selBg }
+    __mauiDirty = true
+  end,
+  ShowSelection = function(self, on) self.__showSelection = on ~= false end,
+  ShowMouseoverItem = function(self, on) self.__showMouseover = on ~= false end,
+
+  -- "bool NeedsScrollBar() - returns true if a scrollbar is needed, else false":
+  -- passen mehr Zeilen in die Liste, als sie hoch ist?
+  NeedsScrollBar = function(self)
+    local rows = math.floor(self.Height() / math.max(1, self:GetRowHeight()))
+    return table.getn(self.__items) > rows
+  end,
+  ScrollToTop = function(self)
+    self.__top = 0
+    __mauiDirty = true
+  end,
+  ShowItem = function(self, index)
+    -- Die Zeile ins Sichtfenster holen (Cfile: SetTopItem/ScrollToItem).
+    local rows = math.max(1, math.floor(self.Height() / math.max(1, self:GetRowHeight())))
+    if index < self.__top then
+      self.__top = index
+    elseif index >= self.__top + rows then
+      self.__top = index - rows + 1
+    end
+    __mauiDirty = true
+  end,
+
+  -- ACHTUNG: das Scrollable-Protokoll (GetScrollValues/ScrollLines/ScrollPages/
+  -- ScrollSetTop) gehoert hier NICHT hin. `control.lua:104-118` definiert es
+  -- bereits, und `ItemList = Class(moho.item_list_methods, Control)` haette dann
+  -- zwei Basisklassen mit demselben Feld — class.lua:147 sagt dazu woertlich
+  -- "field 'ScrollPages' is ambiguous in class definition" und der Import von
+  -- itemlist.lua bricht ab.
+  --
+  -- Das passt auch zur Engine: eine CMauiItemList scrollt in C++, nicht ueber
+  -- Lua-Methoden. Der Scrollbar fragt sie direkt (__mauiScrollValues in maui.lua).
+}, control)
+
+-- ---------------------------------------------------------------------
+-- edit_methods (CMauiEdit) — 31 Bindungen.
+--
+-- Das Textfeld: Chat, Umbenennen, Konsole, Lobby, Bau-Templates. Das Editieren
+-- selbst laeuft in der Engine ueber MET_Char (CMauiEdit::HandleKeyEvent) — die
+-- Lua sieht nur GetText/SetText und die Callbacks OnEnterPressed/OnEscPressed.
+-- ---------------------------------------------------------------------
+local EDIT_NAMES = {
+  'AbandonFocus', 'AcquireFocus', 'ClearText', 'DisableInput', 'EnableInput',
+  'GetBackgroundColor', 'GetCaretColor', 'GetCaretPosition', 'GetFontHeight',
+  'GetForegroundColor', 'GetHighlightBackgroundColor', 'GetHighlightForegroundColor',
+  'GetMaxChars', 'GetStringAdvance', 'GetText', 'IsBackgroundVisible', 'IsCaretVisible',
+  'IsEnabled', 'SetCaretCycle', 'SetCaretPosition', 'SetDropShadow', 'SetMaxChars',
+  'SetNewBackgroundColor', 'SetNewCaretColor', 'SetNewFont', 'SetNewForegroundColor',
+  'SetNewHighlightBackgroundColor', 'SetNewHighlightForegroundColor', 'SetText',
+  'ShowBackground', 'ShowCaret',
+}
+local edit = withNoops(EDIT_NAMES, {
+  SetText = function(self, text)
+    self.__text = tostring(text or '')
+    self.__caret = string.len(self.__text)
+    __mauiDirty = true
+  end,
+  GetText = function(self) return self.__text end,
+  ClearText = function(self)
+    self.__text = ''
+    self.__caret = 0
+    __mauiDirty = true
+  end,
+  SetMaxChars = function(self, n) self.__maxChars = n end,
+  GetMaxChars = function(self) return self.__maxChars end,
+  SetCaretPosition = function(self, p) self.__caret = p end,
+  GetCaretPosition = function(self) return self.__caret end,
+  EnableInput = function(self) self.__enabled = true end,
+  DisableInput = function(self) self.__enabled = false end,
+  IsEnabled = function(self) return self.__enabled end,
+  SetNewFont = function(self, family, pointsize)
+    self.__fontFamily = family or ''
+    self.__fontSize = pointsize or 12
+    __mauiDirty = true
+  end,
+  GetFontHeight = function(self)
+    local a, d = __mauiFontMetrics(self.__fontFamily, self.__fontSize)
+    return math.floor(a + d + 0.5)
+  end,
+  GetStringAdvance = function(self, str)
+    return __mauiStringAdvance(str, self.__fontFamily, self.__fontSize)
+  end,
+  SetNewForegroundColor = function(self, c) self.__colors.fg = c __mauiDirty = true end,
+  SetNewBackgroundColor = function(self, c) self.__colors.bg = c __mauiDirty = true end,
+  GetForegroundColor = function(self) return self.__colors.fg end,
+  GetBackgroundColor = function(self) return self.__colors.bg end,
+  AcquireFocus = function(self) self:AcquireKeyboardFocus(false) end,
+  AbandonFocus = function(self) self:AbandonKeyboardFocus() end,
+}, control)
+
+-- ---------------------------------------------------------------------
+-- scrollbar_methods (CMauiScrollbar) — 4 Bindungen (mHelp woertlich):
+--
+--   Scrollbar:SetScrollable(scrollable)
+--   Scrollbar:SetTextures(background, thumbMiddle, thumbTop, thumbBottom)
+--   DoScrollLines(float)   DoScrollPages(float)
+--
+-- Der Scrollbar rechnet nichts selbst: er ruft das Scrollable-Protokoll auf dem
+-- Objekt, das er bekommen hat (Cfile:1124664/1124731/1124775).
+-- ---------------------------------------------------------------------
+local SCROLLBAR_NAMES = { 'DoScrollLines', 'DoScrollPages', 'SetNewTextures', 'SetScrollable' }
+local scrollbar = withNoops(SCROLLBAR_NAMES, {
+  SetScrollable = function(self, scrollable)
+    self.__scrollable = scrollable or false
+    __mauiDirty = true
+  end,
+  SetNewTextures = function(self, background, thumbMiddle, thumbTop, thumbBottom)
+    self.__textures = {
+      background = background,
+      thumbMiddle = thumbMiddle,
+      thumbTop = thumbTop,
+      thumbBottom = thumbBottom,
+    }
+    __mauiDirty = true
+  end,
+  DoScrollLines = function(self, lines)
+    __mauiScroll(self.__scrollable, self.__axis, 'lines', lines)
+  end,
+  DoScrollPages = function(self, pages)
+    __mauiScroll(self.__scrollable, self.__axis, 'pages', pages)
+  end,
+}, control)
+
 rawset(moho, 'bitmap_methods', Class(moho.control_methods) (bitmap))
 rawset(moho, 'text_methods', Class(moho.control_methods) (text))
 rawset(moho, 'frame_methods', Class(moho.control_methods) (frame))
 rawset(moho, 'border_methods', Class(moho.control_methods) (border))
+rawset(moho, 'item_list_methods', Class(moho.control_methods) (item_list))
+rawset(moho, 'edit_methods', Class(moho.control_methods) (edit))
+rawset(moho, 'scrollbar_methods', Class(moho.control_methods) (scrollbar))
 
 
 -- CMauiLuaDragger: KEIN Control (kein Layout, kein Parent) — die Engine haelt

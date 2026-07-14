@@ -46,6 +46,30 @@ interface MauiControl {
       }
   centerH: boolean
   centerV: boolean
+  /** ItemList / Edit / Scrollbar — was die Engine im Original selbst zeichnet. */
+  list:
+    | false
+    | {
+        // ItemList
+        items?: string[]
+        top?: number
+        selection?: number
+        rowHeight?: number
+        fg?: string | false
+        bg?: string | false
+        selFg?: string | false
+        selBg?: string | false
+        showSelection?: boolean
+        // Edit
+        text?: string
+        caret?: number
+        // Scrollbar
+        axis?: string
+        thumbStart?: number
+        thumbEnd?: number
+        background?: string | false
+        thumbMiddle?: string | false
+      }
 }
 
 export class MauiRenderer {
@@ -115,6 +139,20 @@ export class MauiRenderer {
         }
       } else if (c.kind === 'border' && c.border) {
         this.drawBorder(el, c)
+      } else if (c.kind === 'itemlist') {
+        this.drawItemList(el, c)
+      } else if (c.kind === 'edit') {
+        const l = c.list || {}
+        el.textContent = String(l.text ?? '')
+        el.style.color = l.fg ? argb(String(l.fg)) : '#ffffff'
+        el.style.background = l.bg ? argb(String(l.bg)) : 'transparent'
+        el.style.fontSize = `${c.fontSize || 12}px`
+        if (c.fontFamily) el.style.fontFamily = `"${c.fontFamily}"`
+        el.style.lineHeight = `${c.height}px`
+        el.style.whiteSpace = 'pre'
+        el.style.overflow = 'hidden'
+      } else if (c.kind === 'scrollbar') {
+        this.drawScrollbar(el, c)
       } else if (c.kind === 'text') {
         el.textContent = c.text === false ? '' : String(c.text)
         el.style.color = c.color ? argb(c.color) : '#ffffff'
@@ -191,6 +229,79 @@ export class MauiRenderer {
     put(5, b.horizontal, { left: '0', bottom: `${-bh}px`, width: '100%', height: `${bh}px` }, 'repeat-x')
     put(6, b.vertical, { left: `${-bw}px`, top: '0', width: `${bw}px`, height: '100%' }, 'repeat-y')
     put(7, b.vertical, { right: `${-bw}px`, top: '0', width: `${bw}px`, height: '100%' }, 'repeat-y')
+  }
+
+  /**
+   * Die Zeilen einer ItemList. Im Original zeichnet die Engine sie (CMauiItemList
+   * hält Zeilen, Auswahl und Scroll-Position selbst) — die Zahlen kommen also aus
+   * dem Control, nicht aus der Lua: `top` ist die erste sichtbare Zeile,
+   * `rowHeight` folgt aus der gesetzten Schrift (SetNewFont), die Farben aus
+   * SetNewColors(fg, bg, selFg, selBg).
+   */
+  private drawItemList(el: HTMLDivElement, c: MauiControl): void {
+    const l = c.list || {}
+    const items = l.items ?? []
+    const rowHeight = Math.max(1, l.rowHeight ?? 12)
+    const top = l.top ?? 0
+    const rows = Math.floor(c.height / rowHeight)
+
+    el.style.background = l.bg ? argb(String(l.bg)) : 'transparent'
+    el.style.overflow = 'hidden'
+    el.textContent = ''
+    for (let i = top; i < Math.min(items.length, top + rows); i++) {
+      const row = document.createElement('div')
+      const selected = l.showSelection !== false && l.selection === i
+      row.textContent = items[i] ?? ''
+      row.style.cssText =
+        `position:absolute;left:0;right:0;height:${rowHeight}px;` +
+        `top:${(i - top) * rowHeight}px;line-height:${rowHeight}px;white-space:pre;overflow:hidden;` +
+        `font-size:${c.fontSize || 12}px;`
+      if (c.fontFamily) row.style.fontFamily = `"${c.fontFamily}"`
+      row.style.color = argb(String((selected ? l.selFg : l.fg) || l.fg || 'ffffff'))
+      if (selected && l.selBg) row.style.background = argb(String(l.selBg))
+      el.appendChild(row)
+    }
+  }
+
+  /**
+   * Der Scrollbar: Hintergrund + Thumb. Die Lage des Thumbs rechnet die Engine
+   * NICHT selbst aus — sie fragt das Scrollable-Objekt (`GetScrollValues(axis)`
+   * → rangeMin, rangeMax, visibleMin, visibleMax, Cfile:1124664). Genau diese
+   * Anteile stehen im Snapshot.
+   */
+  private drawScrollbar(el: HTMLDivElement, c: MauiControl): void {
+    const l = c.list || {}
+    const vertical = (l.axis ?? 'Vert') === 'Vert'
+    const start = Math.max(0, Math.min(1, l.thumbStart ?? 0))
+    const end = Math.max(start, Math.min(1, l.thumbEnd ?? 1))
+
+    const bgUrl = l.background ? this.texture(String(l.background)) : null
+    el.style.backgroundImage = bgUrl ? `url(${bgUrl})` : 'none'
+    el.style.backgroundSize = '100% 100%'
+    el.style.overflow = 'hidden'
+
+    if (el.children.length !== 1) {
+      el.textContent = ''
+      const thumb = document.createElement('div')
+      thumb.style.position = 'absolute'
+      el.appendChild(thumb)
+    }
+    const thumb = el.firstElementChild as HTMLDivElement
+    const url = l.thumbMiddle ? this.texture(String(l.thumbMiddle)) : null
+    thumb.style.backgroundImage = url ? `url(${url})` : 'none'
+    thumb.style.backgroundSize = '100% 100%'
+    if (!url) thumb.style.background = 'rgba(255,255,255,0.35)'
+    if (vertical) {
+      thumb.style.left = '0'
+      thumb.style.right = '0'
+      thumb.style.top = `${start * 100}%`
+      thumb.style.height = `${Math.max(4, (end - start) * c.height)}px`
+    } else {
+      thumb.style.top = '0'
+      thumb.style.bottom = '0'
+      thumb.style.left = `${start * 100}%`
+      thumb.style.width = `${Math.max(4, (end - start) * c.width)}px`
+    }
   }
 
   /** DDS aus dem VFS als Data-URL (asynchron nachgeladen, dann gecacht). */

@@ -103,7 +103,13 @@ console.log(`\n== UI-VM booten (${files.size} Lua-Dateien, ${ddsBytes.size} UI-T
 const warnings: string[] = []
 const logs: string[] = []
 const host = await LuaHost.create(files, (level, msg) => {
-  if (level === 'WARN') warnings.push(msg)
+  if (level === 'WARN') {
+    warnings.push(msg)
+    // --warn: die WARN-Zeile SOFORT zeigen. import.lua:51 meldet den echten
+    // Fehler per WARN und wirft danach nur noch „Error importing '<datei>'" —
+    // ohne diese Ausgabe sucht man die Ursache im falschen Modul.
+    if (process.argv.includes('--warn')) console.log(`WARN: ${msg.split('\n').slice(0, 3).join(' | ')}`)
+  }
   logs.push(`${level}: ${msg}`)
 })
 installUiEngine(host, {
@@ -233,6 +239,58 @@ check(
     ? 'FEHLT: der Klick versandet — er kommt gar nicht bis zur Lobby'
     : `der Weg endet GENAU hier: ${line.replace(/^.*?:\s*/, '').slice(0, 90)}`,
 )
+
+console.log('\n== Der Optionen-Dialog: ItemList, Scrollbar und Combo ==')
+// Der Optionen-Dialog ist der erste Ort, an dem die Original-UI die drei
+// fehlenden Controls braucht: eine ItemList (jedes Dropdown ist eine —
+// combo.lua:117) und einen Scrollbar (uiutil.CreateVertScrollbarFor).
+// Er wird hier direkt gebaut, nicht geklickt: das Menü hat sich nach dem
+// Lobby-Fehler schon abgeräumt.
+{
+  let dlgErr: string | null = null
+  try {
+    host.eval(`
+      __ui = {}
+      __ui.parent = import('/lua/ui/uiutil.lua').CreateScreenGroup(GetFrame(0), 'Options Test')
+      import('/lua/ui/dialogs/options.lua').CreateDialog(__ui.parent, function() end)
+    `)
+    for (let i = 0; i < 30; i++) host.eval('__mauiFrame(0.016)')
+  } catch (e) {
+    dlgErr = ((e as Error).message.split('\n')[0] ?? '').replace(/\[string "[\s\S]*?"\]/g, '')
+  }
+  check(dlgErr === null, `options.lua baut den Dialog${dlgErr ? ` — ${dlgErr.slice(0, 110)}` : ''}`)
+
+  // Die ItemLists der Dropdowns sind ZUGEKLAPPT (combo.lua versteckt sie), und
+  // der Snapshot zeigt nur Sichtbares — also im Baum zählen, nicht im Snapshot.
+  const lists = Number(
+    host.eval(`
+      local n = 0
+      for _, c in pairs(__mauiControls) do
+        if c.__kind == 'itemlist' and not c.__destroyed then n = n + 1 end
+      end
+      return n
+    `),
+  )
+  const bars = host.pull<{ kind: string }[]>('__mauiSnapshotJson()').filter((c) => c.kind === 'scrollbar')
+  check(lists > 0, `${lists} ItemLists im Dialog (jedes Dropdown ist eine — combo.lua:117)`)
+  check(bars.length > 0, `${bars.length} Scrollbar(s) im Dialog`)
+
+  // Und sie tragen echte Zeilen: die Combos werden aus den Optionsdaten gefüllt
+  // (optionslogic.GetOptionsData → Auflösung, Sprache, Schatten …).
+  const rows = Number(
+    host.eval(`
+      local best = 0
+      for _, c in pairs(__mauiControls) do
+        if c.__kind == 'itemlist' and not c.__destroyed then
+          local n = table.getn(c.__items)
+          if n > best then best = n end
+        end
+      end
+      return best
+    `),
+  )
+  check(rows > 1, `die größte Liste hat ${rows} Zeilen — die Optionen stehen wirklich drin`)
+}
 
 console.log('\n== Audio: Handles ohne Ausgabe ==')
 // main.lua:231-249 startet Ambient + Musik und stoppt sie über das HANDLE.
