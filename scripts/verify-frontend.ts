@@ -292,6 +292,61 @@ console.log('\n== Der Optionen-Dialog: ItemList, Scrollbar und Combo ==')
   check(rows > 1, `die größte Liste hat ${rows} Zeilen — die Optionen stehen wirklich drin`)
 }
 
+console.log('\n== Der Regler lässt sich ziehen — und meldet den neuen Wert ==')
+// Der Zug geht durch den Dragger (slider.lua:49-70: ButtonPress → Dragger,
+// OnMove → CalculateValueFromMouse → SetValue → OnValueChanged); options.lua
+// hängt daran sein `update` (options.lua:713 → SetVolume). Ohne Dragger-OnMove
+// bewegt sich nichts, und der Regler wäre reine Dekoration.
+//
+// Der Test läuft NACH dem Dialog-Test — aber der Dialog ist MODAL (uiutil.lua:616
+// MakeInputModal → AddInputCapture), und ein Klick daneben trifft dann nichts.
+// Genau das soll die Modalität tun; also wird der Capture-Stack vorher geleert,
+// wie es der Dialog beim Schließen selbst täte.
+{
+  host.eval(`
+    while AnyInputCapture() do RemoveInputCapture(GetInputCapture()) end
+    __sliderTest = {}
+    __sliderTest.parent = import('/lua/ui/uiutil.lua').CreateScreenGroup(GetFrame(0), 'Slider Test')
+    __sliderTest.parent.Depth:Set(99999)
+    local Slider = import('/lua/maui/slider.lua').Slider
+    local UIUtil = import('/lua/ui/uiutil.lua')
+    __sliderTest.slider = Slider(__sliderTest.parent, false, 0, 100,
+      UIUtil.SkinnableFile('/slider02/slider_btn_up.dds'),
+      UIUtil.SkinnableFile('/slider02/slider_btn_over.dds'),
+      UIUtil.SkinnableFile('/slider02/slider_btn_down.dds'),
+      UIUtil.SkinnableFile('/slider02/slider-back_bmp.dds'))
+    __sliderTest.slider.Left:Set(100)
+    __sliderTest.slider.Top:Set(60)
+    __sliderTest.slider.Depth:Set(100000)
+    __sliderTest.slider:SetValue(100)
+    __sliderTest.changed = false
+    __sliderTest.slider.OnValueChanged = function(self, newValue)
+      __sliderTest.changed = newValue
+    end
+  `)
+  host.eval('__mauiFrame(0.016)')
+  const thumb = host.pull<{ left: number; top: number; width: number; height: number }[]>(
+    `(function()
+      local t = __sliderTest.slider._thumb
+      return '[{"left":' .. t.Left() .. ',"top":' .. t.Top() .. ',"width":' .. t.Width() .. ',"height":' .. t.Height() .. '}]'
+    end)()`,
+  )[0]!
+  const tx = Math.round(thumb.left + thumb.width / 2)
+  const ty = Math.round(thumb.top + thumb.height / 2)
+  const hit = String(host.eval(`local c = __mauiHitTest(${tx}, ${ty}) return c and c.__kind or 'NICHTS'`))
+  check(hit === 'bitmap', `der Zeiger trifft den Regler-Knopf bei ${tx},${ty} (${hit})`)
+
+  host.eval(`__mauiMouse('ButtonPress', ${tx}, ${ty}, {}, 1)`)
+  host.eval(`__mauiMouse('MouseMotion', 110, ${ty}, {}, 1)`)
+  host.eval(`__mauiMouse('ButtonRelease', 110, ${ty}, {}, 1)`)
+  const value = Number(host.eval('return __sliderTest.slider:GetValue()'))
+  check(value < 50, `Zug nach links: 100 → ${Math.round(value)} (Dragger → OnMove → SetValue)`)
+  check(
+    host.eval('return __sliderTest.changed') !== false,
+    'OnValueChanged feuert — daran hängt options.lua:713 (update → SetVolume)',
+  )
+}
+
 console.log('\n== Audio: Handles ohne Ausgabe ==')
 // main.lua:231-249 startet Ambient + Musik und stoppt sie über das HANDLE.
 // Ohne Rückgabewert von PlaySound hätte StopSound nichts zu greifen.
