@@ -142,11 +142,28 @@ function UserUnitMeta:IsInCategory(cat)
   return EntityCategoryContains(categories[cat] or cat, self:GetBlueprint())
 end
 
+function UserUnitMeta:GetFireState() return self.fireState or 0 end
+-- Die Bau-Warteschlange einer Fabrik: { { id = <blueprintId>, count = <n> }, ... }
+-- (construction.lua:1620). Sie wird aus der Sim gespiegelt; leer heisst leer.
+function UserUnitMeta:GetBuildQueue() return self.buildQueue or {} end
+
+-- GetAttachedUnitsList(units): die transportierten/angedockten Einheiten der
+-- Selektion (construction.lua:1630). Ohne Transporter in der Sim ist die Liste
+-- leer — das ist eine Tatsache, keine Luecke.
+function GetAttachedUnitsList(units)
+  local out = {}
+  for _, u in ipairs(units or {}) do
+    for _, a in ipairs(u.attached or {}) do out[table.getn(out) + 1] = a end
+  end
+  return out
+end
+
 -- Von der Engine pro Beat: der Zustand einer Unit aus der Sim.
 function __uiSetUnit(id, blueprintId, army, x, y, z, health, maxHealth, workProgress, idle)
   local u = __uiUnits[id]
   if not u then
-    u = setmetatable({ id = id }, UserUnitMeta)
+    -- SUnitVarDat-Ctor (Cfile:772277): mFireState = FIRESTATE_ReturnFire (0).
+    u = setmetatable({ id = id, fireState = 0 }, UserUnitMeta)
     __uiUnits[id] = u
   end
   u.blueprintId = blueprintId
@@ -329,6 +346,179 @@ function GetUnitCommandData(units)
   table.sort(orders)
   table.sort(toggles)
   return orders, toggles, cats
+end
+
+-- === Die Naht zur Sim ===
+--
+-- Im Original schickt die Engine jeden Befehl der UI als ProcessInfo an den
+-- SimDriver (cfunc_SetFireStateL: sSimDriver->ProcessInfo(entityId,
+-- "SetFireState", value)) — die UI SETZT nichts, sie BITTET. Hier ist es
+-- dieselbe Naht: eine Funktion, die die Engine setzt. Fehlt sie, KNALLT es —
+-- ein Befehl, der still verpufft, ist schlimmer als gar keiner.
+__uiSimCommand = false
+
+local function idsOf(units)
+  local ids = {}
+  for _, u in ipairs(units or {}) do ids[table.getn(ids) + 1] = u:GetEntityId() end
+  return ids
+end
+
+local function sendSim(name, units, value)
+  if not __uiSimCommand then
+    error('Befehl "' .. name .. '" hat keinen Weg in die Sim (__uiSimCommand fehlt)', 2)
+  end
+  __uiSimCommand(name, idsOf(units), value)
+end
+
+-- === Klang ===
+--
+-- PlaySound(sound) nimmt genau das Sound{}-Objekt aus dem Blueprint
+-- (bp.Audio.UISelection, selection.lua:5) — Bank + Cue. Die Ausgabe selbst ist
+-- ein eigenes Engine-Teil (FMOD-Baenke in sounds.scd), das es noch nicht gibt.
+--
+-- Deshalb: die angeforderten Cues werden PROTOKOLLIERT und das Fehlen der
+-- Ausgabe wird EINMAL laut gemeldet. Nichts wird erfunden, nichts wird
+-- verschwiegen — und ein Test kann pruefen, dass die richtige Cue kam.
+__uiAudioSink = false
+__uiSoundsRequested = {}
+local warnedNoAudio = false
+
+function PlaySound(sound)
+  if not sound then return end
+  __uiSoundsRequested[table.getn(__uiSoundsRequested) + 1] = sound
+  if __uiAudioSink then
+    __uiAudioSink(sound.Bank, sound.Cue)
+  elseif not warnedNoAudio then
+    warnedNoAudio = true
+    WARN('Audio: keine Ausgabe angeschlossen — Cues werden nur protokolliert (__uiSoundsRequested)')
+  end
+end
+
+-- === Bau-Warteschlange der angezeigten Fabrik ===
+--
+-- cfunc_SetCurrentFactoryForQueueDisplayL (Cfile:1257038-1257087) merkt sich die
+-- Unit als WeakPtr (sCurrentBuildFactory) und liefert die Warteschlange zurueck.
+-- construction.lua:1764 haengt genau daran: `currentCommandQueue = SetCurrent...`,
+-- und die Engine ruft bei jeder Aenderung construction.OnQueueChanged(newQueue).
+--
+-- Die Eintraege sind { id = <blueprintId>, count = <n> } (construction.lua:1620).
+__uiQueueFactory = false
+
+function SetCurrentFactoryForQueueDisplay(unit)
+  __uiQueueFactory = unit or false
+  if not unit then return {} end
+  return unit:GetBuildQueue()
+end
+
+function ClearCurrentFactoryForQueueDisplay()
+  __uiQueueFactory = false
+end
+
+-- === Pause (Produktion einer Fabrik/eines Bauers anhalten) ===
+--
+-- cfunc_GetIsPausedL (Cfile:1359337ff, Hilfetext: "Is anyone ins this list
+-- builder paused?"): true, sobald EINE lebende Unit der Liste mIsPaused traegt.
+-- cfunc_SetPausedL schickt den Wunsch an die Sim — die UI setzt nichts selbst.
+function GetIsPaused(units)
+  for _, u in ipairs(units or {}) do
+    if not u:IsDead() and u.paused == true then return true end
+  end
+  return false
+end
+
+function SetPaused(units, paused)
+  for _, u in ipairs(units or {}) do
+    if not u:IsDead() then u.paused = paused == true end
+  end
+  sendSim('SetPaused', units, paused == true)
+end
+
+-- === Extra-Select-Liste der Session ===
+--
+-- Moho::CWldSession haelt eine WeakSet<UserEntity> (Cfile:29945-29947), die die
+-- UI ueber drei Globals fuellt: AddToSessionExtraSelectList /
+-- RemoveFromSessionExtraSelectList / ClearSessionExtraSelectList
+-- (Cfile:1361771-1361788). construction.lua:924 legt dort die angehaengten
+-- Einheiten ab, die zusaetzlich markiert bleiben sollen; die Weltansicht liest
+-- die Liste beim Zeichnen.
+__uiExtraSelect = {}
+
+function AddToSessionExtraSelectList(unit)
+  if unit then __uiExtraSelect[unit:GetEntityId()] = unit end
+end
+
+function RemoveFromSessionExtraSelectList(unit)
+  if unit then __uiExtraSelect[unit:GetEntityId()] = nil end
+end
+
+function ClearSessionExtraSelectList()
+  __uiExtraSelect = {}
+end
+
+-- === Feuerhaltung (Retaliate-Button) ===
+--
+-- cfunc_GetFireStateL (@0x8BB500, Cfile:1359840-1359898) — genau dieser Ablauf:
+--
+--   state = 3                      -- Sentinel "noch keiner gesehen"
+--   fuer jede lebende Unit MIT RULEUCC_RetaliateToggle (mCommandCaps & 0x20):
+--     state == 3          -> state = fireState der Unit
+--     state ~= fireState  -> state = -1   (gemischt)
+--   state == 3 (keine passende Unit) -> -1
+--
+-- Das 0x20 ist kein Zufall: die RULEUCC-Enums werden in fester Reihenfolge
+-- registriert (Cfile:656671-656719), Bit 5 ist RULEUCC_RetaliateToggle.
+--
+-- Die Zustaende sind 0 = ReturnFire, 1 = HoldFire, 2 = HoldGround
+-- (orders.lua:419-421); der Ctor startet mit ReturnFire (Cfile:772277).
+local RETALIATE_CAP = 'RULEUCC_RetaliateToggle'
+
+local function canRetaliate(u)
+  local bp = u:GetBlueprint()
+  local caps = bp and bp.General and bp.General.CommandCaps
+  return caps ~= nil and caps[RETALIATE_CAP] == true
+end
+
+function GetFireState(units)
+  if type(units) ~= 'table' then return -1 end
+  local state = 3
+  for _, u in ipairs(units) do
+    if not u:IsDead() and canRetaliate(u) then
+      if state == 3 then
+        state = u:GetFireState()
+      elseif state ~= u:GetFireState() then
+        state = -1
+      end
+    end
+  end
+  if state == 3 then return -1 end
+  return state
+end
+
+-- SetFireState(units, id) — orders.lua:526 uebergibt den STRING aus
+-- retaliateStateInfo ('ReturnFire'/'HoldFire'/'HoldGround'). Die Engine schickt
+-- ihn als ProcessInfo an die Sim (cfunc_SetFireStateL); dort ist er ein Befehl
+-- an die Unit. Bis der Befehlsweg zur Sim steht, wird der Zustand in der
+-- UI-Spiegelung gefuehrt — dieselbe Stelle, an der die Engine ihn auch haelt.
+local FIRE_STATE_ID = { ReturnFire = 0, HoldFire = 1, HoldGround = 2 }
+
+function SetFireState(units, id)
+  local state = FIRE_STATE_ID[id]
+  if state == nil then error('SetFireState: unbekannter Zustand ' .. tostring(id), 2) end
+  for _, u in ipairs(units or {}) do
+    if canRetaliate(u) then u.fireState = state end
+  end
+  sendSim('SetFireState', units, state)
+end
+
+-- ToggleFireState(units, currentFireState) — cfunc_ToggleFireStateL: eins
+-- weiter in der Runde (orders.lua:588-593 reicht den aktuellen Zustand rein).
+function ToggleFireState(units, current)
+  local next = (tonumber(current) or -1) + 1
+  if next > 2 or next < 0 then next = 0 end
+  for _, u in ipairs(units or {}) do
+    if canRetaliate(u) then u.fireState = next end
+  end
+  sendSim('SetFireState', units, next)
 end
 
 -- GetRolloverInfo(): die Unit unter dem Mauszeiger (unitview.lua liest daraus

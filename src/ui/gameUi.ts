@@ -1,8 +1,15 @@
 import { LuaHost } from '../lua/host'
-import { installUiEngine, setupUi, createRootFrame, loadUiBlueprints } from '../lua/uiEngine'
+import {
+  installUiEngine,
+  setupUi,
+  setupGameUi,
+  createRootFrame,
+  loadUiBlueprints,
+} from '../lua/uiEngine'
 import { MauiRenderer } from './mauiRenderer'
 import { findFiles } from '../vfs/glob'
 import { parseDds } from '../formats/dds'
+import { FontBook } from './fonts'
 import type { GameVfs } from '../vfs/vfs'
 import type { EcoSnapshot } from './hud'
 import type { LuaUnitSnapshot } from '../sim/luaSimClient'
@@ -23,7 +30,25 @@ export class GameUi {
     private readonly renderer: MauiRenderer,
   ) {}
 
-  static async create(vfs: GameVfs, log: (msg: string) => void): Promise<GameUi> {
+  static async create(
+    vfs: GameVfs,
+    fontFiles: Uint8Array[],
+    log: (msg: string) => void,
+  ): Promise<GameUi> {
+    // Die Schriften des Spiels (<GameDir>/fonts). Sie liefern die Metrik, mit der
+    // die Original-Lua ihr Text-Layout rechnet (text.lua:39/47) — und sie werden
+    // gleich auch gerendert, statt sie durch eine Systemschrift zu ersetzen.
+    const fonts = new FontBook()
+    for (const bytes of fontFiles) {
+      try {
+        const family = fonts.add(bytes)
+        registerBrowserFont(family, bytes)
+      } catch (e) {
+        log(`UI: Schrift nicht lesbar — ${e instanceof Error ? e.message : e}`)
+      }
+    }
+    log(`UI: ${fonts.size} Schriften aus <GameDir>/fonts`)
+
     // ALLE .lua-Dateien, nicht nur lua/**: Localization.lua lädt die Sprachdatei
     // aus /loc/<sprache>/strings_db.lua (localization.lua:15) — die liegt
     // außerhalb von lua/. Wer hier filtert, bricht den Boot an einer Stelle, die
@@ -62,15 +87,15 @@ export class GameUi {
 
     const allPaths = new Set(vfs.find(() => true))
     const host = await LuaHost.create(files, (level, msg) => {
-      if (level === 'WARN') log(`UI-WARN: ${msg.slice(0, 90)}`)
+      if (level === 'WARN') log(`UI-WARN: ${msg.slice(0, 400)}`)
     })
 
     installUiEngine(host, {
       exists: (p) => allPaths.has(p),
       find: (dir, pattern) => findFiles(allPaths, dir, pattern),
       textureSize: (p) => dims.get(p) ?? null,
-      stringAdvance: (text, family, size) => measureText(text, family, size),
-      fontMetrics: (family, size) => fontMetrics(family, size),
+      stringAdvance: (text, family, size) => fonts.advance(text, family, size),
+      fontMetrics: (family, size) => fonts.metrics(family, size),
     })
     setupUi(host)
     createRootFrame(host, window.innerWidth, window.innerHeight)
@@ -81,50 +106,17 @@ export class GameUi {
     log(`UI: ${bpCount} Blueprints geladen (echte Pipeline)`)
 
     // Ab hier baut die Original-Lua die UI — in der Reihenfolge aus
-    // gamemain.lua:145-153.
-    host.eval(`
-      Economy = import('/lua/ui/game/economy.lua')
-      Economy.CreateEconomyBar(GetFrame(0))
-    `)
-    // Orders, Bau-Menü, Unit-View — dieselben Aufrufe wie gamemain.lua:145-153.
-    //
-    // Die Handles leben in einer TABELLE, nicht in Globals: `x = nil` legt
-    // unter dem strengen _G (config.lua:56) keinen Schlüssel an, und der
-    // spätere Lesezugriff wirft dann "access to nonexistent global variable".
-    // In gamemain sind das `local`s — Tabellenfelder sind das Äquivalent, das
-    // über mehrere eval-Aufrufe hinweg hält.
-    host.eval('__ui = {}')
-    for (const [name, code] of [
-      // gamemain.lua:148 — Orders und Construction positionieren sich am
-      // Multifunction-Display; ohne das fehlt ihnen der Bezugspunkt.
-      ['multifunction', `__ui.mfd = import('/lua/ui/game/multifunction.lua').Create(GetFrame(0))`],
-      ['orders', `Orders = import('/lua/ui/game/orders.lua')
-                  __ui.orders = Orders.SetupOrdersControl(GetFrame(0), __ui.mfd)`],
-      ['construction', `import('/lua/ui/game/construction.lua')
-                    .SetupConstructionControl(GetFrame(0), __ui.mfd, __ui.orders)`],
-      ['unitview', `import('/lua/ui/game/unitview.lua')
-                    .SetupUnitViewLayout(GetFrame(0), __ui.orders)`],
-    ] as const) {
-      try {
-        host.eval(code)
-        log(`UI: ${name}.lua läuft`)
-      } catch (e) {
-        // Ohne das Abschneiden des [string "…"]-Präfixes verschluckt die
-        // Ausgabe die eigentliche Lua-Meldung.
-        const msg = (e as Error).message.replace(/\[string "[\s\S]*?"\]/g, '').split('\n')[0]
-        log(`UI: ${name}.lua NOCH NICHT — ${msg?.slice(0, 150)}`)
-      }
-    }
+    // gamemain.lua:145-153. Denselben Weg nimmt die Verify-Suite.
+    setupGameUi(host, log)
 
-    // Ab jetzt gibt es Empfänger für Selektions-Ereignisse (im Original
-    // registriert die Engine den SelectionListener erst beim Session-Start).
-    host.eval('__uiSessionActive = true')
-
-    const count = Number(host.eval('return table.getn(__mauiSnapshot())'))
-    log(`UI: ${count} maui-Controls aus der Original-Lua`)
-
+    // Erst rendern, dann zählen — und zwar in dieser Reihenfolge: die Grids der
+    // Original-UI legen ihre Kinder erst in OnFrame aus (grid.lua:40-48, die
+    // Frame-Pumpe der Engine, Cfile:1118936). Ein Snapshot VOR dem ersten Frame
+    // sieht sie ohne Layout und meldet sie zu Unrecht als kaputt.
     const renderer = new MauiRenderer(host, vfs)
     renderer.update()
+    const count = Number(host.eval('return table.getn(__mauiSnapshot())'))
+    log(`UI: ${count} maui-Controls aus der Original-Lua`)
     return new GameUi(host, renderer)
   }
 
@@ -225,29 +217,13 @@ export class GameUi {
 }
 
 /**
- * Textbreite (CMauiText::GetStringAdvance). Die Engine misst mit der echten
- * Schrift; der Browser kann das über Canvas — mit denselben TTFs aus
- * `<GameDir>/fonts`, sobald die geladen sind.
+ * Die Schrift auch im Browser verfügbar machen — dieselbe TTF-Datei, die die
+ * Metrik geliefert hat. Sonst rechnet das Layout mit "Zeroes Three" und der
+ * Browser zeichnet eine Ersatzschrift: zwei Wahrheiten, die auseinanderlaufen.
  */
-let ctx: CanvasRenderingContext2D | null = null
-function context(family: string, size: number): CanvasRenderingContext2D | null {
-  if (!ctx) ctx = document.createElement('canvas').getContext('2d')
-  if (ctx) ctx.font = `${size}px ${family || 'sans-serif'}`
-  return ctx
-}
-
-function measureText(text: string, family: string, size: number): number {
-  const c = context(family, size)
-  return c ? c.measureText(text).width : 0
-}
-
-/**
- * Ober-/Unterlänge — text.lua:39 macht daraus die Höhe eines Text-Controls
- * (die Engine liefert sie aus der Schrift, Cfile:1145928).
- */
-function fontMetrics(family: string, size: number): [number, number] {
-  const c = context(family, size)
-  if (!c) return [size, 0]
-  const m = c.measureText('Hg')
-  return [m.fontBoundingBoxAscent || size * 0.8, m.fontBoundingBoxDescent || size * 0.2]
+function registerBrowserFont(family: string, bytes: Uint8Array): void {
+  if (typeof FontFace === 'undefined') return
+  const buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
+  const face = new FontFace(family, buf as ArrayBuffer)
+  void face.load().then((f) => document.fonts.add(f))
 }

@@ -85,6 +85,13 @@ export function installUiEngine(host: LuaHost, fs: UiFileSystem): UiEngine {
   host.loadGlobal('/lua/system/MultiEvent.lua')
   host.loadGlobal('/lua/system/collapse.lua')
 
+  // Die UI-Seite des Sync-Tables. Das Gegenstück zu `/lua/simsync.lua` in der
+  // Sim: die Engine legt beides selbst in den jeweiligen State (keine Lua-Datei
+  // ruft es auf, deshalb steht es hier). Es bringt `Sync`, `PreviousSync`,
+  // `UnitData` und `OnSync()` — und ohne `UnitData` scheitert schon
+  // orders.lua:909 an der ersten Selektion.
+  host.loadGlobal('/lua/usersync.lua')
+
   // maui-Substrat: die LazyVar-Instanzen, die InternalCreate*-Globals und
   // DoInit → OnInit. Muss NACH class.lua/moho stehen (die Controls sind
   // Lua-Klassen) und VOR jeder UI-Lua, die Controls erzeugt.
@@ -144,6 +151,64 @@ export function loadUiBlueprints(host: LuaHost, bpPaths: string[]): number {
 /** `/textures/x.dds` → `textures/x.dds` (das VFS führt Pfade ohne führenden /). */
 function normalize(path: string): string {
   return path.replace(/^\/+/, '').toLowerCase()
+}
+
+/**
+ * Die Spiel-UI aufbauen — dieselbe Reihenfolge wie `gamemain.lua:145-153`, wenn
+ * die Engine eine Session startet.
+ *
+ * Die Handles leben in einer TABELLE, nicht in Globals: `x = nil` legt unter dem
+ * strengen `_G` (config.lua:51-56) keinen Schlüssel an, und der spätere
+ * Lesezugriff wirft dann "access to nonexistent global variable". In gamemain
+ * sind das `local`s — Tabellenfelder sind das Äquivalent, das über mehrere
+ * eval-Aufrufe hinweg hält.
+ *
+ * Diese Funktion ist der EINE Aufbauweg der Spiel-UI. Browser und Verify-Suite
+ * nehmen ihn beide — sonst prüft der Test etwas anderes, als der Browser tut.
+ */
+export function setupGameUi(host: LuaHost, log: (msg: string) => void): void {
+  // Der Bildschirm-Baum, exakt wie gamemain.lua ihn aufspannt: EINE Screen-Group,
+  // darin die vier Cluster von borders.lua. Alle Panels haengen an diesen Gruppen
+  // — wer sie stattdessen an GetFrame(0) haengt, bekommt jedes Panel an die
+  // falsche Stelle (die Layout-Dateien rechnen gegen den Cluster, nicht gegen den
+  // Bildschirm).
+  host.eval('__ui = {}')
+  host.eval(`
+    UIUtil = import('/lua/ui/uiutil.lua')
+    __ui.gameParent = UIUtil.CreateScreenGroup(GetFrame(0), "GameMain ScreenGroup")
+    __ui.controlCluster, __ui.statusCluster, __ui.mapGroup, __ui.windowGroup =
+      import('/lua/ui/game/borders.lua').SetupBorderControl(__ui.gameParent)
+  `)
+
+  for (const [name, code] of [
+    ['economy', `Economy = import('/lua/ui/game/economy.lua')
+                 Economy.CreateEconomyBar(__ui.statusCluster)`],
+    ['multifunction', `__ui.mfd = import('/lua/ui/game/multifunction.lua').Create(__ui.controlCluster)`],
+    ['orders', `__ui.ordersModule = import('/lua/ui/game/orders.lua')
+                __ui.orders = __ui.ordersModule.SetupOrdersControl(__ui.controlCluster, __ui.mfd)`],
+    ['construction', `__ui.construction = import('/lua/ui/game/construction.lua')
+                        .SetupConstructionControl(__ui.controlCluster, __ui.mfd, __ui.orders)`],
+    ['unitview', `import('/lua/ui/game/unitview.lua')
+                    .SetupUnitViewLayout(__ui.mapGroup, __ui.orders)`],
+    // gamemain.lua:154 — die Detailansicht (Rollover-Tooltip). construction.lua
+    // ruft sie ungeprüft (UnitViewDetail.Hide()), also MUSS sie stehen.
+    ['unitviewDetail', `import('/lua/ui/game/unitviewDetail.lua')
+                          .SetupUnitViewLayout(__ui.mapGroup, __ui.mapGroup)`],
+  ] as const) {
+    try {
+      host.eval(code)
+      log(`UI: ${name}.lua läuft`)
+    } catch (e) {
+      // Ohne das Abschneiden des [string "…"]-Präfixes verschluckt die Ausgabe
+      // die eigentliche Lua-Meldung.
+      const msg = (e as Error).message.replace(/\[string "[\s\S]*?"\]/g, '').split('\n')[0]
+      log(`UI: ${name}.lua NOCH NICHT — ${msg?.slice(0, 200)}`)
+    }
+  }
+
+  // Ab jetzt gibt es Empfänger für Selektions-Ereignisse (im Original registriert
+  // die Engine den SelectionListener erst beim Session-Start, Cfile:1294170).
+  host.eval('__uiSessionActive = true')
 }
 
 /**

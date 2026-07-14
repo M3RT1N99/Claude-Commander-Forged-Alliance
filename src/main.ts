@@ -424,7 +424,7 @@ async function startSandbox(mapFolder: string): Promise<void> {
     // haben getrennte States). Sie baut das Eco-Panel aus economy.lua — der
     // TS-Nachbau in hud.ts ist dafür raus.
     gameUi?.dispose()
-    gameUi = await GameUi.create(vfs, log)
+    gameUi = await GameUi.create(vfs, await loadGameFonts(), log)
     gameUi.attachEvents()
 
     // Beide Frame-Hooks an EINER Stelle registrieren, nach dem Karten-Laden
@@ -705,6 +705,29 @@ const EMPTY_ECO: EcoSnapshot = {
   mass: 0, massStorage: 0, massIncome: 0, massExpense: 0,
   energy: 0, energyStorage: 0, energyIncome: 0, energyExpense: 0,
   massRequested: 0, energyRequested: 0,
+}
+
+/**
+ * Die Schriften des Spiels: `<GameDir>/fonts/*.ttf` — lose Dateien, kein Archiv,
+ * deshalb über die GameSource und nicht über das VFS.
+ *
+ * `lua/skins/skins.lua:22-26` verlangt "Arial" und "Zeroes Three"; die Engine
+ * misst Text mit genau diesen Dateien (Cfile:1146720). Ohne sie hätte die
+ * Original-Lua keine Textmaße — und rechnete ihr halbes Layout falsch.
+ */
+async function loadGameFonts(): Promise<Uint8Array[]> {
+  if (!source) return []
+  const out: Uint8Array[] = []
+  try {
+    for (const entry of await source.list('fonts')) {
+      if (!/\.ttf$/i.test(entry.name)) continue
+      const raf = await source.open(`fonts/${entry.name}`)
+      out.push(new Uint8Array(await raf.slice(0, raf.size)))
+    }
+  } catch (err) {
+    log(`Schriften: ${err instanceof Error ? err.message : err}`)
+  }
+  return out
 }
 
 /** RULEUCC_*-Fähigkeiten aus General.CommandCaps (bestimmt die Order-Buttons). */

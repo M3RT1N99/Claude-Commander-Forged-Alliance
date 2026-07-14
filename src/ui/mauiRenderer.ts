@@ -30,6 +30,7 @@ interface MauiControl {
   text: string | false
   color: string | false
   fontSize: number | false
+  fontFamily: string | false
   centerH: boolean
   centerV: boolean
 }
@@ -108,6 +109,10 @@ export class MauiRenderer {
         el.textContent = c.text === false ? '' : String(c.text)
         el.style.color = c.color ? argb(c.color) : '#ffffff'
         el.style.fontSize = `${c.fontSize || 12}px`
+        // Dieselbe Schrift, mit der die Lua ihr Layout gerechnet hat (die TTF
+        // aus <GameDir>/fonts, per FontFace registriert). Eine Ersatzschrift
+        // würde anders breit laufen als die Zahlen im Layout.
+        if (c.fontFamily) el.style.fontFamily = `"${c.fontFamily}"`
         el.style.lineHeight = `${c.height}px`
         el.style.whiteSpace = 'pre'
         el.style.textAlign = c.centerH ? 'center' : 'left'

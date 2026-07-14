@@ -214,17 +214,37 @@ local function chainOf(c)
   return chain
 end
 
+-- Ein Control ZEICHNET nur, wenn es etwas zu zeichnen hat: ein Bitmap oder ein
+-- Text. Group, Frame und Border sind Behaelter — die Engine zieht ihr Layout nur
+-- dann, wenn es jemand braucht (ein Kind, das sich daran ausrichtet).
+--
+-- Das ist kein Detail: borders_mini.lua zerstoert in der Mini-Ansicht saemtliche
+-- Rahmen-Bitmaps und laesst die leere `borderGroup` ohne Layout stehen. Im
+-- Original faellt das nie auf, weil niemand ihre Zahlen zieht. Wer im Snapshot
+-- pauschal JEDES Control anfasst, meldet dort einen Fehler, den es nicht gibt.
+local function draws(c)
+  return c.__kind == 'bitmap' or c.__kind == 'text'
+end
+
+-- Die vier Zahlen eines Controls — oder nil, wenn das Layout unvollstaendig ist
+-- ("circular dependency", lazyvar.lua:21: weniger als vier der sechs Variablen
+-- gesetzt).
+local function bounds(c)
+  local ok, l, t, r, b = pcall(function() return c.Left(), c.Top(), c.Right(), c.Bottom() end)
+  if not ok then return nil end
+  return l, t, r, b
+end
+
 function __mauiSnapshot()
   local out = {}
   local n = 0
   for _, c in pairs(__mauiControls) do
-    -- Laeuft das Ziehen der Layout-Zahlen in "circular dependency"
-    -- (lazyvar.lua:21), hat jemand weniger als vier der sechs Layout-Variablen
-    -- gesetzt. Das Control wird uebersprungen und EINMAL laut gemeldet — nicht
-    -- verschwiegen, aber es reisst auch nicht die restliche UI mit.
     local laidOut = false
-    if not c.__destroyed and visible(c) then
-      laidOut = pcall(function() return c.Left(), c.Top() end)
+    if not c.__destroyed and draws(c) and visible(c) then
+      laidOut = bounds(c) ~= nil
+      -- Ein SICHTBARES Bitmap oder Text ohne Layout ist ein echter Fehler: die
+      -- Engine wuerde es zeichnen wollen und haette keine Koordinaten. Einmal
+      -- laut melden, dann ueberspringen — nicht die ganze Seite mitreissen.
       if not laidOut and not __mauiBroken[c.__id] then
         __mauiBroken[c.__id] = true
         WARN('maui-Layout unvollstaendig, Control uebersprungen: ' .. chainOf(c))
@@ -248,6 +268,7 @@ function __mauiSnapshot()
         text = c.__text or false,
         color = c.__color or false,
         fontSize = c.__fontSize or false,
+        fontFamily = c.__fontFamily or false,
         centerH = c.__centerH == true,
         centerV = c.__centerV == true,
       }
@@ -279,10 +300,12 @@ end
 function __mauiHitTest(x, y)
   local best = nil
   for _, c in pairs(__mauiControls) do
-    if not c.__destroyed and not c.__hidden and c.__hitTest ~= false then
-      local l, t = c.Left(), c.Top()
-      local r, b = c.Right(), c.Bottom()
-      if x >= l and x < r and y >= t and y < b then
+    if not c.__destroyed and visible(c) and c.__hitTest ~= false then
+      -- Ohne Layout gibt es keine Flaeche, also auch keinen Treffer. Das ist
+      -- kein Fehlerfall: die Mini-Ansicht laesst leere Gruppen ohne Layout
+      -- stehen (borders_mini.lua), und die Engine fragt sie nie.
+      local l, t, r, b = bounds(c)
+      if l and x >= l and x < r and y >= t and y < b then
         if not best or c.Depth() > best.Depth() then best = c end
       end
     end
