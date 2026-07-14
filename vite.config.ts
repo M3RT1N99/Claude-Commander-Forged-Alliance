@@ -78,4 +78,14 @@ function gameFileServer(): Plugin {
 
 export default defineConfig({
   plugins: [gameFileServer()],
+  server: {
+    // Auf allen Adressen lauschen, nicht nur localhost: dann geht BEIDES —
+    // http://localhost:5173 auf diesem Rechner und http://<LAN-IP>:5173 von
+    // jedem anderen Gerät im Netz (Vite druckt die Adresse beim Start).
+    //
+    // Achtung: damit ist im Dev-Modus auch /gamefiles im lokalen Netz lesbar —
+    // also die Spielinstallation. Im Produktions-Build gibt es die Middleware
+    // nicht; dort kommen die Dateien aus dem Ordner, den der Nutzer selbst wählt.
+    host: true,
+  },
 })

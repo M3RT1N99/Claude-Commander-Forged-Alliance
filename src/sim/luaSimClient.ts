@@ -78,14 +78,10 @@ export class LuaSimClient {
     // soll ausgeführt werden, nicht in TS/HTML nachgebaut — sie hier
     // auszuschließen hat genau das verhindert. Der Sim-Host lädt ohnehin nur,
     // was importiert wird; das Vorladen kostet nur den VFS-Lesevorgang.
-    const files = new Map<string, Uint8Array>()
-    const paths = vfs.find((p) => p.startsWith('lua/') && p.endsWith('.lua'))
-    const BATCH = 64
-    for (let i = 0; i < paths.length; i += BATCH) {
-      const batch = paths.slice(i, i + BATCH)
-      const bytes = await Promise.all(batch.map((p) => vfs.read(p)))
-      batch.forEach((p, j) => files.set(p, bytes[j]!))
-    }
+    // EIN Archiv-Zugriff pro zusammenhängendem Block statt zwei pro Datei
+    // (vfs.readMany): `lua/**` liegt in lua.scd (7 MB) und mohodata.scd — am
+    // Stück gelesen kostet das nichts.
+    const files = await vfs.readMany(vfs.find((p) => p.startsWith('lua/') && p.endsWith('.lua')))
     const worker = new Worker(new URL('./luaSimWorker.ts', import.meta.url), { type: 'module' })
     const client = new LuaSimClient(worker, vfs)
     const booted = new Promise<void>((res) => {

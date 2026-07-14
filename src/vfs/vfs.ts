@@ -94,6 +94,38 @@ export class GameVfs {
     return new TextDecoder('utf-8').decode(await this.read(path))
   }
 
+  /**
+   * Viele Dateien auf einmal — der Weg für alles, was der Boot braucht.
+   *
+   * Einzeln gelesen kostet jede Datei zwei Zugriffe aufs Archiv (Header, Daten).
+   * Beim Start sind das ~19.000 Zugriffe für Lua + UI-Texturen. Hier werden die
+   * Pfade nach Archiv gruppiert und jedes Archiv am Stück gelesen
+   * (ZipArchive.readMany).
+   *
+   * Fehlende Pfade fehlen auch im Ergebnis — kein Werfen: die Skin-Kette der UI
+   * fragt planmäßig nach Dateien, die es nicht gibt.
+   */
+  async readMany(paths: string[]): Promise<Map<string, Uint8Array>> {
+    const byZip = new Map<ZipArchive, { key: string; entry: ZipEntry }[]>()
+    for (const path of paths) {
+      const file = this.files.get(this.normalize(path))
+      if (!file) continue
+      const list = byZip.get(file.zip)
+      if (list) list.push({ key: this.normalize(path), entry: file.entry })
+      else byZip.set(file.zip, [{ key: this.normalize(path), entry: file.entry }])
+    }
+
+    const out = new Map<string, Uint8Array>()
+    for (const [zip, list] of byZip) {
+      const bytes = await zip.readMany(list.map((l) => l.entry))
+      for (const { key, entry } of list) {
+        const b = bytes.get(entry)
+        if (b) out.set(key, b)
+      }
+    }
+    return out
+  }
+
   /** Alle Pfade (lowercase), die das Prädikat erfüllen. */
   find(predicate: (path: string) => boolean): string[] {
     const out: string[] = []

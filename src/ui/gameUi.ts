@@ -53,6 +53,7 @@ export class GameUi {
     // Die Schriften des Spiels (<GameDir>/fonts). Sie liefern die Metrik, mit der
     // die Original-Lua ihr Text-Layout rechnet (text.lua:39/47) — und sie werden
     // gleich auch gerendert, statt sie durch eine Systemschrift zu ersetzen.
+    const tStart = performance.now()
     const fonts = new FontBook()
     for (const bytes of fontFiles) {
       try {
@@ -70,33 +71,38 @@ export class GameUi {
     // nichts mit dem Filter zu tun hat.
     // Dazu die .bp-Dateien: LoadBlueprints() führt sie als Lua aus, und
     // `unitview.lua`/`construction.lua` brauchen `__blueprints`.
-    const bpPaths = vfs.find((p) => /^units\/[^/]+\/[^/]+_unit\.bp$/.test(p))
-    const luaPaths = [...vfs.find((p) => p.endsWith('.lua')), ...bpPaths]
-    const files = new Map<string, Uint8Array>()
-    const BATCH = 64
-    for (let i = 0; i < luaPaths.length; i += BATCH) {
-      const batch = luaPaths.slice(i, i + BATCH)
-      const bytes = await Promise.all(batch.map((p) => vfs.read(p)))
-      batch.forEach((p, j) => files.set(p, bytes[j]!))
-    }
+    const bpPaths = mode === 'frontend' ? [] : vfs.find((p) => /^units\/[^/]+\/[^/]+_unit\.bp$/.test(p))
+    // Die Unit-SKRIPTE (`units/<id>/<id>_script.lua`) gehören der Sim, nicht der
+    // UI: die Engine lädt sie über `Blueprint.Script`, wenn eine Unit entsteht —
+    // keine einzige Datei unter `lua/ui/**` importiert eine davon (geprüft).
+    // Sie liegen verstreut in units.scd (1 GB) und kosteten den UI-Boot allein
+    // ~700 Archiv-Zugriffe.
+    const luaPaths = [
+      ...vfs.find((p) => p.endsWith('.lua') && !p.startsWith('units/')),
+      ...bpPaths,
+    ]
+    // EIN Zugriff pro Archiv-Bereich statt zwei pro Datei (vfs.readMany). Die
+    // Lua liegt in kleinen Archiven (lua.scd 7 MB, mohodata 0,5 MB) — sie am
+    // Stück zu lesen kostet nichts; sie einzeln zu lesen kostete beim Start
+    // Sekunden (und über HTTP tausende Requests).
+    const files = await vfs.readMany(luaPaths)
 
     // Die maui-Lua fragt Texturmaße SYNCHRON ab (GetTextureDimensions, weil ein
     // Bitmap sich ohne Layout-Helfer nach seiner DDS bemisst). Das VFS liest
     // aber asynchron — also werden die Maße der UI-Texturen vorher ermittelt.
     const uiTextures = vfs.find((p) => p.startsWith('textures/ui/') && p.endsWith('.dds'))
     const dims = new Map<string, [number, number]>()
-    for (let i = 0; i < uiTextures.length; i += BATCH) {
-      const batch = uiTextures.slice(i, i + BATCH)
-      const bytes = await Promise.all(batch.map((p) => vfs.read(p)))
-      batch.forEach((p, j) => {
+    {
+      const bytes = await vfs.readMany(uiTextures)
+      for (const [p, b] of bytes) {
         try {
-          const dds = parseDds(bytes[j]!)
+          const dds = parseDds(b)
           dims.set(p, [dds.width, dds.height])
         } catch {
           // Kaputte/unbekannte DDS: nicht raten — die Lua bekommt nil und der
           // Skin-Fallback greift.
         }
-      })
+      }
     }
     log(`UI: ${files.size} Lua-Dateien, ${dims.size} Texturmaße`)
 
@@ -144,7 +150,7 @@ export class GameUi {
     const renderer = new MauiRenderer(host, vfs)
     renderer.update()
     const count = Number(host.eval('return table.getn(__mauiSnapshot())'))
-    log(`UI: ${count} maui-Controls aus der Original-Lua`)
+    log(`UI: ${count} maui-Controls aus der Original-Lua (${Math.round(performance.now() - tStart)} ms)`)
     return new GameUi(host, renderer)
   }
 

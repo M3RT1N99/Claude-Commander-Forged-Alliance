@@ -184,11 +184,28 @@ async function startFrontEndUi(): Promise<void> {
     gameUi.attachEvents()
     setIngame(true)
 
+    // Ein Fehler in einem UI-Skript darf die Bild-Pumpe NICHT anhalten — sonst
+    // friert nach dem ersten fehlenden Engine-Teil die ganze Oberfläche ein.
+    // Die Engine macht es genauso: `CMauiControl::Frame` ruft das Lua-OnFrame
+    // über RunScript, ein Fehler wird protokolliert, das Bild läuft weiter.
+    // Gemeldet wird er trotzdem — jeder verschiedene Fehler genau einmal.
+    const seenErrors = new Set<string>()
     let last = performance.now()
     const tick = (now: number): void => {
       const delta = Math.min((now - last) / 1000, 0.1)
       last = now
-      gameUi?.render(delta)
+      try {
+        gameUi?.render(delta)
+      } catch (err) {
+        const msg = (err instanceof Error ? err.message : String(err))
+          .replace(/\[string "[\s\S]*?"\]/g, '')
+          .split('\n')[0]!
+          .slice(0, 300)
+        if (!seenErrors.has(msg)) {
+          seenErrors.add(msg)
+          log(`UI-FEHLER: ${msg}`)
+        }
+      }
       frontEndFrame = requestAnimationFrame(tick)
     }
     cancelAnimationFrame(frontEndFrame)
