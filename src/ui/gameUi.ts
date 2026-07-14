@@ -183,6 +183,24 @@ export class GameUi {
   }
 
   /**
+   * Fenstergröße geändert → der Root-Frame zieht nach.
+   *
+   * Die Engine tut genau das: `GetFrame(0)` trägt die Fenstermaße, und das
+   * ganze Layout der Original-UI hängt daran (die Panels rechnen gegen
+   * `gameParent`, das den Frame füllt). Ohne diesen Schritt bleibt die UI auf
+   * der Größe stehen, die beim Start galt — und sitzt nach dem Umschalten in
+   * den Vollbild-Spielmodus an der falschen Stelle.
+   */
+  resize(width: number, height: number): void {
+    this.host.eval(`
+      local f = GetFrame(0)
+      f.Width:Set(${Math.max(1, Math.round(width))})
+      f.Height:Set(${Math.max(1, Math.round(height))})
+    `)
+    this.renderer.update()
+  }
+
+  /**
    * Ein Klick in die Welt. Was er bedeutet, steht in `commandmode.lua` — die
    * Engine fragt dort nach (src/ui/worldCommands.ts), sie entscheidet nicht.
    */

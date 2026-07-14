@@ -223,7 +223,15 @@ end
 -- Original faellt das nie auf, weil niemand ihre Zahlen zieht. Wer im Snapshot
 -- pauschal JEDES Control anfasst, meldet dort einen Fehler, den es nicht gibt.
 local function draws(c)
-  return c.__kind == 'bitmap' or c.__kind == 'text'
+  -- Ein Bitmap OHNE Textur und ohne Farbe zeichnet nichts. Die Original-UI legt
+  -- solche Platzhalter an (Bitmap(parent) ohne Datei, Textur kommt spaeter per
+  -- SetTexture) — die Engine rendert sie nicht, also darf auch bei uns weder ein
+  -- DOM-Knoten noch ein Maus-Treffer daraus entstehen.
+  if c.__kind == 'bitmap' then
+    return (c.__texture ~= nil and c.__texture ~= false)
+      or (c.__solidColor ~= nil and c.__solidColor ~= false)
+  end
+  return c.__kind == 'text'
 end
 
 -- Die vier Zahlen eines Controls — oder nil, wenn das Layout unvollstaendig ist

@@ -166,6 +166,33 @@ body.sidebar-collapsed {
   --sidebar-w: 0px;
 }
 
+/* --- Spielmodus: das Spiel bekommt den ganzen Bildschirm ------------------- */
+/*
+ * Nicht Kosmetik, sondern 1:1: die Original-UI rechnet ihr Layout gegen den
+ * Root-Frame (= Fenstergröße). Läge daneben noch ein Web-Rahmen, säße das
+ * Orders-Panel (links 17) hinter der Seitenleiste — im Original füllt das Spiel
+ * den Bildschirm. Der Launcher-Rahmen verschwindet also, sobald eine Session
+ * läuft (ESC bringt ihn zurück, bis das echte Hauptmenü da ist).
+ */
+body.ingame #menu,
+body.ingame #sidebar,
+body.ingame #topbar {
+  display: none;
+}
+
+body.ingame {
+  --rail-w: 0px;
+  --sidebar-w: 0px;
+}
+
+/* Die Spiel-UI (maui-Baum + Minimap/Icons) gehört ins Spiel. Außerhalb des
+   Spielmodus liegt der Launcher-Rahmen dort — beides übereinander wäre nur
+   Matsch. */
+body:not(.ingame) #maui-root,
+body:not(.ingame) #hud {
+  display: none;
+}
+
 #sidebar h2 {
   font-size: 12px;
   text-transform: uppercase;

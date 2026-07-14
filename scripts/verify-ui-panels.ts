@@ -145,6 +145,29 @@ check(controls > 50, `${controls} maui-Controls mit vollständigem Layout`)
 const broken = Number(host.eval('local n = 0 for _ in pairs(__mauiBroken) do n = n + 1 end return n'))
 check(broken === 0, `kein Control ohne Layout (übersprungen: ${broken})`)
 
+// Kein Panel darf KOMPLETT aus dem Bild fallen. Die Original-UI rechnet ihr
+// Layout gegen den Root-Frame (= Fenstergröße); säße daneben noch ein
+// Web-Rahmen, läge das Orders-Panel (links 17, unten 0) hinter der Seitenleiste
+// und wäre unsichtbar — deshalb läuft die Sandbox im Vollbild-Spielmodus.
+//
+// Teilweise überstehende Controls sind KEIN Fehler: die Klammern hängen im
+// Original absichtlich über den Rand (orders_mini.lua:22 setzt die Klammer auf
+// -17). Wer das verbietet, nagelt eine Lüge fest.
+const outside = host.eval(`
+  local bad = {}
+  for _, c in ipairs(__mauiSnapshot()) do
+    local right, bottom = c.left + c.width, c.top + c.height
+    if right <= 0 or bottom <= 0 or c.left >= 1920 or c.top >= 1080 then
+      bad[table.getn(bad) + 1] = c.name .. '(' .. c.kind .. ') @' .. math.floor(c.left) .. ',' .. math.floor(c.top)
+    end
+  end
+  return table.concat(bad, '; ')
+`) as string
+check(
+  outside === '',
+  `kein Control fällt komplett aus dem Bild (1920×1080)${outside ? ' — draußen: ' + outside : ''}`,
+)
+
 console.log('\n== Hit-Test: die freie Spielfläche gehört der Welt ==')
 // Im Original ist die Spielwelt selbst ein Control (CUIWorldView) INNERHALB der
 // mapGroup — in der Tiefenordnung also ÜBER den unsichtbaren Vollbild-Containern

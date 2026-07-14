@@ -368,11 +368,30 @@ async function loadSandboxAssets(id: string): Promise<SandboxUnitAssets | null> 
   return bundle
 }
 
+/**
+ * Spielmodus: der Launcher-Rahmen (Menü, Seitenleiste, Titelzeile) verschwindet,
+ * das Spiel bekommt den ganzen Bildschirm.
+ *
+ * Das ist keine Kosmetik. Die Original-UI rechnet ihr komplettes Layout gegen
+ * den Root-Frame — und der ist die FENSTERGRÖSSE. Bliebe der Web-Rahmen stehen,
+ * säße das Orders-Panel (links 17, unten 0) hinter der Seitenleiste. Im Original
+ * füllt das Spiel den Bildschirm, also tut es das hier auch.
+ */
+function setIngame(on: boolean): void {
+  if (document.body.classList.contains('ingame') === on) return
+  document.body.classList.toggle('ingame', on)
+  // Der Viewer bemisst sich am Fenster, die UI-VM am Root-Frame — beide müssen
+  // den neuen Platz sehen.
+  window.dispatchEvent(new Event('resize'))
+  gameUi?.resize(window.innerWidth, window.innerHeight)
+}
+
 async function startSandbox(mapFolder: string): Promise<void> {
   if (!vfs || !source) return
   try {
     sandbox = null
     setMode('sandbox')
+    setIngame(true)
     await loadMap(mapFolder)
 
     // Läuft schon eine Sim? Dann zurücksetzen, statt eine zweite ACU auf die
@@ -639,6 +658,19 @@ window.addEventListener('keydown', (e) => {
     spaceHeld = true
     e.preventDefault()
   }
+  // ESC verlässt den Spielmodus und bringt den Launcher zurück. Ein
+  // Übergangsweg: sobald das echte Hauptmenü läuft (lua/ui/menus/main.lua),
+  // gehört ESC der Original-UI.
+  if (e.code === 'Escape' && document.body.classList.contains('ingame')) {
+    setIngame(false)
+    log('Launcher (ESC) — die Sandbox läuft weiter')
+  }
+})
+
+// Die Fenstergröße ändert sich → der Root-Frame der UI-VM zieht nach, sonst
+// bleibt die Original-UI auf der Größe von vorhin stehen.
+window.addEventListener('resize', () => {
+  gameUi?.resize(window.innerWidth, window.innerHeight)
 })
 window.addEventListener('keyup', (e) => {
   if (e.code === 'Space') spaceHeld = false
