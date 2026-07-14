@@ -10,6 +10,12 @@ import { MauiRenderer } from './mauiRenderer'
 import { findFiles } from '../vfs/glob'
 import { parseDds } from '../formats/dds'
 import { FontBook } from './fonts'
+import {
+  worldClick,
+  getCommandMode,
+  type CommandMode,
+  type WorldCommandSim,
+} from './worldCommands'
 import type { GameVfs } from '../vfs/vfs'
 import type { EcoSnapshot } from './hud'
 import type { LuaUnitSnapshot } from '../sim/luaSimClient'
@@ -168,6 +174,34 @@ export class GameUi {
   /** Pro Frame: den maui-Baum ins DOM schreiben. */
   render(): void {
     this.renderer.update()
+  }
+
+  /**
+   * Ein Klick in die Welt. Was er bedeutet, steht in `commandmode.lua` — die
+   * Engine fragt dort nach (src/ui/worldCommands.ts), sie entscheidet nicht.
+   */
+  worldClick(
+    sim: WorldCommandSim,
+    hit: { x: number; z: number },
+    elevation: (x: number, z: number) => number,
+    queue = false,
+  ): Promise<string | null> {
+    return worldClick(this.host, sim, hit, elevation, { queue })
+  }
+
+  /** Der aktuelle Command-Mode (was der nächste Klick in der Welt tut). */
+  commandMode(): CommandMode {
+    return getCommandMode(this.host)
+  }
+
+  /** Command-Mode abbrechen — das tut im Original der Rechtsklick. */
+  cancelCommandMode(): void {
+    this.host.eval(`import('/lua/ui/game/commandmode.lua').EndCommandMode(true)`)
+  }
+
+  /** Die Naht für Befehle, die direkt an eine Unit gehen (SetFireState, SetPaused …). */
+  connectSim(send: (name: string, ids: number[], value: unknown) => void): void {
+    this.host.setGlobal('__uiSimCommand', send)
   }
 
   /**

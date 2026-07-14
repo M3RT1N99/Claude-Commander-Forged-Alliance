@@ -128,6 +128,35 @@ export class LuaSimClient {
   }
 
   /**
+   * Bau-Befehl: Baustelle setzen und dem Bauer den Auftrag geben. Liefert die ID
+   * der Baustelle.
+   *
+   * Die Engine tut genau das: `Sim::CreateUnit(params, beingBuilt = 1)` und
+   * danach `OnStartBuild(target, 'MobileBuild')` auf dem Bauer. Der Fortschritt
+   * entsteht dann von selbst im Beat (`buildRate/BuildTime · ResourceConsumed ·
+   * 0.1`, CBuildTaskHelper::UpdateWorkProgress @0x5f5f2c) — hier wird NICHTS
+   * nachgerechnet.
+   */
+  async build(
+    builderId: number,
+    id: string,
+    pos: { x: number; y: number; z: number },
+    army = 1,
+  ): Promise<number> {
+    const scriptPath = `units/${id}/${id}_script.lua`
+    const scriptBytes = this.vfs.exists(scriptPath) ? await this.vfs.read(scriptPath) : null
+    const bpPath = `units/${id}/${id}_unit.bp`
+    const bpBytes = this.vfs.exists(bpPath) ? await this.vfs.read(bpPath) : null
+    const reqId = this.nextReq++
+    return new Promise<number>((resolve, reject) => {
+      this.spawnPending.set(reqId, { resolve, reject })
+      this.worker.postMessage({
+        type: 'build', reqId, builderId, id, scriptPath, scriptBytes, bpBytes, pos, army,
+      })
+    })
+  }
+
+  /**
    * Setzt die Sitzung zurück: frischer Lua-Host, frische Engine, neues Gelände.
    * Ohne das stapeln sich beim zweiten Sandbox-Start ACUs — und mit ihnen der
    * doppelte Startvorrat aus GiveInitialResources.

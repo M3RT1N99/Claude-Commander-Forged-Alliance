@@ -372,6 +372,7 @@ async function startSandbox(mapFolder: string): Promise<void> {
     // GiveInitialResources) — und mit dem Gelände der NEUEN Karte.
     if (luaSim && currentScmap) {
       luaUnits.length = 0
+      knownSceneUnits.clear()
       await luaSim.reset({
         data: currentScmap.heightmap,
         width: currentScmap.width,
@@ -426,6 +427,11 @@ async function startSandbox(mapFolder: string): Promise<void> {
     gameUi?.dispose()
     gameUi = await GameUi.create(vfs, await loadGameFonts(), log)
     gameUi.attachEvents()
+    // Die Naht, über die Befehle der UI in die Sim gehen. Ohne sie KNALLT jeder
+    // Befehl — statt still zu verpuffen (ui-globals.lua: __uiSimCommand).
+    gameUi.connectSim((name, ids, value) => {
+      log(`Befehl an die Sim: ${name}(${ids.join(',')}) = ${String(value)}`)
+    })
 
     // Beide Frame-Hooks an EINER Stelle registrieren, nach dem Karten-Laden
     // (setMap → clearContent wirft alle Hooks weg). Sie vorher oder verteilt zu
@@ -486,8 +492,17 @@ window.addEventListener('pointerup', (e) => {
   boxStart = null
   selectBox.hidden = true
   const moved = Math.hypot(e.clientX - start.x, e.clientY - start.y)
-  // Auswahl über die Lua-Engine (Klick, keine Box-Auswahl).
-  if (moved <= 5 && luaSim && luaUnits.length > 0) {
+  if (moved > 5 || !luaSim) return
+
+  // Was ein Linksklick in der Welt bedeutet, entscheidet die UI-Lua, nicht wir:
+  // steht ein Command-Mode an (Bau-Icon geklickt, Move-Button gedrückt), ist der
+  // Klick ein BEFEHL. Sonst ist er eine Auswahl.
+  if (gameUi && gameUi.commandMode().mode !== false) {
+    const hit = viewer.pickTerrain(e.clientX, e.clientY)
+    if (hit) void issueWorldCommand(hit, e.shiftKey)
+    return
+  }
+  if (luaUnits.length > 0) {
     const luaMsg = selectLua(e.clientX, e.clientY)
     if (luaMsg) log(luaMsg)
   }
@@ -495,15 +510,34 @@ window.addEventListener('pointerup', (e) => {
 
 viewportEl.addEventListener('contextmenu', (e) => {
   e.preventDefault()
-  // Selektierte Lua-Engine-Units: Rechtsklick = Move über den Original-Navigator.
-  if (luaSim && hasLuaSelection()) {
-    const hit = viewer.pickTerrain(e.clientX, e.clientY)
-    if (hit) {
-      for (const u of luaUnits) if (u.selected) luaSim.move(u.id, hit.x, hit.z)
-      log(`Move → ${hit.x.toFixed(0)}, ${hit.z.toFixed(0)}`)
-    }
+  if (!luaSim || !gameUi) return
+  // Rechtsklick im Command-Mode bricht ihn ab (commandmode.lua:113
+  // EndCommandMode(true)) — genau wie im Original.
+  if (gameUi.commandMode().mode !== false) {
+    gameUi.cancelCommandMode()
+    log('Befehl abgebrochen')
+    return
   }
+  // Sonst: der Standardbefehl der Weltansicht auf die Auswahl (Move).
+  const hit = viewer.pickTerrain(e.clientX, e.clientY)
+  if (hit) void issueWorldCommand(hit, e.shiftKey)
 })
+
+/**
+ * Klick in die Welt → Befehl. Die Geometrie (Snap, Höhe) rechnet die Engine, die
+ * Bedeutung kommt aus commandmode.lua (src/ui/worldCommands.ts).
+ */
+async function issueWorldCommand(hit: { x: number; z: number }, queue: boolean): Promise<void> {
+  if (!luaSim || !gameUi) return
+  try {
+    const msg = await gameUi.worldClick(luaSim, hit, (x, z) => viewer.heightAt(x, z), queue)
+    if (msg) log(msg)
+  } catch (err) {
+    log(`FEHLER Befehl: ${err instanceof Error ? err.message : err}`)
+  }
+  // Die entstandene Baustelle bekommt ihr Modell über den generischen Nachzug in
+  // luaSimUpdate — die Sim meldet sie im nächsten Beat.
+}
 
 window.addEventListener('keydown', (e) => {
   if (
@@ -695,6 +729,8 @@ async function getLuaSim(): Promise<LuaSimClient> {
   return luaSimBoot
 }
 const luaUnits: LuaSceneUnit[] = []
+/** Welche Sim-Units bereits ein Modell in der Szene haben (Ladevorgang läuft asynchron). */
+const knownSceneUnits = new Set<number>()
 
 // Solange die Sim nicht läuft, gibt es nichts — keine erfundenen Startwerte.
 // Vorrat und Lager entstehen ausschließlich in der Sim: das Lager aus den
@@ -811,7 +847,17 @@ function luaSimUpdate(): void {
   // Der Sim-Zustand geht in die UI-VM; die Original-_BeatFunction (economy.lua:251)
   // rechnet daraus die Anzeige.
   const eco = luaSim.economySnapshot()
-  if (eco && gameUi) gameUi.beat(eco, luaSim.allStates())
+  const states = luaSim.allStates()
+  if (eco && gameUi) gameUi.beat(eco, states)
+
+  // Neue Units aus der Sim (Baustelle, Fabrik-Produkt) bekommen ihr Modell. Die
+  // Sim erzeugt sie; die Szene zieht nach — nicht umgekehrt.
+  for (const s of states) {
+    if (knownSceneUnits.has(s.id)) continue
+    knownSceneUnits.add(s.id)
+    void addLuaUnitToScene(s.id, s.name, { x: s.x, y: s.y, z: s.z })
+  }
+
   for (const u of luaUnits) {
     const s = luaSim.state(u.id)
     if (!s) continue
@@ -825,6 +871,53 @@ function luaSimUpdate(): void {
   }
 }
 
+/**
+ * Modell + Auswahlring einer Sim-Unit in die Szene bringen.
+ *
+ * Die Sim ist die Wahrheit: sie hat die Unit bereits erzeugt (ACU beim Start,
+ * Baustelle beim Bau-Befehl, später die Fabrik-Produktion). Hier entsteht nur
+ * ihr sichtbares Gegenstück.
+ */
+async function addLuaUnitToScene(
+  uid: number,
+  bpId: string,
+  pos: { x: number; y: number; z: number },
+): Promise<void> {
+  knownSceneUnits.add(uid)
+  const id = bpId.toLowerCase()
+  const assets = await loadSandboxAssets(id)
+  if (!assets) return
+  const scene = viewer.addUnit(assets.model, assets.textures, currentTeamColor(), assets.shader)
+  const scale = bpGet(assets.bp, 'Display.UniformScale')
+  if (typeof scale === 'number' && scale > 0) scene.mesh.scale.setScalar(scale)
+  scene.mesh.position.set(pos.x, pos.y, pos.z)
+  const ring = new THREE.Mesh(
+    luaRingGeo,
+    new THREE.MeshBasicMaterial({ color: 0x44ff66, transparent: true, opacity: 0.9, depthTest: false }),
+  )
+  ring.visible = false
+  ring.renderOrder = 10
+  viewer.addHelper(ring)
+  const strat = bpGet(assets.bp, 'StrategicIconName')
+  const fade = bpGet(assets.bp, 'Display.Mesh.IconFadeInZoom')
+  const name =
+    stripLoc(bpGet(assets.bp, 'General.UnitName')) ??
+    stripLoc(bpGet(assets.bp, 'Description')) ??
+    id.toUpperCase()
+  luaUnits.push({
+    id: uid,
+    bpId: id,
+    mesh: scene.mesh,
+    ring,
+    selected: false,
+    name,
+    army: 1,
+    strategicIcon: typeof strat === 'string' ? strat : 'icon_land_generic',
+    fadeZoom: typeof fade === 'number' && fade > 0 ? fade : 130,
+    caps: readCaps(assets.bp),
+  })
+}
+
 async function spawnViaLua(id: string): Promise<void> {
   if (!vfs) return
   try {
@@ -835,42 +928,8 @@ async function spawnViaLua(id: string): Promise<void> {
     const z = spawnPoint.z
     const y = viewer.heightAt(x, z)
     const uid = await sim.spawn(id, { x, y, z }, 1)
-
-    const assets = await loadSandboxAssets(id)
-    if (!assets) return
-    const scene = viewer.addUnit(assets.model, assets.textures, currentTeamColor(), assets.shader)
-    const scale = bpGet(assets.bp, 'Display.UniformScale')
-    if (typeof scale === 'number' && scale > 0) scene.mesh.scale.setScalar(scale)
-    scene.mesh.position.set(x, y, z)
-    const ring = new THREE.Mesh(
-      luaRingGeo,
-      new THREE.MeshBasicMaterial({ color: 0x44ff66, transparent: true, opacity: 0.9, depthTest: false }),
-    )
-    ring.visible = false
-    ring.renderOrder = 10
-    viewer.addHelper(ring)
-    const strat = bpGet(assets.bp, 'StrategicIconName')
-    const fade = bpGet(assets.bp, 'Display.Mesh.IconFadeInZoom')
-    const maxHp = bpGet(assets.bp, 'Defense.MaxHealth')
-    const name =
-      stripLoc(bpGet(assets.bp, 'General.UnitName')) ?? stripLoc(bpGet(assets.bp, 'Description')) ?? id.toUpperCase()
-    luaUnits.push({
-      id: uid,
-      bpId: id.toLowerCase(),
-      mesh: scene.mesh,
-      ring,
-      selected: false,
-      name,
-      army: 1,
-      strategicIcon: typeof strat === 'string' ? strat : 'icon_land_generic',
-      fadeZoom: typeof fade === 'number' && fade > 0 ? fade : 130,
-      caps: readCaps(assets.bp),
-    })
-
-    log(
-      `✓ ${name.toUpperCase()} über Original-Unit.lua (Worker) gespawnt — ` +
-        `HP ${typeof maxHp === 'number' ? maxHp : '?'} — Linksklick wählt, Rechtsklick bewegt`,
-    )
+    await addLuaUnitToScene(uid, id, { x, y, z })
+    log(`✓ ${id.toUpperCase()} über die Original-Unit.lua gespawnt — Linksklick wählt`)
   } catch (err) {
     log(`FEHLER Lua-Spawn: ${err instanceof Error ? err.message : err}`)
   }

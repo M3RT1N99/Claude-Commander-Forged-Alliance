@@ -173,29 +173,10 @@ function __finishUnit(id, builderId)
 end
 
 -- Alle Units in einem Aufruf lesen (ein Eval pro Beat für den Renderer/Worker).
-function __readAllUnits()
-  local out = {}
-  local n = 0
-  for id, u in pairs(__units) do
-    local p = u.__pos or { 0, 0, 0 }
-    n = n + 1
-    out[n] = {
-      id = id,
-      name = (u.__bp and u.__bp.BlueprintId) or '?',
-      x = p[1], y = p[2], z = p[3],
-      heading = u.__heading or 0,
-      health = u.__health or 0,
-      maxHealth = u:GetMaxHealth(),
-      moving = (u.__goal ~= nil and u.__goal ~= false),
-      fraction = u.__fraction or 1,
-    }
-  end
-  return out
-end
-
-function __readUnit(id)
-  local u = __units[id]
-  if not u then return nil end
+-- EIN Zustandsabbild einer Unit. Frueher gab es zwei — __readUnit ohne
+-- fraction/moving, __readAllUnits ohne mesh. Zwei Abbilder derselben Sache
+-- laufen garantiert auseinander; wer dann welches liest, entscheidet der Zufall.
+local function readRow(id, u)
   local p = u.__pos or { 0, 0, 0 }
   return {
     id = id,
@@ -204,6 +185,24 @@ function __readUnit(id)
     heading = u.__heading or 0,
     health = u.__health or 0,
     maxHealth = u:GetMaxHealth(),
+    moving = (u.__goal ~= nil and u.__goal ~= false),
+    fraction = u.__fraction or 1,
     mesh = u.__meshBp,
   }
+end
+
+function __readAllUnits()
+  local out = {}
+  local n = 0
+  for id, u in pairs(__units) do
+    n = n + 1
+    out[n] = readRow(id, u)
+  end
+  return out
+end
+
+function __readUnit(id)
+  local u = __units[id]
+  if not u then return nil end
+  return readRow(id, u)
 end

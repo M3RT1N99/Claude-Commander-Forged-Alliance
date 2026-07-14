@@ -11,7 +11,7 @@
  */
 import { LuaHost } from '../lua/host'
 import { installEngine, beat, type Engine } from '../lua/engine'
-import { loadUnitBlueprint, spawnLuaUnit } from '../lua/unitFactory'
+import { loadUnitBlueprint, spawnLuaUnit, spawnBuildSite } from '../lua/unitFactory'
 import { setTerrainSource } from '../lua/engineGlobals'
 import { Heightfield, type HeightfieldData } from './terrain'
 
@@ -32,6 +32,19 @@ type InMsg =
   | { type: 'move'; id: number; x: number; z: number }
   | { type: 'stop'; id: number }
   | { type: 'reset'; terrain: HeightfieldData }
+  // Ein Bau-Befehl: Baustelle setzen (CreateUnit mit beingBuilt=1, wie
+  // Sim::CreateUnit es tut) und dem Bauer den Auftrag geben.
+  | {
+      type: 'build'
+      reqId: number
+      builderId: number
+      id: string
+      scriptPath: string
+      scriptBytes: Uint8Array | null
+      bpBytes: Uint8Array | null
+      pos: Vec3
+      army: number
+    }
 
 ctx.onmessage = async (e: MessageEvent<InMsg>): Promise<void> => {
   const msg = e.data
@@ -64,6 +77,18 @@ ctx.onmessage = async (e: MessageEvent<InMsg>): Promise<void> => {
       if (msg.scriptBytes && !host.hasFile(msg.scriptPath)) host.addFile(msg.scriptPath, msg.scriptBytes)
       if (msg.bpBytes) loadUnitBlueprint(host, msg.id, msg.bpBytes)
       const uid = spawnLuaUnit(host, msg.id, msg.pos, msg.army)
+      ctx.postMessage({ type: 'spawned', reqId: msg.reqId, uid })
+    } catch (err) {
+      ctx.postMessage({ type: 'spawnError', reqId: msg.reqId, error: (err as Error).message })
+    }
+  } else if (msg.type === 'build') {
+    try {
+      if (msg.scriptBytes && !host.hasFile(msg.scriptPath)) host.addFile(msg.scriptPath, msg.scriptBytes)
+      if (msg.bpBytes) loadUnitBlueprint(host, msg.id, msg.bpBytes)
+      // Reihenfolge wie in der Engine: erst die Baustelle (Sim::CreateUnit mit
+      // beingBuilt=1), dann der Auftrag an den Bauer (OnStartBuild/'MobileBuild').
+      const uid = spawnBuildSite(host, msg.id, msg.pos, msg.army)
+      host.eval(`__issueBuildTask(${msg.builderId}, ${uid})`)
       ctx.postMessage({ type: 'spawned', reqId: msg.reqId, uid })
     } catch (err) {
       ctx.postMessage({ type: 'spawnError', reqId: msg.reqId, error: (err as Error).message })

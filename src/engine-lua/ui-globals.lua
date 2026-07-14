@@ -370,6 +370,45 @@ local function sendSim(name, units, value)
   __uiSimCommand(name, idsOf(units), value)
 end
 
+-- === Bau-Vorlagen ===
+--
+-- Die Engine haelt EINE aktive Vorlage (eine Liste aus Blueprint + Versatz), die
+-- die Weltansicht beim naechsten Klick als Gruppe setzt. construction.lua:946
+-- setzt sie, commandmode.lua:120 raeumt sie beim Abbruch weg.
+__uiBuildTemplate = false
+
+function SetActiveBuildTemplate(template)
+  __uiBuildTemplate = template or false
+end
+
+function GetActiveBuildTemplate()
+  return __uiBuildTemplate or nil
+end
+
+function ClearBuildTemplates()
+  __uiBuildTemplate = false
+end
+
+-- === Befehls-Rueckmeldung in der Welt ===
+--
+-- AddCommandFeedbackBlip(spec, duration): die Engine setzt ein kurzlebiges Mesh
+-- an die Zielposition (commandmode.lua:133-176 — Fahne, Fadenkreuz, Bau-Flagge).
+-- Das Zeichnen ist Renderer-Arbeit; hier wird der Auftrag gefuehrt, damit der
+-- Renderer ihn abholen kann. Erfunden wird nichts: Position, Mesh und Textur
+-- kommen aus der Lua.
+__uiBlips = {}
+
+function AddCommandFeedbackBlip(spec, duration)
+  __uiBlips[table.getn(__uiBlips) + 1] = { spec = spec, duration = duration }
+end
+
+-- Der Renderer holt die aufgelaufenen Blips ab (und leert die Liste).
+function __uiTakeBlips()
+  local out = __uiBlips
+  __uiBlips = {}
+  return out
+end
+
 -- === Klang ===
 --
 -- PlaySound(sound) nimmt genau das Sound{}-Objekt aus dem Blueprint
