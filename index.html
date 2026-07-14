@@ -13,8 +13,28 @@
     </header>
 
     <main id="layout">
+      <nav id="menu" aria-label="Hauptmenü">
+        <button class="menu-item active" data-mode="start">
+          <span class="menu-label">Start</span>
+          <span class="menu-sub">Spieldaten &amp; Status</span>
+        </button>
+        <button class="menu-item" data-mode="sandbox" disabled>
+          <span class="menu-label">Sandbox</span>
+          <span class="menu-sub">Techdemo spielen</span>
+        </button>
+        <button class="menu-item" data-mode="units" disabled>
+          <span class="menu-label">Einheiten <span class="badge" id="badge-units" hidden></span></span>
+          <span class="menu-sub">Modelle &amp; Animationen</span>
+        </button>
+        <button class="menu-item" data-mode="maps" disabled>
+          <span class="menu-label">Karten <span class="badge" id="badge-maps" hidden></span></span>
+          <span class="menu-sub">Gelände &amp; Vorschau</span>
+        </button>
+        <button id="btn-collapse" title="Seitenleiste ein-/ausklappen">⟨ Seitenleiste</button>
+      </nav>
+
       <aside id="sidebar">
-        <section id="connect-panel">
+        <section id="start-panel">
           <h2>Spieldaten</h2>
           <p class="hint">
             Wähle dein Installationsverzeichnis von
@@ -25,34 +45,23 @@
           <button id="btn-resume" hidden>Erneut verbinden</button>
           <input id="input-dir" type="file" webkitdirectory hidden />
           <button id="btn-fallback" hidden>Ordner wählen (Fallback)…</button>
+          <p class="hint">
+            Danach stehen links Sandbox (die Techdemo), der Einheiten-Viewer und
+            der Karten-Viewer bereit.
+          </p>
         </section>
-
-        <nav id="mode-tabs" hidden>
-          <button id="tab-units" class="tab active">Einheiten</button>
-          <button id="tab-maps" class="tab">Karten</button>
-          <button id="tab-sandbox" class="tab">Sandbox</button>
-        </nav>
 
         <section id="sandbox-panel" hidden>
           <h2>Sandbox</h2>
           <p class="hint">
-            Wählt die Karte aus dem Karten-Tab (oder Standard) und spawnt den
-            UEF-ACU am Startpunkt von Armee 1.<br />
-            <strong>Rechtsklick</strong> = Bewegungsbefehl ·
-            <strong>Linksklick</strong> = Auswahl ·
-            <strong>Leertaste + Maus</strong> = Kamera drehen ·
-            Mausrad = Zoom · Mitteltaste = Verschieben
+            Startet die Techdemo auf der gewählten Karte: die ACU steht am
+            Startpunkt von Armee 1 — alles Weitere läuft im Spiel, wie in SCFA
+            (Bau-Menü der ACU, Fabrik, Produktion).<br />
+            <strong>Linksklick</strong> = Auswahl / Gebäude setzen ·
+            <strong>Rechtsklick</strong> = Bewegung / Abbrechen ·
+            <strong>Leertaste + Maus</strong> = Kamera · Mausrad = Zoom
           </p>
           <button id="btn-sandbox-start" class="primary">Sandbox starten</button>
-          <div id="sandbox-spawns" hidden>
-            <button class="spawn" data-unit="uel0201">+ UEF Striker (Panzer)</button>
-            <button class="spawn" data-unit="url0107">+ Cybran Mantis</button>
-            <button class="spawn" data-unit="ual0201">+ Aeon Aurora</button>
-            <button class="spawn" data-unit="xsl0101">+ Seraphim Selen</button>
-            <button class="spawn" data-unit="ueb1103">+ Mass-Extraktor (T1)</button>
-            <button class="spawn" data-unit="ueb1101">+ Energiegenerator (T1)</button>
-            <button class="spawn" data-unit="uel0001">+ UEF ACU</button>
-          </div>
           <div id="sandbox-info"></div>
         </section>
 

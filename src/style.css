@@ -11,6 +11,12 @@
   --text: #cdd6e4;
   --text-dim: #7c8aa5;
   --accent: #3d8bff;
+  /* Die Akzentfarben des Spiels — aus lua/skins/skins.lua:27-28
+     (fontColor FFbadbdb, bodyColor FF6FAFAF), nicht erfunden. */
+  --fa-teal: #badbdb;
+  --fa-teal-dim: #6fafaf;
+  --rail-w: 196px;
+  --sidebar-w: 320px;
 }
 
 html,
@@ -58,8 +64,91 @@ body {
   min-height: 0;
 }
 
+/* --- Hauptmenü: die Navigationsleiste links ------------------------------- */
+
+#menu {
+  width: var(--rail-w);
+  flex-shrink: 0;
+  background: #0d111b;
+  border-right: 1px solid var(--panel-border);
+  display: flex;
+  flex-direction: column;
+  padding: 10px 0;
+}
+
+.menu-item {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 12px 16px 12px 13px;
+  background: transparent;
+  border: none;
+  border-left: 3px solid transparent;
+  border-radius: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.menu-item .menu-label {
+  display: block;
+  font-size: 13px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--text);
+}
+
+.menu-item .menu-sub {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.menu-item:hover:not(:disabled) {
+  background: #131a29;
+  filter: none;
+}
+
+.menu-item.active {
+  background: #14202c;
+  border-left-color: var(--fa-teal-dim);
+}
+
+.menu-item.active .menu-label {
+  color: var(--fa-teal);
+}
+
+.menu-item:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.menu-item .badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  font-size: 10px;
+  letter-spacing: 0;
+  border-radius: 8px;
+  background: #1d2a3d;
+  color: var(--fa-teal-dim);
+  vertical-align: 1px;
+}
+
+#btn-collapse {
+  margin: auto 10px 0;
+  width: auto;
+  background: transparent;
+  border: 1px solid var(--panel-border);
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+/* --- Kontext-Seitenleiste -------------------------------------------------- */
+
 #sidebar {
-  width: 320px;
+  width: var(--sidebar-w);
+  flex-shrink: 0;
   padding: 14px;
   background: var(--panel);
   border-right: 1px solid var(--panel-border);
@@ -67,6 +156,14 @@ body {
   display: flex;
   flex-direction: column;
   gap: 18px;
+}
+
+body.sidebar-collapsed #sidebar {
+  display: none;
+}
+
+body.sidebar-collapsed {
+  --sidebar-w: 0px;
 }
 
 #sidebar h2 {
@@ -126,24 +223,6 @@ select {
 select.inline {
   width: 60%;
   margin-bottom: 0;
-}
-
-#mode-tabs {
-  display: flex;
-  gap: 6px;
-}
-
-.tab {
-  margin-bottom: 0;
-  background: transparent;
-  border: 1px solid var(--panel-border);
-  color: var(--text-dim);
-}
-
-.tab.active {
-  background: #1c4275;
-  border-color: #2d5da0;
-  color: #fff;
 }
 
 #map-info {
@@ -210,7 +289,8 @@ select.inline {
   top: 0;
   right: 0;
   bottom: 0;
-  left: 320px;
+  /* Beginnt dort, wo der Viewport beginnt: rechts von Menü + Seitenleiste. */
+  left: calc(var(--rail-w) + var(--sidebar-w));
   pointer-events: none;
   z-index: 20;
   font-family: 'Segoe UI', system-ui, sans-serif;

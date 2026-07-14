@@ -44,10 +44,11 @@ const inputDir = $<HTMLInputElement>('#input-dir')
 const unitPanel = $('#unit-panel')
 const mapPanel = $('#map-panel')
 const sandboxPanel = $('#sandbox-panel')
-const modeTabs = $('#mode-tabs')
-const tabUnits = $<HTMLButtonElement>('#tab-units')
-const tabMaps = $<HTMLButtonElement>('#tab-maps')
-const tabSandbox = $<HTMLButtonElement>('#tab-sandbox')
+const startPanel = $('#start-panel')
+const menuItems = [...document.querySelectorAll<HTMLButtonElement>('#menu .menu-item')]
+const badgeUnits = $('#badge-units')
+const badgeMaps = $('#badge-maps')
+const btnCollapse = $<HTMLButtonElement>('#btn-collapse')
 const btnSandboxStart = $<HTMLButtonElement>('#btn-sandbox-start')
 const sandboxInfo = $('#sandbox-info')
 const mapSelect = $<HTMLSelectElement>('#map-select')
@@ -88,8 +89,11 @@ async function connect(src: GameSource): Promise<void> {
       .sort()
     log(`${unitIds.length} Einheiten gefunden`)
 
-    unitPanel.hidden = false
-    modeTabs.hidden = false
+    // Ab jetzt sind alle Menüpunkte erreichbar; die Zähler zeigen, was die
+    // Spieldaten hergeben.
+    for (const item of menuItems) item.disabled = false
+    badgeUnits.textContent = String(unitIds.length)
+    badgeUnits.hidden = false
     renderUnitList('')
     await populateMapList(src)
 
@@ -114,6 +118,7 @@ async function connect(src: GameSource): Promise<void> {
       return
     }
     const wanted = params.get('unit') ?? 'uel0001'
+    setMode('units')
     if (unitIds.includes(wanted.toLowerCase())) {
       unitSelect.value = wanted.toLowerCase()
       await loadUnit(wanted.toLowerCase())
@@ -133,16 +138,19 @@ async function populateMapList(src: GameSource): Promise<void> {
       opt.textContent = e.name
       mapSelect.appendChild(opt)
     }
+    badgeMaps.textContent = String(mapSelect.options.length)
+    badgeMaps.hidden = false
     log(`${mapSelect.options.length} Karten gefunden`)
   } catch (err) {
     log(`Karten-Liste nicht verfügbar: ${err instanceof Error ? err.message : err}`)
   }
 }
 
-function setMode(mode: 'units' | 'maps' | 'sandbox'): void {
-  tabUnits.classList.toggle('active', mode === 'units')
-  tabMaps.classList.toggle('active', mode === 'maps')
-  tabSandbox.classList.toggle('active', mode === 'sandbox')
+type Mode = 'start' | 'units' | 'maps' | 'sandbox'
+
+function setMode(mode: Mode): void {
+  for (const item of menuItems) item.classList.toggle('active', item.dataset.mode === mode)
+  startPanel.hidden = mode !== 'start'
   unitPanel.hidden = mode !== 'units'
   mapPanel.hidden = mode !== 'maps'
   sandboxPanel.hidden = mode !== 'sandbox'
@@ -454,7 +462,6 @@ async function startSandbox(mapFolder: string): Promise<void> {
     const params = new URLSearchParams(location.search)
     const zoomParam = Number(params.get('zoom'))
     viewer.focusOn(spawnPoint, zoomParam > 0 ? zoomParam : 14)
-    $('#sandbox-spawns').hidden = false
     sandboxInfo.innerHTML =
       `Karte <strong>${mapFolder}</strong> — Klick auf Einheit = Auswahl, ` +
       `Bau-Icon + Klick aufs Terrain = Gebäude setzen, Rechtsklick = Bewegung`
@@ -749,18 +756,23 @@ unitSearch.addEventListener('input', () => renderUnitList(unitSearch.value))
 unitSelect.addEventListener('change', () => void loadUnit(unitSelect.value))
 teamColorInput.addEventListener('input', () => viewer.setTeamColor(currentTeamColor()))
 animSelect.addEventListener('change', () => void playSelectedAnimation())
-tabUnits.addEventListener('click', () => setMode('units'))
-tabMaps.addEventListener('click', () => setMode('maps'))
-tabSandbox.addEventListener('click', () => setMode('sandbox'))
+for (const item of menuItems) {
+  item.addEventListener('click', () => setMode(item.dataset.mode as Mode))
+}
+// Seitenleiste einklappen (mehr Platz für die Sandbox). Der Viewer bemisst sich
+// am Fenster — nach dem Umklappen einmal `resize` feuern, damit er nachzieht.
+btnCollapse.addEventListener('click', () => {
+  const collapsed = document.body.classList.toggle('sidebar-collapsed')
+  btnCollapse.textContent = collapsed ? '⟩ Seitenleiste' : '⟨ Seitenleiste'
+  window.dispatchEvent(new Event('resize'))
+})
 mapSelect.addEventListener('change', () => void loadMap(mapSelect.value))
 btnSandboxStart.addEventListener('click', () => {
   void startSandbox(mapSelect.value || 'SCMP_037')
 })
-for (const btn of document.querySelectorAll<HTMLButtonElement>('#sandbox-spawns .spawn')) {
-  // Über die ECHTE Original-Lua-Sim spawnen (Engine-Pfad), nicht als
-  // SimWorld-Platzhalter — alle Fraktions-Units laufen über ihre Unit.lua.
-  btn.addEventListener('click', () => void spawnViaLua(btn.dataset.unit!))
-}
+// Das frühere Spawn-Menü (Buttons je Unit) ist bewusst WEG: Einheiten entstehen
+// im Spiel wie in SCFA — über das Bau-Menü der ACU und die Fabrik. Für Tests
+// gibt es die URL-Parameter ?spawn=<ids> und ?selftest=<bp>.
 
 // Engine-Sim (Original-Lua): Units werden über ihre echte Unit.lua gespawnt,
 // pro Beat getickt/bewegt und hier selektierbar/gerendert.
@@ -874,8 +886,6 @@ const hudSource: HudSource = {
     return out
   },
 }
-const btnLuaSpawn = document.querySelector<HTMLButtonElement>('#btn-lua-spawn')
-btnLuaSpawn?.addEventListener('click', () => void spawnViaLua('uel0001'))
 
 const luaRingGeo = (() => {
   const g = new THREE.RingGeometry(0.85, 1, 40)
