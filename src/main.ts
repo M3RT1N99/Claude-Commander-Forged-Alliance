@@ -856,8 +856,9 @@ function readCaps(bp: BpObject): ReadonlySet<string> {
   return caps
 }
 
-// HUD-Datenquelle aus der Lua-Engine. Die Ökonomie steht NICHT mehr drin: die
-// zeigt jetzt die echte lua/ui/game/economy.lua an (src/ui/gameUi.ts).
+// Datenquelle für Minimap und strategische Icons. Ökonomie, Orders, Unit-View
+// und Bau-Menü stehen NICHT mehr drin — die zeigt die echte lua/ui an
+// (src/ui/gameUi.ts).
 const hudSource: HudSource = {
   units(): HudUnitInfo[] {
     if (!luaSim) return []
@@ -871,16 +872,6 @@ const hudSource: HudSource = {
       })
     }
     return out
-  },
-  selectedCaps(): ReadonlySet<string> {
-    const sel = luaUnits.filter((u) => u.selected)
-    if (sel.length === 0) return new Set<string>()
-    const caps = new Set(sel[0]!.caps)
-    for (const u of sel.slice(1)) for (const c of caps) if (!u.caps.has(c)) caps.delete(c)
-    return caps
-  },
-  stop(): void {
-    for (const u of luaUnits) if (u.selected) luaSim?.stop(u.id)
   },
 }
 const btnLuaSpawn = document.querySelector<HTMLButtonElement>('#btn-lua-spawn')

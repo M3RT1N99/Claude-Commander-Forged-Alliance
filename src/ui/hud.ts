@@ -7,51 +7,30 @@ import { parseDds } from '../formats/dds'
 import { bgraToRgba, decodeDxt } from '../formats/dxt'
 
 /**
- * Rest-HUD — ein TS-Nachbau, der Stueck fuer Stueck verschwindet.
+ * Was von der Weltansicht noch in TypeScript steht: Minimap und strategische
+ * Icons.
  *
- * Das Eco-Panel ist bereits WEG: es kommt jetzt aus der echten
- * lua/ui/game/economy.lua (siehe src/ui/gameUi.ts). Was hier noch steht, ist
- * der naechste Kandidat — Reihenfolge in docs/PLAN-UI.md:
- *   Orders   -> lua/ui/game/orders.lua      (Schritt 5)
- *   Unit-View-> lua/ui/game/unitview.lua    (Schritt 4)
- *   Minimap  -> eine zweite WorldView       (Schritt 7)
+ * Der Rest ist WEG — und zwar nicht ersetzt, sondern durch die Original-Lua
+ * abgelöst:
+ *   Ökonomie   → lua/ui/game/economy.lua
+ *   Orders     → lua/ui/game/orders.lua
+ *   Unit-View  → lua/ui/game/unitview.lua + unitviewDetail.lua
+ *   Bau-Menü   → lua/ui/game/construction.lua
+ * Alles läuft in der UI-VM (src/ui/gameUi.ts) und rendert über den maui-Layer.
  *
- * NICHTS Neues hier anbauen.
- * - Orders-Panel: links 17, unten 0, order-panel_bmp 332×120; Raster 2×6 à
- *   50×50 zentriert (0,−1); Slots nach standardOrdersTable (Move=1, Attack=2,
- *   Patrol=3, Stop=4, Guard=5, Modus=6); verfügbar = Union der CommandCaps.
- * - Unit-View: links 17, 120 über Unterkante, build-over-back_bmp 332×116;
- *   Icon 48² (12,34), Name (16,14), Health-Balken 188×16 (66,35) mit
- *   healthbar_bg/green/yellow/red (>75 % grün, >25 % gelb, sonst rot).
- * - Texturen via SkinnableFile-Reihenfolge: Fraktions-Skin (uef) → common.
+ * Hier stand einmal eine Handkopie der `standardOrdersTable` samt Slot-Nummern
+ * und eine nachgebaute Health-Leiste. Beides ist gelöscht: sobald die echte Lua
+ * dieselbe Sache zeichnet, ist der TS-Nachbau kein „Fallback", sondern ein
+ * zweiter, abweichender Zustand.
+ *
+ * NICHTS Neues hier anbauen. Minimap und Icons gehören ebenfalls in die
+ * Original-Lua (`minimap.lua` ist eine zweite WorldView, die Icons zeichnet die
+ * Engine); solange die Weltansicht kein maui-Control ist, bleiben sie hier.
  */
 
 const FACTION_SKIN = 'uef'
 
-interface OrderDef {
-  cap: string
-  bitmap: string
-  slot: number
-  action?: (s: HudSource) => void
-}
-
-/**
- * Handkopie der standardOrdersTable (orders.lua) — genau das, was hier nicht
- * stehen duerfte. Bleibt nur, bis orders.lua wirklich laeuft (docs/PLAN-UI.md).
- *
- * Ohne `action` kann die Sim den Befehl noch nicht: solche Knoepfe werden
- * DEAKTIVIERT gerendert, statt so zu tun, als taeten sie etwas.
- */
-const COMMON_ORDERS: OrderDef[] = [
-  { cap: 'RULEUCC_Move', bitmap: 'move', slot: 1 },
-  { cap: 'RULEUCC_Attack', bitmap: 'attack', slot: 2 },
-  { cap: 'RULEUCC_Patrol', bitmap: 'patrol', slot: 3 },
-  { cap: 'RULEUCC_Stop', bitmap: 'stop', slot: 4, action: (s) => s.stop() },
-  { cap: 'RULEUCC_Guard', bitmap: 'guard', slot: 5 },
-  { cap: 'RULEUCC_RetaliateToggle', bitmap: 'stand-ground', slot: 6 },
-]
-
-/** Ökonomie-Momentaufnahme fürs HUD. */
+/** Ökonomie-Momentaufnahme für die UI-VM (economy.lua rechnet daraus die Anzeige). */
 export interface EcoSnapshot {
   mass: number
   massStorage: number
@@ -70,7 +49,7 @@ export interface EcoSnapshot {
   energyRequested: number
 }
 
-/** Momentaufnahme einer Einheit fürs HUD (Unit-Panel, Minimap, Strategic Icons). */
+/** Momentaufnahme einer Einheit für Minimap und strategische Icons. */
 export interface HudUnitInfo {
   id: string
   name: string
@@ -85,19 +64,14 @@ export interface HudUnitInfo {
   fadeZoom: number
 }
 
-/** Datenquelle fürs HUD — von der Lua-Engine (main.ts) bereitgestellt. */
+/** Datenquelle — von der Lua-Engine (main.ts) bereitgestellt. */
 export interface HudSource {
   units(): HudUnitInfo[]
-  selectedCaps(): ReadonlySet<string>
-  stop(): void
 }
 
 export class Hud {
   private readonly root: HTMLDivElement
   private readonly refs = new Map<string, HTMLElement>()
-  private readonly orderButtons: { def: OrderDef; img: HTMLImageElement; enabled: boolean }[] = []
-  private readonly healthTex = new Map<string, string>()
-  private readonly iconCache = new Map<string, string>()
   private minimapImage: ImageBitmap | null = null
   private readonly minimapCanvas: HTMLCanvasElement
   private readonly interval: number
@@ -113,15 +87,6 @@ export class Hud {
     this.root.innerHTML = `
       <div id="strat-layer"></div>
       <div id="hud-minimap"><canvas width="216" height="216"></canvas></div>
-      <div id="unitview-panel" hidden>
-        <img id="uv-bracket" />
-        <div id="uv-name"></div>
-        <img id="uv-icon" />
-        <div id="uv-health"><div id="uv-health-fill"></div><span id="uv-health-text"></span></div>
-      </div>
-      <div id="orders-panel">
-        <div id="orders-grid"></div>
-      </div>
     `
     document.body.appendChild(this.root)
     this.minimapCanvas = this.root.querySelector('canvas')!
@@ -159,9 +124,8 @@ export class Hud {
    *
    * Hier stand ein Canvas-'multiply'-Tinting mit einer erfundenen Farbtabelle
    * ({1:'#2a6dbb', 2:'#e23c2c'}). Im Original kommen die Armeefarben aus
-   * /lua/gamecolors.lua (über GetArmiesTable) — die Datei wird importiert,
-   * sobald die UI-VM steht (docs/PLAN-UI.md, Schritt 3). Eine zweite erfundene
-   * Farbe ersetzt keine erste.
+   * /lua/gamecolors.lua (über GetArmiesTable). Eine zweite erfundene Farbe
+   * ersetzt keine erste.
    */
   private strategicIcon(name: string, state: 'rest' | 'selected'): string | null {
     const key = `${name}|${state}`
@@ -240,63 +204,6 @@ export class Hud {
   }
 
   private async build(): Promise<void> {
-    const setBg = (el: HTMLElement, url: string | null): void => {
-      if (url) {
-        el.style.backgroundImage = `url(${url})`
-        el.style.backgroundSize = '100% 100%'
-      }
-    }
-
-    // --- Orders (orders_mini.lua) ------------------------------------------
-    setBg(this.el('#orders-panel'), await this.skin('/game/orders-panel/order-panel_bmp.dds'))
-    const grid = this.el('#orders-grid')
-    const empty = await this.skin('/game/orders/basic-empty_bmp.dds')
-    for (let slot = 1; slot <= 12; slot++) {
-      const cell = document.createElement('div')
-      cell.className = 'order-slot'
-      const def = COMMON_ORDERS.find((o) => o.slot === slot)
-      if (def) {
-        const img = document.createElement('img')
-        const up = await this.skin(`/game/orders/${def.bitmap}_btn_up.dds`)
-        const over = await this.skin(`/game/orders/${def.bitmap}_btn_over.dds`)
-        const down = await this.skin(`/game/orders/${def.bitmap}_btn_down.dds`)
-        const dis = await this.skin(`/game/orders/${def.bitmap}_btn_dis.dds`)
-        if (up) img.src = up
-        img.dataset.up = up ?? ''
-        img.dataset.dis = dis ?? up ?? ''
-        const entry = { def, img, enabled: false }
-        img.addEventListener('pointerenter', () => entry.enabled && over && (img.src = over))
-        img.addEventListener('pointerleave', () => entry.enabled && up && (img.src = up))
-        img.addEventListener('pointerdown', () => entry.enabled && down && (img.src = down))
-        img.addEventListener('pointerup', () => {
-          if (!entry.enabled) return
-          if (over) img.src = over
-          def.action?.(this.source)
-        })
-        this.orderButtons.push(entry)
-        cell.appendChild(img)
-      } else if (empty) {
-        const img = document.createElement('img')
-        img.src = empty
-        cell.appendChild(img)
-      }
-      grid.appendChild(cell)
-    }
-
-    // --- Unit-View (unitview.lua) --------------------------------------------
-    setBg(
-      this.el('#unitview-panel'),
-      await this.skin('/game/unit-build-over-panel/build-over-back_bmp.dds'),
-    )
-    const bracket = this.root.querySelector<HTMLImageElement>('#uv-bracket')!
-    const bracketUrl = await this.skin('/game/unit-build-over-panel/bracket-unit_bmp.dds')
-    if (bracketUrl) bracket.src = bracketUrl
-    setBg(this.el('#uv-health'), await this.skin('/game/unit-build-over-panel/healthbar_bg.dds'))
-    for (const color of ['green', 'yellow', 'red']) {
-      const url = await this.skin(`/game/unit-build-over-panel/healthbar_${color}.dds`)
-      if (url) this.healthTex.set(color, url)
-    }
-
     // --- Minimap-Preview ---------------------------------------------------------
     try {
       const dds = parseDds(this.scmap.previewDds)
@@ -333,59 +240,8 @@ export class Hud {
     }
   }
 
-  private async unitIcon(id: string): Promise<string | null> {
-    const cached = this.iconCache.get(id)
-    if (cached) return cached
-    const url = await this.skin(`/icons/units/${id.toUpperCase()}_icon.dds`)
-    if (url) this.iconCache.set(id, url)
-    return url
-  }
-
   private update(): void {
-    // Orders — verfügbar = Union der CommandCaps der Auswahl (Original)
-    const caps = this.source.selectedCaps()
-    for (const b of this.orderButtons) {
-      // Aktiv nur, wenn die Unit die Cap HAT *und* die Sim den Befehl ausfuehren
-      // kann. Move/Attack/Patrol/Guard/Retaliate haben noch keine action — sie
-      // werden deaktiviert gerendert (die _dis-Bitmap gibt es), statt so zu tun,
-      // als taeten sie etwas. Sie kommen mit orders.lua wieder (docs/PLAN-UI.md).
-      const enabled = caps.has(b.def.cap) && b.def.action !== undefined
-      if (enabled !== b.enabled) {
-        b.enabled = enabled
-        b.img.src = enabled ? b.img.dataset.up! : b.img.dataset.dis!
-        b.img.style.cursor = enabled ? 'pointer' : 'default'
-      }
-    }
-
-    // Unit-View
     const units = this.source.units()
-    const selected = units.filter((u) => u.selected)
-    const panel = this.el('#unitview-panel')
-    if (selected.length === 0) {
-      panel.hidden = true
-    } else {
-      panel.hidden = false
-      const first = selected[0]!
-      this.el('#uv-name').textContent =
-        selected.length > 1 ? `${selected.length} Einheiten` : first.name
-      const hp = selected.reduce((a, u) => a + u.health, 0)
-      const maxHp = selected.reduce((a, u) => a + u.maxHealth, 0)
-      const ratio = maxHp > 0 ? hp / maxHp : 0
-      const fill = this.el('#uv-health-fill')
-      fill.style.width = `${ratio * 100}%`
-      const tex = this.healthTex.get(ratio > 0.75 ? 'green' : ratio > 0.25 ? 'yellow' : 'red')
-      if (tex) {
-        fill.style.backgroundImage = `url(${tex})`
-        fill.style.backgroundSize = '100% 100%'
-      }
-      this.el('#uv-health-text').textContent = `${Math.ceil(hp)} / ${Math.ceil(maxHp)}`
-      void this.unitIcon(first.id).then((url) => {
-        const icon = this.root.querySelector<HTMLImageElement>('#uv-icon')!
-        if (url) icon.src = url
-      })
-    }
-
-    // Minimap
     const ctx = this.minimapCanvas.getContext('2d')!
     const w = this.minimapCanvas.width
     const h = this.minimapCanvas.height
