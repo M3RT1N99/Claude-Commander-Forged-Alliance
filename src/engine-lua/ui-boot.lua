@@ -145,6 +145,19 @@ __uiPanels = {
       import('/lua/ui/game/unitviewDetail.lua').SetupUnitViewLayout(__ui.mapGroup, __ui.mapGroup)
     end,
   },
+  {
+    -- gamemain.lua:165 — DIE MINIMAP. Sie haengt in einem `Window`
+    -- (lua/maui/window.lua): verschiebbar, in der Groesse aenderbar, mit
+    -- Minimalgroesse 150x150 (minimap.lua:114). Darin sitzt eine WorldView mit
+    -- isMiniMap = true (minimap.lua:115) — kartografisch, Draufsicht.
+    --
+    -- GENAU DAS ist der Grund, warum man sie im Spiel bewegen kann. Unser
+    -- TS-Nachbau war ein festgenageltes <canvas>; er ist geloescht.
+    name = 'minimap',
+    build = function()
+      import('/lua/ui/game/minimap.lua').CreateMinimap(__ui.windowGroup)
+    end,
+  },
 }
 
 --- Baut Panel Nr. `i`. Liefert nil bei Erfolg, sonst die Fehlermeldung.

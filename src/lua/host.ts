@@ -84,7 +84,12 @@ export class LuaHost {
     g.set('WARN', (...a: unknown[]) => this.log('WARN', a.map(str).join('')))
     g.set('_ALERT', (...a: unknown[]) => this.log('WARN', a.map(str).join('')))
     g.set('FileCollapsePath', collapsePath)
-    g.set('__mountModule', (name: string) => this.mountModule(name))
+    // `?? false`, NICHT `null`: eine JS-Funktion darf wasmoon niemals `null`
+    // zurückgeben — die VM stirbt dann tief in fremder Lua ("Cannot read
+    // properties of null"). Seit der Hook-Mechanismus für JEDES Modul zusätzlich
+    // nach `/schook/<modul>` fragt (und das meistens nicht existiert), trifft
+    // dieser Pfad ständig.
+    g.set('__mountModule', (name: string) => this.mountModule(name) ?? false)
 
     // Kompat-Schicht (Lua-5.0-Bibliotheksfunktionen) + Basis-Engine-Globals
     this.lua.doStringSync(COMPAT_LUA)

@@ -67,6 +67,49 @@ end
 -- Engine-Hook: Modul in gegebener Umgebung ausfuehren (import.lua ruft das).
 -- Verfolgt zusaetzlich das aktuell geladene File fuer GetSource() (die
 -- Blueprint-Pipeline leitet daraus die BlueprintId ab).
+-- HOOKS — der Mechanismus, mit dem FA seine eigenen Module nachtraeglich patcht.
+--
+-- bin/SupComDataPath.lua sagt:
+--
+--     hook = { '/schook' }
+--
+-- Die Engine laedt danach zu JEDEM Modul zusaetzlich die gleichnamige Datei aus
+-- dem Hook-Verzeichnis — IN DERSELBEN Umgebung, direkt nach dem Original.
+-- Der Hook sieht also alles, was das Modul gerade angelegt hat, und kann es
+-- ergaenzen oder ersetzen.
+--
+-- Das ist keine Kuer, sondern noetig: `lua/maui/window.lua` legt nur ein leeres
+-- `styles = {}` an (Zeile 71) und sagt im Kopfkommentar ausdruecklich "you MUST
+-- hook in a styles table in your product". Genau das tut
+-- `schook/lua/maui/window.lua` — es fuellt styles.backgrounds mit den Rahmen der
+-- Minimap. Ohne Hooks stirbt window.lua:160 an `styles.backgrounds` (nil), und
+-- damit die MINIMAP, das Chat-Fenster und die Konsole.
+--
+-- Auch die Sim haengt daran: schook/lua/simInit.lua, SessionInit.lua,
+-- sim/weapon.lua, SimSync.lua, UserSync.lua.
+__hookPaths = { '/schook' }
+
+local function runHooks(name, env)
+    for _, hookDir in ipairs(__hookPaths) do
+        local hookName = hookDir .. name
+        local hookPath = __mountModule(hookName)
+        if hookPath then
+            local chunk, err = loadfile(hookPath, 't', env or _G)
+            if not chunk then
+                WARN('Hook ' .. hookName .. ': ' .. tostring(err))
+            else
+                local prev = __currentSource
+                __currentSource = hookName
+                local ok, msg = pcall(chunk)
+                __currentSource = prev
+                if not ok then
+                    WARN('Hook ' .. hookName .. ': ' .. tostring(msg))
+                end
+            end
+        end
+    end
+end
+
 function doscript(name, env)
     local fsPath = __mountModule(name)
     if not fsPath then error("module not found: " .. tostring(name), 2) end
@@ -78,6 +121,7 @@ function doscript(name, env)
     __currentSource = name
     local r = chunk()
     __currentSource = prev
+    runHooks(name, env)
     return r
 end
 
