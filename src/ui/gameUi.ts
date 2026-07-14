@@ -53,6 +53,12 @@ export class GameUi {
     fontFiles: Uint8Array[],
     log: (msg: string) => void,
     mode: 'game' | 'frontend' = 'game',
+    /**
+     * Die Engine hört zu, wenn eine ConVar sich ändert (ConExecute).
+     * Kamera, Renderer und Auswahl lesen daraus ihre Werte — genau so, wie die
+     * C++-Seite ui_KeyboardPanSpeed und cam_ZoomAmount in ihren Schleifen liest.
+     */
+    conVarChanged?: (name: string, value: string | number | boolean) => void,
   ): Promise<GameUi> {
     // Die Schriften des Spiels (<GameDir>/fonts). Sie liefern die Metrik, mit der
     // die Original-Lua ihr Text-Layout rechnet (text.lua:39/47) — und sie werden
@@ -121,6 +127,7 @@ export class GameUi {
       textureSize: (p) => dims.get(p) ?? null,
       stringAdvance: (text, family, size) => fonts.advance(text, family, size),
       fontMetrics: (family, size) => fonts.metrics(family, size),
+      conVarChanged,
       // Die Einstellungen überleben das Neuladen. Die Engine schreibt sie als
       // Lua-Quelltext nach `Game.prefs` — hier ist es derselbe Text, nur die
       // Ablage ist der localStorage. Ohne das war jede Option, jedes Profil und
@@ -166,6 +173,23 @@ export class GameUi {
     // Original-UI legen ihre Kinder erst in OnFrame aus (grid.lua:40-48, die
     // Frame-Pumpe der Engine, Cfile:1118936). Ein Snapshot VOR dem ersten Frame
     // sieht sie ohne Layout und meldet sie zu Unrecht als kaputt.
+    // Die Engine holt sich den STAND aller ConVars — Apply(true) hat sie beim
+    // Boot gesetzt, und wer sich erst danach anschließt, hätte sie sonst nie
+    // gesehen.
+    if (conVarChanged) {
+      const all = host.pull<[string, string | number | boolean][]>(`(function()
+        local out = {}
+        for _, entry in pairs(__conVars) do
+          if entry.value ~= nil then
+            out[#out + 1] = '["' .. entry.name .. '",' ..
+              (type(entry.value) == 'string' and ('"' .. entry.value .. '"') or tostring(entry.value)) .. ']'
+          end
+        end
+        return '[' .. table.concat(out, ',') .. ']'
+      end)()`)
+      for (const [name, value] of all) conVarChanged(name, value)
+    }
+
     const renderer = new MauiRenderer(host, vfs)
     renderer.update()
     const count = Number(host.eval('return table.getn(__mauiSnapshot())'))

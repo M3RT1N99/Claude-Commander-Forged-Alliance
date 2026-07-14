@@ -349,6 +349,15 @@ export class UnitViewer {
    * Cursor, Kanten-Scroll/Pfeiltasten/Mitteltaste schieben, Leertaste +
    * Maus rotiert. Alles exponentiell geglättet wie im Original.
    */
+  /**
+   * Die ConVars der Engine (ConExecute setzt sie; die Original-Optionen füttern
+   * sie über optionslogic). Die Kamera LIEST sie — genau wie die C++-Seite, die
+   * ui_KeyboardPanSpeed und cam_ZoomAmount in ihren Schleifen abfragt.
+   */
+  private readonly conVars = new Map<string, string | number | boolean>()
+  /** STRG beschleunigt Schwenken und Drehen (Cfile:1300005-1300007). */
+  private ctrlDown = false
+
   private rts = {
     enabled: false,
     target: new THREE.Vector3(),
@@ -386,9 +395,23 @@ export class UnitViewer {
 
   private updateRtsCamera(dt: number): void {
     const r = this.rts
-    // Dauer-Pan (Kanten-Scroll/Pfeiltasten): Geschwindigkeit ∝ Distanz
+    // Dauer-Pan (Kanten-Scroll/Pfeiltasten). Die Rechnung steht in der Engine
+    // (Moho::CameraImpl::CameraPan, Cfile:1149107):
+    //
+    //   schritt = (mTargetZoom / Viewport-Höhe) · cam_PanSpeed · eingabe
+    //
+    // und `eingabe` ist ±ui_KeyboardPanSpeed (CUIWorldView, Cfile:1300002-1300066),
+    // bei gedrücktem STRG mal ui_KeyboardPanAccelerateMultiplier. Beides sind die
+    // Optionen „Tastatur-Schwenkgeschwindigkeit" und ihr Beschleuniger
+    // (options.lua:200-227) — vorher stand hier `r.dist * 0.9`, eine erfundene
+    // Zahl, und die beiden Regler taten nichts.
+    //
+    // Die Engine multipliziert NICHT mit der Bildzeit — sie pant pro BILD. Das
+    // ist kein Versehen von uns; es ist das bekannte Verhalten von FA.
     if (r.panX !== 0 || r.panZ !== 0) {
-      const speed = r.dist * 0.9 * dt
+      let input = this.conVarNumber('ui_KeyboardPanSpeed')
+      if (this.ctrlDown) input *= this.conVarNumber('ui_KeyboardPanAccelerateMultiplier')
+      const speed = (r.dist / this.canvas.clientHeight) * this.conVarNumber('cam_PanSpeed') * input
       const cos = Math.cos(r.yaw)
       const sin = Math.sin(r.yaw)
       r.goalTarget.x += (r.panX * cos - r.panZ * sin) * speed
@@ -430,22 +453,93 @@ export class UnitViewer {
       : this.camera.position.distanceTo(this.controls.target)
   }
 
-  /** Mausrad: Zoom zum Cursor (SupCom-Verhalten). */
+  /**
+   * Mausrad: Zoom zum Cursor.
+   *
+   * Die Formel kommt aus der Engine (Moho::CameraImpl::CameraZoom, Cfile:1149978):
+   *
+   *   v4 = cam_ZoomAmount * delta * -0.69314718 * 1.442695…   (= -ln2 · log2e = -1)
+   *   mNearZoom *= 2^v4                                        (F2XM1/FSCALE)
+   *   clamp auf [cam_NearZoom, GetMaxZoom()]
+   *
+   * also schlicht: `dist *= 2^(-cam_ZoomAmount · delta)`, geklemmt.
+   *
+   * Vorher stand hier `Math.pow(1.25, ±1)` — eine erfundene Zahl. Und weil
+   * `cam_ZoomAmount` die Option „Empfindlichkeit des Zoomrads" IST
+   * (options.lua:85-96 → ConExecute("cam_ZoomAmount " .. value/100)), tat der
+   * Regler bis eben nichts.
+   */
   rtsZoom(wheelDelta: number, clientX: number, clientY: number): void {
     if (!this.rts.enabled) return
     const r = this.rts
     const oldDist = r.goalDist
-    const factor = Math.pow(1.25, wheelDelta > 0 ? 1 : -1)
+    const zoomAmount = this.conVarNumber('cam_ZoomAmount')
+    const nearZoom = this.conVarNumber('cam_NearZoom')
+    const delta = wheelDelta > 0 ? 1 : -1
+    const factor = Math.pow(2, -zoomAmount * delta)
+    // GetMaxZoom() ist in der Engine kartenabhängig; hier ist es die Kartengröße.
     const maxDist = this.heightfield
       ? Math.max(this.heightfield.width, this.heightfield.height) * 1.4
       : 800
-    r.goalDist = Math.min(Math.max(r.goalDist * factor, 4), maxDist)
+    r.goalDist = Math.min(Math.max(r.goalDist * factor, nearZoom), maxDist)
     const cursor = this.pickTerrain(clientX, clientY)
     if (cursor) {
       const shift = 1 - r.goalDist / oldDist
       r.goalTarget.x += (cursor.x - r.goalTarget.x) * shift
       r.goalTarget.z += (cursor.z - r.goalTarget.z) * shift
     }
+  }
+
+  /**
+   * Eine ConVar der Engine (ConExecute setzt sie, die Original-Optionen füttern
+   * sie). Fehlt sie, ist das ein Fehler — kein Anlass, eine Zahl zu erfinden.
+   */
+  private conVarNumber(name: string): number {
+    const value = this.conVars.get(name)
+    if (typeof value !== 'number') {
+      throw new Error(`Kamera: ConVar "${name}" ist nicht gesetzt (setzt sie ConExecute?)`)
+    }
+    return value
+  }
+
+  private conVarBool(name: string): boolean {
+    const value = this.conVars.get(name)
+    // Die Konsole liefert 0/1 (options.lua setzt Zahlen) oder true/false.
+    if (typeof value === 'number') return value !== 0
+    return value === true
+  }
+
+  /**
+   * Die Engine erfährt von einer geänderten ConVar (ConExecute → __uiConSink).
+   * Genau so liest die C++-Seite ihre Werte: sie fragt die Variable, wenn sie sie
+   * braucht — sie bekommt sie nicht „übergeben".
+   */
+  setConVar(name: string, value: string | number | boolean): void {
+    this.conVars.set(name, value)
+  }
+
+  /** STRG gedrückt? Beschleunigt Schwenken/Drehen (MAUI_KeyIsDown(MKEY_CONTROL)). */
+  setCtrlDown(down: boolean): void {
+    this.ctrlDown = down
+  }
+
+  /**
+   * Darf der Bildschirmrand die Ansicht verschieben? Die Engine fragt das an
+   * genau dieser Stelle (`Moho::ui_ScreenEdgeScrollView`, Cfile:1300036) — es ist
+   * die Option „Bildschirmrand verschiebt Hauptansicht" (options.lua:170-184).
+   * Solange die UI-VM nicht läuft, gilt der Engine-Default (true, Cfile:421730).
+   */
+  edgeScroll(): boolean {
+    return this.conVars.has('ui_ScreenEdgeScrollView')
+      ? this.conVarBool('ui_ScreenEdgeScrollView')
+      : true
+  }
+
+  /** Dürfen die Pfeiltasten schwenken? (`ui_ArrowKeysScrollView`, options.lua:185-199) */
+  arrowKeysPan(): boolean {
+    return this.conVars.has('ui_ArrowKeysScrollView')
+      ? this.conVarBool('ui_ArrowKeysScrollView')
+      : true
   }
 
   /** Dauer-Pan setzen (-1/0/1 je Achse; Kanten-Scroll & Pfeiltasten). */

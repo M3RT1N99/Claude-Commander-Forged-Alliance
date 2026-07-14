@@ -36,7 +36,7 @@ __uiConSink = false
 -- (peek-lua --grep "ConExecute\("). Alle existieren in der Decomp als
 -- Moho::TConVar bzw. Moho::<name>.
 local KNOWN_VARS = {
-  'cam_ZoomAmount', 'cam_NearZoom',
+  'cam_ZoomAmount', 'cam_NearZoom', 'cam_PanSpeed',
   'ui_KeyboardPanSpeed', 'ui_KeyboardPanAccelerateMultiplier',
   'ui_KeyboardRotateSpeed', 'ui_KeyboardRotateAccelerateMultiplier',
   'ui_ScreenEdgeScrollView', 'ui_ArrowKeysScrollView', 'ui_SelectTolerance',
@@ -54,6 +54,7 @@ local KNOWN_VARS = {
 local DEFAULTS = {
   cam_ZoomAmount = 0.40000001,                   -- Cfile:421825
   cam_NearZoom = 5.0,                            -- Cfile: float Moho::cam_NearZoom = 5.0
+  cam_PanSpeed = 1.0,                            -- Cfile: float Moho::cam_PanSpeed = 1.0
   ui_KeyboardPanSpeed = 90.0,                    -- Cfile:421739
   ui_KeyboardPanAccelerateMultiplier = 4.0,      -- Cfile:421740
   ui_KeyboardRotateSpeed = 10.0,                 -- Cfile:421741

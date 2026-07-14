@@ -180,7 +180,7 @@ async function startFrontEndUi(): Promise<void> {
   setMode('frontend')
   try {
     gameUi?.dispose()
-    gameUi = await GameUi.create(vfs, await loadGameFonts(), log, 'frontend')
+    gameUi = await GameUi.create(vfs, await loadGameFonts(), log, 'frontend', conVarChanged)
     gameUi.attachEvents()
     setIngame(true)
 
@@ -391,6 +391,16 @@ async function loadMap(folder: string): Promise<void> {
 let sandbox: SandboxController | null = null
 let hud: Hud | null = null
 let gameUi: GameUi | null = null
+
+/**
+ * Eine ConVar hat sich geändert (ConExecute in der UI-Lua) — die Engine erfährt
+ * es. Kamera und Renderer LESEN diese Werte, genau wie die C++-Seite:
+ * `ui_KeyboardPanSpeed` in der WorldView-Schleife, `cam_ZoomAmount` beim Zoomen.
+ * Daran hängen die Regler im Optionen-Dialog.
+ */
+function conVarChanged(name: string, value: string | number | boolean): void {
+  viewer.setConVar(name, value)
+}
 let buildPreview: BuildPreview | null = null
 let currentScmap: ScmapData | null = null
 let spawnPoint = new THREE.Vector3(20, 0, 20)
@@ -504,7 +514,7 @@ async function startSandbox(mapFolder: string): Promise<void> {
     // haben getrennte States). Sie baut das Eco-Panel aus economy.lua — der
     // TS-Nachbau in hud.ts ist dafür raus.
     gameUi?.dispose()
-    gameUi = await GameUi.create(vfs, await loadGameFonts(), log)
+    gameUi = await GameUi.create(vfs, await loadGameFonts(), log, 'game', conVarChanged)
     gameUi.attachEvents()
     // Die Bau-Vorschau (Geistergebäude am Raster) — Engine-Rendering mit den
     // echten Blueprint-Modellen.
@@ -822,7 +832,16 @@ viewportEl.addEventListener('auxclick', (e) => e.preventDefault())
 window.addEventListener('pointermove', (e) => {
   if (!sandbox) return
   if (midDrag) viewer.rtsDragPan(e.movementX, e.movementY)
-  // Kanten-Scroll innerhalb des Viewports
+  // Kanten-Scroll innerhalb des Viewports — aber nur, wenn die Option es
+  // erlaubt. Die Engine fragt an genau dieser Stelle `ui_ScreenEdgeScrollView`
+  // (Cfile:1300036, in der WorldView-Schleife); das ist die Option
+  // „Bildschirmrand verschiebt Hauptansicht" (options.lua:170-184).
+  if (!viewer.edgeScroll()) {
+    edgePan.x = 0
+    edgePan.z = 0
+    applyPan()
+    return
+  }
   const rect = viewportEl.getBoundingClientRect()
   const m = 14
   const inside =
@@ -833,7 +852,15 @@ window.addEventListener('pointermove', (e) => {
 })
 
 window.addEventListener('keydown', (e) => {
+  // STRG beschleunigt Schwenken und Drehen — die Engine fragt dafür
+  // MAUI_KeyIsDown(MKEY_CONTROL) (Cfile:1300005) und multipliziert mit
+  // ui_KeyboardPanAccelerateMultiplier. Das ist die Option „Beschleunigte
+  // Schwenkgeschwindigkeit" (options.lua:214-227).
+  viewer.setCtrlDown(e.ctrlKey)
   if (!sandbox || e.target instanceof HTMLInputElement) return
+  // Die Pfeiltasten schwenken nur, wenn die Option es erlaubt
+  // (ui_ArrowKeysScrollView, options.lua:185-199).
+  if (!viewer.arrowKeysPan()) return
   if (e.code === 'ArrowLeft') keyPan.x = -1
   else if (e.code === 'ArrowRight') keyPan.x = 1
   else if (e.code === 'ArrowUp') keyPan.z = -1
@@ -843,6 +870,7 @@ window.addEventListener('keydown', (e) => {
   applyPan()
 })
 window.addEventListener('keyup', (e) => {
+  viewer.setCtrlDown(e.ctrlKey)
   if (e.code === 'ArrowLeft' || e.code === 'ArrowRight') keyPan.x = 0
   if (e.code === 'ArrowUp' || e.code === 'ArrowDown') keyPan.z = 0
   applyPan()
