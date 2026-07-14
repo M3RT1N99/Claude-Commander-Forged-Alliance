@@ -1,6 +1,9 @@
 import type { GameVfs } from '../vfs/vfs'
 import type { HeightfieldData } from './terrain'
 import type { EcoSnapshot } from '../ui/hud'
+import { parseBlueprint } from '../formats/blueprint'
+import { resolveUnitPaths } from '../formats/unitPaths'
+import { parseScm } from '../formats/scm'
 
 /**
  * Main-Thread-Fassade für die Lua-Engine im Web-Worker (luaSimWorker.ts).
@@ -22,6 +25,17 @@ export interface LuaUnitSnapshot {
   moving: boolean
   /** Baufortschritt (1 = fertig). __readAllUnits schickt es, es wurde nur nie gelesen. */
   fraction: number
+  /** Bau-Warteschlange einer Fabrik: { id, count } — leer bei allen anderen. */
+  buildQueue?: { id: string; count: number }[]
+}
+
+/** Was die Sim braucht, um eine Unit dieses Typs zu erzeugen. */
+interface UnitPayload {
+  scriptPath: string
+  scriptBytes: Uint8Array | null
+  bpBytes: Uint8Array | null
+  /** Knochennamen aus der SCM — die Engine hat das Skelett auch in der Sim. */
+  bones: string[]
 }
 
 interface StatesMsg {
@@ -114,16 +128,54 @@ export class LuaSimClient {
     }
   }
 
+  /**
+   * Alles, was die Sim braucht, um eine Unit dieses Typs zu erzeugen: das
+   * Script, das Blueprint — und das SKELETT.
+   *
+   * Das Skelett ist kein Renderer-Kram: die Engine lädt das Modell auch in der
+   * Sim, weil Waffentürme, Mündungen und Bau-Knochen an Knochennamen hängen
+   * (`weapon.lua:67` bricht ohne sie ab). Es wird hier aus derselben SCM-Datei
+   * gelesen, die auch der Renderer nimmt.
+   *
+   * Gecacht, weil jede Fabrik-Einheit denselben Typ mehrfach baut.
+   */
+  private readonly payloadCache = new Map<string, UnitPayload>()
+
+  private async unitPayload(id: string): Promise<UnitPayload> {
+    const hit = this.payloadCache.get(id)
+    if (hit) return hit
+    const scriptPath = `units/${id}/${id}_script.lua`
+    const bpPath = `units/${id}/${id}_unit.bp`
+    const payload: UnitPayload = {
+      scriptPath,
+      scriptBytes: this.vfs.exists(scriptPath) ? await this.vfs.read(scriptPath) : null,
+      bpBytes: this.vfs.exists(bpPath) ? await this.vfs.read(bpPath) : null,
+      bones: [],
+    }
+    if (payload.bpBytes) {
+      try {
+        const bp = parseBlueprint(new TextDecoder('utf-8').decode(payload.bpBytes))
+        const paths = resolveUnitPaths(id, bp, (p) => this.vfs.exists(p))
+        if (paths && this.vfs.exists(paths.mesh)) {
+          payload.bones = parseScm(await this.vfs.read(paths.mesh)).bones.map((b) => b.name)
+        }
+      } catch {
+        // Kein Modell (z. B. Effekt-Einheiten): dann hat die Unit eben keine
+        // Knochen. Das ist eine Tatsache über die Unit, keine Lücke der Engine —
+        // ValidateBone liefert dann korrekt false.
+      }
+    }
+    this.payloadCache.set(id, payload)
+    return payload
+  }
+
   /** Spawnt eine Unit über ihre Original-Klasse im Worker; liefert die Unit-ID. */
   async spawn(id: string, pos: { x: number; y: number; z: number }, army = 1): Promise<number> {
-    const scriptPath = `units/${id}/${id}_script.lua`
-    const scriptBytes = this.vfs.exists(scriptPath) ? await this.vfs.read(scriptPath) : null
-    const bpPath = `units/${id}/${id}_unit.bp`
-    const bpBytes = this.vfs.exists(bpPath) ? await this.vfs.read(bpPath) : null
+    const p = await this.unitPayload(id)
     const reqId = this.nextReq++
     return new Promise<number>((resolve, reject) => {
       this.spawnPending.set(reqId, { resolve, reject })
-      this.worker.postMessage({ type: 'spawn', reqId, id, scriptPath, scriptBytes, bpBytes, pos, army })
+      this.worker.postMessage({ type: 'spawn', reqId, id, ...p, pos, army })
     })
   }
 
@@ -143,17 +195,23 @@ export class LuaSimClient {
     pos: { x: number; y: number; z: number },
     army = 1,
   ): Promise<number> {
-    const scriptPath = `units/${id}/${id}_script.lua`
-    const scriptBytes = this.vfs.exists(scriptPath) ? await this.vfs.read(scriptPath) : null
-    const bpPath = `units/${id}/${id}_unit.bp`
-    const bpBytes = this.vfs.exists(bpPath) ? await this.vfs.read(bpPath) : null
+    const p = await this.unitPayload(id)
     const reqId = this.nextReq++
     return new Promise<number>((resolve, reject) => {
       this.spawnPending.set(reqId, { resolve, reject })
-      this.worker.postMessage({
-        type: 'build', reqId, builderId, id, scriptPath, scriptBytes, bpBytes, pos, army,
-      })
+      this.worker.postMessage({ type: 'build', reqId, builderId, id, ...p, pos, army })
     })
+  }
+
+  /**
+   * Fabrik-Auftrag: `count` Einheiten in die Warteschlange der Fabrik. Das ist,
+   * was `IssueBlueprintCommand("UNITCOMMAND_BuildFactory", id, count)` in der
+   * Engine auslöst (construction.lua:884). Die Fabrik arbeitet sie im Beat ab —
+   * über die Original-`FactoryUnit` (defaultunits.lua:422).
+   */
+  async factoryBuild(factoryId: number, id: string, count: number): Promise<void> {
+    const p = await this.unitPayload(id)
+    this.worker.postMessage({ type: 'factoryBuild', factoryId, id, ...p, count })
   }
 
   /**

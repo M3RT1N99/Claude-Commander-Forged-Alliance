@@ -41,6 +41,16 @@ Scenario = Scenario or { MasterChain = { _MASTERCHAIN_ = { Markers = {} } }, Arm
 -- Weapons: the engine instantiates them from the blueprint, using the Lua
 -- class from the unit script's Weapons table (keyed by the weapon Label).
 -- Base class is Weapon from /lua/sim/Weapon.lua (Class(moho.weapon_methods)).
+-- Das Skelett je Blueprint. Die Engine laedt das Modell auch in der Sim — an
+-- seinen Knochen haengen Waffen-Tuerme, Muendungen, Bau- und Effekt-Knochen.
+-- Gefuellt wird es aus der SCM-Datei (src/formats/scm.ts), bevor die erste Unit
+-- dieses Typs entsteht.
+__unitBones = {}
+
+function __setBones(bpId, names)
+  __unitBones[string.lower(bpId)] = names or {}
+end
+
 function __createWeapons(u, bp)
   u.__weapons = {}
   local list = bp.Weapon
@@ -59,6 +69,21 @@ function __createWeapons(u, bp)
     w.__army = u.__army
     w.__enabled = true
     u.__weapons[i] = w
+
+    -- Und dann ruft die Engine OnCreate — genau wie auf der Unit selbst.
+    --
+    -- Das ist kein Detail: DefaultProjectileWeapon.OnCreate endet mit
+    -- ChangeState(self, self.IdleState) (defaultweapons.lua:87), und erst der
+    -- IdleState startet die Zustandsmaschine der Waffe. Ohne OnCreate lief sie
+    -- gar nicht — bis irgendein spaeterer Zustandswechsel sie doch anwarf.
+    --
+    -- Folge: der Overcharge der ACU (IdleState.Main -> StartEconomyDrain,
+    -- defaultweapons.lua:404) lud seine 5000 Energie nicht beim Start auf
+    -- (wo der Startvorrat sie deckt), sondern IRGENDWANN spaeter — bei leerer
+    -- Kasse. Dann fordert er 500 Energie/Tick, bekommt bei 2/Tick Einkommen
+    -- eine Rate von 0.004, wird nie fertig und verhungert nebenbei jede Fabrik.
+    -- Die Reihenfolge der Engine ist die Loesung, nicht ein Sonderfall.
+    if w.OnCreate then w:OnCreate() end
   end
 end
 
@@ -78,6 +103,9 @@ function __spawnUnit(scriptPath, bpId, x, y, z, army, complete)
   u.__army = army
   u.__brain = __getBrain(army)
   u.__pos = { x, y, z }
+  -- Das Skelett aus dem Modell (siehe __setBones). Es muss VOR OnCreate stehen:
+  -- die Waffen pruefen ihre Turm-Knochen beim Aufbau (weapon.lua:67).
+  u.__bones = __unitBones[string.lower(bpId)] or {}
   u.__heading = 0
   u.__navigator = __getNavigator(id)
   -- echte Felder (nicht der wrapInstance-Stub) für die Physik-Fortschreibung
@@ -188,6 +216,9 @@ local function readRow(id, u)
     moving = (u.__goal ~= nil and u.__goal ~= false),
     fraction = u.__fraction or 1,
     mesh = u.__meshBp,
+    -- Die Bau-Warteschlange einer Fabrik ({ id, count }) — die UI zeigt sie an
+    -- (construction.lua:1620), also gehoert sie in den Zustand, den die Sim meldet.
+    buildQueue = u.__buildQueue or {},
   }
 end
 

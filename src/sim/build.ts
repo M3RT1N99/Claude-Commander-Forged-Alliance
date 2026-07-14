@@ -22,9 +22,36 @@ export function installBuild(host: LuaHost): void {
   host.eval(BUILD_LUA)
 }
 
+/**
+ * Phase 0 des Beats: jede Fabrik mit Warteschlange setzt die nächste Einheit auf.
+ * Muss VOR dem Sammeln laufen, sonst zahlt der neue Auftrag erst einen Beat
+ * später.
+ */
+export function factoryTick(host: LuaHost): void {
+  host.eval('__factoryTick()')
+}
+
 /** Phase 1 des Beats: Bau-Bedarf anmelden (vor dem Ökonomie-Tick). */
 export function buildCollect(host: LuaHost): void {
   host.eval('__buildCollect()')
+}
+
+/**
+ * Eine Einheit in die Bau-Warteschlange einer Fabrik legen — das, was
+ * `IssueBlueprintCommand("UNITCOMMAND_BuildFactory", id, count)` in der Engine
+ * auslöst (construction.lua:884).
+ */
+export function queueFactoryBuild(
+  host: LuaHost,
+  factoryId: number,
+  blueprintId: string,
+  count: number,
+): boolean {
+  return (
+    host.eval(
+      `return __queueFactoryBuild(${factoryId}, ${JSON.stringify(blueprintId)}, ${count})`,
+    ) === true
+  )
 }
 
 /** Phase 2 des Beats: gewährte Rate anwenden (nach dem Ökonomie-Tick). */

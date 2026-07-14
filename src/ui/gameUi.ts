@@ -140,6 +140,12 @@ export class GameUi {
         `__uiSetUnit(${u.id}, '${u.name}', 1, ${u.x}, ${u.y}, ${u.z}, ` +
           `${u.health}, ${u.maxHealth}, ${u.fraction ?? 1}, ${!u.moving})`,
       )
+      // Die Bau-Warteschlange einer Fabrik (construction.lua zeigt sie an).
+      const q = u.buildQueue ?? []
+      if (q.length > 0) {
+        const items = q.map((i) => `{ id = '${i.id}', count = ${i.count} }`).join(',')
+        this.host.eval(`__uiSetBuildQueue(${u.id}, { ${items} })`)
+      }
     }
     for (const id of this.knownUnits) {
       if (!seen.has(id)) this.host.eval(`__uiRemoveUnit(${id})`)
@@ -208,6 +214,15 @@ export class GameUi {
     this.host.eval(
       `import('/lua/ui/game/commandmode.lua').StartCommandMode('${mode}', { name = '${name}' })`,
     )
+  }
+
+  /**
+   * Ein Befehl mit einem Blueprint als Ziel — der Weg, den die Original-UI für
+   * die Fabrik-Warteschlange nimmt (construction.lua:884). Er läuft durch
+   * dieselbe Lua-Funktion, die ein Klick aufs Bau-Icon auslöst.
+   */
+  issueBlueprintCommand(command: string, blueprintId: string, count = 1): void {
+    this.host.eval(`IssueBlueprintCommand('${command}', '${blueprintId}', ${count}, false)`)
   }
 
   /** Die Naht für Befehle, die direkt an eine Unit gehen (SetFireState, SetPaused …). */

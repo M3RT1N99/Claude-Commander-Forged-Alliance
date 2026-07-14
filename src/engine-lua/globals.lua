@@ -175,6 +175,18 @@ function ManipMeta:SetAimingArc(minH, maxH, slewH, minP, maxP, slewP)
   self.__arc = { minH, maxH, slewH, minP, maxP, slewP }
   return self
 end
+-- CAimManipulator: der Turm einer Waffe. weapon.lua:139 setzt seinen Schwenk-
+-- und Neigungsbereich aus dem Blueprint (TurretYawMin/Max/Speed,
+-- TurretPitchMin/Max/Speed) — dieselben sechs Zahlen wie beim BuilderArm, nur
+-- unter dem Namen, den die Engine fuer Waffen fuehrt.
+function ManipMeta:SetFiringArc(minH, maxH, slewH, minP, maxP, slewP)
+  self.__arc = { minH, maxH, slewH, minP, maxP, slewP }
+  return self
+end
+function ManipMeta:SetEnabled(on) self.__enabled = on ~= false; return self end
+-- Zeit, bis der Turm ohne Ziel in die Ruhelage zurueckschwenkt (weapon.lua:94:
+-- Gebaeude bekommen 9999999 — sie schwenken nie zurueck).
+function ManipMeta:SetResetPoseTime(t) self.__resetPoseTime = t; return self end
 function ManipMeta:SetHeadingPitch(h, p) self.__heading = h; self.__pitch = p; return self end
 function ManipMeta:GetHeadingPitch() return self.__heading or 0, self.__pitch or 0 end
 -- CAnimationManipulator (decomp: cfunc_CAnimationManipulatorPlayAnim).
@@ -411,6 +423,43 @@ function GetSurfaceHeight(x, z) return GetTerrainHeight(x, z) end
 -- with a terrain-type layer is loaded, every position is the default type.
 function GetTerrainType(x, z)
   return TerrainTypes and TerrainTypes[1]
+end
+
+-- === Befehle an Units (sim_SimInits) ===
+--
+-- Die Sim-Lua erteilt selbst Befehle: FactoryUnit.RollOffUnit (defaultunits.lua:571)
+-- schickt die frisch gebaute Einheit mit IssueMove vom Hof. Die Befehle laufen
+-- ueber denselben Navigator, den auch ein Spielerbefehl benutzt — es gibt keinen
+-- zweiten Bewegungspfad.
+--
+-- Rueckgabe ist ein Kommando-Objekt; die Lua haelt es (self.MoveCommand) und
+-- kann es spaeter loeschen.
+__nextCommand = 1
+
+local function issueTo(units, apply)
+  local cmd = { id = __nextCommand, units = {} }
+  __nextCommand = __nextCommand + 1
+  for _, u in ipairs(units or {}) do
+    if u then
+      apply(u)
+      cmd.units[table.getn(cmd.units) + 1] = u
+    end
+  end
+  return cmd
+end
+
+function IssueMove(units, pos)
+  return issueTo(units, function(u)
+    u:GetNavigator():SetGoal({ pos[1], pos[2] or 0, pos[3] })
+  end)
+end
+
+function IssueStop(units)
+  return issueTo(units, function(u) u:GetNavigator():AbortMove() end)
+end
+
+function IssueClearCommands(units)
+  return issueTo(units, function(u) u:GetNavigator():AbortMove() end)
 end
 
 -- FlattenMapRect(x, z, w, h, y): Gebaeude planieren ihr Baufeld

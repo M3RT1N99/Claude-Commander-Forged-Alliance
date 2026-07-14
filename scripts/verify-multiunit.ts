@@ -10,10 +10,11 @@ import { open, type FileHandle } from 'node:fs/promises'
 import { ZipArchive } from '../src/vfs/zipArchive'
 import type { RandomAccessFile } from '../src/vfs/randomAccess'
 import { LuaHost } from '../src/lua/host'
+import { bonesFromBlueprint } from './gameFiles'
 import { installEngine } from '../src/lua/engine'
 import { setTerrainSource } from '../src/lua/engineGlobals'
 import { FLAT_TEST_TERRAIN } from '../src/sim/terrain'
-import { installUnitFactory, installBlueprintPipeline, loadUnitBlueprint, spawnLuaUnit, readLuaUnit } from '../src/lua/unitFactory'
+import { installUnitFactory, installBlueprintPipeline, loadUnitBlueprint, spawnLuaUnit, readLuaUnit, setUnitBones } from '../src/lua/unitFactory'
 import { installSimThreads } from '../src/lua/simThreads'
 import { EconomyManager, installEconomy } from '../src/sim/economy'
 import { installMotion } from '../src/sim/motion'
@@ -48,6 +49,14 @@ for (const a of ['mohodata.scd', 'lua.scd']) {
 }
 const uf = await NF.open(`${GAME}/gamedata/units.scd`); openFiles.push(uf)
 const uz = await ZipArchive.open(uf)
+// Die Sim braucht auch das SKELETT der Unit: Waffentuerme und Muendungen
+// haengen an Knochennamen (weapon.lua:67). Es kommt aus derselben SCM-Datei,
+// die auch der Renderer liest.
+const assetExists = (p: string): boolean => uz.get(p.toLowerCase()) != null
+const readAsset = async (p: string): Promise<Uint8Array | null> => {
+  const e = uz.get(p.toLowerCase())
+  return e ? uz.read(e) : null
+}
 const bps = new Map<string, Uint8Array>()
 for (const [id] of UNITS) {
   files.set(`units/${id}/${id}_script.lua`, await uz.read(uz.get(`units/${id}/${id}_script.lua`)!))
@@ -66,6 +75,7 @@ console.log('\n== Spawn aller Sandbox-Units über die echte Unit.lua ==')
 for (const [id, name] of UNITS) {
   try {
     loadUnitBlueprint(host, id, bps.get(id)!)
+    setUnitBones(host, id, await bonesFromBlueprint(id, bps.get(id)!, readAsset, assetExists))
     const uid = spawnLuaUnit(host, id, { x: 10, y: 0, z: 10 }, 1)
     const st = readLuaUnit(host, uid)
     check(uid > 0 && st != null && st.maxHealth > 0, `${id} (${name}) — HP ${st?.maxHealth}`)

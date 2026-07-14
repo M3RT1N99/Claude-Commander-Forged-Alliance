@@ -5,7 +5,7 @@ import { installBlueprintPipeline, installUnitFactory } from './unitFactory'
 import { installSimThreads } from './simThreads'
 import { EconomyManager, installEconomy } from '../sim/economy'
 import { installMotion, motionTick } from '../sim/motion'
-import { installBuild, buildCollect, buildApply } from '../sim/build'
+import { installBuild, buildCollect, buildApply, factoryTick } from '../sim/build'
 import { setupSession, SANDBOX_SESSION, type SessionInfo } from '../sim/session'
 import { simTick } from './simThreads'
 
@@ -90,6 +90,10 @@ export function installEngine(
  */
 export function beat(engine: Engine): void {
   const h = engine.host
+  // Phase 0 — Fabriken mit Warteschlange setzen die nächste Einheit auf. Das
+  // muss VOR dem Bedarf laufen, sonst hängt der frische Auftrag einen Beat lang
+  // in der Luft.
+  factoryTick(h)
   // Phase 1 — everyone who wants resources this tick registers demand.
   buildCollect(h)
   h.eval('__econEventsCollect()')

@@ -11,10 +11,11 @@ import { open, type FileHandle } from 'node:fs/promises'
 import { ZipArchive } from '../src/vfs/zipArchive'
 import type { RandomAccessFile } from '../src/vfs/randomAccess'
 import { LuaHost } from '../src/lua/host'
+import { bonesFromBlueprint } from './gameFiles'
 import { installEngine } from '../src/lua/engine'
 import { setTerrainSource } from '../src/lua/engineGlobals'
 import { FLAT_TEST_TERRAIN } from '../src/sim/terrain'
-import { installUnitFactory, installBlueprintPipeline, loadUnitBlueprint, spawnLuaUnit, spawnBuildSite } from '../src/lua/unitFactory'
+import { installUnitFactory, installBlueprintPipeline, loadUnitBlueprint, spawnLuaUnit, spawnBuildSite, setUnitBones } from '../src/lua/unitFactory'
 import { installSimThreads, simTick } from '../src/lua/simThreads'
 import { installMotion, motionTick } from '../src/sim/motion'
 import { EconomyManager, installEconomy } from '../src/sim/economy'
@@ -38,6 +39,14 @@ for (const a of ['mohodata.scd', 'lua.scd']) {
 }
 const uf = await NF.open(`${GAME}/gamedata/units.scd`); openFiles.push(uf)
 const uz = await ZipArchive.open(uf)
+// Die Sim braucht auch das SKELETT der Unit: Waffentuerme und Muendungen
+// haengen an Knochennamen (weapon.lua:67). Es kommt aus derselben SCM-Datei,
+// die auch der Renderer liest.
+const assetExists = (p: string): boolean => uz.get(p.toLowerCase()) != null
+const readAsset = async (p: string): Promise<Uint8Array | null> => {
+  const e = uz.get(p.toLowerCase())
+  return e ? uz.read(e) : null
+}
 const bps = new Map<string, Uint8Array>()
 for (const id of ['uel0001', 'ueb1101']) {
   files.set(`units/${id}/${id}_script.lua`, await uz.read(uz.get(`units/${id}/${id}_script.lua`)!))
@@ -52,8 +61,11 @@ const host = await LuaHost.create(files, () => {})
 const { economy: eco } = installEngine(host)
 // Flaches Testgelaende — EXPLIZIT, weil die Engine ohne Karte knallt (kein stiller 0-Wert).
 setTerrainSource(host, FLAT_TEST_TERRAIN)
-loadUnitBlueprint(host, 'uel0001', bps.get('uel0001')!)
-loadUnitBlueprint(host, 'ueb1101', bps.get('ueb1101')!)
+for (const id of ['uel0001', 'ueb1101']) {
+  loadUnitBlueprint(host, id, bps.get(id)!)
+  // Ohne Skelett kann keine Waffe aufgebaut werden (weapon.lua:67).
+  setUnitBones(host, id, await bonesFromBlueprint(id, bps.get(id)!, readAsset, assetExists))
+}
 
 // Beat in Original-Reihenfolge: Bau-Bedarf → Ökonomie → Bau anwenden → Threads → Physik
 const beat = (): void => {

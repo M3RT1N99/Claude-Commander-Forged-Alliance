@@ -178,6 +178,15 @@ function __uiSetUnit(id, blueprintId, army, x, y, z, health, maxHealth, workProg
   u.dead = false
 end
 
+-- Die Bau-Warteschlange einer Fabrik aus der Sim spiegeln. Die Engine haelt sie
+-- in der UI-Kopie der Unit; construction.lua liest sie ueber
+-- SetCurrentFactoryForQueueDisplay und zeigt sie als Stapel an.
+function __uiSetBuildQueue(id, items)
+  local u = __uiUnits[id]
+  if not u then return end
+  u.buildQueue = items or {}
+end
+
 function __uiRemoveUnit(id)
   local u = __uiUnits[id]
   if u then u.dead = true end
@@ -368,6 +377,21 @@ local function sendSim(name, units, value)
     error('Befehl "' .. name .. '" hat keinen Weg in die Sim (__uiSimCommand fehlt)', 2)
   end
   __uiSimCommand(name, idsOf(units), value)
+end
+
+-- === Befehle mit einem Blueprint als Ziel ===
+--
+-- IssueBlueprintCommand(command, blueprintId, count, clear) — construction.lua:884
+-- schickt damit eine Einheit in die Warteschlange der ausgewaehlten Fabrik
+-- ("UNITCOMMAND_BuildFactory"), oder ein Upgrade an ein Gebaeude
+-- ("UNITCOMMAND_Upgrade", construction.lua:876). Eine POSITION gibt es hier
+-- nicht — was platziert werden muss, laeuft ueber den Command-Mode.
+--
+-- Die UI fuehrt den Befehl nicht aus, sie schickt ihn: sendSim -> Engine -> Sim.
+function IssueBlueprintCommand(command, blueprintId, count, clear)
+  local sel = GetSelectedUnits()
+  if not sel then return end
+  sendSim(command, sel, { blueprint = blueprintId, count = count or 1, clear = clear == true })
 end
 
 -- === Bau-Vorlagen ===

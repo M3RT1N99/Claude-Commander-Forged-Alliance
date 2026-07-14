@@ -102,10 +102,32 @@ local entity = withNoops(ENTITY_NAMES, {
 
   SetMesh = function(self, mesh) self.__meshBp = mesh end,
 
-  -- No skeleton yet: no bone is valid, so bone-driven code paths stay off
-  -- instead of pretending to run.
-  GetBoneCount = function(self) return 0 end,
-  IsValidBone = function(self) return false end,
+  -- Das Skelett. Die Engine kennt es, weil sie das Modell der Unit auch in der
+  -- SIM laedt (nicht nur im Renderer): Waffen-Tuerme, Bau-Knochen, Muendungen
+  -- und Effekte haengen alle an Knochennamen. `Unit.lua:2751 ValidateBone` und
+  -- `weapon.lua:67 SetupTurret` fragen genau danach — ohne Skelett kann keine
+  -- Waffe aufgebaut werden.
+  --
+  -- Die Namen kommen aus der SCM-Datei (src/formats/scm.ts) und werden pro
+  -- Blueprint gesetzt (__setBones).
+  GetBoneCount = function(self)
+    return table.getn(self.__bones or {})
+  end,
+  GetBoneName = function(self, i)
+    return (self.__bones or {})[i + 1]
+  end,
+  IsValidBone = function(self, bone)
+    if bone == nil then return false end
+    local bones = self.__bones or {}
+    if type(bone) == 'number' then
+      return bone >= 0 and bone < table.getn(bones)
+    end
+    local want = string.lower(tostring(bone))
+    for _, name in ipairs(bones) do
+      if string.lower(name) == want then return true end
+    end
+    return false
+  end,
 })
 
 -- ---------------------------------------------------------------------
@@ -152,6 +174,27 @@ local unit = withNoops(UNIT_NAMES, {
   end,
   GetCurrentLayer = function(self) return self.__layer or 'Land' end,
   IsBeingBuilt = function(self) return self.__beingBuilt or false end,
+
+  -- Der Sammelpunkt einer Fabrik. Ohne gesetzten Punkt ist es die Fabrik selbst
+  -- — FactoryUnit.CalculateRollOffPoint (defaultunits.lua:578) sucht damit den
+  -- naechstgelegenen RollOffPoint des Blueprints aus.
+  -- Overcharge: die ACU haelt ihn an, solange er nicht geladen ist
+  -- (cfunc_UnitSetOverchargePaused; uel0001_script.lua:35 setzt ihn beim
+  -- Waffen-Aufbau).
+  SetOverchargePaused = function(self, paused)
+    self.__overchargePaused = paused == true
+  end,
+  IsOverchargePaused = function(self)
+    return self.__overchargePaused == true
+  end,
+
+  GetRallyPoint = function(self)
+    return self.__rally or self:GetPosition()
+  end,
+  SetRallyPoint = function(self, pos)
+    self.__rally = pos
+    return true
+  end,
   IsUnitState = function(self) return false end,
   IsIdleState = function(self) return true end,
   IsPaused = function(self) return false end,

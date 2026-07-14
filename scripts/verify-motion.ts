@@ -11,10 +11,11 @@ import { open, type FileHandle } from 'node:fs/promises'
 import { ZipArchive } from '../src/vfs/zipArchive'
 import type { RandomAccessFile } from '../src/vfs/randomAccess'
 import { LuaHost } from '../src/lua/host'
+import { bonesFromBlueprint } from './gameFiles'
 import { installEngine } from '../src/lua/engine'
 import { setTerrainSource } from '../src/lua/engineGlobals'
 import { FLAT_TEST_TERRAIN } from '../src/sim/terrain'
-import { installUnitFactory, installBlueprintPipeline, loadUnitBlueprint, spawnLuaUnit } from '../src/lua/unitFactory'
+import { installUnitFactory, installBlueprintPipeline, loadUnitBlueprint, spawnLuaUnit, setUnitBones } from '../src/lua/unitFactory'
 import { installSimThreads, simTick } from '../src/lua/simThreads'
 import { installMotion, motionTick } from '../src/sim/motion'
 
@@ -45,6 +46,14 @@ for (const archive of ['mohodata.scd', 'lua.scd']) {
 const unitsFile = await NodeFile.open(`${GAME}/gamedata/units.scd`)
 openFiles.push(unitsFile)
 const unitsZip = await ZipArchive.open(unitsFile)
+// Die Sim braucht auch das SKELETT der Unit: Waffentuerme und Muendungen
+// haengen an Knochennamen (weapon.lua:67). Es kommt aus derselben SCM-Datei,
+// die auch der Renderer liest.
+const assetExists = (p: string): boolean => unitsZip.get(p.toLowerCase()) != null
+const readAsset = async (p: string): Promise<Uint8Array | null> => {
+  const e = unitsZip.get(p.toLowerCase())
+  return e ? unitsZip.read(e) : null
+}
 files.set('units/uel0001/uel0001_script.lua', await unitsZip.read(unitsZip.get('units/uel0001/uel0001_script.lua')!))
 const acuBp = await unitsZip.read(unitsZip.get('units/uel0001/uel0001_unit.bp')!)
 
@@ -62,6 +71,7 @@ installEngine(host)
 // Flaches Testgelaende — EXPLIZIT, weil die Engine ohne Karte knallt (kein stiller 0-Wert).
 setTerrainSource(host, FLAT_TEST_TERRAIN)
 loadUnitBlueprint(host, 'uel0001', acuBp)
+setUnitBones(host, 'uel0001', await bonesFromBlueprint('uel0001', acuBp, readAsset, assetExists))
 
 const beat = (): void => { simTick(host); motionTick(host) }
 const maxSpeed = num(host, "(__registered.Unit['uel0001'].Physics and __registered.Unit['uel0001'].Physics.MaxSpeed) or 0")

@@ -56,6 +56,19 @@ export function loadUnitBlueprint(host: LuaHost, id: string, bpBytes: Uint8Array
 }
 
 /** Spawnt eine Unit über ihre Original-Klasse; liefert Unit-ID oder wirft. */
+/**
+ * Das Skelett eines Blueprints in die Sim geben.
+ *
+ * Die Engine lädt das Modell einer Unit auch in der SIM, nicht nur im Renderer:
+ * Waffentürme (`weapon.lua:67`), Mündungen, Bau- und Effekt-Knochen hängen alle
+ * an Knochennamen, und `Unit:ValidateBone` (unit.lua:2751) fragt sie ab. Ohne
+ * Skelett bricht schon `Weapon:OnCreate` ab — und damit die halbe Unit.
+ */
+export function setUnitBones(host: LuaHost, blueprintId: string, bones: string[]): void {
+  const list = bones.map((b) => JSON.stringify(b)).join(',')
+  host.eval(`__setBones(${JSON.stringify(blueprintId)}, { ${list} })`)
+}
+
 export function spawnLuaUnit(
   host: LuaHost,
   blueprintId: string,

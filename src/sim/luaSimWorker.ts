@@ -11,7 +11,8 @@
  */
 import { LuaHost } from '../lua/host'
 import { installEngine, beat, type Engine } from '../lua/engine'
-import { loadUnitBlueprint, spawnLuaUnit, spawnBuildSite } from '../lua/unitFactory'
+import { queueFactoryBuild } from './build'
+import { loadUnitBlueprint, spawnLuaUnit, spawnBuildSite, setUnitBones } from '../lua/unitFactory'
 import { setTerrainSource } from '../lua/engineGlobals'
 import { Heightfield, type HeightfieldData } from './terrain'
 
@@ -28,7 +29,7 @@ interface Vec3 {
 }
 type InMsg =
   | { type: 'boot'; files: Map<string, Uint8Array>; terrain: HeightfieldData }
-  | { type: 'spawn'; reqId: number; id: string; scriptPath: string; scriptBytes: Uint8Array | null; bpBytes: Uint8Array | null; pos: Vec3; army: number }
+  | { type: 'spawn'; reqId: number; id: string; scriptPath: string; scriptBytes: Uint8Array | null; bpBytes: Uint8Array | null; bones: string[]; pos: Vec3; army: number }
   | { type: 'move'; id: number; x: number; z: number }
   | { type: 'stop'; id: number }
   | { type: 'reset'; terrain: HeightfieldData }
@@ -42,8 +43,21 @@ type InMsg =
       scriptPath: string
       scriptBytes: Uint8Array | null
       bpBytes: Uint8Array | null
+      bones: string[]
       pos: Vec3
       army: number
+    }
+  // Fabrik-Auftrag (IssueBlueprintCommand "UNITCOMMAND_BuildFactory"): die
+  // Einheit geht in die Warteschlange, die Fabrik arbeitet sie im Beat ab.
+  | {
+      type: 'factoryBuild'
+      factoryId: number
+      id: string
+      scriptPath: string
+      scriptBytes: Uint8Array | null
+      bpBytes: Uint8Array | null
+      bones: string[]
+      count: number
     }
 
 ctx.onmessage = async (e: MessageEvent<InMsg>): Promise<void> => {
@@ -72,10 +86,17 @@ ctx.onmessage = async (e: MessageEvent<InMsg>): Promise<void> => {
     return
   }
   if (!host) return
+  // Script, Blueprint und Skelett muessen in der Sim liegen, BEVOR eine Unit
+  // dieses Typs entsteht — auch wenn die Fabrik sie spaeter selbst spawnt.
+  const prepare = (m: { id: string; scriptPath: string; scriptBytes: Uint8Array | null; bpBytes: Uint8Array | null; bones: string[] }): void => {
+    if (!host) return
+    if (m.scriptBytes && !host.hasFile(m.scriptPath)) host.addFile(m.scriptPath, m.scriptBytes)
+    if (m.bpBytes) loadUnitBlueprint(host, m.id, m.bpBytes)
+    setUnitBones(host, m.id, m.bones ?? [])
+  }
   if (msg.type === 'spawn') {
     try {
-      if (msg.scriptBytes && !host.hasFile(msg.scriptPath)) host.addFile(msg.scriptPath, msg.scriptBytes)
-      if (msg.bpBytes) loadUnitBlueprint(host, msg.id, msg.bpBytes)
+      prepare(msg)
       const uid = spawnLuaUnit(host, msg.id, msg.pos, msg.army)
       ctx.postMessage({ type: 'spawned', reqId: msg.reqId, uid })
     } catch (err) {
@@ -83,8 +104,7 @@ ctx.onmessage = async (e: MessageEvent<InMsg>): Promise<void> => {
     }
   } else if (msg.type === 'build') {
     try {
-      if (msg.scriptBytes && !host.hasFile(msg.scriptPath)) host.addFile(msg.scriptPath, msg.scriptBytes)
-      if (msg.bpBytes) loadUnitBlueprint(host, msg.id, msg.bpBytes)
+      prepare(msg)
       // Reihenfolge wie in der Engine: erst die Baustelle (Sim::CreateUnit mit
       // beingBuilt=1), dann der Auftrag an den Bauer (OnStartBuild/'MobileBuild').
       const uid = spawnBuildSite(host, msg.id, msg.pos, msg.army)
@@ -93,6 +113,9 @@ ctx.onmessage = async (e: MessageEvent<InMsg>): Promise<void> => {
     } catch (err) {
       ctx.postMessage({ type: 'spawnError', reqId: msg.reqId, error: (err as Error).message })
     }
+  } else if (msg.type === 'factoryBuild') {
+    prepare(msg)
+    queueFactoryBuild(host, msg.factoryId, msg.id, msg.count)
   } else if (msg.type === 'move') {
     host.eval(`local u=__units[${msg.id}]; if u then u:GetNavigator():SetGoal({ ${msg.x}, 0, ${msg.z} }) end`)
   } else if (msg.type === 'stop') {

@@ -9,6 +9,7 @@ import { open, type FileHandle } from 'node:fs/promises'
 import { ZipArchive } from '../src/vfs/zipArchive'
 import type { RandomAccessFile } from '../src/vfs/randomAccess'
 import { LuaHost } from '../src/lua/host'
+import { bonesFromBlueprint } from './gameFiles'
 import { installEngine } from '../src/lua/engine'
 import { setTerrainSource } from '../src/lua/engineGlobals'
 import { FLAT_TEST_TERRAIN } from '../src/sim/terrain'
@@ -18,6 +19,7 @@ import {
   loadUnitBlueprint,
   spawnLuaUnit,
   readLuaUnit,
+  setUnitBones
 } from '../src/lua/unitFactory'
 
 class NodeFile implements RandomAccessFile {
@@ -55,6 +57,14 @@ for (const archive of ['mohodata.scd', 'lua.scd']) {
 const unitsFile = await NodeFile.open(`${GAME}/gamedata/units.scd`)
 openFiles.push(unitsFile)
 const unitsZip = await ZipArchive.open(unitsFile)
+// Die Sim braucht auch das SKELETT der Unit: Waffentuerme und Muendungen
+// haengen an Knochennamen (weapon.lua:67). Es kommt aus derselben SCM-Datei,
+// die auch der Renderer liest.
+const assetExists = (p: string): boolean => unitsZip.get(p.toLowerCase()) != null
+const readAsset = async (p: string): Promise<Uint8Array | null> => {
+  const e = unitsZip.get(p.toLowerCase())
+  return e ? unitsZip.read(e) : null
+}
 // Unit-Script vorladen; das Blueprint wird über loadUnitBlueprint registriert.
 files.set(
   'units/uel0001/uel0001_script.lua',
@@ -77,6 +87,7 @@ installEngine(host)
 setTerrainSource(host, FLAT_TEST_TERRAIN)
 const missing = new Set<string>()
 loadUnitBlueprint(host, 'uel0001', uel0001bp)
+setUnitBones(host, 'uel0001', await bonesFromBlueprint('uel0001', uel0001bp, readAsset, assetExists))
 
 console.log('\n== Spawn über Original-Klasse (UEL0001 = TWalkingLandUnit) ==')
 try {

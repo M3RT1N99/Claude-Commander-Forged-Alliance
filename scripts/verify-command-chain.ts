@@ -17,13 +17,12 @@
  *
  *   npx tsx --import ./scripts/register-lua.mjs scripts/verify-command-chain.ts
  */
-import { open, readdir, readFile, type FileHandle } from 'node:fs/promises'
-import { ZipArchive } from '../src/vfs/zipArchive'
-import type { RandomAccessFile } from '../src/vfs/randomAccess'
+import { readdir, readFile } from 'node:fs/promises'
 import { LuaHost } from '../src/lua/host'
 import { installEngine, beat } from '../src/lua/engine'
 import { setTerrainSource } from '../src/lua/engineGlobals'
-import { spawnLuaUnit, spawnBuildSite, readLuaUnit, loadUnitBlueprint } from '../src/lua/unitFactory'
+import { spawnLuaUnit, spawnBuildSite, readLuaUnit } from '../src/lua/unitFactory'
+import { GameFiles, GAME_DIR } from './gameFiles'
 import {
   installUiEngine,
   setupUi,
@@ -36,29 +35,6 @@ import { findFiles } from '../src/vfs/glob'
 import { parseDds } from '../src/formats/dds'
 import { FontBook } from '../src/ui/fonts'
 
-class NodeFile implements RandomAccessFile {
-  private constructor(
-    private readonly fh: FileHandle,
-    readonly size: number,
-  ) {}
-  static async open(p: string): Promise<NodeFile> {
-    const fh = await open(p, 'r')
-    return new NodeFile(fh, (await fh.stat()).size)
-  }
-  async slice(s: number, e: number): Promise<ArrayBuffer> {
-    if (e <= s) return new ArrayBuffer(0)
-    const b = Buffer.alloc(e - s)
-    await this.fh.read(b, 0, e - s, s)
-    return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength)
-  }
-  close(): Promise<void> {
-    return this.fh.close()
-  }
-}
-
-const GAME =
-  process.env.CFA_GAME_DIR ??
-  'C:/Program Files (x86)/Steam/steamapps/common/Supreme Commander Forged Alliance'
 
 let failures = 0
 const check = (ok: boolean, label: string): void => {
@@ -71,24 +47,9 @@ const log = (msg: string): void => {
 }
 
 // --- Dateien (erstes Archiv gewinnt, wie im Browser) ------------------------
-const files = new Map<string, Uint8Array>()
-const allPaths = new Set<string>()
-const openFiles: NodeFile[] = []
-const zips: ZipArchive[] = []
-for (const archive of (await readdir(`${GAME}/gamedata`))
-  .filter((n) => n.toLowerCase().endsWith('.scd'))
-  .sort((a, b) => a.localeCompare(b))) {
-  const f = await NodeFile.open(`${GAME}/gamedata/${archive}`)
-  openFiles.push(f)
-  const zip = await ZipArchive.open(f)
-  zips.push(zip)
-  for (const [key, entry] of zip.entries) {
-    allPaths.add(key.toLowerCase())
-    if ((key.endsWith('.lua') || key.endsWith('.bp')) && !files.has(key)) {
-      files.set(key, await zip.read(entry))
-    }
-  }
-}
+const game = await GameFiles.open()
+const files = game.luaFiles
+const allPaths = game.paths
 const bpPaths = [...allPaths].filter((p) => /^units\/[^/]+\/[^/]+_unit\.bp$/.test(p))
 
 // --- Die Sim-VM (Original-Engine-Boot, flaches Testgelände) -----------------
@@ -96,11 +57,8 @@ console.log('\n== Sim: ACU über die Original-Unit.lua ==')
 const simHost = await LuaHost.create(files, () => {})
 const engine = installEngine(simHost)
 setTerrainSource(simHost, () => 20) // flaches Testgelände auf Höhe 20
-// Die Blueprints der beteiligten Units über die echte Pipeline (dieselbe, die
-// der Worker beim Spawn benutzt).
-for (const id of ['uel0001', 'ueb0101']) {
-  loadUnitBlueprint(simHost, id, files.get(`units/${id}/${id}_unit.bp`)!)
-}
+// Blueprint UND Skelett — genau das, was der Worker beim Spawn mitschickt.
+for (const id of ['uel0001', 'ueb0101']) await game.giveUnit(simHost, id)
 const acu = spawnLuaUnit(simHost, 'uel0001', { x: 100, y: 20, z: 100 }, 1)
 check(acu > 0, `ACU gespawnt (id ${acu})`)
 // GiveInitialResources läuft nach WaitTicks(5) — erst danach hat die Armee etwas.
@@ -114,20 +72,18 @@ check(eco0.mass > 0 && eco0.energy > 0, `Startvorrat aus GiveInitialResources: $
 // --- Die UI-VM (dieselbe wie im Browser) ------------------------------------
 console.log('\n== UI: Panels aufbauen, ACU auswählen ==')
 const dims = new Map<string, [number, number]>()
-for (const zip of zips) {
-  for (const [key, entry] of zip.entries) {
-    if (!key.startsWith('textures/ui/') || !key.endsWith('.dds') || dims.has(key)) continue
-    try {
-      const dds = parseDds(await zip.read(entry))
-      dims.set(key, [dds.width, dds.height])
-    } catch {
-      // Kaputte DDS: nicht raten.
-    }
+for (const key of game.paths) {
+  if (!key.startsWith('textures/ui/') || !key.endsWith('.dds')) continue
+  try {
+    const dds = parseDds(await game.read(key))
+    dims.set(key, [dds.width, dds.height])
+  } catch {
+    // Kaputte DDS: nicht raten.
   }
 }
 const fonts = new FontBook()
-for (const name of await readdir(`${GAME}/fonts`)) {
-  if (/\.ttf$/i.test(name)) fonts.add(await readFile(`${GAME}/fonts/${name}`))
+for (const name of await readdir(`${GAME_DIR}/fonts`)) {
+  if (/\.ttf$/i.test(name)) fonts.add(await readFile(`${GAME_DIR}/fonts/${name}`))
 }
 
 const uiHost = await LuaHost.create(files, (level, msg) => {
@@ -268,6 +224,6 @@ check(
 
 simHost.close()
 uiHost.close()
-for (const f of openFiles) await f.close()
+await game.close()
 console.log(failures === 0 ? '\nBEFEHLSKETTE BESTANDEN' : `\n${failures} CHECK(S) FEHLGESCHLAGEN`)
 process.exit(failures === 0 ? 0 : 1)

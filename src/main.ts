@@ -430,7 +430,15 @@ async function startSandbox(mapFolder: string): Promise<void> {
     // Die Naht, über die Befehle der UI in die Sim gehen. Ohne sie KNALLT jeder
     // Befehl — statt still zu verpuffen (ui-globals.lua: __uiSimCommand).
     gameUi.connectSim((name, ids, value) => {
-      log(`Befehl an die Sim: ${name}(${ids.join(',')}) = ${String(value)}`)
+      const v = value as { blueprint?: string; count?: number } | undefined
+      if (name === 'UNITCOMMAND_BuildFactory' && v?.blueprint) {
+        // Die Fabrik baut: die Einheit geht in ihre Warteschlange (die Sim spawnt
+        // sie selbst, sobald sie an der Reihe ist).
+        for (const id of ids) void luaSim?.factoryBuild(id, v.blueprint, v.count ?? 1)
+        log(`Fabrik ${ids.join(',')}: ${v.count ?? 1}× ${v.blueprint}`)
+        return
+      }
+      log(`Befehl an die Sim: ${name}(${ids.join(',')}) — noch kein Weg dorthin`)
     })
 
     // Beide Frame-Hooks an EINER Stelle registrieren, nach dem Karten-Laden
@@ -487,17 +495,41 @@ async function runSelftest(blueprintId: string): Promise<void> {
   await issueWorldCommand({ x: s.x + 9, z: s.z + 9 }, false)
 
   // Wächst der Bau? Die Zahlen kommen aus der Sim, nicht von hier.
-  for (let round = 0; round < 60; round++) {
+  let factoryId = 0
+  for (let round = 0; round < 90 && factoryId === 0; round++) {
     await new Promise((r) => setTimeout(r, 1000))
-    const site = luaSim.allStates().find((u) => u.name === blueprintId && u.fraction < 1)
+    const site = luaSim.allStates().find((u) => u.name === blueprintId)
     const eco = luaSim.economySnapshot()
-    if (site) {
+    if (!site) continue
+    if (site.fraction < 1) {
       log(
         `SELFTEST: ${blueprintId} bei ${(site.fraction * 100).toFixed(0)} % ` +
           `(Masse ${eco?.mass.toFixed(0)}, Einheiten ${luaUnits.length})`,
       )
-    } else if (luaSim.allStates().some((u) => u.name === blueprintId)) {
-      log(`SELFTEST: ${blueprintId} FERTIG — Lager ${luaSim.economySnapshot()?.massStorage}`)
+    } else {
+      factoryId = site.id
+      log(`SELFTEST: ${blueprintId} FERTIG — Lager ${eco?.massStorage.toFixed(0)}`)
+    }
+  }
+  if (factoryId === 0) return
+
+  // Die Fabrik produziert: Auswahl → IssueBlueprintCommand (genau der Weg, den
+  // ein Klick aufs Bau-Icon in der Original-construction.lua nimmt).
+  gameUi.select([factoryId])
+  gameUi.issueBlueprintCommand('UNITCOMMAND_BuildFactory', 'uel0101', 2)
+  for (let round = 0; round < 60; round++) {
+    await new Promise((r) => setTimeout(r, 1000))
+    const tanks = luaSim.allStates().filter((u) => u.name === 'uel0101')
+    if (tanks.length === 0) continue
+    const done = tanks.filter((t) => t.fraction >= 1).length
+    const e = luaSim.economySnapshot()
+    log(
+      `SELFTEST: Fabrik baut uel0101 — ${tanks.length} Stück, ${done} fertig ` +
+        `(${(tanks[0]!.fraction * 100).toFixed(0)} %) — Masse ${e?.mass.toFixed(0)}/${e?.massStorage.toFixed(0)} ` +
+        `+${e?.massIncome.toFixed(1)} −${e?.massExpense.toFixed(1)}, Energie ${e?.energy.toFixed(0)} +${e?.energyIncome.toFixed(1)}`,
+    )
+    if (done >= 2) {
+      log('SELFTEST: BEIDE PANZER FERTIG — die Techdemo läuft')
       return
     }
   }
