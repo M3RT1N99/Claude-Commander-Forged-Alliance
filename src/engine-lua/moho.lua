@@ -439,7 +439,11 @@ end
 
 local text = withNoops(TEXT_NAMES, {
   SetText = function(self, str)
-    self.__text = str or ''
+    -- tostring, weil die UI-Lua auch ZAHLEN durchreicht (economy.lua schreibt
+    -- ihre Werte direkt in die Controls). Die Engine nimmt einen String entgegen;
+    -- LuaPlus wandelt eine Zahl beim Uebergeben selbst um. Ohne diese Umwandlung
+    -- bekommt die Schriftmetrik eine Zahl zu messen — und verschluckt sich.
+    self.__text = str ~= nil and tostring(str) or ''
     refreshTextAdvance(self)
     __mauiDirty = true
   end,

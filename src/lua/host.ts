@@ -104,6 +104,23 @@ export class LuaHost {
 
   /** Setzt/überschreibt ein globales Symbol (Engine-Funktion, Tabelle). */
   setGlobal(name: string, value: unknown): void {
+    // Eine JS-Funktion darf NIEMALS `null` nach Lua zurückgeben: wasmoon prüft
+    // den Rückgabewert mit `typeof target !== 'object'` und greift danach auf
+    // `target.then` zu (wasmoon/dist/index.js:1020-1026). Für `null` ist
+    // `typeof` aber "object" — die VM stirbt mit "Cannot read properties of null
+    // (reading 'then')", und zwar irgendwo tief in einer Original-Lua-Datei, die
+    // damit nichts zu tun hat. (Gefunden, als GetTextureDimensions für eine
+    // fehlende DDS `null` lieferte: die Auswahl der ACU riss die ganze UI-VM um.)
+    //
+    // `undefined` ist der richtige Wert — daraus wird in Lua `nil`.
+    if (typeof value === 'function') {
+      const fn = value as (...args: unknown[]) => unknown
+      this.lua.global.set(name, (...args: unknown[]) => {
+        const r = fn(...args)
+        return r === null ? undefined : r
+      })
+      return
+    }
     this.lua.global.set(name, value)
   }
 

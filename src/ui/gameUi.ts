@@ -199,6 +199,17 @@ export class GameUi {
     this.host.eval(`import('/lua/ui/game/commandmode.lua').EndCommandMode(true)`)
   }
 
+  /**
+   * Command-Mode starten. Im Original ist das ein Konsolenbefehl — die
+   * Tastenbelegung ruft ihn genau so auf (`StartCommandMode order RULEUCC_Move`,
+   * keymap/keyactions.lua:218), und die Bau-Icons rufen dieselbe Lua-Funktion.
+   */
+  startCommandMode(mode: 'order' | 'build' | 'buildanchored', name: string): void {
+    this.host.eval(
+      `import('/lua/ui/game/commandmode.lua').StartCommandMode('${mode}', { name = '${name}' })`,
+    )
+  }
+
   /** Die Naht für Befehle, die direkt an eine Unit gehen (SetFireState, SetPaused …). */
   connectSim(send: (name: string, ids: number[], value: unknown) => void): void {
     this.host.setGlobal('__uiSimCommand', send)

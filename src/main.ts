@@ -443,15 +443,63 @@ async function startSandbox(mapFolder: string): Promise<void> {
     // SimWorld-Platzhalter. Nicht awaiten, damit die Karte sofort bedienbar ist
     // (die Lua-VM bootet einmalig im Hintergrund).
     void spawnViaLua('uel0001')
-    const zoomParam = Number(new URLSearchParams(location.search).get('zoom'))
+    const params = new URLSearchParams(location.search)
+    const zoomParam = Number(params.get('zoom'))
     viewer.focusOn(spawnPoint, zoomParam > 0 ? zoomParam : 14)
     $('#sandbox-spawns').hidden = false
     sandboxInfo.innerHTML =
       `Karte <strong>${mapFolder}</strong> — Klick auf Einheit = Auswahl, ` +
-      `Klick aufs Terrain = Bewegung (Shift = Warteschlange)`
+      `Bau-Icon + Klick aufs Terrain = Gebäude setzen, Rechtsklick = Bewegung`
     log(`Sandbox bereit auf ${mapFolder} (Sim: 10 Ticks/s)`)
+    const selftest = params.get('selftest')
+    if (selftest) void runSelftest(selftest)
   } catch (err) {
     log(`FEHLER Sandbox: ${err instanceof Error ? err.message : err}`)
+  }
+}
+
+/**
+ * Selbsttest über die URL (`?selftest=ueb0101`): wählt die ACU und baut das
+ * angegebene Gebäude neben ihr — über GENAU denselben Weg wie ein Klick
+ * (SelectUnits → commandmode → worldClick). Damit ist der Browser-Pfad prüfbar,
+ * ohne dass jemand mit der Maus danebentippt.
+ */
+async function runSelftest(blueprintId: string): Promise<void> {
+  const deadline = Date.now() + 60000
+  while (luaUnits.length === 0 && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 200))
+  }
+  const acu = luaUnits[0]
+  if (!acu || !gameUi || !luaSim) {
+    log('SELFTEST: keine ACU')
+    return
+  }
+  try {
+    gameUi.select([acu.id])
+  } catch (err) {
+    log(`SELFTEST: select scheitert — ${(err as Error).stack?.slice(0, 300)}`)
+    return
+  }
+  log(`SELFTEST: ACU ${acu.id} ausgewählt`)
+  gameUi.startCommandMode('build', blueprintId)
+  const s = luaSim.state(acu.id)
+  if (!s) return
+  await issueWorldCommand({ x: s.x + 9, z: s.z + 9 }, false)
+
+  // Wächst der Bau? Die Zahlen kommen aus der Sim, nicht von hier.
+  for (let round = 0; round < 60; round++) {
+    await new Promise((r) => setTimeout(r, 1000))
+    const site = luaSim.allStates().find((u) => u.name === blueprintId && u.fraction < 1)
+    const eco = luaSim.economySnapshot()
+    if (site) {
+      log(
+        `SELFTEST: ${blueprintId} bei ${(site.fraction * 100).toFixed(0)} % ` +
+          `(Masse ${eco?.mass.toFixed(0)}, Einheiten ${luaUnits.length})`,
+      )
+    } else if (luaSim.allStates().some((u) => u.name === blueprintId)) {
+      log(`SELFTEST: ${blueprintId} FERTIG — Lager ${luaSim.economySnapshot()?.massStorage}`)
+      return
+    }
   }
 }
 
