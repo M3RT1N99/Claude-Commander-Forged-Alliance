@@ -388,3 +388,17 @@ host.close()
 for (const f of openFiles) await f.close()
 console.log(failures === 0 ? '\nUI-PANELS BESTANDEN' : `\n${failures} CHECK(S) FEHLGESCHLAGEN`)
 process.exit(failures === 0 ? 0 : 1)
+
+console.log('\n== Die Weltansichten sind Controls — auch die Minimap ==')
+// Im Original gibt es ZWEI: die Hauptansicht (gamemain.lua:142) und die Minimap
+// (minimap.lua:115 — dieselbe Klasse, nur `isMiniMap = true`). Genau deshalb
+// lässt sich die Minimap im Spiel verschieben: sie ist ein Control in einem
+// Fenster, kein festgenageltes Rechteck.
+const views = host.pull<{ kind: string; name: string; list: { miniMap?: boolean } | false }[]>(
+  '__mauiSnapshotJson()',
+).filter((c) => c.kind === 'worldview')
+check(views.length >= 1, `${views.length} WorldView(s) im Baum`)
+check(
+  views.some((v) => v.list && v.list.miniMap === false),
+  'die Hauptansicht ist da (perspektivisch)',
+)
