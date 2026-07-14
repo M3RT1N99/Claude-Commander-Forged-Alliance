@@ -178,9 +178,18 @@ console.log('\n== Hit-Test: die freie Spielfläche gehört der Welt ==')
 // ist KEINE EINHEIT MEHR SELEKTIERBAR — genau dieser Fehler stand im Browser
 // (der Treffer war die "GameMain ScreenGroup"). Deshalb gilt: nur ein Control,
 // das etwas ZEICHNET (Bitmap/Text), verbraucht einen Klick.
+// Die freie Fläche IST die WorldView — ein echtes Control (CUIWorldView), das
+// gamemain.lua:142 in die mapGroup hängt. Sie verbraucht den Klick NICHT: im
+// Original behandelt sie ihn selbst (Auswahl, Befehl, Bau), bei uns tut das die
+// 3D-Seite. Die alte Krücke („ein Treffer auf einen unsichtbaren Container
+// gehört der Welt") ist damit weg.
+const worldHit = String(
+  host.eval(`local c = __mauiHitTest(960, 500) if not c then return 'NICHTS' end return c.__kind`),
+)
+check(worldHit === 'worldview', `der Klick in die freie Fläche trifft die WorldView (${worldHit})`)
 check(
   host.eval(`return __mauiMouse('ButtonPress', 960, 500, { Left = true })`) === false,
-  'Klick in die freie Spielfläche wird NICHT verbraucht (Container reichen durch)',
+  'und die UI verbraucht ihn NICHT — er gehört der Welt',
 )
 
 console.log('\n== Auswahl: __uiSetUnit → SelectUnits → OnSelectionChanged ==')

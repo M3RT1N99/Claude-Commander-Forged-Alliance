@@ -215,6 +215,39 @@ function InternalCreateMovie(luaobj, parent)
   return doInit(luaobj)
 end
 
+-- CUIWorldView — die Weltansicht. Sie ist ein CONTROL, kein Sonderfall.
+--
+-- Das ist der Grund, warum sich im Original die Minimap verschieben laesst: sie
+-- IST eine WorldView (minimap.lua:115), die in einem Fenster haengt — kein
+-- festgenageltes Rechteck.
+--
+-- Ihr __init liegt in C++ (Cfile:1300209), die Signatur steht woertlich im
+-- mHelp:
+--
+--   moho.UIWorldView:__init(parent_control, cameraName, depth, isMiniMap, trackCamera)
+--
+-- worldview.lua:96 leitet davon ab: `WorldView = Class(moho.UIWorldView, Control)`.
+-- Zwei Ansichten gibt es im Spiel:
+--   * die Hauptansicht  — worldview.lua:22 CreateMainWorldView(parent, mapGroup)
+--   * die Minimap       — minimap.lua:115 WorldView(..., 'MiniMap', 2, true, 'WorldCamera')
+--     (isMiniMap = true -> kartografisch, Draufsicht)
+--
+-- Gezeichnet wird die Welt von der 3D-Engine, nicht vom maui-Renderer: das
+-- Control sagt nur, WO und WIE GROSS. Genau das liefert der Snapshot.
+function __uiCreateWorldView(luaobj, parent, cameraName, depth, isMiniMap, trackCamera)
+  attachControl(luaobj, parent, 'worldview')
+  luaobj.__cameraName = cameraName or 'WorldCamera'
+  luaobj.__isMiniMap = isMiniMap == true
+  luaobj.__trackCamera = trackCamera
+  luaobj.__cartographic = isMiniMap == true
+  luaobj.__resourceIcons = false
+  luaobj.__inputLocked = false
+  luaobj.__highlight = true
+  luaobj.__globalCameraCommands = false
+  if depth then luaobj.Depth:Set(depth) end
+  return doInit(luaobj)
+end
+
 -- CMauiScrollbar (Cfile:1144735). `axis` ist der Lexical-String der
 -- EMauiScrollAxis ("Vert"/"Horz", scrollbar.lua:9-12).
 --
@@ -370,6 +403,9 @@ local function draws(c)
     or c.__kind == 'itemlist'
     or c.__kind == 'edit'
     or c.__kind == 'scrollbar'
+    -- Die WorldView zeichnet die WELT (die 3D-Seite tut es an ihrer Stelle) und
+    -- nimmt Klicks entgegen — sie muss also im Snapshot und im Hit-Test stehen.
+    or c.__kind == 'worldview'
 end
 
 -- Die vier Zahlen eines Controls — oder nil, wenn das Layout unvollstaendig ist
@@ -577,6 +613,13 @@ local function listJson(ctrl)
     return '{"text":' .. jsonStr(ctrl.__text or '')
       .. ',"caret":' .. jsonNum(ctrl.__caret or 0)
       .. ',"fg":' .. jsonOpt(c.fg) .. ',"bg":' .. jsonOpt(c.bg)
+      .. '}'
+  end
+  if ctrl.__kind == 'worldview' then
+    return '{"camera":' .. jsonStr(ctrl.__cameraName or 'WorldCamera')
+      .. ',"miniMap":' .. tostring(ctrl.__isMiniMap == true)
+      .. ',"cartographic":' .. tostring(ctrl.__cartographic == true)
+      .. ',"resourceIcons":' .. tostring(ctrl.__resourceIcons == true)
       .. '}'
   end
   if ctrl.__kind == 'scrollbar' then
@@ -794,9 +837,18 @@ function __mauiMouse(evType, x, y, mods, keyCode)
     Type = evType, MouseX = x, MouseY = y, Modifiers = mods, KeyCode = keyCode or 0,
   })
   if handled then return true end
-  -- Der Hit-Test liefert nur zeichnende Controls — ein Treffer ist also immer
-  -- ein UI-Treffer, auch wenn ihn niemand behandelt hat (ein Klick auf ein
-  -- Panel ist kein Bewegungsbefehl).
+  -- Ein Treffer auf die WORLDVIEW ist KEIN UI-Treffer: die Weltansicht IST die
+  -- Welt (CUIWorldView). Im Original behandelt sie den Klick selbst — Auswahl,
+  -- Befehl, Bau. Bei uns macht das die 3D-Seite, also muss der Klick dorthin
+  -- durchgereicht werden.
+  --
+  -- Vorher gab es die WorldView nicht, und die Regel lautete: "ein Klick auf
+  -- einen unsichtbaren Vollbild-Container gehoert der Welt". Diese Kruecke ist
+  -- damit weg — die Welt ist jetzt ein echtes Control.
+  if hit and hit.__kind == 'worldview' then return false end
+  -- Sonst: der Hit-Test liefert nur zeichnende Controls — ein Treffer ist also
+  -- ein UI-Treffer, auch wenn ihn niemand behandelt hat (ein Klick auf ein Panel
+  -- ist kein Bewegungsbefehl).
   return hit ~= nil
 end
 

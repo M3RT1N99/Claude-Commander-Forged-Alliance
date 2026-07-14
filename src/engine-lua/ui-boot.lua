@@ -95,6 +95,16 @@ end
 --- Panel kostet und benannt wird — statt den ganzen Aufbau mitzureissen.
 __uiPanels = {
   {
+    -- gamemain.lua:142 — die HAUPTANSICHT. Sie ist ein Control (CUIWorldView),
+    -- kein Sonderfall: worldview.lua:22 haengt sie in die mapGroup. Nur deshalb
+    -- laesst sich im Original auch die MINIMAP verschieben — sie ist dieselbe
+    -- Klasse (minimap.lua:115).
+    name = 'worldview',
+    build = function()
+      import('/lua/ui/game/worldview.lua').CreateMainWorldView(__ui.gameParent, __ui.mapGroup)
+    end,
+  },
+  {
     name = 'economy',
     build = function()
       Economy = import('/lua/ui/game/economy.lua')

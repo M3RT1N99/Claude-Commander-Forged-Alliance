@@ -890,6 +890,80 @@ local movie = withNoops(MOVIE_NAMES, {
   GetNumFrames = function(self) return 0 end,
 }, control)
 
+-- ---------------------------------------------------------------------
+-- UIWorldView (CUIWorldView) — 17 Bindungen. Die Weltansicht ist ein CONTROL.
+--
+-- Das ist der Grund, warum sich im Original die Minimap verschieben laesst: sie
+-- IST eine WorldView (minimap.lua:115), die in einem Fenster haengt.
+--
+-- Ihr __init liegt in C++ — mHelp woertlich (Cfile:1300209):
+--   moho.UIWorldView:__init(parent_control, cameraName, depth, isMiniMap, trackCamera)
+--
+-- Die uebrigen Signaturen ebenso woertlich:
+--   Reset()                         SetCartographic(bool)     bool IsCartographic()
+--   LockInput(camera)               UnlockInput(camera)       IsInputLocked(camera)
+--   EnableResourceRendering(bool)   bool IsResourceRenderingEnabled()
+--   SetHighlightEnabled(bool)       bool HasHighlightCommand()
+--   GetsGlobalCameraCommands(bool)  string GetRightMouseButtonOrder()
+--   (vector2f|nil) = GetScreenPos(unit)
+--   VECTOR2 Project(self, VECTOR3) - Weltpunkt -> Control-Koordinaten
+--   ZoomScale(x, y, wheelRot, wheelDelta)
+--
+-- Gezeichnet wird die Welt von der 3D-Engine, nicht vom maui-Renderer: das
+-- Control sagt nur, WO und WIE GROSS. Was hier Zustand ist, ist Zustand; was
+-- Geometrie braucht (Project, GetScreenPos), liefert die 3D-Seite ueber
+-- __uiWorldProject — ohne sie wird nicht geraten, sondern nil gemeldet.
+-- ---------------------------------------------------------------------
+local WORLDVIEW_NAMES = {
+  '__init', 'CameraReset', 'EnableResourceRendering', 'GetRightMouseButtonOrder',
+  'GetScreenPos', 'GetsGlobalCameraCommands', 'HasHighlightCommand', 'IsCartographic',
+  'IsInputLocked', 'IsResourceRenderingEnabled', 'LockInput', 'Project', 'Reset',
+  'SetCartographic', 'SetHighlightEnabled', 'UnlockInput', 'ZoomScale',
+}
+local worldview = withNoops(WORLDVIEW_NAMES, {
+  __init = function(self, parent, cameraName, depth, isMiniMap, trackCamera)
+    __uiCreateWorldView(self, parent, cameraName, depth, isMiniMap, trackCamera)
+  end,
+
+  SetCartographic = function(self, on)
+    self.__cartographic = on == true
+    __mauiDirty = true
+  end,
+  IsCartographic = function(self) return self.__cartographic == true end,
+
+  EnableResourceRendering = function(self, on)
+    self.__resourceIcons = on == true
+    __mauiDirty = true
+  end,
+  IsResourceRenderingEnabled = function(self) return self.__resourceIcons == true end,
+
+  LockInput = function(self) self.__inputLocked = true end,
+  UnlockInput = function(self) self.__inputLocked = false end,
+  IsInputLocked = function(self) return self.__inputLocked == true end,
+
+  SetHighlightEnabled = function(self, on) self.__highlight = on == true end,
+  HasHighlightCommand = function(self) return false end,
+
+  GetsGlobalCameraCommands = function(self, on) self.__globalCameraCommands = on == true end,
+
+  -- "string moho.UIWorldView:GetRightMouseButtonOrder()" — welcher Befehl haengt
+  -- gerade an der rechten Maustaste. Die Entscheidung trifft die Engine aus der
+  -- Auswahl; solange es sie nicht gibt, wird NICHTS behauptet.
+  GetRightMouseButtonOrder = function(self) return nil end,
+
+  -- Weltpunkt -> Control-Koordinaten. Das kann nur die 3D-Seite (Projektion der
+  -- Kamera); sie haengt sich als __uiWorldProject ein.
+  Project = function(self, pos)
+    if not __uiWorldProject then return nil end
+    return __uiWorldProject(self.__id, pos[1], pos[2], pos[3])
+  end,
+  GetScreenPos = function(self, unit)
+    if not __uiWorldProject or not unit then return nil end
+    local p = unit:GetPosition()
+    return __uiWorldProject(self.__id, p[1], p[2], p[3])
+  end,
+}, control)
+
 rawset(moho, 'bitmap_methods', Class(moho.control_methods) (bitmap))
 rawset(moho, 'text_methods', Class(moho.control_methods) (text))
 rawset(moho, 'frame_methods', Class(moho.control_methods) (frame))
@@ -897,7 +971,56 @@ rawset(moho, 'border_methods', Class(moho.control_methods) (border))
 rawset(moho, 'item_list_methods', Class(moho.control_methods) (item_list))
 rawset(moho, 'edit_methods', Class(moho.control_methods) (edit))
 rawset(moho, 'scrollbar_methods', Class(moho.control_methods) (scrollbar))
+-- ---------------------------------------------------------------------
+-- camera_methods (CameraImpl) — 25 Bindungen, mHelp woertlich:
+--
+--   Camera:Reset()                       Camera:SnapTo(position, orientationHPR, zoom)
+--   Camera:MoveTo(position, orientationHPR, zoom, seconds)
+--   Camera:MoveToRegion(region[,seconds])
+--   Camera:SetZoom(zoom, seconds)        Camera:GetZoom()
+--   Camera:SetTargetZoom(zoom)           Camera:GetTargetZoom()
+--   Camera:GetMinZoom()                  Camera:GetMaxZoom()
+--   Camera:SetMaxZoomMult()              Camera:GetFocusPosition()
+--   Camera:Spin(headingRate[,zoomRate])  Camera:HoldRotation()  Camera:RevertRotation()
+--   Camera:TrackEntities(ents,zoom,seconds)  Camera:TargetEntities(ents,zoom,seconds)
+--   Camera:NoseCam(ent,pitchAdjust,zoom,seconds,transition)
+--   Camera:SaveSettings() / RestoreSettings(settings)
+--   Camera:EnableEaseInOut() / DisableEaseInOut()  Camera:SetAccMode(accTypeName)
+--   Camera:UseGameClock() / UseSystemClock()
+--
+-- Es gibt MEHRERE Kameras, ueber ihren Namen unterschieden ('WorldCamera',
+-- 'MiniMap', 'CameraHead2') — worldview.lua:593 holt sie mit GetCamera(name).
+--
+-- Die Kamera SELBST ist die 3D-Seite (TypeScript). Hier steht nur der Zustand
+-- und die Bruecke: __uiCameraCall(name, methode, …). Fehlt die Bruecke, wird
+-- nichts behauptet.
+-- ---------------------------------------------------------------------
+local CAMERA_NAMES = {
+  'DisableEaseInOut', 'EnableEaseInOut', 'GetFocusPosition', 'GetMaxZoom', 'GetMinZoom',
+  'GetTargetZoom', 'GetZoom', 'HoldRotation', 'MoveTo', 'MoveToRegion', 'NoseCam',
+  'Reset', 'RestoreSettings', 'RevertRotation', 'SaveSettings', 'SetAccMode',
+  'SetMaxZoomMult', 'SetTargetZoom', 'SetZoom', 'SnapTo', 'Spin', 'TargetEntities',
+  'TrackEntities', 'UseGameClock', 'UseSystemClock',
+}
+local camera = withNoops(CAMERA_NAMES, {
+  GetZoom = function(self) return __uiCameraGet(self.__name, 'zoom') end,
+  GetTargetZoom = function(self) return __uiCameraGet(self.__name, 'targetZoom') end,
+  GetMinZoom = function(self) return __uiCameraGet(self.__name, 'minZoom') end,
+  GetMaxZoom = function(self) return __uiCameraGet(self.__name, 'maxZoom') end,
+  GetFocusPosition = function(self) return __uiCameraGet(self.__name, 'focus') end,
+  SetZoom = function(self, zoom, seconds) __uiCameraSet(self.__name, 'zoom', zoom, seconds) end,
+  SetTargetZoom = function(self, zoom) __uiCameraSet(self.__name, 'targetZoom', zoom) end,
+  SetMaxZoomMult = function(self, mult) __uiCameraSet(self.__name, 'maxZoomMult', mult) end,
+  Reset = function(self) __uiCameraSet(self.__name, 'reset', true) end,
+  SnapTo = function(self, pos, hpr, zoom) __uiCameraMove(self.__name, pos, hpr, zoom, 0) end,
+  MoveTo = function(self, pos, hpr, zoom, seconds)
+    __uiCameraMove(self.__name, pos, hpr, zoom, seconds or 0)
+  end,
+})
+rawset(moho, 'camera_methods', Class() (camera))
+
 rawset(moho, 'movie_methods', Class(moho.control_methods) (movie))
+rawset(moho, 'UIWorldView', Class(moho.control_methods) (worldview))
 
 
 -- CMauiLuaDragger: KEIN Control (kein Layout, kein Parent) — die Engine haelt

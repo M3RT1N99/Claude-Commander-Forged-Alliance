@@ -31,6 +31,8 @@ __uiOverlayFilters = {}
 __uiTeamColorMode = 'FactionColor'
 __cursor = false
 __prefs = {}
+-- Weltpunkt -> Bildschirm. Das kann nur die 3D-Seite; sie haengt sich hier ein.
+__uiWorldProject = false
 
 -- === Cursor (_c_CreateCursor, Cfile:1129627-1129631) ===
 -- Registered as a <global> in scr_UserInits. cursor.lua:8 calls it in __init;
@@ -43,6 +45,43 @@ end
 function SetCursor(c)
   __cursor = c
   return c
+end
+
+-- === Kameras ===
+--
+-- Es gibt MEHRERE: 'WorldCamera' (die Hauptansicht), 'MiniMap', 'CameraHead2'.
+-- worldview.lua:593 holt sie ueber GetCamera(name), minimap.lua ueber ihren
+-- eigenen Namen. Die Kamera selbst ist die 3D-Seite (TypeScript) — hier steht
+-- der Zugriff, nicht die Rechnung.
+__uiCameras = {}
+__uiCameraBridge = false
+
+--- GetCamera(name) — das Kamera-Objekt zu einem Namen (scr_UserInits).
+function GetCamera(name)
+  local key = tostring(name or 'WorldCamera')
+  if not __uiCameras[key] then
+    local cam = Class(moho.camera_methods) {}()
+    cam.__name = key
+    __uiCameras[key] = cam
+  end
+  return __uiCameras[key]
+end
+
+--- Die Bruecke zur 3D-Seite. Fehlt sie, wird NICHTS behauptet: eine Kamera, die
+--- niemand rendert, hat auch keinen Zoom.
+function __uiCameraGet(name, what)
+  if not __uiCameraBridge then return nil end
+  return __uiCameraBridge('get', name, what)
+end
+
+function __uiCameraSet(name, what, value, seconds)
+  if not __uiCameraBridge then return end
+  __uiCameraBridge('set', name, what, value, seconds)
+end
+
+function __uiCameraMove(name, pos, hpr, zoom, seconds)
+  if not __uiCameraBridge then return end
+  __uiCameraBridge('move', name, pos, hpr, zoom, seconds)
 end
 
 -- GetCursor() (Cfile:1274426) — das aktuelle Cursor-Objekt. uimain.lua:23 setzt
