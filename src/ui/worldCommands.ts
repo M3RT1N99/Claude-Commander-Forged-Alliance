@@ -44,20 +44,14 @@ export interface WorldCommandSim {
 
 /** Der Command-Mode, wie die Original-Lua ihn führt (commandmode.lua:109). */
 export function getCommandMode(host: LuaHost): CommandMode {
-  const res = host.eval(`
-    local cm = import('/lua/ui/game/commandmode.lua').GetCommandMode()
-    return { mode = cm[1] or false, name = (cm[2] and cm[2].name) or false }
-  `) as { mode: CommandMode['mode']; name: string | false }
-  return res
+  return host.pull<CommandMode>('__uiCommandModeJson()')
 }
 
 /** Footprint-Maße aus dem Blueprint der UI-VM (Footprint.SizeX/SizeZ). */
 export function footprintOf(host: LuaHost, blueprintId: string): [number, number] {
-  const fp = host.eval(`
-    local bp = __blueprints['${blueprintId}']
-    if not bp then return nil end
-    return { bp.Footprint.SizeX or 1, bp.Footprint.SizeZ or 1 }
-  `) as [number, number] | null
+  const fp = host.pull<[number, number] | null>(
+    `__uiFootprintJson('${blueprintId.replaceAll("'", '')}')`,
+  )
   if (!fp) throw new Error(`Kein Blueprint '${blueprintId}' in der UI-VM`)
   return fp
 }
@@ -93,13 +87,9 @@ export async function worldClick(
   elevation: (x: number, z: number) => number,
   opts: { queue: boolean } = { queue: false },
 ): Promise<string | null> {
-  const selection = host.eval(`
-    local sel = GetSelectedUnits()
-    if not sel then return {} end
-    local out = {}
-    for i, u in ipairs(sel) do out[i] = { id = u:GetEntityId(), army = u:GetArmy() } end
-    return out
-  `) as { id: number; army: number }[]
+  // pull() liefert JSON — eine LEERE Lua-Tabelle wuerde als `{}` in JS ankommen,
+  // nicht als `[]`, und `for…of` warf dann "selection is not iterable".
+  const selection = host.pull<{ id: number; army: number }[]>('__uiSelectionJson()')
   if (selection.length === 0) return null
 
   const cm = getCommandMode(host)
@@ -149,12 +139,9 @@ function onCommandIssued(
     Clear: boolean
   },
 ): void {
-  host.eval(`
-    import('/lua/ui/game/commandmode.lua').OnCommandIssued({
-      CommandType = '${cmd.CommandType}',
-      Blueprint = ${cmd.Blueprint ? `'${cmd.Blueprint}'` : 'false'},
-      Target = { Position = { ${cmd.Position.x}, ${cmd.Position.y}, ${cmd.Position.z} } },
-      Clear = ${cmd.Clear},
-    })
-  `)
+  const bp = cmd.Blueprint ? `'${cmd.Blueprint}'` : 'nil'
+  host.eval(
+    `__uiCommandIssued('${cmd.CommandType}', ${bp}, ` +
+      `${cmd.Position.x}, ${cmd.Position.y}, ${cmd.Position.z}, ${cmd.Clear})`,
+  )
 }

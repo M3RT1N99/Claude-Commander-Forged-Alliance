@@ -6,6 +6,7 @@ import { installSimThreads } from './simThreads'
 import UI_GLOBALS_LUA from '../engine-lua/ui-globals.lua?raw'
 import PREFS_LUA from '../engine-lua/prefs.lua?raw'
 import CONSOLE_LUA from '../engine-lua/console.lua?raw'
+import WORLD_COMMANDS_LUA from '../engine-lua/world-commands.lua?raw'
 import UI_BOOT_LUA from '../engine-lua/ui-boot.lua?raw'
 import UI_GLOBALS_MISSING_LUA from '../engine-lua/ui-globals-missing.lua?raw'
 import MAUI_LUA from '../engine-lua/maui.lua?raw'
@@ -174,6 +175,7 @@ export function installUiEngine(host: LuaHost, fs: UiFileSystem): UiEngine {
   // — in Lua, nicht in TS-Template-Literalen. Definiert nur Funktionen, gerufen
   // wird nichts; deshalb steht es am Ende.
   host.eval(UI_BOOT_LUA)
+  host.eval(WORLD_COMMANDS_LUA)
 
   return { host }
 }

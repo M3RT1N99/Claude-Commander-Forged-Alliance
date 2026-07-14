@@ -450,8 +450,26 @@ local function jsonStr(s)
 end
 
 -- Zahl oder false/nil -> JSON. Lua schreibt Ganzzahlen sonst als "1.0".
-local function jsonNum(v)
+-- Eine Layout-Zahl kann kaputt sein: `inf` oder `nan` entsteht, wenn eine
+-- LazyVar durch null teilt oder eine Kette sich nicht aufloest. `%.4g` schreibt
+-- daraus "-inf" oder "nan" — und das ist KEIN gueltiges JSON: der Parser bricht
+-- mit "No number after minus sign" ab und reisst die GANZE Oberflaeche mit,
+-- ohne zu sagen, welches Control schuld ist.
+--
+-- Also: die kaputte Zahl wird zu null (der Renderer laesst das Control weg) und
+-- EINMAL gemeldet — mit Name und Feld, damit man die Ursache findet.
+__mauiBadNumbers = {}
+
+local function jsonNum(v, what)
   if v == nil or v == false then return 'false' end
+  if type(v) ~= 'number' or v ~= v or v == math.huge or v == -math.huge then
+    local label = tostring(what or '?')
+    if not __mauiBadNumbers[label] then
+      __mauiBadNumbers[label] = true
+      WARN('maui: ' .. label .. ' ist keine gueltige Zahl (' .. tostring(v) .. ') — Control wird nicht gezeichnet')
+    end
+    return 'null'
+  end
   return string.format('%.4g', v)
 end
 
@@ -593,13 +611,13 @@ function __mauiSnapshotJson()
       .. ',"border":' .. borderJson(c)
       .. ',"kind":' .. jsonStr(c.kind)
       .. ',"name":' .. jsonStr(c.name)
-      .. ',"left":' .. jsonNum(c.left)
-      .. ',"top":' .. jsonNum(c.top)
-      .. ',"width":' .. jsonNum(c.width)
-      .. ',"height":' .. jsonNum(c.height)
-      .. ',"depth":' .. jsonNum(c.depth)
+      .. ',"left":' .. jsonNum(c.left, c.name .. '.Left')
+      .. ',"top":' .. jsonNum(c.top, c.name .. '.Top')
+      .. ',"width":' .. jsonNum(c.width, c.name .. '.Width')
+      .. ',"height":' .. jsonNum(c.height, c.name .. '.Height')
+      .. ',"depth":' .. jsonNum(c.depth, c.name .. '.Depth')
       .. ',"hidden":' .. tostring(c.hidden)
-      .. ',"alpha":' .. jsonNum(c.alpha)
+      .. ',"alpha":' .. jsonNum(c.alpha, c.name .. '.Alpha')
       .. ',"texture":' .. jsonOpt(c.texture)
       .. ',"solidColor":' .. jsonOpt(c.solidColor)
       .. ',"text":' .. jsonOpt(c.text)

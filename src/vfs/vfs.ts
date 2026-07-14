@@ -7,16 +7,16 @@ import type { GameSource } from './gameSource'
  * "units/uel0001/..."). Später gemountete Archive überschreiben frühere
  * Einträge gleichen Pfads.
  */
-interface VfsFile {
-  archive: string
-  zip: ZipArchive
-  entry: ZipEntry
-}
+/** Eine Datei im VFS: entweder aus einem Archiv oder direkt von der Platte. */
+type VfsFile =
+  | { kind: 'zip'; archive: string; zip: ZipArchive; entry: ZipEntry }
+  | { kind: 'disk'; archive: string; path: string }
 
 export class GameVfs {
   private constructor(
     private readonly files: Map<string, VfsFile>,
     readonly archiveNames: string[],
+    private readonly source: GameSource,
   ) {}
 
   static async mount(
@@ -53,7 +53,7 @@ export class GameVfs {
         let added = 0
         for (const [key, entry] of zip.entries) {
           if (files.has(key)) continue // früheres Archiv hat Vorrang
-          files.set(key, { archive: scd.name, zip, entry })
+          files.set(key, { kind: 'zip', archive: scd.name, zip, entry })
           added++
         }
         names.push(scd.name)
@@ -67,8 +67,47 @@ export class GameVfs {
       }
     }
 
+    // Und das SPIELVERZEICHNIS selbst — die Engine mountet es nach `/`:
+    //
+    //   mount_dir(InitFileDir .. '\\..\\gamedata\\*.scd', '/')
+    //   mount_dir(InitFileDir .. '\\..', '/')            <- bin/SupComDataPath.lua
+    //
+    // Nur deshalb liegen `/maps/**`, `/movies/**` und `/mods/**` im VFS: sie sind
+    // gar nicht in den Archiven, sondern lose Dateien. Ohne diesen Mount findet
+    // `maputil.LoadScenario('/maps/X1CA_TUT/X1CA_TUT_scenario.lua')` nichts —
+    // der Tutorial-Knopf und jede Karte laufen ins Leere.
+    //
+    // gamedata/ wird uebersprungen (die Archive stehen schon oben), und die
+    // Archive haben Vorrang: was schon da ist, wird nicht ueberschrieben.
+    let disk = 0
+    const walk = async (relDir: string, depth: number): Promise<void> => {
+      if (depth > 6) return
+      let entries: Awaited<ReturnType<typeof source.list>>
+      try {
+        entries = await source.list(relDir)
+      } catch {
+        return // nicht lesbar: ueberspringen, nicht raten
+      }
+      for (const e of entries) {
+        const rel = relDir ? `${relDir}/${e.name}` : e.name
+        const key = rel.toLowerCase().replaceAll('\\', '/')
+        if (e.dir) {
+          if (key === 'gamedata') continue
+          await walk(rel, depth + 1)
+        } else if (!files.has(key)) {
+          files.set(key, { kind: 'disk', archive: '<Spielverzeichnis>', path: rel })
+          disk++
+        }
+      }
+    }
+    await walk('', 0)
+    if (disk > 0) {
+      names.push('<Spielverzeichnis>')
+      log(`  <Spielverzeichnis>: ${disk} lose Dateien (maps, movies, mods …)`)
+    }
+
     log(`VFS bereit: ${files.size} Dateien aus ${names.length} Archiven`)
-    return new GameVfs(files, names)
+    return new GameVfs(files, names, source)
   }
 
   private normalize(path: string): string {
@@ -81,13 +120,18 @@ export class GameVfs {
 
   /** Liefert den Original-Pfad (mit Original-Casing) oder null. */
   resolve(path: string): string | null {
-    return this.files.get(this.normalize(path))?.entry.name ?? null
+    const file = this.files.get(this.normalize(path))
+    if (!file) return null
+    return file.kind === 'zip' ? file.entry.name : file.path
   }
 
   async read(path: string): Promise<Uint8Array> {
     const file = this.files.get(this.normalize(path))
     if (!file) throw new Error(`VFS: Datei nicht gefunden: ${path}`)
-    return file.zip.read(file.entry)
+    if (file.kind === 'zip') return file.zip.read(file.entry)
+    // Lose Datei aus dem Spielverzeichnis (maps, movies, mods).
+    const raf = await this.source.open(file.path)
+    return new Uint8Array(await raf.slice(0, raf.size))
   }
 
   async readText(path: string): Promise<string> {
@@ -107,12 +151,18 @@ export class GameVfs {
    */
   async readMany(paths: string[]): Promise<Map<string, Uint8Array>> {
     const byZip = new Map<ZipArchive, { key: string; entry: ZipEntry }[]>()
+    const onDisk: string[] = []
     for (const path of paths) {
-      const file = this.files.get(this.normalize(path))
+      const key = this.normalize(path)
+      const file = this.files.get(key)
       if (!file) continue
+      if (file.kind === 'disk') {
+        onDisk.push(key)
+        continue
+      }
       const list = byZip.get(file.zip)
-      if (list) list.push({ key: this.normalize(path), entry: file.entry })
-      else byZip.set(file.zip, [{ key: this.normalize(path), entry: file.entry }])
+      if (list) list.push({ key, entry: file.entry })
+      else byZip.set(file.zip, [{ key, entry: file.entry }])
     }
 
     const out = new Map<string, Uint8Array>()
@@ -122,6 +172,11 @@ export class GameVfs {
         const b = bytes.get(entry)
         if (b) out.set(key, b)
       }
+    }
+    // Lose Dateien (maps, movies) einzeln — sie liegen nicht in einem Archiv,
+    // also gibt es nichts zusammenzufassen.
+    for (const key of onDisk) {
+      out.set(key, await this.read(key))
     }
     return out
   }

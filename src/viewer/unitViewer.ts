@@ -354,7 +354,25 @@ export class UnitViewer {
    * sie über optionslogic). Die Kamera LIEST sie — genau wie die C++-Seite, die
    * ui_KeyboardPanSpeed und cam_ZoomAmount in ihren Schleifen abfragt.
    */
-  private readonly conVars = new Map<string, string | number | boolean>()
+  private readonly conVars = new Map<string, string | number | boolean>(
+    // Die Startwerte sind in der Engine EINKOMPILIERT — sie stehen dort, bevor
+    // eine einzige Zeile Lua läuft (`float Moho::cam_ZoomAmount = 0.4;`). Genau
+    // deshalb kann man in FA die Kamera schon bewegen, bevor die UI oben ist.
+    // Sobald optionslogic.Apply(true) durchläuft, überschreibt es sie mit den
+    // gespeicherten Optionen (ConExecute → __uiConSink → setConVar).
+    //
+    // Alle Werte aus der Decomp, keiner geraten:
+    Object.entries({
+      cam_ZoomAmount: 0.40000001, // Cfile:421825
+      cam_NearZoom: 5.0, // Cfile: float Moho::cam_NearZoom = 5.0
+      cam_PanSpeed: 1.0, // Cfile: float Moho::cam_PanSpeed = 1.0
+      ui_KeyboardPanSpeed: 90.0, // Cfile:421739
+      ui_KeyboardPanAccelerateMultiplier: 4.0, // Cfile:421740
+      ui_KeyboardRotateSpeed: 10.0, // Cfile:421741
+      ui_KeyboardRotateAccelerateMultiplier: 2.0, // Cfile:421742
+      ui_ScreenEdgeScrollView: true, // Cfile:421730
+    }),
+  )
   /** STRG beschleunigt Schwenken und Drehen (Cfile:1300005-1300007). */
   private ctrlDown = false
 
@@ -475,7 +493,11 @@ export class UnitViewer {
     const oldDist = r.goalDist
     const zoomAmount = this.conVarNumber('cam_ZoomAmount')
     const nearZoom = this.conVarNumber('cam_NearZoom')
-    const delta = wheelDelta > 0 ? 1 : -1
+    // Vorzeichen: `wheelDelta` ist das DOM-`deltaY` — POSITIV heißt Rad nach
+    // UNTEN, und das zoomt HERAUS. Die Engine-Formel verkleinert die Distanz bei
+    // positivem delta (`dist *= 2^(-cam_ZoomAmount · delta)`), also muss das
+    // Rad-Delta gedreht werden. Ohne diese Drehung war das Zoomen invertiert.
+    const delta = wheelDelta > 0 ? -1 : 1
     const factor = Math.pow(2, -zoomAmount * delta)
     // GetMaxZoom() ist in der Engine kartenabhängig; hier ist es die Kartengröße.
     const maxDist = this.heightfield

@@ -45,6 +45,12 @@ local KNOWN_VARS = {
   'ren_SkyDome', 'ren_Bloom', 'ren_Oblivion', 'ren_SelectBoxes',
   'SC_CameraScaleLOD', 'SC_VerticalSync', 'SC_AntiAliasingSamples',
   'SC_PrimaryAdapter', 'SC_SecondaryAdapter', 'SC_ToggleCursorClip',
+  -- Die Reichweiten-Ringe (gamemain.lua:519-523, worldview.lua). In der Engine
+  -- registriert: "range_RenderHighlighted", "range_RenderSelected",
+  -- "range_RenderBuild", "range_Fill", "range_InnerThicknessCoeff",
+  -- "range_OuterThicknessCoeff".
+  'range_RenderHighlighted', 'range_RenderSelected', 'range_RenderBuild',
+  'range_Fill', 'range_InnerThicknessCoeff', 'range_OuterThicknessCoeff',
 }
 
 -- STARTWERTE — nur die, die in der Decomp BELEGT sind. Ein Default, den ich
