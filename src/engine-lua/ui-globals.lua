@@ -546,6 +546,42 @@ function PauseVoice(category, bPause)
   PauseSound(category, bPause)
 end
 
+-- === Lautstaerken ===
+--
+--   float GetVolume(category)      Cfile:1348388
+--   SetVolume(category, volume)    Cfile:1348320
+--   SetMovieVolume(volume): 0.0 - 2.0   Cfile:1302838
+--   GetMovieVolume()                    Cfile:1302900
+--
+-- Die Kategorien stehen in der Original-Lua: options.lua:700/729/735/745 setzt
+-- "Global", "World", "Interface" und "Music". Der Wertebereich ist 0..1 — die
+-- Option ist ein Regler 0..100 und teilt selbst durch 100 (options.lua:710).
+--
+-- Der Startwert ist 1.0, weil genau das die Option vorgibt (default = 100,
+-- options.lua:697) und `set` beim Start SetVolume(value/100) ruft. Es ist keine
+-- erfundene Zahl, sondern die, die die Original-Lua eine Zeile spaeter selbst
+-- setzt. Ausgabe gibt es noch keine (M12) — der Zustand wird nur gefuehrt.
+__uiVolumes = { Global = 1.0, World = 1.0, Interface = 1.0, Music = 1.0 }
+__uiMovieVolume = 1.0
+
+function SetVolume(category, volume)
+  __uiVolumes[category] = volume
+end
+
+function GetVolume(category)
+  local v = __uiVolumes[category]
+  if v == nil then return 1.0 end
+  return v
+end
+
+function SetMovieVolume(volume)
+  __uiMovieVolume = volume
+end
+
+function GetMovieVolume()
+  return __uiMovieVolume
+end
+
 -- === Bau-Warteschlange der angezeigten Fabrik ===
 --
 -- cfunc_SetCurrentFactoryForQueueDisplayL (Cfile:1257038-1257087) merkt sich die

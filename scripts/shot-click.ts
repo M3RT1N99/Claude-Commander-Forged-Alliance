@@ -5,7 +5,8 @@
  *   2) npx tsx scripts/shot-click.ts <port> "<text>" bild.png
  */
 const port = Number(process.argv[2] ?? 9333)
-const label = process.argv[3] ?? 'Optionen'
+/** Mehrere Klicks nacheinander: "Optionen,Ton" */
+const labels = (process.argv[3] ?? 'Optionen').split(',')
 const outFile = process.argv[4] ?? 'shot.png'
 
 const targets = (await (await fetch(`http://127.0.0.1:${port}/json`)).json()) as {
@@ -39,28 +40,30 @@ const evaluate = async (expression: string): Promise<any> => {
   return res.result?.value
 }
 
-// Die Mitte des Controls finden, das den Text trägt.
-const pos = await evaluate(`(() => {
-  const el = [...document.querySelectorAll('#maui-root div')].find(d => d.textContent === ${JSON.stringify(label)} && d.children.length === 0)
-  if (!el) return null
-  const r = el.getBoundingClientRect()
-  return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }
-})()`)
-if (!pos) {
-  console.log(`Text "${label}" nicht gefunden`)
-  process.exit(1)
+for (const label of labels) {
+  // Die Mitte des Controls finden, das den Text trägt.
+  const pos = await evaluate(`(() => {
+    const el = [...document.querySelectorAll('#maui-root div')].find(d => d.textContent === ${JSON.stringify(label)} && d.children.length === 0)
+    if (!el) return null
+    const r = el.getBoundingClientRect()
+    return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }
+  })()`)
+  if (!pos) {
+    console.log(`Text "${label}" nicht gefunden`)
+    process.exit(1)
+  }
+  console.log(`klick auf "${label}" @${pos.x},${pos.y}`)
+  for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) {
+    await send('Input.dispatchMouseEvent', {
+      type,
+      x: pos.x,
+      y: pos.y,
+      button: type === 'mouseMoved' ? 'none' : 'left',
+      clickCount: type === 'mouseMoved' ? 0 : 1,
+    })
+  }
+  await new Promise((r) => setTimeout(r, 3500))
 }
-console.log(`klick auf "${label}" @${pos.x},${pos.y}`)
-for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) {
-  await send('Input.dispatchMouseEvent', {
-    type,
-    x: pos.x,
-    y: pos.y,
-    button: type === 'mouseMoved' ? 'none' : 'left',
-    clickCount: type === 'mouseMoved' ? 0 : 1,
-  })
-}
-await new Promise((r) => setTimeout(r, 4000))
 
 console.log('Log:', await evaluate(`document.querySelector('#log').textContent.split(String.fromCharCode(10)).filter(l => l.includes('FEHLER')).slice(-3).join(' || ') || 'kein Fehler'`))
 console.log('Controls:', await evaluate(`document.querySelectorAll('#maui-root > div').length`))

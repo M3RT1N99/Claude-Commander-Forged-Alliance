@@ -36,6 +36,7 @@ export class GameUi {
   private constructor(
     private readonly host: LuaHost,
     private readonly renderer: MauiRenderer,
+    private readonly log: (msg: string) => void,
   ) {}
 
   /**
@@ -151,7 +152,7 @@ export class GameUi {
     renderer.update()
     const count = Number(host.eval('return table.getn(__mauiSnapshot())'))
     log(`UI: ${count} maui-Controls aus der Original-Lua (${Math.round(performance.now() - tStart)} ms)`)
-    return new GameUi(host, renderer)
+    return new GameUi(host, renderer, log)
   }
 
   /**
@@ -217,7 +218,14 @@ export class GameUi {
    * KEINEN Tick-Scheduler, ihre Threads laufen mit den Bildern (userinit.lua:13-21).
    */
   render(delta = 1 / 60): void {
-    this.renderer.update(delta)
+    // Ein Fehler in einem OnFrame-Skript darf die Bild-Pumpe nicht anhalten —
+    // sonst friert nach dem ersten fehlenden Engine-Teil die ganze Oberfläche
+    // ein. Die Engine macht es genauso (CMauiControl::Frame → RunScript).
+    try {
+      this.renderer.update(delta)
+    } catch (err) {
+      this.reportUiError(err)
+    }
   }
 
   /**
@@ -319,7 +327,32 @@ export class GameUi {
       type === 'WheelRotation'
         ? `return __mauiWheel(${e.clientX}, ${e.clientY}, ${-(e as WheelEvent).deltaY}, ${mods})`
         : `return __mauiMouse('${type}', ${e.clientX}, ${e.clientY}, ${mods}, ${keyCode})`
-    return this.host.eval(call) === true
+    try {
+      return this.host.eval(call) === true
+    } catch (err) {
+      // Ein Fehler in einem UI-Skript darf die Maus nicht abschalten. Die Engine
+      // macht es genauso: CMauiControl::HandleEvent ruft das Lua-HandleEvent über
+      // RunScript, ein Fehler wird protokolliert und das Programm läuft weiter.
+      // Ohne das riss der erste fehlende Engine-Teil (ein Klick auf den
+      // Ton-Reiter → GetVolume) die ganze Bedienung mit.
+      //
+      // Das Event gilt als VERBRAUCHT: es hat ein Control getroffen (sonst wäre
+      // kein Skript gelaufen) — es darf nicht auch noch als Klick in die Welt gehen.
+      this.reportUiError(err)
+      return true
+    }
+  }
+
+  private readonly seenErrors = new Set<string>()
+  /** Jeden verschiedenen Lua-Fehler GENAU EINMAL melden — nicht 60-mal pro Sekunde. */
+  private reportUiError(err: unknown): void {
+    const msg = (err instanceof Error ? err.message : String(err))
+      .replace(/\[string "[\s\S]*?"\]/g, '')
+      .split('\n')[0]!
+      .slice(0, 300)
+    if (this.seenErrors.has(msg)) return
+    this.seenErrors.add(msg)
+    this.log(`UI-FEHLER: ${msg}`)
   }
 
   /**
