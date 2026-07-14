@@ -59,10 +59,17 @@ export class LuaHost {
     if (!bytes) return null
     const fsPath = `${FS_PREFIX}/${key}`
     if (!this.mounted.has(fsPath)) {
-      const raw = new TextDecoder('latin1').decode(bytes)
-      const { code } = transpileFaLua(raw)
+      // Byte rein, Byte raus. Der Transpiler arbeitet auf Text, die VM will die
+      // ORIGINAL-BYTES — Lua ist byte-transparent, und die Engine transkodiert
+      // nichts: sie liest die Datei, wie sie im .scd steht (die Loc-Dateien sind
+      // UTF-8, `loc/de/strings_db.lua` enthält „ä" als C3 A4).
+      //
+      // Ein String darf hier NICHT direkt gemountet werden: Emscripten kodiert
+      // ihn als UTF-8, und jedes Byte über 0x7F wäre doppelt kodiert — im Menü
+      // stand „Profil Ã¤ndern".
+      const { code } = transpileFaLua(bytesToLatin1(bytes))
       // @ts-expect-error luaWasm ist das interne Emscripten-Modul
-      this.factory.mountFileSync(this.luaWasm, fsPath, code)
+      this.factory.mountFileSync(this.luaWasm, fsPath, latin1ToBytes(code))
       this.mounted.add(fsPath)
     }
     return fsPath
@@ -211,6 +218,30 @@ export class LuaHost {
 }
 
 /** Engine-Bootstrap in Lua: doscript + __runGlobal auf Basis von loadfile. */
+
+/**
+ * Bytes ↔ Text, ein Byte = ein Zeichen (echtes Latin-1).
+ *
+ * `new TextDecoder('latin1')` tut das NICHT: in der WHATWG-Spec ist 'latin1'
+ * (wie 'iso-8859-1') ein Alias für **windows-1252**. Byte 0x80 wird dort zu '€'
+ * (U+20AC), 0x99 zu '™'. Wer damit dekodiert und die Zeichen später wieder als
+ * Bytes nimmt, zerstört jede UTF-8-Datei — und die Loc-Dateien des Spiels SIND
+ * UTF-8. Einen byte-treuen Decoder gibt es in der Web-API nicht.
+ */
+function bytesToLatin1(bytes: Uint8Array): string {
+  let out = ''
+  const CHUNK = 0x8000 // String.fromCharCode nimmt nicht beliebig viele Argumente
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    out += String.fromCharCode(...bytes.subarray(i, i + CHUNK))
+  }
+  return out
+}
+
+function latin1ToBytes(text: string): Uint8Array {
+  const out = new Uint8Array(text.length)
+  for (let i = 0; i < text.length; i++) out[i] = text.charCodeAt(i) & 0xff
+  return out
+}
 
 function str(v: unknown): string {
   if (v === null || v === undefined) return 'nil'

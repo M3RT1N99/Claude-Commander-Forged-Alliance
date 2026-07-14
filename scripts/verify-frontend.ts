@@ -135,6 +135,8 @@ interface Snap {
   name: string
   texture: string | false
   text: string | false
+  alpha: number
+  hidden: boolean
 }
 const snap = host.pull<Snap[]>('__mauiSnapshotJson()')
 const textures = snap.map((c) => (c.texture ? String(c.texture).toLowerCase() : ''))
@@ -153,12 +155,26 @@ check(buttons === menuTopCount, `${buttons} freigegebene Menü-Knöpfe = ${menuT
 if (buttons !== menuTopCount && process.argv.includes('--dump')) {
   for (const c of snap) console.log(`    ${c.kind} ${c.name} ${c.texture || c.text || ''}`)
 }
+// … und sie müssen SICHTBAR sein. Die Knöpfe starten auf Alpha 0 (main.lua:610);
+// erst `FadeIn` blendet sie über OnFrame auf 1 hoch (648/670). Ein Knopf mit der
+// richtigen Textur, aber Alpha 0, ist im Bild schlicht nicht da — genau das war
+// der Zustand, den nur der Browser zeigte, weil dieser Test nur Texturen prüfte.
+const visibleButtons = snap.filter(
+  (c) => c.name === 'button' && !c.hidden && c.alpha > 0.9 && String(c.texture).includes('large_btn'),
+).length
+check(visibleButtons >= menuTopCount, `${visibleButtons} Knöpfe sind voll eingeblendet (Alpha 1)`)
+
 // Die sieben Beschriftungen — lokalisiert aus der Original-Lua (<LOC _Campaign> …).
 const labels = snap.filter((c) => c.kind === 'text' && c.text).map((c) => String(c.text))
 check(
   labels.some((t) => /Kampagne|Campaign/i.test(t)) && labels.some((t) => /Gefecht|Skirmish/i.test(t)),
   'die Knöpfe tragen ihre Beschriftung aus menuTop',
 )
+// … und zwar mit den richtigen Zeichen. `/loc/<sprache>/strings_db.lua` ist UTF-8;
+// wer die Datei latin1 einliest und als UTF-8 wieder ausgibt, kodiert jedes Byte
+// über 0x7F doppelt — im Menü stand „Profil Ã¤ndern".
+const mojibake = labels.filter((t) => /Ã.|â€/.test(t))
+check(mojibake.length === 0, `keine doppelt kodierten Umlaute (${mojibake[0]?.slice(0, 40) ?? '—'})`)
 
 // GetVersion() steht sichtbar im Menü (main.lua:172) — und ist kein erfundener
 // String mehr, sondern die Version DIESER Engine.

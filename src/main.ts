@@ -99,6 +99,12 @@ async function connect(src: GameSource): Promise<void> {
     await populateMapList(src)
 
     const params = new URLSearchParams(location.search)
+    // ?frontend — direkt ins echte Hauptmenü (menus/main.lua), ohne Umweg über
+    // den Launcher. Derselbe Weg, den der Menüpunkt nimmt.
+    if (params.has('frontend')) {
+      await startFrontEndUi()
+      return
+    }
     const wantedSandbox = params.get('sandbox')
     if (wantedSandbox) {
       await startSandbox(wantedSandbox)
