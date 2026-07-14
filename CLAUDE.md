@@ -70,14 +70,27 @@ src/engine-lua/brain.lua       __createBrain → echte AIBrain-Klasse aus aibrai
 src/engine-lua/build.lua       Bau-Tasks (Ökonomie-Verbraucher)
 src/engine-lua/motion.lua      Navigator + Bewegung
 src/engine-lua/compat.lua      Lua-5.0-Kompat (__foriter, table.getn …)
+src/engine-lua/maui.lua        UI-Substrat: LazyVars, InternalCreate*, Event-Pump, Frame-Pumpe
+src/engine-lua/ui-globals.lua  UI-Globals (scr_UserInits): Selektion, Befehle, Rollover …
 
-src/lua/engine.ts      installEngine() — DER Boot; beat() — der 10-Hz-Sim-Beat
+src/lua/engine.ts      installEngine() — DER Sim-Boot; beat() — der 10-Hz-Sim-Beat
+src/lua/uiEngine.ts    installUiEngine() + setupGameUi() — DER UI-Boot (gamemain.lua:132-154)
 src/lua/host.ts        wasmoon-Host + VFS-Mounting
 src/lua/transpile.ts   FA-Dialekt → Standard-Lua (siehe „Zwei Lua-Dialekte")
 src/sim/economy.ts     Zwei-Ratio-Ökonomie (binär verifiziert)
 src/sim/session.ts     ScenarioInfo + Brains (SimInit-Schritte 3a/5a)
 src/sim/luaSimWorker.ts  Web Worker, der die Sim hostet
+src/ui/gameUi.ts       Die UI-VM im Main-Thread (Original lua/ui)
+src/ui/mauiRenderer.ts maui-Baum → DOM (ein Control = ein <div>)
+src/ui/worldCommands.ts Klick in die Welt → commandmode.lua fragen → Befehl an die Sim
+src/ui/fonts.ts        Die Schriften des Spiels (TTF-Metrik)
 ```
+
+**Die Spiel-UI hat genau einen Aufbauweg:** `setupGameUi()` in
+[src/lua/uiEngine.ts](src/lua/uiEngine.ts) — dieselbe Reihenfolge wie `gamemain.lua:132-154`
+(Screen-Group → `borders.lua` liefert die vier Cluster → economy, multifunction, orders,
+construction, unitview, unitviewDetail). Browser und Verify-Suite nehmen ihn beide; wer
+die Panels direkt an `GetFrame(0)` hängt, bekommt sie an die falsche Stelle.
 
 ### Boot-Reihenfolge ist nicht kosmetisch
 
@@ -148,8 +161,11 @@ kein Fehler, nur falsche Ergebnisse.
 
 ### Sim-Beat (`Sim::AdvanceBeat` @Cfile:1076363)
 
-Bau-Bedarf anmelden → Ökonomie verteilen → gewährte Rate anwenden → Lua-Threads →
-Bewegung.
+Fabrik-Warteschlangen → Bau-Bedarf anmelden → Ökonomie verteilen → gewährte Rate
+anwenden → Lua-Threads → Bewegung.
+
+Die Reihenfolge ist messbar: eine Unit wird in Phase 3 fertig, ihr **Lager** taucht
+deshalb erst im Ökonomie-Tick des **nächsten** Beats auf.
 
 ### Unit-Lifecycle
 
@@ -196,11 +212,51 @@ und keine `EventCallbacks`.
 - **`Sound{}`** ist der einzige DSL-Konstruktor in den `.bp`-Dateien (3445×). Fehlt er,
   bricht die Blueprint-Auswertung mittendrin ab — und das bp landet halbfertig unter
   dem Schlüssel `'null'`.
+- **Die Sim hat das SKELETT der Unit**, nicht nur der Renderer. `weapon.lua:67` prüft
+  die Turm-Knochen über `Unit:ValidateBone` (unit.lua:2751); Mündungen, Bau- und
+  Effekt-Knochen hängen ebenfalls an Namen. Die Knochen kommen aus derselben
+  `.scm`-Datei, die der Renderer liest (`__setBones`, [scripts/gameFiles.ts](scripts/gameFiles.ts)).
+  Ohne Skelett bricht schon `Weapon:OnCreate` ab.
+- **Die Engine ruft `OnCreate` auf JEDER Waffe.** `DefaultProjectileWeapon.OnCreate`
+  endet mit `ChangeState(self, self.IdleState)` (defaultweapons.lua:87) — erst der
+  IdleState startet die Zustandsmaschine der Waffe. Ohne diesen Aufruf lief sie gar
+  nicht, bis ein späterer Zustandswechsel sie zufällig anwarf: der Overcharge der ACU
+  (IdleState.Main → `StartEconomyDrain`, defaultweapons.lua:404) lud seine
+  **5000 Energie** dann bei leerer Kasse. 500 E/Tick Bedarf gegen 2 E/Tick Einkommen
+  ⇒ Rate 0.004, nie fertig — und jede Fabrik verhungert nebenbei. **Reihenfolge ist
+  Semantik.**
+- **Raster-Snap beim Bauen** (`COORDS_GridSnap` @0x50B1E0, Cfile:641666-641686):
+  `cell = trunc(p − size/2)`, zurück `+ size/2`, **Höhe erst nach dem Snap**
+  (Cfile:641588). `size` sind die ganzzahligen `Footprint.SizeX/SizeZ` — nicht
+  SkirtSize, nicht SelectionSize. Ein 5×5-Gebäude sitzt also immer auf `x.5`.
+- **Feuerhaltung** (`GetFireState` @0x8BB500): Sentinel 3 → erste Unit **mit**
+  `RULEUCC_RetaliateToggle` (Bit 5 der CommandCaps, Reihenfolge Cfile:656671-656719)
+  setzt den Zustand, Abweichung ⇒ −1 (gemischt). Werte: 0 = ReturnFire, 1 = HoldFire,
+  2 = HoldGround; der Ctor startet mit ReturnFire (Cfile:772277).
+- **Schriften:** `lua/skins/skins.lua:22-26` verlangt „Arial" und „Zeroes Three" —
+  beide liegen als TTF in `<GameDir>/fonts`. Text-Controls bemessen sich nach
+  `FontAscent + FontDescent` und `TextAdvance` (text.lua:39/47), also wird die echte
+  TTF-Metrik gelesen ([src/formats/ttf.ts](src/formats/ttf.ts)) und dieselbe Datei per
+  `FontFace` gerendert. Der volle Name (nameID 4) ist der Schlüssel: `ARIAL.TTF` und
+  `ARIALBD.TTF` haben **beide** die Familie „Arial".
+- **`/lua/usersync.lua` gehört in die UI-VM** (Gegenstück zu `/lua/simsync.lua` in der
+  Sim; keine Lua-Datei lädt es, die Engine tut es). Es bringt `Sync`, `UnitData` und
+  `OnSync()` — ohne `UnitData` scheitert schon orders.lua:909 an der ersten Selektion.
+
+### wasmoon: eine JS-Funktion darf NIE `null` zurückgeben
+
+wasmoon prüft den Rückgabewert mit `typeof target !== 'object'` und greift danach auf
+`target.then` zu (`node_modules/wasmoon/dist/index.js:1020-1026`). Für `null` ist
+`typeof` aber `"object"` — die VM stirbt mit *„Cannot read properties of null (reading
+'then')"*, und zwar tief in einer Original-Lua-Datei, die damit nichts zu tun hat.
+`LuaHost.setGlobal` wandelt deshalb `null → undefined` (= Lua `nil`). Gefunden, als
+`GetTextureDimensions` für eine fehlende DDS `null` lieferte: die Auswahl der ACU riss
+die komplette UI-VM um.
 
 ## Werkzeuge
 
 ```bash
-npm test                                    # alle 14 Verify-Suiten (~25 s)
+npm test                                    # alle 20 Verify-Suiten
 npx tsc --noEmit                            # Typecheck
 npx tsx scripts/peek-lua.ts --grep <regex>  # Original-Lua/Blueprints durchsuchen
 npx tsx --import ./scripts/register-lua.mjs scripts/discover-engine-api.ts
@@ -225,28 +281,41 @@ Ein roter Test nach einer Ehrlichkeits-Korrektur ist ein **Fund**, kein Rücksch
 Unit läuft scheinbar weiter. Zuerst nach `ForkThread-Fehler:` in den WARN-Zeilen
 suchen.
 
-## Bekannte Löcher (Stand: Juli 2026)
+## Stand: die Techdemo läuft
+
+ACU auswählen → Bau-Menü aus dem Blueprint → Gebäude aufs Raster setzen → es wird aus
+der echten Ökonomie bezahlt → die fertige Fabrik produziert Panzer, die vom Hof rollen.
+Alles über die Original-Lua; verifiziert in
+[scripts/verify-command-chain.ts](scripts/verify-command-chain.ts) und
+[scripts/verify-factory.ts](scripts/verify-factory.ts), im Browser über
+`?selftest=<blueprint>`.
+
+## Bekannte Löcher
 
 Der Weg zur echten UI steht in [docs/PLAN-UI.md](docs/PLAN-UI.md) — mit Decomp-Belegen.
 
-- **`src/ui/hud.ts`** ist ein TS/HTML-Nachbau von
-  `lua/ui/game/{economy,orders,unitview}.lua`, inklusive erfundener Farben. Größter
-  offener Verstoß gegen das Kernprinzip. Dort **nichts Neues anbauen** — der Weg ist
-  der maui-Layer + die echte `lua/ui`.
-- **`setTerrainSource()` wird nie gerufen.** `GetTerrainHeight` liefert daher überall
-  0, ohne jede Fehlermeldung — ein stiller Stub im Produktivpfad, also verboten.
+- **`src/ui/hud.ts`** ist der letzte TS/HTML-Nachbau (Orders, Unit-View, Minimap). Die
+  Ökonomie ist dort schon raus — sie kommt aus der echten `economy.lua`. Dort **nichts
+  Neues anbauen**; der Rest gehört ebenfalls abgebaut.
+- **Kein Audio.** `PlaySound` protokolliert die angeforderten Cues
+  (`__uiSoundsRequested`) und meldet einmal laut, dass keine Ausgabe angeschlossen ist.
+  Die FMOD-Bänke aus `sounds.scd` sind ungelesen.
+- **Keine Weltansicht als maui-Control.** `worldview.lua`, `borders`-Rahmen, Minimap,
+  Tabs und Chat fehlen; der Klick in die Welt läuft über
+  [src/ui/worldCommands.ts](src/ui/worldCommands.ts).
 - **Die Karte wird in TS geparst** (`main.ts` liest `Scenario.MasterChain…Markers`
   selbst), statt `ScenarioUtilities.lua` auszuführen. Folge: keine Armee-Gruppen,
   keine Props, kein `CreateInitialArmyGroup`.
-- **Das Blueprint wird zweimal gelesen** — einmal vom TS-Parser (`main.ts`, fürs HUD)
-  und einmal von der echten `LoadBlueprints()`-Pipeline (Worker). Zwei Wahrheiten.
+- **Das Blueprint wird zweimal gelesen** — einmal vom TS-Parser (`main.ts`, für Modelle
+  und Knochen) und einmal von der echten `LoadBlueprints()`-Pipeline. Zwei Wahrheiten.
+- **Nur ein Bauer pro Baustelle** — Assist (mehrere Bauer an einer Baustelle) fehlt.
+- **Kein Kampf:** Waffen bauen sich auf und zielen, aber es gibt keine Projektile,
+  keinen Schaden und keine Beam-Waffen (`defaultweapons.lua:909`, `Beams`).
 - **Ökonomie-Lua-API ist noch No-Op:** `SetProductionPerSecond*`,
   `SetConsumptionPerSecond*`, `SetBuildRate` schreiben nichts in die Engine-Ökonomie
   (Werte kommen bisher nur aus dem Blueprint).
 - **`docs/research/economy-binary.md` beschreibt mehr, als `economy.ts` kann**
   (Handicap, Overflow-Sharing an Verbündete, kumulierter `granted`-Akku fehlen).
-- `defaultweapons.lua:909` wirft `attempt to index a nil value (field 'Beams')` —
-  Beam-Waffen fehlen noch.
 
 ## Sprache
 
