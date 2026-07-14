@@ -140,6 +140,51 @@ npx tsx scripts/peek-lua.ts --grep <regex>  # Original-Lua/Blueprints suchen
   `ForkThread-Fehler:` in den WARN-Zeilen suchen.
 - Commits auf Deutsch, Was + Warum, ein Meilenstein pro Commit.
 
+## Arbeitsstil je Modell
+
+Alles oben gilt für **jedes** Modell. Dieser Abschnitt ändert nur, *wie viel* du
+am Stück übernimmst und mit welchem Aufwand — **nie, was richtig ist**. Dein
+aktives Modell steht in deinem System-Prompt.
+
+**Basis** (Sonnet-Klasse, jedes Modell, und immer bei Unsicherheit): kleine,
+verifizierbare Schritte; vor großen Umbauten über mehrere Dateien beim Nutzer
+rückversichern; für breite Suchen **einen** Recherche-Subagenten statt weiter
+Fächerung. Aufwand: mittel; hoch bei schwerem Denken.
+
+**Opus 4.8 und die Claude-5-Familie (Fable 5):** autonom arbeiten. Mehrstufige
+Arbeit von Anfang bis Ende planen und lange Vorhaben (Migrationen, Umbauten über
+viele Dateien) **ohne Zwischenhalt** zu Ende bringen, solange Typecheck und
+Suiten grün bleiben. Die Spezifikation vorn festlegen (Aufgabe, Absicht,
+Randbedingungen, Abnahmekriterium in einem Zug), nicht scheibchenweise. Aufwand:
+`xhigh` als Startpunkt für Coding/Agenten-Arbeit, `high` als Minimum bei
+Denkarbeit; `max` nur für echte Grenzfälle (überdenkt strukturierte Aufgaben).
+Der Nutzer kann mit **ultracode** weiter aufdrehen (xhigh + deterministische
+Workflow-Fächerung).
+
+**Fächern und auf Abdeckung prüfen (Opus 4.8 und neuer):** diese Modelle
+spawnen von sich aus zu wenig. Also *ausdrücklich* parallele Subagenten über
+unabhängige Themen fächern — z. B. je ein Agent pro Recherche-Thema
+(Front-End-Menü, WorldView, Session-Start, Kampf …) oder pro Engine-Subsystem.
+**Nicht** fächern für Arbeit, die in einer Antwort erledigt ist. Vor „fertig":
+einen frischen Subagenten den eigenen Diff prüfen lassen — sein Auftrag ist
+**Abdeckung** (jede Korrektheits- oder Anforderungslücke melden, mit
+Zuversicht + Schwere), nicht Filtern. In diesem Repo gibt es (noch) keine
+vorgefertigten Reviewer-Agenten; nutze `/code-review` bzw. einen
+`general-purpose`-Agenten mit klarem Prüfauftrag.
+
+**Regel-Reichweite wörtlich nennen.** Diese Modelle folgen Anweisungen wörtlich
+und verallgemeinern eine Regel nicht von selbst. Wenn eine Invariante *jeden*
+Fall betrifft, schreibe „jede/alle": *jede* Zahl kommt aus Blueprint, Lua oder
+Decomp; *jedes* fehlende Engine-Teil knallt; *jede* Spiellogik läuft in der
+Original-Lua.
+
+**Niemals** die Invarianten (Kernprinzip, „Verboten"), die Ehrlichkeitsregeln
+oder die Korrektheit davon abhängig machen, welches Modell gerade läuft — die
+Modellzeile kann veraltet sein; im Zweifel gilt die Basis. Jeden autonomen
+Schritt an einer Prüfung verankern, die du **wirklich ausführen** kannst
+(`npx tsc --noEmit`, die passende `verify-*`-Suite, `npm test`, der
+Browser-Selbsttest `?sandbox=…&selftest=…`) — nie an „sieht fertig aus".
+
 ## Weiterführende Doku
 
 | Dokument | Inhalt |

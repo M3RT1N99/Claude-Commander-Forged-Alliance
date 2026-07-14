@@ -145,6 +145,21 @@ check(controls > 50, `${controls} maui-Controls mit vollständigem Layout`)
 const broken = Number(host.eval('local n = 0 for _ in pairs(__mauiBroken) do n = n + 1 end return n'))
 check(broken === 0, `kein Control ohne Layout (übersprungen: ${broken})`)
 
+console.log('\n== Hit-Test: die freie Spielfläche gehört der Welt ==')
+// Im Original ist die Spielwelt selbst ein Control (CUIWorldView) INNERHALB der
+// mapGroup — in der Tiefenordnung also ÜBER den unsichtbaren Vollbild-Containern
+// (CreateScreenGroup deaktiviert seinen Hit-Test NICHT, uiutil.lua:333). Ein
+// Klick in die freie Fläche trifft dort die WorldView, nie den Container.
+//
+// Bei uns ist die Welt noch kein maui-Control. Fängt ein Container den Klick,
+// ist KEINE EINHEIT MEHR SELEKTIERBAR — genau dieser Fehler stand im Browser
+// (der Treffer war die "GameMain ScreenGroup"). Deshalb gilt: nur ein Control,
+// das etwas ZEICHNET (Bitmap/Text), verbraucht einen Klick.
+check(
+  host.eval(`return __mauiMouse('ButtonPress', 960, 500, { Left = true })`) === false,
+  'Klick in die freie Spielfläche wird NICHT verbraucht (Container reichen durch)',
+)
+
 console.log('\n== Auswahl: __uiSetUnit → SelectUnits → OnSelectionChanged ==')
 // Die ACU, so wie die Sim sie meldet.
 host.eval(`__uiSetUnit(1, 'uel0001', 1, 100, 20, 100, 12000, 12000, 1, true)`)
@@ -188,6 +203,18 @@ check(
 check(
   host.eval(`return __t.enabled['RULEUCC_Nuke'] ~= true`) === true,
   'RULEUCC_Nuke bleibt aus — die ACU hat die Fähigkeit nicht',
+)
+
+// Die Gegenprobe zum Hit-Test oben: das Orders-Panel gibt es erst MIT Auswahl
+// (orders.lua hält es sonst versteckt). Jetzt liegt dort ein Bitmap — und ein
+// Klick darauf ist ein UI-Klick, kein Bewegungsbefehl.
+check(
+  host.eval(`return __ui.ordersModule.controls.bg:IsHidden() == false`) === true,
+  'Mit Auswahl ist das Orders-Panel sichtbar (vorher: hidden)',
+)
+check(
+  host.eval(`return __mauiMouse('ButtonPress', 30, 1075, { Left = true })`) === true,
+  'Klick auf das Orders-Panel WIRD verbraucht (dort zeichnet ein Bitmap)',
 )
 
 console.log('\n== construction.lua: das Bau-Menü kommt aus dem Blueprint ==')

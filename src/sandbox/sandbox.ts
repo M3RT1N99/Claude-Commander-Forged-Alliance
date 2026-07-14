@@ -1,4 +1,3 @@
-import * as THREE from 'three'
 import type { UnitViewer } from '../viewer/unitViewer'
 import type { UnitTextures } from '../viewer/unitMaterial'
 import type { ScmModel } from '../formats/scm'
@@ -16,27 +15,18 @@ export interface SandboxUnitAssets {
 }
 
 /**
- * Schlanke Sandbox-Ansicht: RTS-Kamera + Mass-Punkt-Marker. Die Simulation
- * selbst läuft über die eingebettete **Original-Lua-Engine** (LuaSim) — der
- * frühere TS-Nachbau (SimWorld) wurde entfernt.
+ * Schlanke Sandbox-Ansicht: nur die RTS-Kamera. Die Simulation selbst läuft
+ * über die eingebettete **Original-Lua-Engine** (LuaSim).
+ *
+ * Hier stand ein selbst erfundener Ring-Marker für Mass-Punkte. Er ist WEG:
+ * nichts zeichnen, was nicht aus dem Spiel kommt. Im Original sind Mass-Punkte
+ * Ressourcen-Vorkommen (`CreateResourceDeposit`, angelegt von
+ * `ScenarioUtilities.lua`), und die Engine rendert ihre Icons — das kommt über
+ * den Session-Start-1:1-Weg (docs/research/session-start.md), nicht über
+ * Platzhalter-Geometrie. Die Marker-Daten bleiben in main.ts erhalten.
  */
 export class SandboxController {
-  constructor(private readonly viewer: UnitViewer) {
+  constructor(viewer: UnitViewer) {
     viewer.setRtsControls(true)
-  }
-
-  /** Zeichnet die Mass-Punkt-Marker der Karte (aus den _save.lua-Markern). */
-  setMassSpots(spots: { x: number; z: number }[]): void {
-    const geo = new THREE.RingGeometry(0.6, 0.9, 24)
-    geo.rotateX(-Math.PI / 2)
-    for (const s of spots) {
-      const marker = new THREE.Mesh(
-        geo,
-        new THREE.MeshBasicMaterial({ color: 0x9be045, transparent: true, opacity: 0.85 }),
-      )
-      marker.position.set(s.x, this.viewer.heightAt(s.x, s.z) + 0.06, s.z)
-      marker.renderOrder = 5
-      this.viewer.addHelper(marker)
-    }
   }
 }

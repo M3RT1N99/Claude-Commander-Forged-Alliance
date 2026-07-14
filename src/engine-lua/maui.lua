@@ -334,13 +334,19 @@ __mauiHover = false
 --
 -- Zwei Faelle:
 --  1. Ein Control hat es behandelt (HandleEvent -> true).
---  2. Der Zeiger steht ueberhaupt ueber einem UI-Control.
+--  2. Der Zeiger steht ueber einem Control, das etwas ZEICHNET (Bitmap/Text).
 --
--- Fall 2 ist kein Zusatz, sondern das Original: die Spielwelt ist dort selbst
--- ein Control (CUIWorldView) ganz unten im Stapel. Liegt ein Panel darueber,
--- ist das Panel das oberste getroffene Control — und die WorldView sieht das
--- Event nie. Bei uns ist die Welt kein maui-Control, also gilt: alles ausser
--- dem Root-Frame ist UI, und ein Klick darauf ist kein Bewegungsbefehl.
+-- Fall 2 bildet das Original ab: dort ist die Spielwelt selbst ein Control
+-- (CUIWorldView), das INNERHALB der mapGroup liegt — also in der Tiefenordnung
+-- UEBER den unsichtbaren Vollbild-Containern (Screen-Group, mapGroup,
+-- windowGroup; uiutil.lua:333 CreateScreenGroup deaktiviert seinen Hit-Test
+-- NICHT). Ein Klick in die freie Spielflaeche trifft im Original deshalb die
+-- WorldView, nie die Container darunter. Bei uns ist die Welt (noch) kein
+-- maui-Control — ein Treffer auf einen reinen Container bedeutet daher
+-- dasselbe wie dort: der Klick gehoert der Welt.
+--
+-- (Die Regel war frueher "alles ausser dem Root-Frame ist UI" — damit fras die
+-- Screen-Group jeden Klick und keine Einheit war mehr selektierbar.)
 function __mauiMouse(evType, x, y, mods)
   local hit = __mauiHitTest(x, y)
 
@@ -358,7 +364,7 @@ function __mauiMouse(evType, x, y, mods)
     Type = evType, MouseX = x, MouseY = y, Modifiers = mods,
   })
   if handled then return true end
-  return hit ~= nil and hit.__kind ~= 'frame'
+  return hit ~= nil and draws(hit)
 end
 
 function __mauiWheel(x, y, rotation, mods)

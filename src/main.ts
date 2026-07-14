@@ -424,7 +424,10 @@ async function startSandbox(mapFolder: string): Promise<void> {
     }
 
     sandbox = new SandboxController(viewer)
-    sandbox.setMassSpots(massSpots)
+    // massSpots werden NICHT mehr als erfundene Ringe gezeichnet. Sie bleiben
+    // geparst (Struktur der Karte), bis der Session-Start sie als echte
+    // Ressourcen-Vorkommen über ScenarioUtilities.lua anlegt und die Engine
+    // ihre Original-Icons rendert.
     if (currentScmap) {
       hud = new Hud(vfs, viewer, hudSource, currentScmap)
     }
