@@ -222,6 +222,48 @@ local function readRow(id, u)
   }
 end
 
+-- Der Unit-Zustand als JSON-STRING.
+--
+-- Dieselbe Falle wie beim maui-Snapshot: ein Rueckgabewert aus Lua nach JS bleibt
+-- im wasmoon-Registry haengen und wird nie eingesammelt. Der Worker liest den
+-- Zustand ZEHNMAL PRO SEKUNDE — die Sim-VM wuerde langsam aber sicher volllaufen.
+-- Deshalb uebergibt Lua einen String an eine JS-Funktion (LuaHost.pull), statt
+-- eine Tabelle zurueckzugeben.
+local function jstr(s)
+  s = tostring(s)
+  s = string.gsub(s, '\\', '\\\\')
+  s = string.gsub(s, '"', '\\"')
+  return '"' .. s .. '"'
+end
+
+local function jnum(v)
+  return string.format('%.6g', v or 0)
+end
+
+function __readAllUnitsJson()
+  local parts = {}
+  local n = 0
+  for id, u in pairs(__units) do
+    local r = readRow(id, u)
+    local q = {}
+    for i, item in ipairs(r.buildQueue) do
+      q[i] = '{"id":' .. jstr(item.id) .. ',"count":' .. jnum(item.count) .. '}'
+    end
+    n = n + 1
+    parts[n] = '{"id":' .. jnum(r.id)
+      .. ',"name":' .. jstr(r.name)
+      .. ',"x":' .. jnum(r.x) .. ',"y":' .. jnum(r.y) .. ',"z":' .. jnum(r.z)
+      .. ',"heading":' .. jnum(r.heading)
+      .. ',"health":' .. jnum(r.health)
+      .. ',"maxHealth":' .. jnum(r.maxHealth)
+      .. ',"moving":' .. tostring(r.moving)
+      .. ',"fraction":' .. jnum(r.fraction)
+      .. ',"buildQueue":[' .. table.concat(q, ',') .. ']'
+      .. '}'
+  end
+  return '[' .. table.concat(parts, ',') .. ']'
+end
+
 function __readAllUnits()
   local out = {}
   local n = 0

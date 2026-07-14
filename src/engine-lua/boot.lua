@@ -31,7 +31,29 @@ do
   local readsNil = { __index = function() return nil end }
   debug.setmetatable(nil, readsNil)
   debug.setmetatable(0, readsNil)
-  debug.setmetatable(true, readsNil)
+
+  -- BOOLEANS duerfen Attribute TRAGEN — Lesen UND Schreiben.
+  --
+  -- config.lua:21-23 raeumt die LuaPlus-Attribute nur fuer nil, Zahlen und
+  -- Strings ab (`metacleanup(nil) / metacleanup(0) / metacleanup('')`).
+  -- Booleans stehen dort NICHT — und die Original-UI nutzt das aus:
+  --
+  --   commandmode.lua:113  function EndCommandMode(isCancel)
+  --   commandmode.lua:114      modeData.isCancel = isCancel or false
+  --
+  -- `modeData` ist `false`, solange kein Command-Mode laeuft (commandmode.lua:75).
+  -- In FA schreibt diese Zeile das Attribut also auf einen BOOLEAN — und liest es
+  -- fuenf Zeilen spaeter wieder (Z. 119). Ohne diese Metatable stirbt jeder
+  -- Befehl, der ohne aktiven Command-Mode erteilt wird (ein normaler Rechtsklick-
+  -- Move!) mit "attempt to index a boolean value (upvalue 'modeData')".
+  --
+  -- LuaPlus haelt die Attribute pro TYP (eine Metatable je Typ), nicht pro Wert —
+  -- deshalb ist eine gemeinsame Tabelle das richtige Abbild.
+  local boolAttrs = {}
+  debug.setmetatable(true, {
+    __index = boolAttrs,
+    __newindex = function(_, k, v) boolAttrs[k] = v end,
+  })
 
   -- Coroutines brauchen ebenfalls eine Metatable, denn config.lua:35 haengt
   -- ihre eigene daran:  local thread_mt = { Destroy = KillThread }

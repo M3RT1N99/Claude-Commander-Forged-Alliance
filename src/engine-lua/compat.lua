@@ -26,6 +26,11 @@ do
   end
 end
 
+-- string.gfind hiess in Lua 5.0 so; ab 5.1 heisst dieselbe Funktion gmatch.
+-- Die Original-UI benutzt sie (text.lua:170 bricht damit lange Texte um) — ohne
+-- sie stirbt jeder Tooltip mit "attempt to call a nil value (field 'gfind')".
+string.gfind = string.gfind or string.gmatch
+
 table.getn = table.getn or function(t) return #t end
 table.setn = table.setn or function() end
 table.foreach = table.foreach or function(t, f)

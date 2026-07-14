@@ -134,9 +134,13 @@ export class GameUi {
     // Der Zustand der Units in die UI-VM (die Engine spiegelt ihn clientseitig:
     // UserUnit::UpdateUnitData @0x8C0750). Erst danach kann die UI ihn zeigen.
     const seen = new Set<number>()
+    // EIN eval für den ganzen Beat, nicht eines pro Unit: jeder eval-Aufruf
+    // kompiliert einen eigenen Lua-Chunk. Bei 50 Einheiten und 10 Beats/s wären
+    // das 500 Chunks pro Sekunde — Arbeit, die niemand braucht.
+    const lines: string[] = []
     for (const u of units) {
       seen.add(u.id)
-      this.host.eval(
+      lines.push(
         `__uiSetUnit(${u.id}, '${u.name}', 1, ${u.x}, ${u.y}, ${u.z}, ` +
           `${u.health}, ${u.maxHealth}, ${u.fraction ?? 1}, ${!u.moving})`,
       )
@@ -144,21 +148,22 @@ export class GameUi {
       const q = u.buildQueue ?? []
       if (q.length > 0) {
         const items = q.map((i) => `{ id = '${i.id}', count = ${i.count} }`).join(',')
-        this.host.eval(`__uiSetBuildQueue(${u.id}, { ${items} })`)
+        lines.push(`__uiSetBuildQueue(${u.id}, { ${items} })`)
       }
     }
     for (const id of this.knownUnits) {
-      if (!seen.has(id)) this.host.eval(`__uiRemoveUnit(${id})`)
+      if (!seen.has(id)) lines.push(`__uiRemoveUnit(${id})`)
     }
     this.knownUnits = seen
 
-    this.host.eval(`__uiSetEconomy(
+    lines.push(`__uiSetEconomy(
       ${eco.massStorage}, ${eco.energyStorage},
       ${eco.mass}, ${eco.energy},
       ${eco.massIncome}, ${eco.energyIncome},
       ${eco.massRequested}, ${eco.energyRequested},
       ${eco.massExpense}, ${eco.energyExpense})`)
-    this.host.eval('Economy._BeatFunction()')
+    lines.push('Economy._BeatFunction()')
+    this.host.eval(lines.join('\n'))
   }
 
   /**
@@ -258,12 +263,20 @@ export class GameUi {
    * Bewegungsbefehl.
    */
   private handleMouse(type: string, e: MouseEvent | WheelEvent): boolean {
+    // Bei ButtonRelease ist `e.buttons` schon 0 — die gedrückte Taste steht dann
+    // nur noch in `e.button`. Beides zusammen ergibt die Modifiers, die die
+    // Original-Lua erwartet.
+    const down = e.buttons | (type === 'ButtonRelease' ? [1, 4, 2][e.button] ?? 0 : 0)
     const mods = `{ Shift = ${e.shiftKey}, Ctrl = ${e.ctrlKey}, Alt = ${e.altKey}, ` +
-      `Left = ${(e.buttons & 1) !== 0}, Middle = ${(e.buttons & 4) !== 0}, Right = ${(e.buttons & 2) !== 0} }`
+      `Left = ${(down & 1) !== 0}, Middle = ${(down & 4) !== 0}, Right = ${(down & 2) !== 0} }`
+    // KeyCode der Maustaste (Windows-VK: 1 = links, 2 = rechts, 4 = mitte). Der
+    // Dragger merkt sich ihn beim ButtonPress (button.lua:160 PostDragger) und
+    // beendet sich erst, wenn GENAU diese Taste losgelassen wird.
+    const keyCode = [1, 4, 2][e.button] ?? 0
     const call =
       type === 'WheelRotation'
         ? `return __mauiWheel(${e.clientX}, ${e.clientY}, ${-(e as WheelEvent).deltaY}, ${mods})`
-        : `return __mauiMouse('${type}', ${e.clientX}, ${e.clientY}, ${mods})`
+        : `return __mauiMouse('${type}', ${e.clientX}, ${e.clientY}, ${mods}, ${keyCode})`
     return this.host.eval(call) === true
   }
 

@@ -102,6 +102,37 @@ export class LuaHost {
     return this.lua.doStringSync(`return import(${JSON.stringify(name)})`)
   }
 
+  /**
+   * Daten aus Lua holen, OHNE dass die VM ausblutet.
+   *
+   * **Jeder Rückgabewert aus Lua nach JS leckt.** wasmoon hält ihn im
+   * Lua-Registry fest; der Lua-GC kann ihn nie einsammeln. Gemessen (2000
+   * Aufrufe, Zuwachs NACH einem collectgarbage("collect")):
+   *
+   *   Tabelle zurückgeben        156,6 MB   ← der maui-Snapshot, 60× pro Sekunde
+   *   JSON-String zurückgeben     24,9 MB
+   *   Aufruf ohne Rückgabewert     0,0 MB
+   *   Lua ruft eine JS-Funktion    0,0 MB   ← dieser Weg
+   *
+   * Bei 60 Bildern/s waren das rund 5 MB pro Sekunde — nach wenigen Minuten
+   * stand die UI-VM an ihrer 2-GB-Grenze und starb mit "not enough memory".
+   *
+   * Deshalb: für alles, was pro Bild oder pro Beat läuft, gibt Lua NICHTS
+   * zurück — es RUFT eine JS-Funktion mit einem JSON-String auf. Der wird beim
+   * Übergang kopiert, und in Lua bleibt nichts liegen.
+   *
+   * `expr` ist ein Lua-Ausdruck, der einen String liefert (z. B.
+   * `__mauiSnapshotJson()`).
+   */
+  pull<T>(expr: string): T {
+    let payload = ''
+    this.lua.global.set('__pullSink', (s: string) => {
+      payload = s
+    })
+    this.lua.doStringSync(`__pullSink(${expr})`)
+    return JSON.parse(payload) as T
+  }
+
   /** Setzt/überschreibt ein globales Symbol (Engine-Funktion, Tabelle). */
   setGlobal(name: string, value: unknown): void {
     // Eine JS-Funktion darf NIEMALS `null` nach Lua zurückgeben: wasmoon prüft

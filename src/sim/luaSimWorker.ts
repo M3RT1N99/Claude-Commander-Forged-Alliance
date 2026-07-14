@@ -145,12 +145,12 @@ function tickAndPost(): void {
   if (!host || !engine) return
   // Ein Sim-Beat: Bau-Bedarf → Ökonomie → gewährte Rate → Lua-Threads → Physik.
   beat(engine)
-  // wasmoon reicht eine Lua-Tabelle je nach Inhalt als Array ODER als Objekt
-  // heraus — eine LEERE Tabelle kommt als `{}` an, nicht als `[]`. Der Main-
-  // Thread iterierte darüber und starb mit "m.units is not iterable", sobald die
-  // Sim einmal ohne Units dastand (z. B. direkt nach einem Karten-Reset).
-  const raw = host.eval('return __readAllUnits()') as unknown
-  const units = Array.isArray(raw) ? raw : Object.values((raw ?? {}) as object)
+  // Der Zustand kommt als JSON-STRING (LuaHost.pull), nicht als Rückgabewert:
+  // eine zurückgegebene Lua-Tabelle bleibt im wasmoon-Registry hängen und wird
+  // nie eingesammelt — bei 10 Beats/s läuft die Sim-VM sonst langsam voll.
+  // (Nebenwirkung, die damit auch weg ist: eine LEERE Tabelle kam als `{}` statt
+  // `[]` an, und der Main-Thread starb an "m.units is not iterable".)
+  const units = host.pull<unknown[]>('__readAllUnitsJson()')
   const a = engine.economy.army(1)
   ctx.postMessage({
     type: 'states',

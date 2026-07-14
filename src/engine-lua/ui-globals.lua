@@ -324,8 +324,14 @@ end
 --
 -- orders/toggles sind ARRAYS von Cap-Strings — orders.lua:891 iteriert sie
 -- mit `for index, availOrder in availableOrders do`.
+--
+-- Bei LEERER Auswahl liefert die Engine LEERE TABELLEN, nicht nil: die beiden
+-- AssignNewTable-Aufrufe (Cfile:1264740, :1264765) stehen HINTER der Schleife
+-- ueber die Units und laufen deshalb immer. Wer hier nil zurueckgibt, toetet
+-- orders.lua:891 (`for index, availOrder in availableOrders do`) bei jeder
+-- Abwahl — und damit die ganze UI-VM.
 function GetUnitCommandData(units)
-  if type(units) ~= 'table' or table.getn(units) == 0 then return end
+  if type(units) ~= 'table' or table.getn(units) == 0 then return {}, {}, nil end
 
   local orderSet, toggleSet = {}, {}
   local cats = nil
@@ -475,6 +481,67 @@ end
 
 function ClearCurrentFactoryForQueueDisplay()
   __uiQueueFactory = false
+end
+
+-- === Script-Bits (die Umschalter einer Unit) ===
+--
+-- Schild an/aus, Waffe an/aus, Stealth, Produktion … stehen als BITMASKE auf der
+-- Unit (mUnitVarDat.mScriptbits). cfunc_GetScriptBitL (Cfile:1360150ff) nimmt
+-- eine Unit-Liste und einen BIT-INDEX (Argument 2 ist eine Zahl), ueberspringt
+-- Units, die die passende ToggleCap nicht haben ((1 << bit) & mToggleCaps), und
+-- liefert den Zustand.
+--
+-- Die Bit-Reihenfolge ist die Registrierungs-Reihenfolge der RULEUTC-Enums
+-- (Cfile:656794-656810):
+--   0 ShieldToggle  1 WeaponToggle  2 JammingToggle  3 IntelToggle
+--   4 ProductionToggle  5 StealthToggle  6 GenericToggle  7 SpecialToggle
+--   8 CloakToggle
+local TOGGLE_CAPS = {
+  [0] = 'RULEUTC_ShieldToggle',
+  [1] = 'RULEUTC_WeaponToggle',
+  [2] = 'RULEUTC_JammingToggle',
+  [3] = 'RULEUTC_IntelToggle',
+  [4] = 'RULEUTC_ProductionToggle',
+  [5] = 'RULEUTC_StealthToggle',
+  [6] = 'RULEUTC_GenericToggle',
+  [7] = 'RULEUTC_SpecialToggle',
+  [8] = 'RULEUTC_CloakToggle',
+}
+
+local function hasToggleCap(u, bit)
+  local cap = TOGGLE_CAPS[bit]
+  if not cap then return false end
+  local bp = u:GetBlueprint()
+  local caps = bp and bp.General and bp.General.ToggleCaps
+  return caps ~= nil and caps[cap] == true
+end
+
+local function bitSet(bits, bit)
+  return math.floor((bits or 0) / (2 ^ bit)) % 2 == 1
+end
+
+function GetScriptBit(units, bit)
+  for _, u in ipairs(units or {}) do
+    if not u:IsDead() and hasToggleCap(u, bit) then
+      if bitSet(u.scriptBits or 0, bit) then return true end
+    end
+  end
+  return false
+end
+
+-- ToggleScriptBit(units, bit, value) — die UI schickt den Wunsch an die Sim
+-- (dort ruft er Unit:OnScriptBitSet/OnScriptBitClear, unit.lua:309/353).
+function ToggleScriptBit(units, bit, value)
+  local on = value == true
+  for _, u in ipairs(units or {}) do
+    if hasToggleCap(u, bit) then
+      local bits = u.scriptBits or 0
+      if on ~= bitSet(bits, bit) then
+        u.scriptBits = on and (bits + 2 ^ bit) or (bits - 2 ^ bit)
+      end
+    end
+  end
+  sendSim('ToggleScriptBit', units, { bit = bit, value = on })
 end
 
 -- === Pause (Produktion einer Fabrik/eines Bauers anhalten) ===

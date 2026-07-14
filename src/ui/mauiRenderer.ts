@@ -62,16 +62,11 @@ export class MauiRenderer {
     // Control, das SetNeedsFrameUpdate(true) verlangt hat (Cfile:1118936).
     // Die Grids der Original-UI bauen darin ihr Layout auf.
     this.host.eval(`__mauiFrame(${deltaSeconds})`)
-    // wasmoon reicht eine Lua-Tabelle je nach Inhalt als Array ODER als Objekt
-    // mit numerischen Schlüsseln heraus. Beides akzeptieren — ein stiller
-    // `return`, wenn die Form nicht passt, hat den ganzen Renderer lautlos
-    // stillgelegt.
-    const raw = this.host.eval('return __mauiSnapshot()') as unknown
-    const controls: MauiControl[] = Array.isArray(raw)
-      ? (raw as MauiControl[])
-      : raw && typeof raw === 'object'
-        ? (Object.values(raw) as MauiControl[])
-        : []
+    // Der Snapshot kommt als JSON-STRING über eine JS-Funktion — er wird NICHT
+    // aus Lua zurückgegeben. Jeder Rückgabewert bliebe im wasmoon-Registry
+    // hängen (~78 kB pro Snapshot), und bei 60 Bildern/s lief die UI-VM nach
+    // Minuten in ihre 2-GB-Grenze ("not enough memory"). Siehe LuaHost.pull().
+    const controls = this.host.pull<MauiControl[]>('__mauiSnapshotJson()')
     if (controls.length === 0) return
 
     const seen = new Set<number>()

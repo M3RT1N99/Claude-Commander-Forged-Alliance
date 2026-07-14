@@ -15,12 +15,35 @@ local function collector(g) return function(bp) __registered[g][bp.BlueprintId o
 -- (unit.lua:243) zugreifen, obwohl die .bp-Datei diese Sektionen gar nicht
 -- enthaelt. Werte 1:1 aus den Ctors — nichts geschaetzt.
 __bpDefaults = {
-  General = {},
+  -- Die Upgrade-Felder sind KEINE leeren Strings: der Ctor setzt sie auf den
+  -- String "none" (Cfile:656076-656077, func_StringInitFilename("none", ...));
+  -- nur UpgradesTo startet leer (str_empty, Cfile:656075).
+  --
+  -- Das ist kein Detail: construction.lua:863 fragt
+  --   elseif blueprint.General.UpgradesFromBase != "none" then
+  --       ... elseif blueprint.General.UpgradesFromBase == unitBp.General.UpgradesFromBase then
+  --           performUpgrade = true
+  -- Fehlt der Default, sind BEIDE Seiten nil — nil == nil ist wahr, und die UI
+  -- haelt JEDES Gebaeude fuer ein Upgrade der ausgewaehlten Unit. Der Klick aufs
+  -- Bau-Icon schickte dann ein UNITCOMMAND_Upgrade an die Sim, statt den
+  -- Bau-Modus zu starten — nichts liess sich mehr bauen.
+  General = {
+    UpgradesFrom = 'none',
+    UpgradesFromBase = 'none',
+    UpgradesTo = '',
+  },
   -- IdleEffects: Tabellen-Feld im Struct -> leer, nie nil. unit.lua:2463
   -- indiziert es ungeprueft (bpTable[layer]).
   Display = {
     UniformScale = 1.0, SpawnRandomRotation = false, HideLifebars = false,
     IdleEffects = {}, MovementEffects = {},
+    -- Der Ctor legt mDisplay.mIconName als LEEREN String an (Cfile:655662-655664:
+    -- _Mysize = 0, Buf[0] = 0). KEIN einziges .bp setzt das Feld — trotzdem
+    -- verkettet gamecommon.lua:17 es ungeprueft zu einem Pfad. Er wird dadurch
+    -- '/textures/ui/common/icons/units/_icon.dds', DiskGetFileInfo liefert false,
+    -- und die Lua faellt auf default_icon.dds zurueck (gamecommon.lua:22-24).
+    -- Genau so ist es gemeint: das leere Feld IST der Standard-Weg.
+    IconName = '',
   },
   Intel = {
     VisionRadius = 10, WaterVisionRadius = 10, RadarRadius = 0, SonarRadius = 0,

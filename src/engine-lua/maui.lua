@@ -286,6 +286,69 @@ function __mauiSnapshot()
 end
 
 -- =====================================================================
+-- Der Snapshot als JSON-STRING.
+--
+-- Warum nicht einfach die Tabelle? Weil JEDER Rueckgabewert aus Lua nach JS im
+-- wasmoon-Registry haengen bleibt und der Lua-GC ihn nie einsammelt (gemessen:
+-- eine Snapshot-Tabelle kostet ~78 kB, die nie wieder frei werden). Bei 60
+-- Bildern pro Sekunde sind das rund 5 MB/s — nach wenigen Minuten stand die
+-- UI-VM an ihrer 2-GB-Grenze und starb mit "not enough memory" mitten im Spiel.
+--
+-- Ein String, den Lua an eine JS-Funktion UEBERGIBT, wird beim Uebergang kopiert
+-- und hinterlaesst nichts (gemessen: 0 MB Zuwachs). Deshalb wird hier von Hand
+-- serialisiert — die Struktur ist bekannt und flach, ein allgemeiner
+-- JSON-Encoder waere unnoetig teuer.
+-- =====================================================================
+local function jsonStr(s)
+  s = tostring(s)
+  s = string.gsub(s, '\\', '\\\\')
+  s = string.gsub(s, '"', '\\"')
+  s = string.gsub(s, '\n', '\\n')
+  s = string.gsub(s, '\r', '\\r')
+  s = string.gsub(s, '\t', '\\t')
+  return '"' .. s .. '"'
+end
+
+-- Zahl oder false/nil -> JSON. Lua schreibt Ganzzahlen sonst als "1.0".
+local function jsonNum(v)
+  if v == nil or v == false then return 'false' end
+  return string.format('%.4g', v)
+end
+
+local function jsonOpt(v)
+  if v == nil or v == false then return 'false' end
+  return jsonStr(v)
+end
+
+function __mauiSnapshotJson()
+  local parts = {}
+  local n = 0
+  for _, c in ipairs(__mauiSnapshot()) do
+    n = n + 1
+    parts[n] = '{"id":' .. c.id
+      .. ',"kind":' .. jsonStr(c.kind)
+      .. ',"name":' .. jsonStr(c.name)
+      .. ',"left":' .. jsonNum(c.left)
+      .. ',"top":' .. jsonNum(c.top)
+      .. ',"width":' .. jsonNum(c.width)
+      .. ',"height":' .. jsonNum(c.height)
+      .. ',"depth":' .. jsonNum(c.depth)
+      .. ',"hidden":' .. tostring(c.hidden)
+      .. ',"alpha":' .. jsonNum(c.alpha)
+      .. ',"texture":' .. jsonOpt(c.texture)
+      .. ',"solidColor":' .. jsonOpt(c.solidColor)
+      .. ',"text":' .. jsonOpt(c.text)
+      .. ',"color":' .. jsonOpt(c.color)
+      .. ',"fontSize":' .. jsonNum(c.fontSize)
+      .. ',"fontFamily":' .. jsonOpt(c.fontFamily)
+      .. ',"centerH":' .. tostring(c.centerH)
+      .. ',"centerV":' .. tostring(c.centerV)
+      .. '}'
+  end
+  return '[' .. table.concat(parts, ',') .. ']'
+end
+
+-- =====================================================================
 -- Event-Pump
 --
 -- Das Event-Table hat exakt die Felder, die func_CreateLuaEvent @0x795BD0
@@ -305,10 +368,22 @@ end
 
 -- Trefferpruefung: das oberste (groesste Depth) sichtbare Control unter dem
 -- Punkt, dessen Hit-Test aktiv ist.
+-- Getroffen wird nur, was auch ZEICHNET.
+--
+-- Die unsichtbaren Vollbild-Container der Original-UI (Screen-Group, mapGroup,
+-- windowGroup, die Grids) liegen ueber allem und deaktivieren ihren Hit-Test
+-- NICHT (uiutil.lua:333). Wer sie mitzaehlt, laesst sie jeden Klick fressen:
+-- erst war keine Einheit mehr waehlbar, dann verschluckte eine Gruppe ueber dem
+-- Bau-Menue den Klick aufs Bau-Icon (und die Auswahl fiel weg, weil der Klick
+-- als Klick in die Welt durchging).
+--
+-- Die Gruppen sehen ihre Events trotzdem: __mauiDispatch schickt das Event vom
+-- getroffenen Control die ELTERN-Kette hoch (CMauiControl::HandleEvent,
+-- Cfile:1124525) — genau wie im Original.
 function __mauiHitTest(x, y)
   local best = nil
   for _, c in pairs(__mauiControls) do
-    if not c.__destroyed and visible(c) and c.__hitTest ~= false then
+    if not c.__destroyed and visible(c) and c.__hitTest ~= false and draws(c) then
       -- Ohne Layout gibt es keine Flaeche, also auch keinen Treffer. Das ist
       -- kein Fehlerfall: die Mini-Ansicht laesst leere Gruppen ohne Layout
       -- stehen (borders_mini.lua), und die Engine fragt sie nie.
@@ -355,7 +430,27 @@ __mauiHover = false
 --
 -- (Die Regel war frueher "alles ausser dem Root-Frame ist UI" — damit fras die
 -- Screen-Group jeden Klick und keine Einheit war mehr selektierbar.)
-function __mauiMouse(evType, x, y, mods)
+function __mauiMouse(evType, x, y, mods, keyCode)
+  -- Ein aktiver Dragger hat die Maus ERFASST: Bewegung und Loslassen gehen an
+  -- ihn, nicht in den maui-Baum (CMauiLuaDragger::OnMove/OnRelease,
+  -- Cfile:1130393/1130403). Genau so kommt ein Button ueberhaupt zu seinem
+  -- OnClick (button.lua:122).
+  if __mauiDragger then
+    local d = __mauiDragger
+    if evType == 'MouseMotion' then
+      if d.OnMove then d:OnMove(x, y) end
+      return true
+    elseif evType == 'ButtonRelease' then
+      -- Nur die Taste, mit der der Dragger gestartet wurde, beendet ihn
+      -- (PostDragger bekommt den KeyCode des ButtonPress-Events).
+      if __mauiDraggerKey == 0 or keyCode == nil or keyCode == __mauiDraggerKey then
+        __mauiDragger = false
+        if d.OnRelease then d:OnRelease(x, y) end
+      end
+      return true
+    end
+  end
+
   local hit = __mauiHitTest(x, y)
 
   if hit ~= __mauiHover then
@@ -368,11 +463,17 @@ function __mauiMouse(evType, x, y, mods)
     __mauiHover = hit or false
   end
 
+  -- KeyCode gehoert ins Event (func_CreateLuaEvent setzt ihn, Cfile:1136341):
+  -- button.lua:160 reicht ihn an PostDragger weiter, damit nur DIESE Maustaste
+  -- den Dragger wieder beendet.
   local handled = __mauiDispatch(hit, {
-    Type = evType, MouseX = x, MouseY = y, Modifiers = mods,
+    Type = evType, MouseX = x, MouseY = y, Modifiers = mods, KeyCode = keyCode or 0,
   })
   if handled then return true end
-  return hit ~= nil and draws(hit)
+  -- Der Hit-Test liefert nur zeichnende Controls — ein Treffer ist also immer
+  -- ein UI-Treffer, auch wenn ihn niemand behandelt hat (ein Klick auf ein
+  -- Panel ist kein Bewegungsbefehl).
+  return hit ~= nil
 end
 
 function __mauiWheel(x, y, rotation, mods)
@@ -383,6 +484,54 @@ function __mauiWheel(x, y, rotation, mods)
     WheelRotation = rotation, WheelDelta = rotation,
     Modifiers = mods,
   })
+end
+
+-- =====================================================================
+-- Dragger — die Maus-Erfassung der Engine.
+--
+-- JEDER Button-Klick der Original-UI laeuft darueber (button.lua:120-160):
+--   ButtonPress -> Dragger() -> PostDragger(rootFrame, event.KeyCode, dragger)
+--   Loslassen   -> die Engine ruft dragger:OnRelease(x, y) -> dort erst OnClick
+-- Ohne Dragger gibt es also NIE ein OnClick — kein Bau-Modus, kein Order-Button,
+-- kein Menue-Knopf. (Genau daran starb der Klick aufs Bau-Icon: er fiel durch die
+-- UI hindurch, wurde als Klick in die Welt gewertet, und die ACU verlor ihre
+-- Auswahl.)
+--
+-- Semantik aus der Decomp:
+--   PostDragger(originFrame, keycode, dragger)  @0x78E210, Hilfetext:
+--     "Make 'dragger' the active dragger from a particular frame. You can pass
+--      nil to cancel the current dragger."
+--   CMauiLuaDragger::OnMove/OnRelease  (Cfile:1130393/1130403) rufen die
+--     Lua-Methoden mit der MAUSPOSITION (mMousePos.x/.y),
+--   CMauiLuaDragger::OnCancel (Cfile:1130413) ohne Argumente.
+--
+-- Solange ein Dragger aktiv ist, gehen Bewegung und Loslassen an IHN, nicht an
+-- den maui-Baum — er hat die Maus erfasst.
+-- =====================================================================
+__mauiDragger = false
+__mauiDraggerKey = 0
+
+function InternalCreateDragger(luaobj)
+  luaobj.__isDragger = true
+  return luaobj
+end
+
+function PostDragger(originFrame, keycode, dragger)
+  if not dragger then
+    -- nil bricht den laufenden Dragger ab (Hilfetext @0x78E210).
+    local old = __mauiDragger
+    __mauiDragger = false
+    if old and old.OnCancel then old:OnCancel() end
+    return
+  end
+  __mauiDragger = dragger
+  __mauiDraggerKey = keycode or 0
+end
+
+-- Ein Dragger ist KEIN Control: er wird ueber moho.dragger_methods erzeugt und
+-- raeumt sich selbst weg (dragger.lua:15 OnRelease -> self:Destroy()).
+function __mauiDraggerDestroy(dragger)
+  if __mauiDragger == dragger then __mauiDragger = false end
 end
 
 function InternalCreateBorder(luaobj, parent)

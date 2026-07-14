@@ -548,3 +548,13 @@ rawset(moho, 'control_methods', Class() (control))
 rawset(moho, 'bitmap_methods', Class(moho.control_methods) (bitmap))
 rawset(moho, 'text_methods', Class(moho.control_methods) (text))
 rawset(moho, 'frame_methods', Class(moho.control_methods) (frame))
+
+-- CMauiLuaDragger: KEIN Control (kein Layout, kein Parent) — die Engine haelt
+-- ihn separat und ruft OnMove/OnRelease/OnCancel (Cfile:1130393-1130413).
+-- dragger.lua:15 raeumt ihn selbst weg: `OnRelease -> self:Destroy()`.
+rawset(moho, 'dragger_methods', Class() ({
+  Destroy = function(self)
+    __mauiDraggerDestroy(self)
+    self.__destroyed = true
+  end,
+}))

@@ -185,6 +185,12 @@ check(
 
 console.log('\n== Auswahl: __uiSetUnit → SelectUnits → OnSelectionChanged ==')
 // Die ACU, so wie die Sim sie meldet.
+// Die Naht zur Sim: ohne sie KNALLT jeder Befehl (statt still zu verpuffen).
+// Hier wird nur mitgeschrieben, was die UI schicken WÜRDE.
+host.eval('__t = { simCommands = {} }')
+host.setGlobal('__uiSimCommand', (name: string) => {
+  host.eval(`table.insert(__t.simCommands, '${name}')`)
+})
 host.eval(`__uiSetUnit(1, 'uel0001', 1, 100, 20, 100, 12000, 12000, 1, true)`)
 const selected = Number(host.eval('return __uiSelectByIds({ 1 })'))
 check(selected === 1, 'SelectUnits({acu}) → 1 Einheit ausgewählt')
@@ -203,7 +209,8 @@ console.log('\n== orders.lua: die Befehls-Buttons kommen aus dem Blueprint ==')
 // Die Buttons stehen im Grid der Original-orders.lua (orders.lua:868 SetItem).
 // Ausgelesen wird der Grid-Inhalt, nicht eine Nachbau-Tabelle.
 host.eval(`
-  __t = { orders = {}, enabled = {} }
+  __t.orders = {}
+  __t.enabled = {}
   local grid = __ui.ordersModule.controls.orderButtonGrid
   local cols, rows = grid:GetDimensions()
   for row = 1, rows do
@@ -268,6 +275,97 @@ const inMenu = (bp: string): boolean =>
   `) === true
 check(inMenu('ueb0101'), 'ueb0101 (T1-Landfabrik) steht im Bau-Menü der ACU')
 check(!inMenu('uel0101'), 'uel0101 (Panzer) steht NICHT drin — den baut die Fabrik')
+
+console.log('\n== Klick aufs Bau-Icon: der Bau-Modus startet, die Auswahl bleibt ==')
+// Der Weg, den ein Spieler nimmt: ACU wählen → Bau-Icon anklicken → Gebäude
+// setzen. Ging der Klick versehentlich an die WELT (weil eine unsichtbare Gruppe
+// über dem Icon lag), wurde die ACU stattdessen abgewählt.
+//
+// Das Icon wird NICHT gesucht, sondern beim Namen genommen: construction.lua
+// hängt jedem Bau-Button seine Blueprint-ID an (`item.id`), und der Klick landet
+// über den Original-Weg in commandmode.StartCommandMode('build', {name=id}).
+// Erst ein Frame: die Grids der Original-UI legen ihre Kinder in OnFrame aus
+// (grid.lua:40-48) — nach einer Selektion ist das Bau-Menü frisch befüllt.
+host.eval('__mauiFrame(0.016)')
+// specialgrid.lua:108 hängt die Item-Daten als `control.Data` an den Button.
+// Genommen wird das erste GEBÄUDE im Menü (MotionType RULEUMT_None) — nur das
+// startet den Bau-Modus; mobile Einheiten baut die Fabrik (construction.lua:878).
+// Welcher Tab gerade offen ist, darf dem Test egal sein.
+host.eval(`
+  __t.icon = false
+  __t.iconId = false
+  for _, c in pairs(__mauiControls) do
+    if not c.__destroyed and not __t.icon and c.Data and c.Data.type == 'item' and c.Data.id then
+      local bp = __blueprints[c.Data.id]
+      -- Gebäude (RULEUMT_None) UND kein Upgrade der ausgewählten Unit:
+      -- construction.lua:875 schickt Upgrades direkt als IssueBlueprintCommand,
+      -- nur alles andere geht in den Bau-Modus (construction.lua:878-880).
+      local upgrades = bp and bp.General and bp.General.UpgradesFrom
+      local isUpgrade = upgrades ~= nil and upgrades ~= 'none' and upgrades ~= ''
+      if bp and bp.Physics.MotionType == 'RULEUMT_None' and not isUpgrade and not c:IsHidden() then
+        __t.icon = c
+        __t.iconId = c.Data.id
+      end
+    end
+  end
+`)
+const iconId = String(host.eval('return __t.iconId or ""'))
+const hasIcon = host.eval(`return __t.icon ~= false`) === true
+check(hasIcon, `Ein Gebäude-Icon steht im Bau-Menü: ${iconId} (construction.lua)`)
+if (hasIcon) {
+  const pos = host.eval(`
+    local c = __t.icon
+    return { x = math.floor(c.Left() + c.Width() / 2), y = math.floor(c.Top() + c.Height() / 2) }
+  `) as { x: number; y: number }
+  // Ein Klick ist Drücken UND Loslassen — und zwar über den Dragger: button.lua
+  // feuert OnClick erst in dragger:OnRelease (button.lua:122-133). Wer nur
+  // ButtonPress schickt, sieht nie einen Klick.
+  check(
+    host.eval(
+      `return __mauiMouse('ButtonPress', ${pos.x}, ${pos.y}, { Left = true }, 1)`,
+    ) === true,
+    `Klick auf das Icon (${pos.x}, ${pos.y}) gehört der UI — NICHT der Welt`,
+  )
+  check(
+    host.eval('return __mauiDragger ~= false') === true,
+    'Der ButtonPress hat einen Dragger gesetzt (PostDragger, button.lua:160)',
+  )
+  host.eval(`__mauiMouse('ButtonRelease', ${pos.x}, ${pos.y}, { Left = true }, 1)`)
+  check(
+    host.eval('return __mauiDragger == false') === true,
+    'Das Loslassen hat den Dragger beendet (OnRelease → Destroy, dragger.lua:15)',
+  )
+  const cm = host.eval(`
+    local m = import('/lua/ui/game/commandmode.lua').GetCommandMode()
+    return { mode = m[1] or false, name = (m[2] and m[2].name) or false }
+  `) as { mode: string | false; name: string | false }
+  check(
+    cm.mode === 'build' && cm.name === iconId,
+    `Der Bau-Modus läuft: ${String(cm.mode)}/${String(cm.name)} (commandmode.lua)`,
+  )
+  check(
+    Number(host.eval('local s = GetSelectedUnits() return s and table.getn(s) or 0')) === 1,
+    'Die ACU ist NOCH ausgewählt (der Klick war kein Welt-Klick)',
+  )
+}
+
+console.log('\n== Abwahl darf die UI nicht töten ==')
+// GetUnitCommandData liefert bei leerer Auswahl LEERE TABELLEN (die Engine legt
+// sie hinter der Unit-Schleife immer an, Cfile:1264740). Gab unsere Version nil
+// zurück, starb orders.lua:891 beim ersten Klick ins Leere.
+let deselectOk = true
+try {
+  host.eval('__uiSelectByIds({})')
+} catch {
+  deselectOk = false
+}
+check(deselectOk, 'SelectUnits({}) überlebt orders.lua/construction.lua')
+check(
+  host.eval('return GetSelectedUnits() == nil') === true,
+  'GetSelectedUnits() ist danach nil (Cfile:1361395)',
+)
+// Und die Auswahl wieder herstellen, damit die folgenden Prüfungen stimmen.
+host.eval(`__uiSelectByIds({ 1 })`)
 
 console.log('\n== unitview.lua: Rollover zeigt die echte Unit ==')
 host.eval('__uiSetRollover(1)')

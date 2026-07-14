@@ -150,11 +150,17 @@ check(onWorld === false, 'Klick daneben trifft nur den Root-Frame → die Welt b
 
 // Bubbling: ein Kind, das false liefert, reicht das Event an den Parent hoch
 // (Cfile:1124525). Kommt es dort an, ist die Kette richtig.
+// Das Kind ist ein BITMAP, kein Group: der Hit-Test trifft nur, was auch
+// ZEICHNET (sonst würden die unsichtbaren Vollbild-Container der Original-UI
+// jeden Klick fressen — siehe verify-ui-panels). Das Bubbling selbst ist davon
+// unberührt: das Event geht vom getroffenen Control die Eltern-Kette hoch.
 const bubbled = host.eval(`
   local Group = import('/lua/maui/group.lua').Group
+  local Bitmap = import('/lua/maui/bitmap.lua').Bitmap
   local parent = Group(GetFrame(0), 'bubbleParent')
   parent.Left:Set(500) parent.Top:Set(500) parent.Width:Set(100) parent.Height:Set(100)
-  local child = Group(parent, 'bubbleChild')
+  local child = Bitmap(parent)
+  child:SetSolidColor('ff204060')
   child.Left:Set(500) child.Top:Set(500) child.Width:Set(50) child.Height:Set(50)
   local reached = false
   child.HandleEvent = function(self, event) return false end
