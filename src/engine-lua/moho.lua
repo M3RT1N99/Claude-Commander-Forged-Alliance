@@ -407,8 +407,26 @@ local control = withNoops(CONTROL_NAMES, {
   end,
   GetAlpha = function(self) return self.__alpha or 1 end,
 
-  DisableHitTest = function(self) self.__hitTest = false end,
-  EnableHitTest = function(self) self.__hitTest = true end,
+  -- "Control:DisableHitTest([recursive])" / "Control:EnableHitTest([recursive])"
+  -- (Cfile:1125051/1125109). Das OPTIONALE recursive-Flag ist kein Beiwerk:
+  -- uiutil.lua:993 (`ret:DisableHitTest(true)`) macht damit die Deko-Klammern
+  -- eines Dialogs mausdurchlaessig. Wer es ignoriert, laesst die Klammern
+  -- weiterhin treffen — und weil sie mit den Knoepfen auf DERSELBEN Tiefe liegen
+  -- und in der Baumreihenfolge davor stehen, gewinnt bei `mDepth > best`
+  -- (Cfile:1124509, echt groesser) die Klammer. Der Tutorial-Dialog war so nicht
+  -- mehr zu beantworten.
+  DisableHitTest = function(self, recursive)
+    self.__hitTest = false
+    if recursive then
+      for _, c in ipairs(self.__children or {}) do c:DisableHitTest(true) end
+    end
+  end,
+  EnableHitTest = function(self, recursive)
+    self.__hitTest = true
+    if recursive then
+      for _, c in ipairs(self.__children or {}) do c:EnableHitTest(true) end
+    end
+  end,
   IsHitTestDisabled = function(self) return self.__hitTest == false end,
 
   -- Tastatur-Fokus (Cfile:1125718/1125768/1125828). Hat ein Control den Fokus,
@@ -540,7 +558,32 @@ local text = withNoops(TEXT_NAMES, {
 -- ---------------------------------------------------------------------
 local FRAME_NAMES = { 'GetTargetHead', 'GetTopmostDepth', 'SetTargetHead' }
 local frame = withNoops(FRAME_NAMES, {
-  GetTopmostDepth = function(self) return 5000000 end,
+  -- "int GetTargetHead()" (Cfile:1136990) — der Bildschirm, auf dem dieser Frame
+  -- liegt. Wir haben genau einen Head; __mauiCreateRootFrame haengt ihn als
+  -- __head an. uiutil.lua:671 baut damit seine Dialog-Tiefe:
+  --   GetFrame(parent:GetRootFrame():GetTargetHead()):GetTopmostDepth() + 1
+  GetTargetHead = function(self) return self.__head or 0 end,
+  SetTargetHead = function(self, head) self.__head = head end,
+
+  -- "float GetTopmostDepth()" (Cfile:1136937) — die groesste Tiefe, die in
+  -- diesem Frame vergeben ist. Ein Dialog legt sich damit UEBER alles, was schon
+  -- da ist (uiutil.lua:671, +1). Ein fester Wert (hier stand 5000000) waere eine
+  -- erfundene Zahl: zwei Dialoge saessen auf derselben Tiefe, und der zweite
+  -- laege je nach Zeichenreihenfolge zufaellig hinten.
+  GetTopmostDepth = function(self)
+    local top = 0
+    for _, c in pairs(__mauiControls) do
+      if not c.__destroyed then
+        local root = c
+        while root.__parent do root = root.__parent end
+        if root == self then
+          local d = c.Depth()
+          if d and d > top then top = d end
+        end
+      end
+    end
+    return top
+  end,
 }, control)
 
 -- ---------------------------------------------------------------------

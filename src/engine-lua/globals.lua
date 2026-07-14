@@ -1,3 +1,38 @@
+-- === Sound-Parameter-Objekte ===
+--
+-- Beides sind CORE-Globals (scr_CoreInits) — sie stehen in BEIDEN Lua-States,
+-- und das ist der Punkt:
+--
+--   Sound( {cue,bank,cutoff} ) - Make a sound parameters object   Cfile:608456
+--   RPCSound( {cue,bank,cutoff} )                                 Cfile:608507
+--
+-- In der Sim ist `Sound{}` der EINZIGE DSL-Konstruktor in den .bp-Dateien
+-- (3445 Vorkommen; fehlt er, bricht die Blueprint-Auswertung mittendrin ab und
+-- das bp landet halbfertig unter dem Schluessel 'null'). In der UI baut
+-- main.lua:231 damit die Menuemusik. Lag die Definition nur bei den Blueprints,
+-- kannte die UI-VM ihn nicht — obwohl die Engine ihn dort genauso registriert.
+function Sound(t) return t end
+function RPCSound(t) return t end
+
+-- === MATH_Lerp (Core-Global, Cfile:598170) ===
+--
+-- mHelp: "MATH_Lerp(s, a, b) or MATH_Lerp(s, sMin, sMax, a, b) -> number".
+-- Der Rumpf (Cfile:598228-598258) rechnet:
+--
+--   3 Argumente:  a + (b - a) * s
+--   5 Argumente:  a + (b - a) * ((s - sMin) / (sMax - sMin))
+--
+-- KEIN Klemmen auf [0,1] — die Engine laesst den Wert ueberschiessen. Wer hier
+-- ein math.min/max dazuerfindet, macht die Ein-/Ausblendungen der UI (die genau
+-- damit rechnen, effecthelpers.lua:446) an den Raendern falsch.
+function MATH_Lerp(s, a, b, c, d)
+  if d == nil then
+    return a + (b - a) * s
+  end
+  local sMin, sMax = a, b
+  return c + (d - c) * ((s - sMin) / (sMax - sMin))
+end
+
 -- === Vektor-Mathematik (cfunc_VDist2/VDist3/…) ===
 function VDist2(x1, z1, x2, z2)
   local dx, dz = x1 - x2, z1 - z2

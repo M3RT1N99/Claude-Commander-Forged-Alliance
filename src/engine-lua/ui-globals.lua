@@ -85,11 +85,21 @@ end
 
 -- GetOptions(key): the engine's option store (video, sound, gameplay).
 -- prefs.lua:44 reads 'primary_adapter' when it creates a profile.
+-- GetOptions(key) — "obj GetOptions()" (Cfile:1369977), Rumpf:
+-- CUserPrefs::LookupCurrentOption (Cfile:1370017). Es ist die Option des
+-- AKTUELLEN PROFILS, nicht eine globale Tabelle: optionslogic.lua legt sie mit
+-- `Prefs.SetToCurrentProfile('options', curOptions)` (Zeile 60) genau dort ab
+-- und liest sie mit `Prefs.GetFromCurrentProfile('options')` (Zeile 48) wieder.
+-- Wer stattdessen GetPreference('options') liest, sieht die Aenderung nie —
+-- prefs.SetOption('mainmenu_bgmovie', false) verpuffte still, und das Menue
+-- baute weiter seinen Film.
 function GetOptions(key)
-  local opts = GetPreference('options')
-  if not opts then return nil end
-  if key == nil then return opts end
-  return opts[key]
+  local profile = GetPreference('profile')
+  if not profile or not profile.current or not profile.profiles then return nil end
+  local current = profile.profiles[profile.current]
+  if not current or not current.options then return nil end
+  if key == nil then return current.options end
+  return current.options[key]
 end
 
 -- =====================================================================
@@ -448,19 +458,92 @@ end
 -- Deshalb: die angeforderten Cues werden PROTOKOLLIERT und das Fehlen der
 -- Ausgabe wird EINMAL laut gemeldet. Nichts wird erfunden, nichts wird
 -- verschwiegen — und ein Test kann pruefen, dass die richtige Cue kam.
+-- Die Signaturen kommen aus den mHelp-Strings der Decomp:
+--
+--   handle = PlaySound(sndParams, prepareOnly)   Cfile:1348030
+--   StartSound(handle)                           Cfile:1348174
+--   StopSound(handle, [immediate=false])         Cfile:1348237
+--   bool = SoundIsPrepared(handle)               Cfile:1348102
+--   PauseSound(categoryString, bPause)           Cfile:1347882  <- KATEGORIE,
+--   PlayVoice(params, duck)                      Cfile:1348652     kein Handle
+--
+-- Das HANDLE ist der Punkt: main.lua:231-249 startet die Menuemusik und stoppt
+-- sie ueber genau dieses Handle (`StopSound(musicHandle)` in StopMusic und
+-- OnDestroy). Ohne Rueckgabewert haette StopSound nichts zu stoppen — die Musik
+-- liefe im Menue ewig weiter, sobald es eine Ausgabe gibt.
 __uiAudioSink = false
 __uiSoundsRequested = {}
 local warnedNoAudio = false
 
-function PlaySound(sound)
-  if not sound then return end
-  __uiSoundsRequested[table.getn(__uiSoundsRequested) + 1] = sound
+local function newHandle(params, kind)
+  local h = {
+    Bank = params.Bank,
+    Cue = params.Cue,
+    kind = kind,
+    -- Ein Handle ist "prepared", sobald die Bank die Cue geladen hat. Wir laden
+    -- nichts — also ist es das sofort. movie.lua:37-49 wartet darauf; ein ewiges
+    -- false wuerde den Splash-Film blockieren.
+    prepared = true,
+    playing = false,
+    stopped = false,
+  }
+  __uiSoundsRequested[table.getn(__uiSoundsRequested) + 1] = h
+  return h
+end
+
+function StartSound(handle)
+  if not handle then return end
+  handle.playing = true
+  handle.stopped = false
   if __uiAudioSink then
-    __uiAudioSink(sound.Bank, sound.Cue)
+    __uiAudioSink(handle.Bank, handle.Cue)
   elseif not warnedNoAudio then
     warnedNoAudio = true
     WARN('Audio: keine Ausgabe angeschlossen — Cues werden nur protokolliert (__uiSoundsRequested)')
   end
+end
+
+function PlaySound(sound, prepareOnly)
+  if not sound then return end
+  local h = newHandle(sound, 'sound')
+  if not prepareOnly then StartSound(h) end
+  return h
+end
+
+function PlayVoice(params, duck)
+  if not params then return end
+  local h = newHandle(params, 'voice')
+  h.duck = duck
+  StartSound(h)
+  return h
+end
+
+function SoundIsPrepared(handle)
+  return handle ~= nil and handle.prepared == true
+end
+
+function StopSound(handle, immediate)
+  if not handle then return end
+  handle.playing = false
+  handle.stopped = true
+  handle.immediate = immediate == true
+end
+
+function StopAllSounds()
+  for _, h in ipairs(__uiSoundsRequested) do
+    h.playing = false
+    h.stopped = true
+  end
+end
+
+-- PauseSound/PauseVoice arbeiten auf KATEGORIEN ("music", "voice", …), nicht auf
+-- Handles — deshalb ein eigener Zustand.
+__uiSoundCategoriesPaused = {}
+function PauseSound(category, bPause)
+  __uiSoundCategoriesPaused[category] = bPause == true
+end
+function PauseVoice(category, bPause)
+  PauseSound(category, bPause)
 end
 
 -- === Bau-Warteschlange der angezeigten Fabrik ===
@@ -742,8 +825,104 @@ function ConExecute(cmd)
 end
 function ConExecuteSave(cmd) ConExecute(cmd) end
 
+-- === Front-End: Zustand, Einstiege, Daten ===
+--
+-- Es gibt genau EINE UI-VM fuer die ganze Anwendung (Moho::USER_GetLuaState ist
+-- ein Singleton, Cfile:1368027). Splash, Hauptmenue, Lobby und Spiel-UI laufen
+-- alle darin — was wechselt, ist nur der Zustand:
+--
+--   UIS_none=0  UIS_splash=1  UIS_frontend=2  UIS_game=3  UIS_lobby=4
+--                                              (Cfile:1262301-1262311)
+__uiState = 0
+local UI_STATE_NAMES = { [0] = 'none', [1] = 'splash', [2] = 'frontend', [3] = 'game', [4] = 'lobby' }
+
+-- GetCurrentUIState (Cfile:1265924) — borders.lua:101 fragt danach.
+function GetCurrentUIState()
+  return UI_STATE_NAMES[__uiState]
+end
+
+-- CUIManager::SetNewLuaState: Frames neu, Zustand setzen, dann SetupUI() aus
+-- der Original-uimain.lua (Cfile:1273680). SetupUI laeuft bei JEDEM Wechsel neu
+-- — der Cursor haengt daran (uimain.lua:22-25).
+function __uiSetNewLuaState(state)
+  __mauiResetFrames()
+  __uiState = state
+  import('/lua/ui/uimain.lua').SetupUI()
+end
+
+-- Die duennen Lua-Wrapper um UI_StartSplashScreens (Cfile:1262357) und
+-- UI_StartFrontEnd (Cfile:1262476). mHelp: "kill current UI and start ...".
+function EngineStartSplashScreens()
+  __uiSetNewLuaState(1)
+  import('/lua/ui/uimain.lua').StartSplashScreen()
+end
+
+function EngineStartFrontEndUI()
+  __uiSetNewLuaState(2)
+  import('/lua/ui/uimain.lua').StartFrontEndUI()
+end
+
+-- FrontEndData legt die Engine selbst in die UI-Globals (Cfile:1268751/1268831):
+-- Kampagnen-Briefing, Replay-Dateiname, ausgewaehlte Karte. Get/Set sind nur
+-- Tabellenzugriffe.
+FrontEndData = {}
+function GetFrontEndData(key) return FrontEndData[key] end
+function SetFrontEndData(key, value) FrontEndData[key] = value end
+
+-- ClearFrame (Cfile:1264066) — alle Kinder eines Root-Frames weg.
+function ClearFrame(index)
+  GetFrame(index or 0):ClearChildren()
+end
+
+-- FlushEvents (Cfile:1274594): "flush mouse/keyboard events". Nach dem Aufbau
+-- des Menues (main.lua:992) sollen die Klicks, die waehrend des Ladens
+-- aufgelaufen sind, NICHT nachtraeglich zuschlagen. Bei uns kommen die Events
+-- einzeln aus dem DOM — es gibt keine Warteschlange, die zu leeren waere; der
+-- laufende Dragger aber schon.
+function FlushEvents()
+  __mauiDragger = false
+end
+
+-- ExitApplication (Cfile:1263877): "request that the application shut down"
+-- (main.lua:980, der Exit-Knopf).
+function ExitApplication()
+  __uiExitRequested = true
+  LOG('ExitApplication')
+end
+
+-- === Keymap ===
+-- Die Engine fuehrt EINE Tastenzuordnung (Taste -> Konsolenbefehl). IN_AddKeyMapTable
+-- legt Eintraege hinein, IN_RemoveKeyMapTable nimmt genau diese Tasten wieder
+-- heraus (mHelp Cfile:1260010: "removes the keys from the key map"), IN_ClearKeyMap
+-- leert sie. uimain.lua:52 raeumt so den Debug-Teil ab, sobald das Front-End
+-- startet. Das Ausloesen der Aktionen ist Sache des Key-Handlers (M3).
+__uiKeyMap = {}
+
+function IN_AddKeyMapTable(map)
+  for key, action in pairs(map or {}) do
+    __uiKeyMap[key] = action
+  end
+end
+
+function IN_RemoveKeyMapTable(map)
+  for key, _ in pairs(map or {}) do
+    __uiKeyMap[key] = nil
+  end
+end
+
+function IN_ClearKeyMap()
+  __uiKeyMap = {}
+end
+
 -- === Session / Umgebung ===
-function GetVersion() return 'CFA' end
+-- GetVersion ist ein CORE-Global (Cfile:599401) und liefert die Version der
+-- ENGINE, nicht die der Spieldaten: Moho::GetEngineVersion (@0x4D3D30) ist
+-- schlicht `STR_Printf("%1.1f.%i", 1.5, 3764)` — einkompiliert. Die Engine hier
+-- sind wir; also sagt der String, welche Engine laeuft. __engineVersion setzt
+-- der Host aus der package.json (uiEngine.ts).
+function GetVersion()
+  return __engineVersion or 'unbekannt'
+end
 function DebugFacilitiesEnabled() return false end
 function SessionIsReplay() return false end
 function SessionIsMultiplayer() return false end
@@ -762,4 +941,12 @@ function GetFrame(index)
   end
   return __uiFrames[index]
 end
-function GetNumRootFrames() return __uiFrames and #__uiFrames or 0 end
+-- Ein Head = ein Root-Frame; die Engine zaehlt ab 0 (Cfile:1273621, Schleife
+-- ueber die Heads). `#__uiFrames` waere hier 0, weil der einzige Eintrag der
+-- Index 0 ist — uimain.lua:61 (`GetNumRootFrames() > 1` → multihead.lua) haette
+-- das nie gemerkt, ein spaeterer Multihead-Test schon.
+function GetNumRootFrames()
+  local n = 0
+  while __uiFrames[n] do n = n + 1 end
+  return n
+end

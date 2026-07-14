@@ -105,8 +105,8 @@ installUiEngine(host, {
   find: (dir, pattern) => findFiles(allPaths, dir, pattern),
   textureSize,
 })
-setupUi(host)
 createRootFrame(host, 800, 600)
+setupUi(host)
 
 console.log('\n== Root-Frame: GetFrame(0), erzeugt über die Original-Frame-Klasse ==')
 // InternalCreateFrame → attachControl (7 LazyVars) → DoInit → Control.OnInit

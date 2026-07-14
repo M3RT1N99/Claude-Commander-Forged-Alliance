@@ -6,6 +6,7 @@ import { installSimThreads } from './simThreads'
 import UI_GLOBALS_LUA from '../engine-lua/ui-globals.lua?raw'
 import UI_GLOBALS_MISSING_LUA from '../engine-lua/ui-globals-missing.lua?raw'
 import MAUI_LUA from '../engine-lua/maui.lua?raw'
+import pkg from '../../package.json' with { type: 'json' }
 
 /**
  * Die UI-VM — der zweite Lua-State.
@@ -51,6 +52,11 @@ export function installUiEngine(host: LuaHost, fs: UiFileSystem): UiEngine {
   // ForkThread als Upvalue), dann die Original-Lua.
   installSimThreads(host)
   installEngineGlobals(host)
+  // GetVersion() (Core-Global, Cfile:599401) liefert die Version der ENGINE:
+  // Moho::GetEngineVersion @0x4D3D30 ist `STR_Printf("%1.1f.%i", 1.5, 3764)` —
+  // einkompiliert, nicht aus den Spieldaten gelesen. Die Engine hier sind wir,
+  // also steht unsere Version drin. Im Hauptmenü ist sie sichtbar (main.lua:172).
+  host.setGlobal('__engineVersion', `${pkg.name} ${pkg.version}`)
   host.eval(UI_GLOBALS_LUA)
 
   // DiskGetFileInfo ist die Naht zum VFS. UIUtil.UIFile/SkinnableFile bauen
@@ -212,21 +218,52 @@ export function setupGameUi(host: LuaHost, log: (msg: string) => void): void {
 }
 
 /**
+ * Das Hauptmenü — der Weg, den die Engine beim normalen Start nimmt.
+ *
+ * `main()` (Cfile:1373865) ruft ohne Kommandozeilen-Argumente
+ * `Moho::UI_StartSplashScreens()`; `splash.lua:22-25` springt bei gesetzter
+ * Preference `movie.nologo` sofort mit `EngineStartFrontEndUI()` weiter — das
+ * ist ein Original-Pfad, kein Trick. Von dort: `SetNewLuaState(UIS_frontend)`
+ * → `SetupUI()` → `uimain.StartFrontEndUI()` → `menus/main.lua:CreateUI()`.
+ *
+ * Ohne SFD-Decoder gibt es kein Hintergrund-Video. Auch das geht über den
+ * Original-Weg: `mainmenu_bgmovie` ist eine echte Option (options.lua:358-371),
+ * die main.lua:151-153 abfragt. Kein Sonderfall im Code.
+ */
+export function startFrontEnd(host: LuaHost): void {
+  ensureProfile(host)
+  host.eval(`
+    local Prefs = import('/lua/user/prefs.lua')
+    Prefs.SetOption('mainmenu_bgmovie', false)
+    SetPreference('movie.nologo', true)
+  `)
+  // Der Weg beginnt beim Splash — genau wie im Spiel. Dass er sofort ins
+  // Front-End durchreicht, entscheidet die Original-Lua, nicht wir.
+  host.eval('EngineStartSplashScreens()')
+}
+
+/**
  * Führt `SetupUI()` aus dem Original-`uimain.lua` aus — den Einstiegspunkt, den
  * die Engine selbst ruft (Cfile:1262333:
  * `SCR_Import('/lua/ui/uimain.lua')['SetupUI']()`). Danach stehen Skin, Layout
  * und Cursor — alles aus der Original-Lua, nichts aus TS.
  */
 export function setupUi(host: LuaHost): void {
+  ensureProfile(host)
+  host.eval(`import('/lua/ui/uimain.lua').SetupUI()`)
+}
+
+function ensureProfile(host: LuaHost): void {
   // Ein Benutzerprofil muss existieren (prefs.lua:96 greift ungeprüft darauf
-  // zu). Angelegt wird es über den Original-Weg — `Prefs.CreateProfile`
+  // zu, und main.lua:57-62 baut ohne `profile.current` den Profil-Dialog statt
+  // des Menüs). Angelegt wird es über den Original-Weg — `Prefs.CreateProfile`
   // (prefs.lua:31), dieselbe Funktion, die das Spiel benutzt, wenn jemand zum
-  // ersten Mal startet. Kein handgeschnitztes Profil-Table.
+  // ersten Mal startet; sie setzt `profile.current` selbst (prefs.lua:57).
+  // Kein handgeschnitztes Profil-Table.
   host.eval(`
     local Prefs = import('/lua/user/prefs.lua')
     if not Prefs.ProfilesExist() then
       Prefs.CreateProfile('Commander')
     end
   `)
-  host.eval(`import('/lua/ui/uimain.lua').SetupUI()`)
 }

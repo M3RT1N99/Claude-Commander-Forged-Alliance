@@ -123,8 +123,8 @@ installUiEngine(host, {
   stringAdvance: (text, family, size) => fonts.advance(text, family, size),
   fontMetrics: (family, size) => fonts.metrics(family, size),
 })
-setupUi(host)
 createRootFrame(host, 1920, 1080)
+setupUi(host)
 
 check(fonts.has('Arial') && fonts.has('Zeroes Three'), 'Arial + Zeroes Three aus <GameDir>/fonts')
 const arial = fonts.metrics('Arial', 14)

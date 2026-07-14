@@ -69,8 +69,8 @@ installUiEngine(ui, {
   stringAdvance: (t, f, s) => fonts.advance(t, f, s),
   fontMetrics: (f, s) => fonts.metrics(f, s),
 })
-setupUi(ui)
 createRootFrame(ui, 1920, 1080)
+setupUi(ui)
 loadUiBlueprints(ui, [...game.paths].filter((p) => /^units\/[^/]+\/[^/]+_unit\.bp$/.test(p)))
 setupGameUi(ui, () => {})
 ui.setGlobal('__uiSimCommand', () => {})

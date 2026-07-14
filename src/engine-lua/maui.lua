@@ -161,14 +161,49 @@ end
 -- Der Root-Frame: die Wurzel des UI-Baums, die GetFrame(0) liefert. Die Engine
 -- erzeugt ihn beim Start und gibt ihm die Fenstergroesse; die Klasse dafuer ist
 -- die Original-Frame (frame.lua:6, setzt Depth auf 0).
+__mauiRootWidth = 0
+__mauiRootHeight = 0
 function __mauiCreateRootFrame(width, height)
   local Frame = import('/lua/maui/frame.lua').Frame
   local f = Frame('root')
+  -- Ein Frame gehoert zu genau einem Head (Bildschirm); wir haben einen.
+  -- uiutil.lua:671 fragt ihn: GetFrame(ctrl:GetRootFrame():GetTargetHead()).
+  f.__head = 0
   f.Left:Set(0)
   f.Top:Set(0)
   f.Width:Set(width)
   f.Height:Set(height)
+  __mauiRootWidth = width
+  __mauiRootHeight = height
   return f
+end
+
+-- CUIManager::SetNewLuaState (@0x84C4E0, Cfile:1273520) — der EINE Weg, auf dem
+-- die Engine den UI-Zustand wechselt (Splash → Front-End → Lobby → Spiel). Die
+-- Reihenfolge steht in der Decomp:
+--
+--   1. Input-Capture-Stack und laufenden Dragger abraeumen   (1273557-1273564)
+--   2. alte Root-Frames freigeben, mState = neuer Zustand    (1273600-1273605)
+--   3. pro Head einen NEUEN CMauiFrame samt LazyVars         (1273621-1273666)
+--   4. SetupUI() aus /lua/ui/uimain.lua rufen                (1273680)
+--
+-- Zwei Dinge folgen daraus, die man nicht raten darf: der Root-Frame existiert
+-- VOR SetupUI() (effecthelpers.lua:28 ruft auf Modulebene GetFrame(0)), und der
+-- maui-Baum ist nach JEDEM Zustandswechsel leer.
+function __mauiResetFrames()
+  __mauiCapture = {}
+  __mauiDragger = false
+  __mauiFocus = false
+  -- Alles, was an keinem Frame haengt, wuerde den Wechsel sonst ueberleben.
+  local roots = {}
+  for _, c in pairs(__mauiControls) do
+    if not c.__parent then roots[table.getn(roots) + 1] = c end
+  end
+  for _, c in ipairs(roots) do
+    if not c.__destroyed then c:Destroy() end
+  end
+  __uiFrames = {}
+  __mauiCreateRootFrame(__mauiRootWidth, __mauiRootHeight)
 end
 
 -- Momentaufnahme des UI-Baums fuer den Renderer. Die Layout-Zahlen werden hier
@@ -434,37 +469,51 @@ end
 -- Die Gruppen sehen ihre Events trotzdem: __mauiDispatch schickt das Event vom
 -- getroffenen Control die ELTERN-Kette hoch (CMauiControl::HandleEvent,
 -- Cfile:1124525) — genau wie im Original.
--- Ist `c` ein Nachfahre von `root` (oder root selbst)?
-local function isUnder(c, root)
-  local node = c
-  while node do
-    if node == root then return true end
-    node = node.__parent or nil
-  end
-  return false
-end
-
+-- CMauiControl::GetTopmostControl (@0x785xxx, Cfile:1124492) — WOERTLICH:
+--
+--   for (i = a1; i; i = DepthFirstSuccessor(i, a1))
+--     if (!IsHidden && !IsHitTestDisabled && HitTest(x,y) && i->mDepth > mDepth)
+--       { best = i; mDepth = i->mDepth; }
+--
+-- Zwei Dinge stehen da, die man nicht raten darf:
+--
+--  1. Es ist eine TIEFENSUCHE ab der Wurzel — also die Reihenfolge, in der die
+--     Controls angelegt wurden.
+--  2. Der Vergleich ist ECHT GROESSER. Bei GLEICHER Tiefe gewinnt der ERSTE in
+--     Baumreihenfolge, nicht der letzte.
+--
+-- Beides zusammen entscheidet echte Faelle: im Tutorial-Dialog liegen der
+-- "Nein"-Knopf und die Deko-Klammern auf derselben Tiefe (10110). Wer ueber
+-- eine Hash-Tabelle laeuft (pairs) und bei Gleichstand den letzten nimmt,
+-- greift zufaellig die Klammer — der Dialog ist dann nicht mehr zu beantworten.
 function __mauiHitTest(x, y)
-  -- MODALITAET: ist der Capture-Stack nicht leer, beginnt der Hit-Test nicht am
+  -- MODALITAET: ist der Capture-Stack nicht leer, beginnt die Suche nicht am
   -- Root-Frame, sondern beim obersten Capture-Control (Cfile:1147376-1147390).
   -- Ein Klick daneben trifft dann NICHTS — genau das macht einen Dialog modal
   -- (uiutil.lua:615 MakeInputModal).
-  local capture = GetInputCapture()
+  local root = GetInputCapture() or __uiFrames[0]
+  if not root then return nil end
 
-  local best = nil
-  for _, c in pairs(__mauiControls) do
-    if capture and not isUnder(c, capture) then
-      -- ausserhalb des modalen Zweigs: unsichtbar fuer die Maus
-    elseif not c.__destroyed and visible(c) and c.__hitTest ~= false and draws(c) then
+  local best, bestDepth = nil, nil
+  local function walk(c)
+    if c.__destroyed or c.__hidden then return end
+    if c.__hitTest ~= false and draws(c) then
       -- Ohne Layout gibt es keine Flaeche, also auch keinen Treffer. Das ist
       -- kein Fehlerfall: die Mini-Ansicht laesst leere Gruppen ohne Layout
       -- stehen (borders_mini.lua), und die Engine fragt sie nie.
       local l, t, r, b = bounds(c)
       if l and x >= l and x < r and y >= t and y < b then
-        if not best or c.Depth() > best.Depth() then best = c end
+        local d = c.Depth()
+        if bestDepth == nil or d > bestDepth then
+          best, bestDepth = c, d
+        end
       end
     end
+    for _, child in ipairs(c.__children or {}) do
+      walk(child)
+    end
   end
+  walk(root)
   return best
 end
 

@@ -96,8 +96,8 @@ installUiEngine(host, {
   // Test-Metrik: der Test prueft TEXTINHALTE, keine Textmasse.
   fontMetrics: (_family, size) => [size * 0.8, size * 0.2],
 })
-setupUi(host)
 createRootFrame(host, 1920, 1080)
+setupUi(host)
 
 console.log('\n== Die echte economy.lua baut das Panel ==')
 let err: string | null = null

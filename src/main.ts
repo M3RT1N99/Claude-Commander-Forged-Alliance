@@ -147,7 +147,7 @@ async function populateMapList(src: GameSource): Promise<void> {
   }
 }
 
-type Mode = 'start' | 'units' | 'maps' | 'sandbox'
+type Mode = 'start' | 'units' | 'maps' | 'sandbox' | 'frontend'
 
 function setMode(mode: Mode): void {
   for (const item of menuItems) item.classList.toggle('active', item.dataset.mode === mode)
@@ -155,6 +155,44 @@ function setMode(mode: Mode): void {
   unitPanel.hidden = mode !== 'units'
   mapPanel.hidden = mode !== 'maps'
   sandboxPanel.hidden = mode !== 'sandbox'
+}
+
+/**
+ * Das echte Hauptmenü des Spiels.
+ *
+ * Nichts davon ist nachgebaut: `menus/main.lua` baut sich selbst, sobald die
+ * Engine `uimain.StartFrontEndUI()` ruft (Cfile:1262476). Es läuft im Vollbild,
+ * weil das Original-Layout gegen den Root-Frame rechnet — also gegen die
+ * Fenstergröße.
+ *
+ * Die Frame-Pumpe ist hier Pflicht, nicht Kosmetik: die Einfahr-Animation, die
+ * Knopf-Freigabe (main.lua:621) und der Lauftext hängen alle an `OnFrame`.
+ */
+let frontEndFrame = 0
+async function startFrontEndUi(): Promise<void> {
+  if (!vfs) return
+  setMode('frontend')
+  try {
+    gameUi?.dispose()
+    gameUi = await GameUi.create(vfs, await loadGameFonts(), log, 'frontend')
+    gameUi.attachEvents()
+    setIngame(true)
+
+    let last = performance.now()
+    const tick = (now: number): void => {
+      const delta = Math.min((now - last) / 1000, 0.1)
+      last = now
+      gameUi?.render(delta)
+      frontEndFrame = requestAnimationFrame(tick)
+    }
+    cancelAnimationFrame(frontEndFrame)
+    frontEndFrame = requestAnimationFrame(tick)
+    log('Hauptmenü läuft (menus/main.lua)')
+  } catch (err) {
+    log(`FEHLER im Hauptmenü: ${err instanceof Error ? err.message : err}`)
+    setIngame(false)
+    setMode('start')
+  }
 }
 
 function renderUnitList(filter: string): void {
@@ -713,6 +751,17 @@ window.addEventListener('keydown', (e) => {
   // Übergangsweg: sobald das echte Hauptmenü läuft (lua/ui/menus/main.lua),
   // gehört ESC der Original-UI.
   if (e.code === 'Escape' && document.body.classList.contains('ingame')) {
+    // Im Hauptmenü gehört ESC eigentlich der Original-UI (uimain.SetEscapeHandler,
+    // main.lua:805) — bis der Tasten-Weg steht (M3), bringt es den Launcher
+    // zurück. Die Bild-Pumpe muss dabei aufhören, sonst rechnet das Menü im
+    // Hintergrund weiter.
+    if (frontEndFrame) {
+      cancelAnimationFrame(frontEndFrame)
+      frontEndFrame = 0
+      gameUi?.dispose()
+      gameUi = null
+      setMode('start')
+    }
     setIngame(false)
     log('Launcher (ESC) — die Sandbox läuft weiter')
   }
@@ -843,7 +892,14 @@ unitSelect.addEventListener('change', () => void loadUnit(unitSelect.value))
 teamColorInput.addEventListener('input', () => viewer.setTeamColor(currentTeamColor()))
 animSelect.addEventListener('change', () => void playSelectedAnimation())
 for (const item of menuItems) {
-  item.addEventListener('click', () => setMode(item.dataset.mode as Mode))
+  item.addEventListener('click', () => {
+    const mode = item.dataset.mode as Mode
+    if (mode === 'frontend') {
+      void startFrontEndUi()
+      return
+    }
+    setMode(mode)
+  })
 }
 // Seitenleiste einklappen (mehr Platz für die Sandbox). Der Viewer bemisst sich
 // am Fenster — nach dem Umklappen einmal `resize` feuern, damit er nachzieht.

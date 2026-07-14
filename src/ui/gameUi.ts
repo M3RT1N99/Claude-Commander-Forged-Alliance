@@ -3,6 +3,7 @@ import {
   installUiEngine,
   setupUi,
   setupGameUi,
+  startFrontEnd,
   createRootFrame,
   loadUiBlueprints,
 } from '../lua/uiEngine'
@@ -37,10 +38,17 @@ export class GameUi {
     private readonly renderer: MauiRenderer,
   ) {}
 
+  /**
+   * @param mode `'game'` baut die Spiel-UI (gamemain.lua:145-153), `'frontend'`
+   *   das Hauptmenü (uimain.StartFrontEndUI → menus/main.lua). Beide laufen in
+   *   DERSELBEN VM — die Engine hat genau eine UI-VM (USER_GetLuaState ist ein
+   *   Singleton, Cfile:1368027); was wechselt, ist nur der Zustand.
+   */
   static async create(
     vfs: GameVfs,
     fontFiles: Uint8Array[],
     log: (msg: string) => void,
+    mode: 'game' | 'frontend' = 'game',
   ): Promise<GameUi> {
     // Die Schriften des Spiels (<GameDir>/fonts). Sie liefern die Metrik, mit der
     // die Original-Lua ihr Text-Layout rechnet (text.lua:39/47) — und sie werden
@@ -104,17 +112,30 @@ export class GameUi {
       stringAdvance: (text, family, size) => fonts.advance(text, family, size),
       fontMetrics: (family, size) => fonts.metrics(family, size),
     })
-    setupUi(host)
+    // Root-Frame ZUERST, dann SetupUI — so macht es die Engine
+    // (CUIManager::SetNewLuaState: Frame Cfile:1273621-1273666, SetupUI erst
+    // Cfile:1273680). Andersherum zerreißt schon der Import von
+    // effecthelpers.lua, das auf Modulebene GetFrame(0) ruft (Zeile 28).
     createRootFrame(host, window.innerWidth, window.innerHeight)
 
-    // Die Blueprints gehören in BEIDE VMs: unitview.lua:180 liest
-    // __blueprints[...], construction.lua:1681 fragt EntityCategoryGetUnitList.
-    const bpCount = loadUiBlueprints(host, bpPaths)
-    log(`UI: ${bpCount} Blueprints geladen (echte Pipeline)`)
+    if (mode === 'frontend') {
+      // Das Hauptmenü baut sich selbst: startFrontEnd ruft nur den Einstieg der
+      // Engine (EngineStartSplashScreens → splash.lua → EngineStartFrontEndUI →
+      // uimain.StartFrontEndUI → menus/main.lua:CreateUI). SetupUI() läuft dabei
+      // aus __uiSetNewLuaState heraus — genau wie in CUIManager::SetNewLuaState.
+      startFrontEnd(host)
+    } else {
+      setupUi(host)
 
-    // Ab hier baut die Original-Lua die UI — in der Reihenfolge aus
-    // gamemain.lua:145-153. Denselben Weg nimmt die Verify-Suite.
-    setupGameUi(host, log)
+      // Die Blueprints gehören in BEIDE VMs: unitview.lua:180 liest
+      // __blueprints[...], construction.lua:1681 fragt EntityCategoryGetUnitList.
+      const bpCount = loadUiBlueprints(host, bpPaths)
+      log(`UI: ${bpCount} Blueprints geladen (echte Pipeline)`)
+
+      // Ab hier baut die Original-Lua die UI — in der Reihenfolge aus
+      // gamemain.lua:145-153. Denselben Weg nimmt die Verify-Suite.
+      setupGameUi(host, log)
+    }
 
     // Erst rendern, dann zählen — und zwar in dieser Reihenfolge: die Grids der
     // Original-UI legen ihre Kinder erst in OnFrame aus (grid.lua:40-48, die
@@ -183,9 +204,14 @@ export class GameUi {
     this.host.eval(id === null ? '__uiSetRollover(nil)' : `__uiSetRollover(${id})`)
   }
 
-  /** Pro Frame: den maui-Baum ins DOM schreiben. */
-  render(): void {
-    this.renderer.update()
+  /**
+   * Pro Bild: die Frame-Pumpe der Engine laufen lassen (OnFrame auf jedem
+   * Control mit SetNeedsFrameUpdate, Cfile:1118936) und den maui-Baum ins DOM
+   * schreiben. `delta` ist die echte Zeit seit dem letzten Bild — die UI-VM hat
+   * KEINEN Tick-Scheduler, ihre Threads laufen mit den Bildern (userinit.lua:13-21).
+   */
+  render(delta = 1 / 60): void {
+    this.renderer.update(delta)
   }
 
   /**

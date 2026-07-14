@@ -96,8 +96,8 @@ installUiEngine(uiHost, {
   stringAdvance: (t, f, s) => fonts.advance(t, f, s),
   fontMetrics: (f, s) => fonts.metrics(f, s),
 })
-setupUi(uiHost)
 createRootFrame(uiHost, 1920, 1080)
+setupUi(uiHost)
 loadUiBlueprints(uiHost, bpPaths)
 setupGameUi(uiHost, log)
 uiHost.setGlobal('__uiSimCommand', () => {})

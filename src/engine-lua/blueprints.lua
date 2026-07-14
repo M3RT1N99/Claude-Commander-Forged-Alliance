@@ -1,10 +1,5 @@
 __active_mods = {}
 __registered = { Unit={}, Mesh={}, Prop={}, Projectile={}, Emitter={}, TrailEmitter={}, Beam={} }
--- Sound{}: der EINZIGE DSL-Konstruktor in den .bp-Dateien (3445 Vorkommen,
--- z. B. uel0001_unit.bp:14 CaptureLoop = Sound{Bank=…, Cue=…}). Fehlt er,
--- bricht die Blueprint-Auswertung mittendrin ab und das bp wird unter dem
--- Schlüssel 'null' halbfertig registriert.
-function Sound(t) return t end
 local function collector(g) return function(bp) __registered[g][bp.BlueprintId or '?'] = bp end end
 -- Blueprint-Defaults: die Engine liest ein .bp NICHT in eine rohe Tabelle,
 -- sondern in ein getyptes Struct (Moho::RUnitBlueprint). Dessen Ctor
