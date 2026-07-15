@@ -117,7 +117,7 @@ const FRAGMENT = /* glsl */ `
  * kann colorMask nicht pro Material; der Alpha-Kanal des Framebuffers wird
  * bei uns nicht weiterverwendet, der Unterschied ist nicht sichtbar.
  */
-function applyBlend(mat: THREE.ShaderMaterial, blendMode: number): void {
+export function applyBlend(mat: THREE.ShaderMaterial, blendMode: number): void {
   mat.blending = THREE.CustomBlending
   mat.blendEquation = THREE.AddEquation
   switch (blendMode) {

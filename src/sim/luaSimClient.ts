@@ -149,7 +149,15 @@ export class LuaSimClient {
     // EIN Archiv-Zugriff pro zusammenhängendem Block statt zwei pro Datei
     // (vfs.readMany): `lua/**` liegt in lua.scd (7 MB) und mohodata.scd — am
     // Stück gelesen kostet das nichts.
-    const files = await vfs.readMany(vfs.find((p) => p.startsWith('lua/') && p.endsWith('.lua')))
+    // lua/** UND schook/**: schook.scd ist der PATCH-HOOK-LAYER von FA —
+    // doscript hängt zu jedem Modul die gleichnamige Datei aus /schook an
+    // (boot.lua runHooks; bin/SupComDataPath.lua: hook = {'/schook'}).
+    // Ohne diese Dateien fehlen der Sim u. a. SimUnitEnhancements/
+    // RemoveAllUnitEnhancements (schook/lua/SimSync.lua) — unit.lua:1287
+    // ruft das in JEDEM OnDestroy.
+    const files = await vfs.readMany(
+      vfs.find((p) => (p.startsWith('lua/') || p.startsWith('schook/')) && p.endsWith('.lua')),
+    )
 
     // Dazu ALLE PROJEKTILE (`projectiles/<id>/<id>_proj.bp` + `_script.lua`).
     //

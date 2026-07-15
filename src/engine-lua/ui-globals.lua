@@ -393,6 +393,23 @@ function GetIdleFactories()
   end)
 end
 
+-- "IsKeyDown(keyCode)" (mHelp Cfile:1141963; Rumpf 1141975-1142000): der
+-- String wird per SCR_GetEnum in ein EMauiKeyCode aufgeloest und
+-- MAUI_KeyIsDown gefragt. Die Original-UI fragt genau EINEN Namen: 'Shift'
+-- (commandmode.lua:82 — haelt der Spieler Shift, bleibt der Befehls-Modus
+-- nach dem ersten Befehl aktiv: die Bau-Warteschlange). Der Zustand kommt
+-- aus den Browser-Tastatur-Events (gameUi.attachEvents -> __uiSetKeyDown);
+-- headless ist keine Taste gedrueckt — auch das ist die Wahrheit.
+__uiKeysDown = {}
+
+function __uiSetKeyDown(name, down)
+  __uiKeysDown[name] = down == true
+end
+
+function IsKeyDown(keyCode)
+  return __uiKeysDown[keyCode] == true
+end
+
 -- "Validate a list of units" (mHelp, Cfile:1360576; Rumpf 1360596-1360650):
 -- filtert eine Unit-Liste auf lebende UserUnits (nicht IsDead, nicht
 -- DestroyQueued), Reihenfolge bleibt erhalten. Rueckgabe ist IMMER eine

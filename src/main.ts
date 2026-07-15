@@ -10,6 +10,7 @@ import {
 import { GameVfs } from './vfs/vfs'
 import { parseScm, type ScmModel } from './formats/scm'
 import { ParticleSystem } from './viewer/particles'
+import { TrailSystem, type TrailBpData } from './viewer/trails'
 import { EmitterRuntime, type EmitterBpData } from './effects/emitterRuntime'
 import { parseSca } from './formats/sca'
 import { parseScmap } from './formats/scmap'
@@ -472,6 +473,7 @@ function loadProjectileAssets(bpId: string): Promise<ProjectileAssets | null> {
 // die die Sim nicht mehr meldet, hören auf; ihre Partikel leben im
 // Vertex-Shader weiter, wie im Original.
 let particles: ParticleSystem | null = null
+let trails: TrailSystem | null = null
 const emitterRuntimes = new Map<number, EmitterRuntime>()
 const emitterBpData = new Map<string, EmitterBpData>()
 const emitterBpPending = new Set<string>()
@@ -485,12 +487,23 @@ async function prepareEmitterBatch(bpId: string): Promise<void> {
     | (EmitterBpData & { RepeatTexture?: string; TextureName?: string })
     | null
   if (!bp) return // kein Emitter-BP unter dieser Id — bleibt aus
-  // Polytrails (TrailEmitterBlueprint: RepeatTexture statt Texture) und Beams
-  // (BeamBlueprint: TextureName) sind EIGENE Render-Familien der Engine
-  // (TPolyTrail_*/TBeam_* in particle.fx — Ribbons, keine Partikel-Quads).
-  // Ihr Renderer folgt; bis dahin sind sie bewusst unsichtbar.
-  if (typeof bp.RepeatTexture === 'string' || typeof bp.TextureName === 'string') {
-    log(`Partikel: ${bpId.split('/').pop()} ist ein ${bp.TextureName ? 'Beam' : 'Polytrail'} — Renderer folgt`)
+  // Polytrails (TrailEmitterBlueprint: RepeatTexture statt Texture) sind eine
+  // EIGENE Render-Familie (TPolyTrail_* — Ribbons, src/viewer/trails.ts).
+  if (typeof bp.RepeatTexture === 'string') {
+    const t = bp as TrailBpData
+    const texP = (t.RepeatTexture ?? '').replace(/^\//, '').toLowerCase()
+    const rampP = (t.RampTexture ?? '').replace(/^\//, '').toLowerCase()
+    const [tex, ramp] = await Promise.all([loadFirstTexture([texP]), loadFirstTexture([rampP])])
+    if (!tex || !ramp) {
+      log(`Trail: Textur fehlt für ${bpId} (${texP || '—'} / ${rampP || '—'})`)
+      return
+    }
+    trails?.registerBp(bpId, t, tex, ramp)
+    return
+  }
+  // Beams (BeamBlueprint: TextureName) — Renderer folgt; bewusst unsichtbar.
+  if (typeof bp.TextureName === 'string') {
+    log(`Partikel: ${bpId.split('/').pop()} ist ein Beam — Renderer folgt`)
     return
   }
   const texPath = (bp.Texture ?? '').replace(/^\//, '').toLowerCase()
@@ -514,6 +527,11 @@ function updateEmitters(): void {
   const seen = new Set<number>()
   for (const e of luaSim.allEmitters()) {
     seen.add(e.id)
+    // Polytrails: pro Tick ein Segment-Punkt an der gemeldeten Position.
+    if (trails?.hasBp(e.bp)) {
+      trails.point(e.id, e.bp, e.x, e.y, e.z, tick, e.scale)
+      continue
+    }
     let rt = emitterRuntimes.get(e.id)
     if (!rt) {
       const bp = emitterBpData.get(e.bp)
@@ -714,6 +732,8 @@ async function startSandbox(mapFolder: string): Promise<void> {
     // die Helper-Meshes weg, also auch die Batches).
     particles?.dispose()
     particles = new ParticleSystem((mesh) => viewer.addHelper(mesh))
+    trails?.dispose()
+    trails = new TrailSystem((mesh) => viewer.addHelper(mesh))
     emitterRuntimes.clear()
     lastEmitterTick = -1
     // Die Naht, über die Befehle der UI in die Sim gehen. Ohne sie KNALLT jeder
@@ -915,6 +935,12 @@ async function selftestKampf(): Promise<void> {
     nPartikel > 0
       ? `SELFTEST-PARTIKEL: ${nPartikel} Partikel gespawnt — das Partikelsystem lebt`
       : 'SELFTEST-PARTIKEL: KEIN Partikel gespawnt — Emitter-Kette prüfen',
+  )
+  const nTrails = trails?.totalTrails() ?? 0
+  log(
+    nTrails > 0
+      ? `SELFTEST-TRAILS: ${nTrails} Poly-Trail(s) im Bild — die Spuren leben`
+      : 'SELFTEST-TRAILS: kein Poly-Trail entstanden (im Gauss-Duell erwartbar: gauss_cannon_polytrail)',
   )
 }
 
@@ -1462,9 +1488,11 @@ function luaSimUpdate(): void {
   // Die Emitter: pro neuem Sim-Tick spawnen, pro Frame die Partikel-Uhr
   // stellen (uTime = Sim-Tick + Frame-Anteil; die Kurven zählen in Ticks).
   updateEmitters()
-  if (particles && luaSim) {
+  if (luaSim) {
     const frac = Math.min((performance.now() - lastTickWall) / 100, 1)
-    particles.update(luaSim.gameTick + frac, viewer.worldCamera)
+    const uTime = luaSim.gameTick + frac
+    particles?.update(uTime, viewer.worldCamera)
+    trails?.update(uTime)
   }
 
   for (const u of luaUnits) {

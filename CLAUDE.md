@@ -187,32 +187,32 @@ Browser-Selbsttest `?sandbox=…&selftest=…`) — nie an „sieht fertig aus".
 
 ## Weiterführende Doku
 
-| Dokument | Inhalt |
-|---|---|
-| [docs/STATUS.md](docs/STATUS.md) | Stand + bekannte Löcher (zuerst lesen) |
-| [docs/PLAN-1ZU1.md](docs/PLAN-1ZU1.md) | Konsolidierter 1:1-Fahrplan (Meilensteine) |
-| [docs/PLAN-UI.md](docs/PLAN-UI.md) | Weg zur echten `lua/ui`, mit Decomp-Belegen |
-| [docs/MASTERPLAN.md](docs/MASTERPLAN.md) | Gesamtinventur Vollspiel, Phasen A–F |
-| [docs/FORMATS.md](docs/FORMATS.md) | Dateiformate (scd/scm/sca/scmap/dds), verifiziert |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Architektur (älter; bei Widerspruch gilt CLAUDE.md) |
-| [research/engine-api.md](docs/research/engine-api.md) | **Alle** Engine-Bindungen je VM (generiert — Checkliste) |
-| [research/verified-facts.md](docs/research/verified-facts.md) | Belegtes Detailwissen nach Themen |
-| [research/economy-binary.md](docs/research/economy-binary.md) | Zwei-Ratio-Ökonomie aus dem Binary |
-| [research/build-task-binary.md](docs/research/build-task-binary.md) | Bau-Task-Ablauf |
-| [research/command-dispatch-binary.md](docs/research/command-dispatch-binary.md) | Befehls-Dispatch (Command→Task) |
-| [research/damage-binary.md](docs/research/damage-binary.md) | Schadenssystem |
-| [research/movement-path.md](docs/research/movement-path.md) | Bewegung: Grid, HaStar, Navigator, Steering |
-| [research/weapons.md](docs/research/weapons.md) | Waffensystem |
-| [research/ui-complete.md](docs/research/ui-complete.md) | UI-System komplett |
-| [research/game-shell.md](docs/research/game-shell.md) | Front-End, Lobby, Session-Start |
-| [research/effects-audio.md](docs/research/effects-audio.md) | Effekt-Blueprints + XACT-Audio |
-| [research/sound-fmod.md](docs/research/sound-fmod.md) | Audio-Bänke |
-| [research/intel-vision.md](docs/research/intel-vision.md) | Intel/Recon/Sichtbarkeit |
-| [research/net-replay-save.md](docs/research/net-replay-save.md) | Lockstep, Replay, Save |
-| [research/render-details.md](docs/research/render-details.md) | Renderer, SCMAP-Reststruktur |
-| [research/lua-gameplay.md](docs/research/lua-gameplay.md) | FA-Lua-Dialekt-Nachweis (Lua 5.0.1) |
-| [research/engine-core.md](docs/research/engine-core.md) / [engine-architecture.md](docs/research/engine-architecture.md) | Engine-Kern aus der Decomp |
+| Dokument                                                                                                               | Inhalt                                                          |
+| ---------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| [docs/STATUS.md](docs/STATUS.md)                                                                                        | Stand + bekannte Löcher (zuerst lesen)                         |
+| [docs/PLAN-1ZU1.md](docs/PLAN-1ZU1.md)                                                                                  | Konsolidierter 1:1-Fahrplan (Meilensteine)                      |
+| [docs/PLAN-UI.md](docs/PLAN-UI.md)                                                                                      | Weg zur echten`lua/ui`, mit Decomp-Belegen                    |
+| [docs/MASTERPLAN.md](docs/MASTERPLAN.md)                                                                                | Gesamtinventur Vollspiel, Phasen A–F                           |
+| [docs/FORMATS.md](docs/FORMATS.md)                                                                                      | Dateiformate (scd/scm/sca/scmap/dds), verifiziert               |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)                                                                            | Architektur (älter; bei Widerspruch gilt CLAUDE.md)            |
+| [research/engine-api.md](docs/research/engine-api.md)                                                                   | **Alle** Engine-Bindungen je VM (generiert — Checkliste) |
+| [research/verified-facts.md](docs/research/verified-facts.md)                                                           | Belegtes Detailwissen nach Themen                               |
+| [research/economy-binary.md](docs/research/economy-binary.md)                                                           | Zwei-Ratio-Ökonomie aus dem Binary                             |
+| [research/build-task-binary.md](docs/research/build-task-binary.md)                                                     | Bau-Task-Ablauf                                                 |
+| [research/command-dispatch-binary.md](docs/research/command-dispatch-binary.md)                                         | Befehls-Dispatch (Command→Task)                                |
+| [research/damage-binary.md](docs/research/damage-binary.md)                                                             | Schadenssystem                                                  |
+| [research/movement-path.md](docs/research/movement-path.md)                                                             | Bewegung: Grid, HaStar, Navigator, Steering                     |
+| [research/weapons.md](docs/research/weapons.md)                                                                         | Waffensystem                                                    |
+| [research/ui-complete.md](docs/research/ui-complete.md)                                                                 | UI-System komplett                                              |
+| [research/game-shell.md](docs/research/game-shell.md)                                                                   | Front-End, Lobby, Session-Start                                 |
+| [research/effects-audio.md](docs/research/effects-audio.md)                                                             | Effekt-Blueprints + XACT-Audio                                  |
+| [research/sound-fmod.md](docs/research/sound-fmod.md)                                                                   | Audio-Bänke                                                    |
+| [research/intel-vision.md](docs/research/intel-vision.md)                                                               | Intel/Recon/Sichtbarkeit                                        |
+| [research/net-replay-save.md](docs/research/net-replay-save.md)                                                         | Lockstep, Replay, Save                                          |
+| [research/render-details.md](docs/research/render-details.md)                                                           | Renderer, SCMAP-Reststruktur                                    |
+| [research/lua-gameplay.md](docs/research/lua-gameplay.md)                                                               | FA-Lua-Dialekt-Nachweis (Lua 5.0.1)                             |
+| [research/engine-core.md](docs/research/engine-core.md) / [engine-architecture.md](docs/research/engine-architecture.md) | Engine-Kern aus der Decomp                                      |
 
 ## Sprache
 
-Antworten auf Deutsch. Code-Kommentare auf Englisch. Commits auf Deutsch.
+Antworten auf Deutsch. Code-Kommentare auf Englisch. Commits auf Englisch.

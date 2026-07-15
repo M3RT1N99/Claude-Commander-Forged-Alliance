@@ -32,7 +32,7 @@ local NOT_IMPLEMENTED = {
   'InternalCreateBorder', 'InternalCreateDiscoveryService', 'InternalCreateDragger', 'InternalCreateEdit', 'InternalCreateFrame', 'InternalCreateGroup',
   'InternalCreateHistogram', 'InternalCreateItemList', 'InternalCreateLobby', 'InternalCreateMapPreview', 'InternalCreateMesh', 'InternalCreateMovie',
   'InternalCreateScrollbar', 'InternalCreateText', 'InternalCreateWorldMesh', 'InternalSaveGame', 'IsAlly',
-  'IsEnemy', 'IsKeyDown', 'IsNeutral', 'IsObserver', 'IssueBlueprintCommand', 'IssueCommand',
+  'IsEnemy', 'IsNeutral', 'IsObserver', 'IssueBlueprintCommand', 'IssueCommand',
   'IssueDockCommand', 'IssueUnitCommand', 'KeycodeMSWToMaui', 'KeycodeMauiToMSW', 'LaunchGPGNet', 'LaunchSinglePlayerSession',
   'LoadSavedGame', 'OpenURL', 'ParseEntityCategory', 'PauseSound',
   'PauseVoice', 'PlaySound', 'PlayTutorialVO', 'PlayVoice', 'PostDragger', 'PrefetchSession',

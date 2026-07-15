@@ -496,6 +496,21 @@ export class GameUi {
       capture: true,
       passive: false,
     })
+    // Die Modifier-Tasten für IsKeyDown (mHelp Cfile:1141963) — die
+    // Original-UI fragt 'Shift' (commandmode.lua:82: Shift hält den
+    // Befehls-Modus nach dem ersten Befehl offen → Bau-Warteschlange).
+    // Namen wie im EMauiKeyCode-Enum, das SCR_GetEnum auflöst.
+    const meldeTaste = (e: KeyboardEvent, down: boolean): void => {
+      const name = e.key === 'Shift' ? 'Shift' : e.key === 'Control' ? 'Control' : e.key === 'Alt' ? 'Alt' : null
+      if (name) this.host.eval(`__uiSetKeyDown('${name}', ${down})`)
+    }
+    target.addEventListener('keydown', (e) => meldeTaste(e, true), true)
+    target.addEventListener('keyup', (e) => meldeTaste(e, false), true)
+    // Fenster verlässt den Fokus → keine Taste gilt mehr als gehalten (sonst
+    // klemmt Shift nach Alt+Tab dauerhaft).
+    target.addEventListener('blur', () => {
+      this.host.eval(`__uiSetKeyDown('Shift', false) __uiSetKeyDown('Control', false) __uiSetKeyDown('Alt', false)`)
+    })
   }
 
   dispose(): void {
