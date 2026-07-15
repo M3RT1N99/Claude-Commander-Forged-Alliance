@@ -503,6 +503,34 @@ const rollover = host.eval(`
 `)
 check(rollover === 'uel0001', 'GetRolloverInfo().blueprintId = uel0001')
 
+console.log('\n== score.lua: das Punkte-Panel steht, die Uhr läuft aus dem Sim-Tick ==')
+// CreateScoreUI lief im One-Shot-OnFrame (gamemain.OnFirstUpdate,
+// ui-boot.lua) beim ersten __mauiFrame nach dem Panel-Aufbau.
+check(
+  host.eval(`return import('/lua/ui/game/score.lua').controls.bg ~= nil`) === true,
+  'CreateScoreUI hat das Panel gebaut (controls.bg existiert)',
+)
+// Die Uhr: GetGameTime() ist ein FORMATIERTER String (Cfile:1266614/1266640,
+// %H:%M:%S); score._OnBeat schreibt ihn in controls.time (score.lua:230).
+// Der Antrieb ist der ECHTE Beat-Verteiler (UI_LuaBeat → gamemain.OnBeat,
+// Cfile:1262940) — Ökonomie-Spiegel vorher, sonst rechnet economy._BeatFunction
+// mit nichts.
+host.eval(`__uiSetEconomy(650, 4000, 650, 4000, 1, 10, 0, 0, 0, 0)`)
+host.eval(`__uiSetGameTick(725)`)
+host.eval(`__uiFactoryQueueBeat()`)
+host.eval(`import('/lua/ui/game/gamemain.lua').OnBeat()`)
+const scoreZeit = String(host.eval(`return import('/lua/ui/game/score.lua').controls.time:GetText()`))
+check(scoreZeit === '00:01:12', `die Uhr zeigt ${scoreZeit} (Tick 725 → 00:01:12)`)
+// FUND (dokumentiert): currentScores hat im Vanilla-3599-Datenbestand KEINEN
+// Produzenten — aibrain.lua:59/334 (CollectCurrentScores/SyncCurrentScores)
+// forkt niemand (weder Lua noch Engine; einziger Engine-Import von aibrain.lua
+// ist func_LoadAiBrain, Cfile:724474, nur für die Klasse). Die Punktespalte
+// bleibt 1:1 leer, bis eine Session sie liefert.
+check(
+  host.eval(`return import('/lua/ui/game/score.lua').currentScores == false`) === true,
+  'currentScores bleibt false — 1:1: Vanilla hat keinen Score-Sync-Produzenten',
+)
+
 host.close()
 for (const f of openFiles) await f.close()
 console.log(failures === 0 ? '\nUI-PANELS BESTANDEN' : `\n${failures} CHECK(S) FEHLGESCHLAGEN`)

@@ -137,6 +137,38 @@ in CLAUDE.md. Vor Arbeit an einem der Themen: den passenden Abschnitt lesen.*
 - **`SessionRequestPause`/`SessionResume` halten die SIM an**
   (CWldSession::RequestPause) — die UI läuft weiter (eigene VM, eigener
   Frame-Takt).
+- **Der Weltstart läuft über den WldUIProvider** (`InternalCreateWldUIProvider`
+  → `WLD_SetUIProvider`, Cfile:29710): `func_DoPreload` (Cfile:1320735) ruft
+  `StartGameUI` + `provider:StartLoadingDialog()`; `DoInitializing`
+  (Cfile:1321030-1321090) ruft `StartGameUI` ERNEUT (SetNewLuaState räumt die
+  Root-Frames — so verschwindet der Lade-Dialog), dann `StopLoadingDialog()`
+  (Fraktionsbild, 1,5-s-Fade, `ForkThread(InitialAnimations)` —
+  gamemain.lua:253-263 blendet Score/Economy/Avatare/Reiter ein) und ERST
+  DANACH `CreateGameInterface` (= gamemain.CreateUI). Fehler in OnFrame
+  werfen in der Engine nicht: RunScript fängt sie und loggt
+  (`gpg::Warnf 'Error running %s script in %s: %s'`, Cfile:590672).
+- **`currentScores` hat im Vanilla-3599-Datenbestand KEINEN Produzenten:**
+  `CollectCurrentScores`/`SyncCurrentScores` (aibrain.lua:59/334) forkt
+  niemand — weder eine Lua-Datei (grep über lua.scd/mohodata.scd: nur die
+  Definitionen) noch die Engine (einziger aibrain-Import ist
+  `func_LoadAiBrain`, Cfile:724474, nur für die Klasse; `GetArmyScore`
+  liefert 0 Werte, Cfile:1267147). Die Punktespalte des Score-Panels bleibt
+  1:1 LEER; lebende Zahlen wären eine Zusatzentscheidung (FAF-Verhalten).
+- **Die Fabrik-Queue-Anzeige treibt die Engine, nicht die Lua:**
+  `CUIManager::DoBeat` ruft pro Sim-Beat ERST
+  `UI_FactoryCommandQueueHandlerBeat` (Cfile:1256904-1256990: struktureller
+  Vergleich gegen `sCurrentBuildQueue`, bei Änderung
+  `gamemain.OnQueueChanged(neu)`; Fabrik weg → einmal `OnQueueChanged(nil)`),
+  DANN `UI_LuaBeat` (Cfile:1273907-1273911).
+  `SetCurrentFactoryForQueueDisplay` kopiert die Queue sofort (Cfile:1257076).
+- **Avatare/Idle:** Avatar = `bp.General.QuickSelectPriority > 0`
+  (UserUnit-Ctor Cfile:1362979; Struct-Default 0, Cfile:656079), aufsteigend
+  einsortiert (Cfile:1352238). `mIsEngineer` = ENGINEER **ohne**
+  COMMAND/SCOUT/UNTARGETABLE (Cfile:1362995-1363014). Die Listen liefern bei
+  leer **nil**, keine leere Tabelle (Cfile:1360921) — avatars.lua:666 prüft
+  `if avatars then`. Die UEF-ACU trägt PODSTAGINGPLATFORM
+  (uel0001_unit.bp:125) — orders.lua:923-932 läuft bei jeder ACU-Auswahl und
+  braucht `GetAssistingUnitsList` (Cfile:1360671).
 
 ## Lua-Host
 

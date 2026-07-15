@@ -1538,9 +1538,10 @@ function GetVersion()
   return __engineVersion or 'unbekannt'
 end
 function DebugFacilitiesEnabled() return false end
-function SessionIsReplay() return false end
-function SessionIsMultiplayer() return false end
-function SessionIsActive() return __uiSessionActive == true end
+-- SessionIsReplay/SessionIsMultiplayer/SessionIsActive sind WEITER OBEN
+-- definiert (bei den Session-Globals). Hier standen stille Zweitfassungen,
+-- die die echten ueberschatteten — SessionIsMultiplayer war dadurch immer
+-- false, egal wie viele Befehlsquellen die Session hat.
 -- === Die SPIELZEIT — sie kommt aus der SIM, nicht aus der UI-Uhr ===
 --
 -- Die UI hat ihre eigene Uhr (CurrentTime, Sekunden seit Start, 60 Hz Frames);
