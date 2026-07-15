@@ -246,7 +246,17 @@ export class GameUi {
       ${eco.massIncome}, ${eco.energyIncome},
       ${eco.massRequested}, ${eco.energyRequested},
       ${eco.massExpense}, ${eco.energyExpense})`)
-    lines.push('Economy._BeatFunction()')
+    // Der BEAT-VERTEILER der Original-UI — nicht ein einzelnes Panel.
+    //
+    // Die Engine ruft pro Sim-Beat GENAU EINE Lua-Funktion:
+    // Moho::UI_LuaBeat() → gamemain.OnBeat() (Cfile:1262940-1262967). Dort
+    // laufen ALLE per AddBeatFunction registrierten Update-Funktionen:
+    // economy._BeatFunction, avatars.AvatarUpdate (das ACU-Icon rechts!),
+    // commandmode.OnCommandModeBeat, connectivity.PingUpdate, …
+    //
+    // Vorher riefen wir Economy._BeatFunction() DIREKT — damit lief genau ein
+    // Panel, und alle anderen registrierten Beat-Funktionen blieben tot.
+    lines.push(`import('/lua/ui/game/gamemain.lua').OnBeat()`)
     this.host.eval(lines.join('\n'))
   }
 

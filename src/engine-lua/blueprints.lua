@@ -168,16 +168,24 @@ __projDefaults = {
 -- stirbt in schook/lua/sim/weapon.lua:17). Genau so gefunden — im Durchlauf.
 --
 -- Die Feldliste ist die der Engine, nicht eine geratene Auswahl.
+-- Die NICHT-NULL-Defaults kommen aus dem Struct-Ctor. Der ist im Retail-Binary
+-- nicht als eigene Funktion dekompilierbar; die beste Quelle ist faf-re
+-- (RUnitBlueprint.cpp:1015-1086, dokumentiert in weapons.md:1001):
+--   FiringTolerance 0.01, MaxHeightDiff inf, RateOfFire 1.0, TrackingRadius 1.0,
+--   HeadingArcRange 180, IgnoresAlly 1, LeadTarget 1, TargetCheckInterval 3.0
+-- Sie sind nicht kosmetisch: IgnoresAlly=1 laesst Projektile durch Verbuendete
+-- fliegen (sonst stirbt der Schuss einer bauenden ACU in der eigenen
+-- Baustelle), und TargetCheckInterval=0 hiesse „jeden Tick Ziele suchen".
 __weaponDefaults = {
-  -- float (Cfile:658290-658520)
+  -- float (Feldliste: Cfile:658290-658520; Nicht-Null-Werte: weapons.md:1001)
   BombDropThreshold = 0.0, Damage = 0.0, DamageRadius = 0.0, EffectiveRadius = 0.0,
-  FiringRandomness = 0.0, FiringTolerance = 0.0, HeadingArcCenter = 0.0,
-  HeadingArcRange = 0.0, MaxHeightDiff = 0.0, MaxRadius = 0.0,
+  FiringRandomness = 0.0, FiringTolerance = 0.01, HeadingArcCenter = 0.0,
+  HeadingArcRange = 180.0, MaxHeightDiff = math.huge, MaxRadius = 0.0,
   MaximumBeamLength = 0.0, MinRadius = 0.0, MuzzleVelocity = 0.0,
   MuzzleVelocityRandom = 0.0, MuzzleVelocityReduceDistance = 0.0,
   ProjectileLifetime = 0.0, ProjectileLifetimeUsesMultiplier = 0.0,
-  RateOfFire = 0.0, RequiresEnergy = 0.0, RequiresMass = 0.0,
-  SlavedToBodyArcRange = 0.0, TargetCheckInterval = 0.0, TrackingRadius = 0.0,
+  RateOfFire = 1.0, RequiresEnergy = 0.0, RequiresMass = 0.0,
+  SlavedToBodyArcRange = 0.0, TargetCheckInterval = 3.0, TrackingRadius = 1.0,
   -- int
   AttackGroundTries = 0, MaxProjectileStorage = 0,
   -- bool
@@ -186,7 +194,7 @@ __weaponDefaults = {
   AutoInitiateAttackCommand = false, BelowWaterFireOnly = false,
   BelowWaterTargetsOnly = false, CannotAttackGround = false,
   CountedProjectile = false, DummyWeapon = false, IgnoreIfDisabled = false,
-  IgnoresAlly = false, LeadTarget = false, ManualFire = false, NeedPrep = false,
+  IgnoresAlly = true, LeadTarget = true, ManualFire = false, NeedPrep = false,
   NeedToComputeBombDrop = false, NukeWeapon = false, OverChargeWeapon = false,
   PrefersPrimaryWeaponTarget = false, ReTargetOnMiss = false, SlavedToBody = false,
   StopOnPrimaryWeaponBusy = false, Turreted = false,

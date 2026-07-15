@@ -115,10 +115,15 @@ export class Hud {
   // -------------------------------------------------------------------------
   // LEBENSBALKEN + BAU-FORTSCHRITT
   //
-  // Auch das zeichnet im Original die ENGINE über der Welt (nicht die Lua): ein
-  // Balken über jeder Einheit, so breit wie sie ist. Bei einer BAUSTELLE zeigt
-  // er den Baufortschritt — deshalb sieht man im Original, wie ein Gebäude
-  // wächst, statt dass es fertig dasteht.
+  // Auch das zeichnet im Original die ENGINE über der Welt (nicht die Lua).
+  // Belegt aus der Decomp (Cfile:1284551-1284575): Balken erscheinen nur für
+  // AUSGEWÄHLTE Einheiten und die Einheit unter dem Cursor (dazu die ConVar
+  // ui_ForceLifbarsOnEnemy), unterhalb der Zoom-Grenze ui_LifebarLOD (200,
+  // Cfile:421758), nie bei Display.HideLifebars und nie während eines Upgrades.
+  //
+  // Zwei getrennte Balken, wie im Original zu sehen:
+  //   oben   LEBEN         (der echte Gesundheitsstand — er wächst beim Bau mit)
+  //   unten  BAU-FORTSCHRITT in GELB (nur solange FractionComplete < 1)
   // -------------------------------------------------------------------------
   private readonly barPool: HTMLDivElement[] = []
 
@@ -131,7 +136,10 @@ export class Hud {
     while (this.barPool.length < units.length) {
       const bar = document.createElement('div')
       bar.className = 'life-bar'
-      bar.innerHTML = '<div class="life-fill"></div>'
+      // Zwei Zeilen: Leben oben, Bau-Fortschritt (gelb) darunter.
+      bar.innerHTML =
+        '<div class="bar-row"><div class="life-fill"></div></div>' +
+        '<div class="bar-row build-row"><div class="build-fill"></div></div>'
       layer.appendChild(bar)
       this.barPool.push(bar)
     }
@@ -151,14 +159,11 @@ export class Hud {
         continue
       }
       const bauend = u.fraction < 1
-      const anteil = bauend
-        ? u.fraction
-        : u.maxHealth > 0
-          ? Math.max(0, Math.min(1, u.health / u.maxHealth))
-          : 0
-      // Volle Einheiten ohne Schaden zeigen keinen Balken (wie im Original) —
-      // eine Baustelle immer.
-      if (!bauend && anteil >= 0.999 && !u.selected) {
+      const leben =
+        u.maxHealth > 0 ? Math.max(0, Math.min(1, u.health / u.maxHealth)) : 0
+      // Volle, nicht ausgewählte Einheiten zeigen keinen Balken (Decomp:
+      // Auswahl/Hover-Bedingung, Cfile:1284556-1284575) — eine Baustelle immer.
+      if (!bauend && leben >= 0.999 && !u.selected) {
         bar.style.display = 'none'
         continue
       }
@@ -171,16 +176,24 @@ export class Hud {
       bar.style.width = `${breite}px`
       bar.style.transform =
         `translate(${s.x - rootRect.left}px, ${s.y - rootRect.top}px) translate(-50%, -100%)`
-      const fill = bar.firstElementChild as HTMLDivElement
-      fill.style.width = `${anteil * 100}%`
-      // Bau = blau (der Bau-Fortschritt), sonst grün→rot nach Gesundheit.
-      fill.style.background = bauend
-        ? '#3fa9f5'
-        : anteil > 0.6
-          ? '#3ad353'
-          : anteil > 0.3
-            ? '#e8d33a'
-            : '#e84040'
+
+      // Oben: das LEBEN — auch während des Baus (die HP wachsen mit dem
+      // Fortschritt, unit.lua schreibt sie hoch). Ampel-Stufen; die exakte
+      // Farbtreppe der Engine steckt in einer nicht dekompilierbaren
+      // Zeichenfunktion — Grün/Gelb/Rot ist die beobachtete Reihenfolge.
+      const lifeFill = bar.querySelector<HTMLDivElement>('.life-fill')!
+      lifeFill.style.width = `${leben * 100}%`
+      lifeFill.style.background =
+        leben > 0.6 ? '#3ad353' : leben > 0.3 ? '#e8d33a' : '#e84040'
+
+      // Unten: der BAU-FORTSCHRITT in GELB — nur solange gebaut wird. Genau so
+      // zeigt es das Original: beide Balken übereinander, der Bau-Balken darunter.
+      const buildRow = bar.querySelector<HTMLDivElement>('.build-row')!
+      buildRow.style.display = bauend ? 'block' : 'none'
+      if (bauend) {
+        const buildFill = bar.querySelector<HTMLDivElement>('.build-fill')!
+        buildFill.style.width = `${u.fraction * 100}%`
+      }
     }
   }
 

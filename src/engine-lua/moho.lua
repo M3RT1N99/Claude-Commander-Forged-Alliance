@@ -182,13 +182,13 @@ local entity = withNoops(ENTITY_NAMES, {
         q = __orientFromDir({ (dx or 0) / len, (dy or 0) / len, (dz or 0) / len })
       end
     end
-    return __projCreate(self, bpId, p, q, nil, 0, 0, 'Normal', nil)
+    return __projCreate(self, bpId, p, q, nil, 0, 0, 'Normal', nil, true)
   end,
 
   -- Entity:CreateProjectileAtBone(projectile_blueprint, bone) (Cfile:930926).
   CreateProjectileAtBone = function(self, bpId, bone)
     local p, q = __boneWorld(self, bone)
-    return __projCreate(self, bpId, p, q, nil, 0, 0, 'Normal', nil)
+    return __projCreate(self, bpId, p, q, nil, 0, 0, 'Normal', nil, true)
   end,
 
   -- Transform. __pos is {x, y, z}, __orient a quaternion.
@@ -528,23 +528,74 @@ local weapon = withNoops(WEAPON_NAMES, {
     -- Unsere Tuerme drehen sich noch nicht (die AimManipulatoren sind Attrappen),
     -- deshalb zielen wir IMMER ueber die Zielloesung — sonst schoesse jede Waffe
     -- stur nach vorn.
-    local tp = self:GetCurrentTargetPos()
-    if tp then
-      local dx, dy, dz = tp[1] - pos[1], tp[2] - pos[2], tp[3] - pos[3]
-      local len = math.sqrt(dx * dx + dy * dy + dz * dz)
-      if len > 0 then
-        quat = __orientFromDir({ dx / len, dy / len, dz / len })
-      end
+    --
+    -- Gezielt wird auf den KOERPER (CAiTarget::GetTargetPosGun — ein Zielpunkt
+    -- AUF der Einheit), nicht auf die Fuesse: `__pos` ist die Bodenposition, und
+    -- ein Schuss auf die Fuesse faellt mit der Gravitation VOR dem Ziel in den
+    -- Boden — Wirkungstreffer gab es dann nur per Zufall.
+    local tp = nil
+    if self.__target then
+      tp = __unitCollision(self.__target)
+    elseif self.__targetGround then
+      tp = self.__targetGround
     end
 
     local speed = nil
     if bp.MuzzleVelocity and bp.MuzzleVelocity ~= 0 then speed = bp.MuzzleVelocity end
 
+    if tp then
+      local dx, dy, dz = tp[1] - pos[1], tp[2] - pos[2], tp[3] - pos[3]
+      local aimed = false
+
+      -- BALLISTISCHE FEUERLOESUNG (Moho::AI_CalculateFiringPitch,
+      -- Cfile:790870-790905). Ein Projektil mit Gravitation faellt auf dem Weg —
+      -- die Engine hebt den Abschusswinkel genau so an, dass der Bogen auf dem
+      -- Ziel landet (dafuer steht `BallisticArc = 'RULEUBA_LowArc'` im
+      -- Blueprint). Woertlich aus der Decomp:
+      --   dxz  = horizontale Distanz
+      --   A    = -(dxz^2 * gravity.y) / (2 * v^2)        (gravity.y = -4.9)
+      --   disc = dxz^2 - 4 * A * (dy + A)
+      --   lowArc  = atan((dxz - sqrt(disc)) / (2A))
+      --   highArc = atan((dxz + sqrt(disc)) / (2A))      (Artillerie)
+      -- Ohne die Loesung fiel jeder flache Schuss VOR dem Ziel in den Boden.
+      local projPhys = __registered.Projectile[string.lower(tostring(projId))]
+      projPhys = projPhys and projPhys.Physics
+      local useGravity = projPhys and projPhys.UseGravity ~= false
+      local v0 = speed or (projPhys and projPhys.InitialSpeed) or 0
+
+      if useGravity and v0 > 0 and bp.BallisticArc ~= 'RULEUBA_None' then
+        local dxz = math.sqrt(dx * dx + dz * dz)
+        if dxz > 0.001 then
+          local A = (__simGravity * dxz * dxz) / (2 * v0 * v0)
+          local disc = dxz * dxz - 4 * A * (dy + A)
+          if disc >= 0 and A > 0 then
+            local sq = math.sqrt(disc)
+            local t = (bp.BallisticArc == 'RULEUBA_HighArc') and (dxz + sq) or (dxz - sq)
+            local pitch = math.atan(t / (2 * A))
+            local horiz = math.cos(pitch)
+            quat = __orientFromDir({
+              (dx / dxz) * horiz, math.sin(pitch), (dz / dxz) * horiz,
+            })
+            aimed = true
+          end
+        end
+      end
+
+      -- Ausser ballistischer Reichweite oder ohne Gravitation: direkt zielen.
+      if not aimed then
+        local len = math.sqrt(dx * dx + dy * dy + dz * dz)
+        if len > 0 then
+          quat = __orientFromDir({ dx / len, dy / len, dz / len })
+        end
+      end
+    end
+
     local damage = self.__damage or bp.Damage or 0
     local radius = self.__damageRadius or bp.DamageRadius or 0
     local proj = __projCreate(
       u, projId, pos, quat, speed, damage, radius,
-      self.__damageType or bp.DamageType or 'Normal', self.__target
+      self.__damageType or bp.DamageType or 'Normal', self.__target,
+      bp.IgnoresAlly ~= false
     )
 
     -- Lebensdauer (Cfile:985760ff).
@@ -1055,7 +1106,8 @@ local projectile = withNoops(PROJECTILE_NAMES, {
   SetScaleVelocity = function(self, s) self.__scaleVel = s; return self end,
   CreateChildProjectile = function(self, bpId)
     return __projCreate(self.__launcher, bpId, self.__pos, self.__orient, nil,
-      self.__damage or 0, self.__damageRadius or 0, self.__damageType or 'Normal', self.__target)
+      self.__damage or 0, self.__damageRadius or 0, self.__damageType or 'Normal', self.__target,
+      self.__ignoresAlly)
   end,
 }, entity)
 

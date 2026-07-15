@@ -71,7 +71,11 @@ end
 --- launcher: die Entity, die schiesst (Unit oder Waffe -> deren Unit)
 --- pos/quat: Startpose in der WELT
 --- speed:    Betrag der Anfangsgeschwindigkeit (nil = InitialSpeed aus dem bp)
-function __projCreate(launcher, bpId, pos, quat, speed, damage, damageRadius, damageType, target)
+--- ignoresAlly: das Projektil fliegt durch VERBUENDETE hindurch. PROJ_Create
+---   bekommt es als Parameter (Cfile:946751); Entity:CreateProjectile uebergibt
+---   fest 1 (Cfile:930895), die Waffe ihr Blueprint-Feld IgnoresAlly (Default 1,
+---   weapons.md:599). nil heisst hier: ignorieren (der Engine-Default).
+function __projCreate(launcher, bpId, pos, quat, speed, damage, damageRadius, damageType, target, ignoresAlly)
   local key = string.lower(tostring(bpId))
   local bp = __registered.Projectile[key]
   if not bp then
@@ -109,6 +113,10 @@ function __projCreate(launcher, bpId, pos, quat, speed, damage, damageRadius, da
   p.__collideSurface = phys.CollideSurface ~= false
   p.__collideEntity = phys.CollideEntity ~= false
   p.__destroyOnWater = phys.DestroyOnWater == true
+  -- Verbuendete ueberfliegen (PROJ_Create-Parameter, Default 1). Ohne diesen
+  -- Filter starb jeder Schuss einer bauenden ACU in ihrer EIGENEN Baustelle,
+  -- die direkt neben ihr steht — der Feind blieb unversehrt.
+  p.__ignoresAlly = ignoresAlly ~= false
   p.__target = target
   p.__damage = damage or 0
   p.__damageRadius = damageRadius or 0
@@ -177,11 +185,21 @@ end
 -- Kollisionsvolumen (Box/Sphere) nimmt, ist nicht belegt
 -- (docs/research/combat-projectiles.md §9).
 -- ---------------------------------------------------------------------
-local function unitRadius(u)
+--- Die Kollisionskugel einer Unit: Mittelpunkt = KOERPERMITTE (Fuesse + SizeY/2),
+--- Radius aus dem Kollisionsquader SizeX/Y/Z (Weltmeter, uel0001: 1/2/0.7).
+---
+--- Der Mittelpunkt ist nicht Kosmetik: `u.__pos` sind die FUESSE der Einheit.
+--- Ein Schuss, der auf Koerperhoehe vorbeifliegt, war von den Fuessen weiter
+--- entfernt als der Radius — Punkt-Blank-Schuesse gingen "durch" die Einheit.
+--- (Die Engine sweept gegen das Kollisionsvolumen, CheckCollision @0x69D1D0 ist
+--- nicht dekompilierbar — die Kugel um die Koerpermitte ist die benannte
+--- Naeherung, combat-projectiles.md §9.)
+function __unitCollision(u)
   local bp = u.__bp
-  local sx = (bp.SizeX or 1) * 0.5
-  local sz = (bp.SizeZ or 1) * 0.5
-  return math.max(sx, sz, 0.5)
+  local sy = bp.SizeY or 1
+  local r = math.max(bp.SizeX or 1, bp.SizeZ or 1, sy) * 0.5
+  local p = u.__pos
+  return { p[1], p[2] + sy * 0.5, p[3] }, math.max(r, 0.5)
 end
 
 --- Quadrierter Abstand Punkt <-> Strecke.
@@ -205,10 +223,20 @@ end
 local function checkCollision(p, from, to)
   -- 1. Entities. Die Engine fragt die Lua VOR der Kollision: OnCollisionCheck.
   if p.__collideEntity then
+    -- VERBUENDETE ueberfliegen: PROJ_Create bekommt `ignoresAlly` (Default 1,
+    -- Cfile:930895; Waffen-Blueprint IgnoresAlly, weapons.md:599). Nur wenn die
+    -- DamageData ausdruecklich CollideFriendly sagt (weapon.lua:294, Default
+    -- false; die Engine fragt Projectile.lua:407 GetCollideFriendly), kollidiert
+    -- das Projektil doch mit eigenen Einheiten.
+    local hitsAllies = not p.__ignoresAlly
+      or (p.DamageData and p.DamageData.CollideFriendly == true)
+    local army = p.__army
+
     for id, u in pairs(__units) do
-      if not u.__destroyed and u ~= p.__launcher then
-        local r = unitRadius(u)
-        if distSqSegment(from, to, u.__pos) <= r * r then
+      if not u.__destroyed and u ~= p.__launcher
+        and (hitsAllies or not IsAlly(u.__army, army)) then
+        local center, r = __unitCollision(u)
+        if distSqSegment(from, to, center) <= r * r then
           -- Der Lua-Filter (func_OnCollisionCheck, Cfile:945766): liefert er
           -- false, fliegt das Projektil weiter (Freund-Beschuss, Flares, …).
           local pass = true

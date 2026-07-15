@@ -124,7 +124,9 @@ const spiegle = (): void => {
       `${e.incomeMass}, ${e.incomeEnergy}, ${e.expenseMass}, ${e.expenseEnergy}, ` +
       `${e.expenseMass}, ${e.expenseEnergy})`,
   )
-  ui.eval('Economy._BeatFunction()')
+  // Der Beat-VERTEILER (UI_LuaBeat -> gamemain.OnBeat, Cfile:1262940):
+  // ALLE registrierten Beat-Funktionen laufen (economy, avatars, commandmode ...).
+  ui.eval(`import('/lua/ui/game/gamemain.lua').OnBeat()`)
 }
 
 /** Ein Beat der Sim + ein Bild der UI — der Takt des laufenden Spiels. */
@@ -240,15 +242,23 @@ if (!msg?.startsWith('Bau')) {
 }
 
 tue('Bauen bis fertig (Ökonomie zahlt, Bauer fährt hin)')
+// Geprüft wird das Gebäude, das WIRKLICH geklickt wurde — nicht ein fest
+// verdrahtetes. (Der Durchlauf nimmt das erste klickbare Gebäude-Icon.)
+const gebaut = (icon.split('|')[0] || 'ueb0101').toLowerCase()
 let fabrik = 0
 for (let i = 0; i < 400 && fabrik === 0; i++) {
   takt(1)
   const alle = sim.pull<{ id: number; name: string; fraction: number }[]>('__readAllUnitsJson()')
-  const f = alle.find((u) => u.name === 'ueb0101' && u.fraction >= 1)
+  const f = alle.find((u) => u.name === gebaut && u.fraction >= 1)
   if (f) fabrik = f.id
 }
-console.log(fabrik ? `   Fabrik ${fabrik} fertig` : '   Fabrik NICHT fertig geworden')
-if (!fabrik) melde('SIM', 'Die Fabrik wurde nie fertig (Bau-Kette hängt)')
+console.log(fabrik ? `   ${gebaut} ${fabrik} fertig` : `   ${gebaut} NICHT fertig geworden (teuer + wenig Einkommen ist normal — nur melden, wenn der Fortschritt STEHT)`)
+if (!fabrik) {
+  const f2 = sim.pull<{ id: number; name: string; fraction: number }[]>('__readAllUnitsJson()')
+    .find((u) => u.name === gebaut)
+  if (!f2 || f2.fraction <= 0) melde('SIM', 'Die Baustelle wächst nicht (Bau-Kette hängt)')
+  else console.log(`   Fortschritt: ${(f2.fraction * 100).toFixed(0)}% — Kette läuft`)
+}
 
 if (fabrik) {
   tue('Fabrik auswählen + Sammelpunkt setzen')

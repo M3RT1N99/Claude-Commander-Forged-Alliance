@@ -77,13 +77,24 @@ function __addBone(name, parent, px, py, pz, qw, qx, qy, qz)
   }
 end
 
---- Die Ruhepose in den MODELLRAUM aufloesen (Kette bis zur Wurzel).
+--- Die Ruhepose in den WELTRAUM aufloesen (Kette bis zur Wurzel).
 --- Elternindizes sind 0-basiert (-1 = Wurzel), die Lua-Liste ist 1-basiert.
+---
+--- Die SCM ist in MODELL-Einheiten gebaut; in die Welt kommt sie ueber
+--- `Display.UniformScale` des Blueprints (uel0001: 0.105, uel0201: 0.07 — der
+--- Renderer skaliert sein Mesh mit genau diesem Wert). Ohne die Skalierung sass
+--- die ACU-Muendung 10 Weltmeter VOR und 12 UEBER der Einheit — jeder Schuss
+--- entstand irgendwo im Nichts und fiel per Gravitation vor dem Ziel in den
+--- Boden. Der Blueprint ist beim Knochen-Setzen bereits registriert
+--- (giveUnit/prepare laden erst das bp, dann das Skelett).
 function __finishBones()
   if not pending then return end
   local bones = pending.bones
   local names, xform, index = {}, {}, {}
   local resolve
+
+  local bp = __registered and __registered.Unit and __registered.Unit[pending.id]
+  local scale = (bp and bp.Display and bp.Display.UniformScale) or 1
 
   resolve = function(i)
     if xform[i] then return xform[i] end
@@ -106,6 +117,15 @@ function __finishBones()
     names[i] = b.name
     index[string.lower(b.name)] = i
     resolve(i)
+  end
+  -- NACH dem Aufloesen skalieren (die relative Kette bleibt dabei konsistent,
+  -- Rotationen sind skalierungsfrei).
+  if scale ~= 1 then
+    for _, x in pairs(xform) do
+      x.pos[1] = x.pos[1] * scale
+      x.pos[2] = x.pos[2] * scale
+      x.pos[3] = x.pos[3] * scale
+    end
   end
   __unitBones[pending.id] = { names = names, xform = xform, index = index }
   pending = nil
