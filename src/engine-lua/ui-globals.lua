@@ -84,6 +84,29 @@ function __uiCameraMove(name, pos, hpr, zoom, seconds)
   __uiCameraBridge('move', name, pos, hpr, zoom, seconds)
 end
 
+--- "UIZoomTo(units,[seconds])" (Cfile:1292715): die Hauptkamera faehrt auf die
+--- Mitte der gegebenen Einheiten. gamemain.OnFirstUpdate zoomt so beim Start
+--- auf die ACU; die Avatar-Icons springen damit zu ihrer Einheit.
+function UIZoomTo(units, seconds)
+  local n, cx, cy, cz = 0, 0, 0, 0
+  for _, u in ipairs(units or {}) do
+    local p = u.GetPosition and u:GetPosition()
+    if p then
+      cx, cy, cz = cx + (p[1] or 0), cy + (p[2] or 0), cz + (p[3] or 0)
+      n = n + 1
+    end
+  end
+  if n == 0 then return end
+  __uiCameraMove('WorldCamera', { cx / n, cy / n, cz / n }, nil, nil, seconds)
+end
+
+--- avatars.lua:42 springt damit per Klick zum naechsten leerlaufenden Ingenieur.
+function UISelectAndZoomTo(unit, seconds)
+  if not unit then return end
+  SelectUnits({ unit })
+  UIZoomTo({ unit }, seconds)
+end
+
 -- GetCursor() (Cfile:1274426) — das aktuelle Cursor-Objekt. uimain.lua:23 setzt
 -- es bei JEDEM Zustandswechsel neu; splash.lua:27/52 blendet es waehrend der
 -- Filme aus. Vorher warf es aus der Fehl-Liste und riss den Splash mit.
@@ -238,6 +261,12 @@ function UserUnitMeta:IsInCategory(cat)
 end
 
 function UserUnitMeta:GetFireState() return self.fireState or 0 end
+
+-- SetCustomName: gamemain.OnFirstUpdate tauft die ACU auf den Spielernamen
+-- (gamemain.lua:84); unitview.lua:205 zeigt ihn im Rollover. Der Name lebt in
+-- der UI-Kopie — die Original-Engine synct ihn zusaetzlich in die Sim (spaeter,
+-- mit dem UnitData-Sync).
+function UserUnitMeta:SetCustomName(name) self.customName = name end
 -- Die Bau-Warteschlange einer Fabrik: { { id = <blueprintId>, count = <n> }, ... }
 -- (construction.lua:1620). Sie wird aus der Sim gespiegelt; leer heisst leer.
 function UserUnitMeta:GetBuildQueue() return self.buildQueue or {} end
@@ -856,6 +885,21 @@ __uiAudioSink = false
 __uiSoundsRequested = {}
 local warnedNoAudio = false
 
+-- EnableWorldSounds()/DisableWorldSounds() (Cfile:1348520-1348545, 0 Argumente):
+-- der Schalter fuer die WELT-Gerausche (Waffen, Einheiten — nicht die UI-Cues).
+-- gamemain.OnFirstUpdate() schaltet sie beim Spielstart an (gamemain.lua:78),
+-- splash/NIS schalten sie aus. Echter Zustand; die Audio-Ausgabe liest ihn,
+-- sobald es sie gibt.
+__uiWorldSounds = false
+
+function EnableWorldSounds()
+  __uiWorldSounds = true
+end
+
+function DisableWorldSounds()
+  __uiWorldSounds = false
+end
+
 local function newHandle(params, kind)
   local h = {
     Bank = params.Bank,
@@ -1194,10 +1238,19 @@ function __uiSetRollover(id)
     __uiRollover = false
     return
   end
+  -- Die Oeko-Felder kommen aus dem BLUEPRINT — derselben Quelle, aus der die
+  -- Sim ihre Produktion/Unterhalt registriert (units.lua __econRegister). Eine
+  -- Baustelle produziert nichts (Baustellen sind fuer die Oekonomie unsichtbar).
+  local bp = __blueprints[u.blueprintId]
+  local eco = (bp and bp.Economy) or {}
+  local fertig = (u.workProgress or 1) >= 1
   __uiRollover = {
     userUnit = u,
     blueprintId = u.blueprintId,
-    armyIndex = u.army,
+    -- 0-BASIERT: unitview.lua:89-90 rechnet `info.armyIndex + 1` fuer
+    -- GetFocusArmy()/armiesTable — genau wie die Engine ihre Armee-Indizes
+    -- 0-basiert an die Rollover-Info gibt.
+    armyIndex = (u.army or 1) - 1,
     health = u.health,
     maxHealth = u.maxHealth,
     shieldRatio = u.shieldRatio or 0,
@@ -1205,6 +1258,10 @@ function __uiSetRollover(id)
     workProgress = u.workProgress or 0,
     kills = 0,
     customName = u.customName,
+    massProduced = fertig and (eco.ProductionPerSecondMass or 0) or 0,
+    massRequested = fertig and (eco.MaintenanceConsumptionPerSecondMass or 0) or 0,
+    energyProduced = fertig and (eco.ProductionPerSecondEnergy or 0) or 0,
+    energyRequested = fertig and (eco.MaintenanceConsumptionPerSecondEnergy or 0) or 0,
   }
 end
 
@@ -1214,6 +1271,21 @@ end
 -- kein Schweigen.
 __uiOverlayFilters = {}
 __uiTeamColorMode = 'FactionColor'
+
+-- MapBorderAdd(blueprintid) (Cfile:1269840) / MapBorderClear(): der dekorative
+-- KARTENRAND der Weltansicht — WorldMesh-Blueprints aus dem Skin
+-- (uiutil.lua:142-158, UpdateWorldBorderState; die Option heisst
+-- 'world_border'). Echter Zustand; die 3D-Seite rendert die Meshes, sobald sie
+-- WorldMesh kann.
+__uiMapBorders = {}
+
+function MapBorderAdd(blueprintId)
+  __uiMapBorders[table.getn(__uiMapBorders) + 1] = blueprintId
+end
+
+function MapBorderClear()
+  __uiMapBorders = {}
+end
 
 function SetOverlayFilter(filter) __uiOverlayFilters = { filter } end
 function SetOverlayFilters(filters) __uiOverlayFilters = filters or {} end
@@ -1340,7 +1412,24 @@ function DebugFacilitiesEnabled() return false end
 function SessionIsReplay() return false end
 function SessionIsMultiplayer() return false end
 function SessionIsActive() return __uiSessionActive == true end
-function GetGameTimeSeconds() return (GameTick and GameTick() or 0) * 0.1 end
+-- === Die SPIELZEIT — sie kommt aus der SIM, nicht aus der UI-Uhr ===
+--
+-- Die UI hat ihre eigene Uhr (CurrentTime, Sekunden seit Start, 60 Hz Frames);
+-- die SPIELZEIT zaehlt in Sim-Ticks (10 Hz) und steht still, wenn die Sim
+-- pausiert. Die Engine-Seite meldet den Tick pro Beat (__uiSetGameTick).
+--
+--   "string GetGameTime()" — ein FORMATIERTER String (Cfile:1266614), die
+--   Engine formatiert %H:%M:%S (wxTimeSpan::Format, Cfile:1266640). score.lua
+--   zeigt ihn woertlich als Uhr oben rechts (score.lua:230).
+__uiGameTick = 0
+function __uiSetGameTick(t) __uiGameTick = t or 0 end
+function GameTick() return __uiGameTick end
+function GameTime() return __uiGameTick * 0.1 end
+function GetGameTimeSeconds() return __uiGameTick * 0.1 end
+function GetGameTime()
+  local s = math.floor(__uiGameTick * 0.1)
+  return string.format('%02d:%02d:%02d', math.floor(s / 3600), math.floor((s % 3600) / 60), s % 60)
+end
 function HasCommandLineArg() return false end
 function GetCommandLineArg() return nil end
 

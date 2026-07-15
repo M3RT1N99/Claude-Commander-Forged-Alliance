@@ -41,6 +41,8 @@ interface UnitPayload {
 
 interface StatesMsg {
   type: 'states'
+  /** Der Sim-Tick des Beats — die Spielzeit-Uhr der UI zaehlt damit. */
+  tick: number
   units: LuaUnitSnapshot[]
   economy: EcoSnapshot
 }
@@ -55,6 +57,8 @@ type OutMsg =
 export class LuaSimClient {
   private readonly statesById = new Map<number, LuaUnitSnapshot>()
   private economy: EcoSnapshot | null = null
+  /** Letzter gemeldeter Sim-Tick (Spielzeit = Tick / 10). */
+  gameTick = 0
   private nextReq = 1
   private bootResolve: (() => void) | null = null
   private resetResolve: (() => void) | null = null
@@ -126,6 +130,7 @@ export class LuaSimClient {
         break
       case 'states':
         this.economy = m.economy
+        this.gameTick = m.tick
         this.statesById.clear()
         for (const u of m.units) this.statesById.set(u.id, u)
         break

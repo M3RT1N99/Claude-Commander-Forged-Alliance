@@ -1213,7 +1213,7 @@ function luaSimUpdate(): void {
   // rechnet daraus die Anzeige.
   const eco = luaSim.economySnapshot()
   const states = luaSim.allStates()
-  if (eco && gameUi) gameUi.beat(eco, states)
+  if (eco && gameUi) gameUi.beat(eco, states, luaSim.gameTick)
 
   // Neue Units aus der Sim (Baustelle, Fabrik-Produkt) bekommen ihr Modell. Die
   // Sim erzeugt sie; die Szene zieht nach — nicht umgekehrt.

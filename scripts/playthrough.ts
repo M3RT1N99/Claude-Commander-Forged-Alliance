@@ -124,6 +124,7 @@ const spiegle = (): void => {
       `${e.incomeMass}, ${e.incomeEnergy}, ${e.expenseMass}, ${e.expenseEnergy}, ` +
       `${e.expenseMass}, ${e.expenseEnergy})`,
   )
+  ui.eval(`__uiSetGameTick(${Number(sim.eval('return __gameTick'))})`)
   // Der Beat-VERTEILER (UI_LuaBeat -> gamemain.OnBeat, Cfile:1262940):
   // ALLE registrierten Beat-Funktionen laufen (economy, avatars, commandmode ...).
   ui.eval(`import('/lua/ui/game/gamemain.lua').OnBeat()`)
@@ -309,6 +310,27 @@ if (!tot) melde('SIM', 'Der Feind wurde nicht getötet — die Waffen greifen ni
 takt(60)
 const wracks = Number(sim.eval('local n = 0 for _ in pairs(__props) do n = n + 1 end return n'))
 console.log(`   ${wracks} Wrack(s) auf dem Feld`)
+
+tue('Hover: unitview zeigt Name + HP der Unit unter dem Cursor')
+// Genau der Browser-Weg: main.ts meldet die Unit unter der Maus per
+// __uiSetRollover; unitview.lua liest GetRolloverInfo() in seinem OnFrame
+// (unitview.lua:422-433) und fuellt Name, HP-Balken und Statistiken.
+spiegle()
+ui.eval(`__uiSetRollover(${acu})`)
+uiFrame(5)
+const uv = ui.eval(`
+  local Unitview = import('/lua/ui/game/unitview.lua')
+  local c = Unitview.controls
+  if not c or not c.name then return 'controls nicht erreichbar' end
+  return string.format('name=%q hp=%q alpha=%.1f',
+    tostring(c.name:GetText()), tostring(c.health:GetText()), c.bg:GetAlpha())
+`) as string
+console.log(`   ${uv}`)
+if (uv.indexOf('name=""') >= 0 || uv.indexOf('nicht erreichbar') >= 0) {
+  melde('UI', `unitview zeigt nichts beim Hover: ${uv}`)
+}
+ui.eval('__uiSetRollover(nil)')
+uiFrame(2)
 
 tue('Die Reiter oben (Menü, Diplomatie) + Abwahl')
 try {

@@ -214,7 +214,7 @@ export class GameUi {
    * Ein Sim-Beat: Ökonomie in die UI-VM, dann die Original-`_BeatFunction`
    * (economy.lua:251) rechnen lassen. Sie schreibt den Text in die Controls.
    */
-  beat(eco: EcoSnapshot, units: LuaUnitSnapshot[]): void {
+  beat(eco: EcoSnapshot, units: LuaUnitSnapshot[], gameTick = 0): void {
     // Der Zustand der Units in die UI-VM (die Engine spiegelt ihn clientseitig:
     // UserUnit::UpdateUnitData @0x8C0750). Erst danach kann die UI ihn zeigen.
     const seen = new Set<number>()
@@ -246,6 +246,8 @@ export class GameUi {
       ${eco.massIncome}, ${eco.energyIncome},
       ${eco.massRequested}, ${eco.energyRequested},
       ${eco.massExpense}, ${eco.energyExpense})`)
+    // Die SPIELZEIT (score.lua zeigt sie als Uhr; sie steht bei Pause still).
+    lines.push(`__uiSetGameTick(${gameTick})`)
     // Der BEAT-VERTEILER der Original-UI — nicht ein einzelnes Panel.
     //
     // Die Engine ruft pro Sim-Beat GENAU EINE Lua-Funktion:

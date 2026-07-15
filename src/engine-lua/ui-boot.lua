@@ -88,6 +88,16 @@ function __uiCreateScreenTree()
   __ui.gameParent = UIUtil.CreateScreenGroup(GetFrame(0), 'GameMain ScreenGroup')
   __ui.controlCluster, __ui.statusCluster, __ui.mapGroup, __ui.windowGroup =
     import('/lua/ui/game/borders.lua').SetupBorderControl(__ui.gameParent)
+
+  -- Der ONE-SHOT aus gamemain.lua:136-140, woertlich: beim ERSTEN Bild nach dem
+  -- Aufbau laeuft gamemain.OnFirstUpdate() — dort entsteht das Punkte-Panel
+  -- (score.lua:CreateScoreUI), die ACU bekommt den Spielernamen, die Musik und
+  -- der Start-Zoom laufen an. Ohne den Haken fehlte das alles kommentarlos.
+  __ui.controlCluster:SetNeedsFrameUpdate(true)
+  __ui.controlCluster.OnFrame = function(self, deltaTime)
+    __ui.controlCluster:SetNeedsFrameUpdate(false)
+    import('/lua/ui/game/gamemain.lua').OnFirstUpdate()
+  end
 end
 
 --- Die Panels der Spiel-UI, in der Reihenfolge aus gamemain.lua:145-154.

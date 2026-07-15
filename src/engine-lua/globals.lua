@@ -112,10 +112,16 @@ function IsEnemy(a, b) return a ~= b end
 --
 -- Ohne dieses Global stirbt jeder Todes-Thread: unit.lua:1200 DeathThread ruft
 -- GetRandomFloat (utils.lua) -> Random().
+--
+-- ACHTUNG: config.lua:42 setzt spaeter `math.random = Random`. Im Original ist
+-- Random eine C-Bindung — hier ist es Lua, und wer dann ueber `math.random`
+-- geht, ruft SICH SELBST (endlose Tail-Rekursion: die VM haengt, kein
+-- Stack-Overflow). Also das echte math.random VOR dem Alias festhalten.
+local mathRandom = math.random
 function Random(a, b)
-  if a == nil then return math.random() end
-  if b == nil then return math.random(1, math.floor(a)) end
-  return math.random(math.floor(a), math.floor(b))
+  if a == nil then return mathRandom() end
+  if b == nil then return mathRandom(1, math.floor(a)) end
+  return mathRandom(math.floor(a), math.floor(b))
 end
 
 -- Warp(unit, location, [orientation]) — eine Entity SOFORT versetzen

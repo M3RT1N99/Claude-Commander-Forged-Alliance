@@ -236,16 +236,23 @@ const clickText = (pattern: RegExp, label: string): string | null => {
 }
 
 let err = clickText(/Gefecht|Skirmish/i, 'der Gefecht-Knopf ist im Baum zu finden')
-if (err === null) {
+if (err === null && !warnings.some((w) => w.includes('InternalCreateLobby'))) {
   // Beim ersten Mal fragt das Spiel, ob man das Tutorial spielen will
   // (main.lua:855-872, Prefs 'MenuTutorialPrompt'). Das ist Original-Verhalten,
   // kein Fehler — der Dialog muss also erst beantwortet werden.
   err = clickText(/^Nein$|^No$/i, 'der Tutorial-Dialog steht da und lässt sich mit „Nein" beantworten')
 }
-const line = err?.split('\n')[0] ?? ''
+// Ein Lua-Fehler in einem OnFrame WIRFT in der Engine nicht: RunScript fängt
+// ihn (lua_call != 0) und loggt „Error running %s script in %s: %s"
+// (gpg::Warnf, Cfile:590672; LogScriptWarning Cfile:590508) — das Bild läuft
+// weiter. Die Bild-Pumpe tut seit dem xpcall dasselbe (maui.lua). Der Beweis,
+// dass der Klick bis zur Lobby trägt, steht darum im WARN-Log — nicht in einer
+// hochgeworfenen Exception.
+const lobbySource = err ?? warnings.find((w) => w.includes('InternalCreateLobby')) ?? ''
+const line = lobbySource.split('\n').find((l) => l.includes('InternalCreateLobby')) ?? ''
 check(
   line.includes('InternalCreateLobby'),
-  err === null
+  line === ''
     ? 'FEHLT: der Klick versandet — er kommt gar nicht bis zur Lobby'
     : `der Weg endet GENAU hier: ${line.replace(/^.*?:\s*/, '').slice(0, 90)}`,
 )

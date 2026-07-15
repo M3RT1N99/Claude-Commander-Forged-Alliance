@@ -213,8 +213,12 @@ function tickAndPost(): void {
   // `[]` an, und der Main-Thread starb an "m.units is not iterable".)
   const units = host.pull<unknown[]>('__readAllUnitsJson()')
   const a = engine.economy.army(1)
+  // Der SIM-TICK gehoert zum Zustand: die Spielzeit-Uhr der UI (score.lua:230,
+  // GetGameTime) zaehlt in Sim-Ticks und steht bei Pause still.
+  const tick = Number(host.eval('return __gameTick'))
   ctx.postMessage({
     type: 'states',
+    tick,
     units,
     economy: {
       mass: a.mass, massStorage: a.maxMass, massIncome: a.incomeMass, massExpense: a.expenseMass,
