@@ -27,6 +27,8 @@ import {
   installUiEngine,
   setupUi,
   setupGameUi,
+  startSessionLoading,
+  finishSessionLoading,
   createRootFrame,
   loadUiBlueprints,
   applySession,
@@ -86,6 +88,16 @@ setupUi(ui)
 const bpPaths = [...game.paths].filter((p) => /^units\/[^/]+\/[^/]+_unit\.bp$/.test(p))
 loadUiBlueprints(ui, bpPaths)
 applySession(ui, { ...SANDBOX_SESSION, map: 'SCMP_009' })
+// Der Weltstart der Engine, wie im Browser (gameUi.ts): DoPreload
+// (StartGameUI + StartLoadingDialog, Cfile:1320735) -> DoInitializing
+// (Frame-Reset + SetupUI + StartGameUI erneut, dann StopLoadingDialog,
+// Cfile:1321030-1321090). Erst StopLoadingDialog forkt InitialAnimations —
+// ohne diese Kette fahren Score, Economy und Avatare nie ein.
+startSessionLoading(ui)
+ui.eval('__mauiResetFrames()')
+ui.eval('__uiSetupUi()')
+ui.eval('__uiStartGameUI()')
+finishSessionLoading(ui)
 setupGameUi(ui, (m) => {
   if (m.includes('NOCH NICHT')) melde('UI', m)
 })
@@ -151,6 +163,12 @@ for (const id of ['uel0001', 'ueb0101', 'ueb1101', 'uel0201', 'uel0101']) {
 const acu = spawnLuaUnit(sim, 'uel0001', { x: 100, y: 20, z: 100 }, 1)
 takt(10)
 console.log(`   ACU ${acu}, Masse ${engine.economy.army(1).mass.toFixed(0)}`)
+
+tue('Lade-Fade abwarten (das Fraktionsbild fängt sonst jeden Klick)')
+// gamemain.lua:274-292: das Fraktionsbild liegt auf Depth 200 über ALLEM und
+// faded erst nach 1,5 s über ~2 s aus — solange trifft jeder Hit-Test nur
+// dieses Bitmap. Der Spieler klickt im Original auch erst nach dem Fade.
+uiFrame(260)
 
 tue('ACU auswählen (SelectUnits → gamemain.OnSelectionChanged)')
 spiegle()
@@ -346,6 +364,37 @@ try {
   uiFrame(3)
 } catch (e) {
   melde('UI', `Abwahl: ${(e as Error).message}`)
+}
+
+tue('InitialAnimations: das Fraktionsbild faded, die Panels fahren ein')
+// Der Fade braucht 1,5 s Wartezeit + ~2 s Ausblenden (gamemain.lua:279-291,
+// delta/2 pro Bild) — erst danach forkt die Original-Lua InitialAnimations
+// und score.lua:406 ruft controls.bg:Show(). Die Uhr oben rechts (score.lua:230,
+// GetGameTime) muss am Ende SICHTBAR sein und LAUFEN.
+try {
+  uiFrame(380)
+  const uhr = String(
+    ui.eval(`
+      for _, c in pairs(__mauiControls) do
+        if not c.__destroyed and tostring(c.__text or ''):find('^%d%d:%d%d:%d%d$') then
+          -- laufende Uhr, nicht der (zu Recht versteckte) Kampagnen-Timer
+          if tostring(c.__text) ~= '00:00:00' then
+            local n = c
+            while n do
+              if n.__hidden then return 'VERSTECKT durch ' .. tostring(n.__name) end
+              n = n.__parent
+            end
+            return 'sichtbar: ' .. tostring(c.__text)
+          end
+        end
+      end
+      return 'KEINE laufende Uhr im Baum'
+    `),
+  )
+  if (uhr.startsWith('sichtbar')) console.log(`   Score-Uhr ${uhr}`)
+  else melde('UI', `Score-Uhr nach InitialAnimations: ${uhr}`)
+} catch (e) {
+  melde('UI', `InitialAnimations: ${(e as Error).message}`)
 }
 
 // --- Der Bericht ------------------------------------------------------------

@@ -70,6 +70,43 @@ function __uiSetupUi()
 end
 
 -- =====================================================================
+-- Der Weltstart — die Provider-Kette der Engine
+-- =====================================================================
+
+--- func_StartGameUI (Cfile:1262514): setzt den UI-Zustand auf UIS_game und
+--- ruft uimain.StartGameUI() — dort entsteht der WldUIProvider
+--- (gamemain.lua:225, "SHOULD NOT BE CALLED FROM LUA CODE"). Die Engine ruft
+--- es ZWEIMAL: beim Weltstart (func_DoPreload, Cfile:1320768) und nach dem
+--- Laden erneut mit frischen Root-Frames (DoInitializing, Cfile:1321035) —
+--- der zweite Aufruf raeumt so den Lade-Dialog ab. Wer die Kette in EINER
+--- VM zweimal faehrt, muss dazwischen __mauiResetFrames() rufen (das ist
+--- das SetNewLuaState der Engine).
+function __uiStartGameUI()
+  import('/lua/ui/uimain.lua').StartGameUI()
+end
+
+--- Die Lade-Dialog-Aufrufe der Engine, mit demselben Nil-Check wie im
+--- Original (`if ( sWldUIProvider )`, Cfile:1320769/1321066):
+---   StartLoadingDialog  beim Weltstart (Cfile:1320770)
+---   UpdateLoadingDialog(elapsed) pro Bild waehrend des Ladens (Cfile:1295322)
+---   StopLoadingDialog   nach dem ersten Beat mit Sync-Daten (Cfile:1321067)
+--- StopLoadingDialog zeigt das Fraktionsbild, blendet es nach 1,5 s aus und
+--- forkt InitialAnimations (gamemain.lua:253-263) — ERST DARIN werden Score,
+--- Economy, Avatare und die Reiter eingeblendet. Ohne diese Kette stehen die
+--- Panels fuer immer unsichtbar da.
+function __uiProviderStartLoading()
+  if __uiWldProvider then __uiWldProvider:StartLoadingDialog() end
+end
+
+function __uiProviderUpdateLoading(elapsed)
+  if __uiWldProvider then __uiWldProvider:UpdateLoadingDialog(elapsed) end
+end
+
+function __uiProviderStopLoading()
+  if __uiWldProvider then __uiWldProvider:StopLoadingDialog() end
+end
+
+-- =====================================================================
 -- Die Spiel-UI (gamemain.lua:145-154)
 -- =====================================================================
 

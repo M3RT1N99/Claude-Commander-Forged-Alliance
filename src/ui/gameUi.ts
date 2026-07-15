@@ -4,6 +4,8 @@ import {
   setupUi,
   setupGameUi,
   startFrontEnd,
+  startSessionLoading,
+  finishSessionLoading,
   createRootFrame,
   loadUiBlueprints,
   applySession,
@@ -177,8 +179,27 @@ export class GameUi {
       // Import, tabs.lua:20 `SessionGetScenarioInfo().Options.Timeouts`.
       if (session) applySession(host, session)
 
+      // Der Weltstart, wörtlich wie die Engine (func_DoPreload, Cfile:1320735):
+      // StartGameUI → StartLoadingDialog. Der Lade-Dialog setzt dabei ECHTE
+      // ConVars (UI_RenderUnitBars, UI_NisRenderIcons, ren_SelectBoxes —
+      // gamemain.lua:217-219). Die Sim lädt parallel im Worker; die Wartezeit
+      // an dieser Stelle ist im Browser null.
+      startSessionLoading(host)
+
+      // DoInitializing (Cfile:1321030-1321090): SetNewLuaState räumt die
+      // Root-Frames (der Lade-Dialog verschwindet), SetupUI + StartGameUI
+      // laufen ERNEUT (frischer Provider), dann StopLoadingDialog — das
+      // Fraktionsbild blendet über 1,5 s aus, und die Original-Lua forkt
+      // InitialAnimations (gamemain.lua:253-263): erst DARIN fahren Score,
+      // Economy, Avatare und die Reiter ein.
+      host.eval('__mauiResetFrames()')
+      host.eval('__uiSetupUi()')
+      host.eval('__uiStartGameUI()')
+      finishSessionLoading(host)
+
       // Ab hier baut die Original-Lua die UI — in der Reihenfolge aus
-      // gamemain.lua:145-153. Denselben Weg nimmt die Verify-Suite.
+      // gamemain.lua:145-153; in der Engine kommt CreateGameInterface NACH
+      // StopLoadingDialog (Cfile:1321080). Denselben Weg nimmt die Verify-Suite.
       setupGameUi(host, log)
     }
 

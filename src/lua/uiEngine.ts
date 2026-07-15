@@ -260,6 +260,34 @@ export function applySession(host: LuaHost, info: SessionInfo, playerName = 'Com
  * Diese Funktion ist der EINE Aufbauweg der Spiel-UI. Browser und Verify-Suite
  * nehmen ihn beide — sonst prüft der Test etwas anderes, als der Browser tut.
  */
+/**
+ * Der Weltstart, wie die Engine ihn fährt (func_DoPreload, Cfile:1320735):
+ * `func_StartGameUI` (uimain.StartGameUI → der WldUIProvider entsteht,
+ * gamemain.lua:225), dann `provider:StartLoadingDialog()` — der Lade-Bildschirm
+ * der Original-Lua (Fraktions-Movie + „IN TRANSIT").
+ */
+export function startSessionLoading(host: LuaHost): void {
+  host.eval('__uiStartGameUI()')
+  host.eval('__uiProviderStartLoading()')
+}
+
+/** Pro Bild während des Ladens: `provider:UpdateLoadingDialog(elapsed)`
+ *  (Moho::CLuaWldUIProvider::UpdateLoadingDialog, Cfile:1295322). */
+export function updateSessionLoading(host: LuaHost, elapsedSeconds: number): void {
+  host.eval(`__uiProviderUpdateLoading(${elapsedSeconds})`)
+}
+
+/**
+ * Das Ende des Ladens (DoInitializing, Cfile:1321067): `StopLoadingDialog()`
+ * zeigt das Fraktionsbild, blendet es über 1,5 s aus und forkt
+ * InitialAnimations (gamemain.lua:253-263) — erst darin fahren Score, Economy,
+ * Avatare und die Reiter ein. Danach ruft die Engine CreateGameInterface
+ * (= setupGameUi). Diese Reihenfolge ist Semantik, nicht Kosmetik.
+ */
+export function finishSessionLoading(host: LuaHost): void {
+  host.eval('__uiProviderStopLoading()')
+}
+
 export function setupGameUi(host: LuaHost, log: (msg: string) => void): void {
   // Der Lua-Code dazu steht in ui-boot.lua — hier wird er nur gerufen. Jedes
   // Panel einzeln, damit ein fehlendes Engine-Teil nur SEIN Panel kostet und

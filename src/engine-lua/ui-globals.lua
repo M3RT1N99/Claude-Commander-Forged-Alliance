@@ -756,6 +756,30 @@ function SessionIsActive()
   return __uiScenarioInfo ~= false
 end
 
+-- === Der WldUIProvider — die Naht zwischen Welt-Laden und UI ===
+--
+-- InternalCreateWldUIProvider(self) (cfunc, Cfile:28934) baut den
+-- CLuaWldUIProvider um das Lua-Objekt und registriert ihn als DEN Provider
+-- (Moho::WLD_SetUIProvider, Cfile:29710). Die Engine ruft dann seine
+-- Methoden per RunScript (Cfile:1295316-1295350): StartLoadingDialog beim
+-- Weltstart (func_DoPreload, Cfile:1320770), UpdateLoadingDialog(elapsed)
+-- pro Bild waehrend des Ladens, StopLoadingDialog nach dem ERSTEN Beat mit
+-- Sync-Daten (DoInitializing, Cfile:1321067) — und erst DANACH
+-- CreateGameInterface (= gamemain.CreateUI). gamemain.lua:225 haengt an
+-- genau diesen Haken den Lade-Dialog und die InitialAnimations.
+__uiWldProvider = false
+
+function InternalCreateWldUIProvider(luaobj)
+  __uiWldProvider = luaobj
+end
+
+-- "FlushEvents() -- flush mouse/keyboard events" (Cfile:1274567): leert die
+-- Eingabe-Queue des UI-Managers (sub_84DA80). gamemain.lua:297 ruft es am Ende
+-- von StopLoadingDialog, damit waehrend des Ladens gepufferte Klicks nicht ins
+-- frische Spiel durchschlagen. Unsere Events laufen SYNCHRON (__mauiMouse
+-- verarbeitet sofort, es gibt keine Queue) — geleert wird eine leere Queue.
+function FlushEvents() end
+
 --- "Return true iff the active session is a replay session." — wir spielen live.
 function SessionIsReplay()
   return false
