@@ -237,11 +237,19 @@ local function checkCollision(p, from, to)
         and (hitsAllies or not IsAlly(u.__army, army)) then
         local center, r = __unitCollision(u)
         if distSqSegment(from, to, center) <= r * r then
-          -- Der Lua-Filter (func_OnCollisionCheck, Cfile:945766): liefert er
-          -- false, fliegt das Projektil weiter (Freund-Beschuss, Flares, …).
+          -- Der Lua-Filter (func_OnCollisionCheck, Cfile:945766): gefragt wird
+          -- die ZIEL-UNIT — unit.lua:972 OnCollisionCheck(self, other,
+          -- firingWeapon): DisallowCollisions, Ally -> GetCollideFriendly,
+          -- DoNotCollideList beidseitig. projectile:OnCollisionCheck ist die
+          -- PROJEKTIL-gegen-PROJEKTIL-Abwehr (projectile.lua:89-105 prueft
+          -- other:GetTrackingTarget — das haben nur Projektile) und darf hier
+          -- NICHT laufen: seine MISSILE-x-DIRECTFIRE-Regel liesse jede Rakete
+          -- jeden DIRECTFIRE-Panzer ignorieren. (Die Waffe des Schuetzen
+          -- fuehrt unser Projektil nicht mit — nil; der Rumpf 972-1000 liest
+          -- firingWeapon nicht.)
           local pass = true
-          if p.OnCollisionCheck then
-            local ok, res = pcall(function() return p:OnCollisionCheck(u) end)
+          if u.OnCollisionCheck then
+            local ok, res = pcall(function() return u:OnCollisionCheck(p, nil) end)
             if ok then pass = res ~= false end
           end
           if pass then
@@ -306,6 +314,122 @@ local function alignToVelocity(q, v, maxAngle)
   }
 end
 
+-- ---------------------------------------------------------------------
+-- GELENKTE MUNITION — Moho::Projectile::UpdateTracking (@944367) mit den
+-- Quaternion-Helfern der Engine (alles belegt, docs/research/
+-- verified-facts.md "Gelenkte Munition"):
+--   QuatCrossAdd  (@0x44F880): die Rotation v1 -> v2 (Halbwinkel-Quat).
+--   RotateQuatByAngle (@0x4EB740): begrenzt ein Delta-Quat auf `rads`;
+--     ist das Ziel NAEHER als das Limit, bleibt es unveraendert.
+--   QuatFromVecRot (@0x69AA50): forward aus dem Quat, Delta bauen,
+--     begrenzen, dann PRE-multipliziert (quat = delta * quat).
+-- ---------------------------------------------------------------------
+local function quatCrossAdd(v1x, v1y, v1z, v2x, v2y, v2z)
+  local l1 = math.sqrt(v1x * v1x + v1y * v1y + v1z * v1z)
+  local l2 = math.sqrt(v2x * v2x + v2y * v2y + v2z * v2z)
+  if l1 > 1e-9 then v1x, v1y, v1z = v1x / l1, v1y / l1, v1z / l1 end
+  if l2 > 1e-9 then v2x, v2y, v2z = v2x / l2, v2y / l2, v2z / l2 end
+  local ax, ay, az = v1x + v2x, v1y + v2y, v1z + v2z
+  local al = math.sqrt(ax * ax + ay * ay + az * az)
+  if al <= 1e-9 then return { 0, v1x, v1y, v1z } end -- antiparallel (belegt)
+  ax, ay, az = ax / al, ay / al, az / al
+  return {
+    ax * v1x + ay * v1y + az * v1z, -- w = dot(half, v1)
+    v1y * az - v1z * ay,            -- xyz = cross(v1, half)
+    v1z * ax - v1x * az,
+    v1x * ay - v1y * ax,
+  }
+end
+
+local function rotateQuatByAngle(q, rads)
+  local half = math.abs(rads * 0.5)
+  if half >= 1.5707964 then return q end
+  local qw, qx, qy, qz = q[1], q[2], q[3], q[4]
+  local sinHalf = math.sin(half)
+  local axisSq = qx * qx + qy * qy + qz * qz
+  -- Ziel naeher als das Limit -> Delta bleibt (volle Drehung).
+  if axisSq <= sinHalf * sinHalf then return q end
+  if qw < 0 then sinHalf = -sinHalf end
+  local al = math.sqrt(axisSq)
+  return { math.cos(half), qx / al * sinHalf, qy / al * sinHalf, qz / al * sinHalf }
+end
+
+local function quatFromVecRot(q, rx, ry, rz, rads)
+  local f = __quatForward(q)
+  local d = rotateQuatByAngle(quatCrossAdd(f[1], f[2], f[3], rx, ry, rz), rads)
+  -- PRE-multiply: neu = delta * alt.
+  local dw, dx, dy, dz = d[1], d[2], d[3], d[4]
+  local ow, ox, oy, oz = q[1], q[2], q[3], q[4]
+  return {
+    ow * dw - ox * dx - oy * dy - oz * dz,
+    dw * ox + dx * ow + dy * oz - dz * oy,
+    dw * oy - dx * oz + dy * ow + dz * ox,
+    dw * oz + dx * oy - dy * ox + dz * ow,
+  }
+end
+
+--- UpdateTracking (@944367): Zielposition holen (Koerpermitte), bei totem
+--- Ziel EINMAL OnLostTarget und auf die letzte Position weiterfliegen;
+--- Lead-Vorhaltung zweischrittig; die Nase dreht hoechstens
+--- TurnRate·0.1 Grad pro Tick; VelocityAlign setzt v auf die neue Nase.
+--- (Noch offen wie dokumentiert: ZigZag und StayUnderwater — kein Vanilla-
+--- Projektil unserer Testpfade nutzt sie; sie folgen mit eigenem Beleg-Test.)
+local function updateTracking(p)
+  local tgt = p.__target
+  if tgt and not tgt.__destroyed and not tgt.__destroyQueued then
+    local mitte = __unitCollision(tgt)
+    -- Ziel-Geschwindigkeit aus der ECHTEN Positionsdifferenz des letzten
+    -- Ticks (im Original GetVelocity aus dem Motion-Zustand).
+    local prev = p.__tgtPrev
+    if prev then
+      p.__tgtVel = {
+        (mitte[1] - prev[1]) * 10,
+        (mitte[2] - prev[2]) * 10,
+        (mitte[3] - prev[3]) * 10,
+      }
+    end
+    p.__tgtPrev = mitte
+    p.__goalPos = mitte
+  elseif p.__trackTarget then
+    -- Ziel verloren: RunScript('OnLostTarget') + TrackTarget aus (@944379).
+    if p.OnLostTarget then p:OnLostTarget() end
+    p.__trackTarget = false
+    p.__tgtVel = nil
+  end
+  local goal = p.__goalPos
+  if not goal then return end
+
+  local gx, gy, gz = goal[1], goal[2], goal[3]
+  -- Lead-Vorhaltung (@944470-944500): zweischrittig ueber die
+  -- Zielgeschwindigkeit, Zeitmass = Distanz / (MaxSpeed·0.1) Ticks.
+  local tv = p.__tgtVel
+  if p.__leadTarget and tv and p.__maxSpeed and p.__maxSpeed > 0 then
+    local pos = p.__pos
+    local speedProTick = p.__maxSpeed * 0.1
+    for _ = 1, 2 do
+      local dx, dy, dz = gx - pos[1], gy - pos[2], gz - pos[3]
+      local ticks = math.sqrt(dx * dx + dy * dy + dz * dz) / speedProTick
+      gx = goal[1] + tv[1] * 0.1 * ticks
+      gy = goal[2] + tv[2] * 0.1 * ticks
+      gz = goal[3] + tv[3] * 0.1 * ticks
+    end
+  end
+
+  local pos = p.__pos
+  p.__orient = quatFromVecRot(
+    p.__orient,
+    gx - pos[1], gy - pos[2], gz - pos[3],
+    (p.__turnRate or 0) * DEG_PER_SEC_TO_RAD_PER_TICK
+  )
+  if p.__velocityAlign then
+    -- func_VecSetLength: v = Forward · |v| (@944660-944676).
+    local v = p.__vel
+    local len = math.sqrt(v[1] * v[1] + v[2] * v[2] + v[3] * v[3])
+    local f = __quatForward(p.__orient)
+    v[1], v[2], v[3] = f[1] * len, f[2] * len, f[3] * len
+  end
+end
+
 --- Eine Quaternion, deren +Z-Achse in Richtung `d` zeigt (COORDS_Orient).
 function __orientFromDir(d)
   local dx, dy, dz = d[1], d[2], d[3]
@@ -338,6 +462,12 @@ function __projectileTick()
         v[1] = v[1] + p.__ballistic[1] * 0.1
         v[2] = v[2] + p.__ballistic[2] * 0.1
         v[3] = v[3] + p.__ballistic[3] * 0.1
+      else
+        -- GELENKT: die Nase dreht Richtung Ziel (UpdateTracking @944367),
+        -- danach beschleunigt das Projektil entlang der Nase — der
+        -- Tracking-Zweig hat KEINE ballistische Beschleunigung
+        -- (Cfile:944155-944211).
+        updateTracking(p)
       end
       -- Beschleunigung entlang der eigenen Achse.
       if p.__accel ~= 0 then

@@ -160,6 +160,43 @@ check(
   `Es ist das DefaultWreckage-Prop aus dem Blueprint der Unit (${wreck})`,
 )
 
+console.log('\n== Gelenkte Munition: die Zealot-Rakete dreht auf ein seitliches Ziel ==')
+// AAAZealotMissile01: TrackTarget=true, TurnRate=180, MaxSpeed=50, Accel=6
+// (das Blueprint aus projectiles.scd). UpdateTracking (@944367) dreht die
+// Nase pro Tick höchstens TurnRate·0.1° Richtung Ziel; ohne Tracking flöge
+// die Rakete geradeaus am Ziel vorbei.
+{
+  // DIFFERENZ-BEWEIS: die Rakete startet nach +Z, das Ziel steht 18° seitlich
+  // (10 m in +X, 30 m voraus). Geradeaus (Tracking aus) verfehlt sie um 10 m —
+  // mit UpdateTracking dreht die Nase ein und trifft. Der Abschusswinkel ist
+  // realistisch: im Spiel zielt die WAFFE vor dem Abschuss grob aufs Ziel.
+  const schuetzeId = spawnLuaUnit(host, 'uel0201', { x: 200, y: 20, z: 90 }, 1)
+  const zielId = spawnLuaUnit(host, 'uel0201', { x: 210, y: 20, z: 130 }, 2)
+  const fliege = (tracking: boolean): string =>
+    host.eval(`
+      local schuetze = __units[${schuetzeId}]
+      local ziel = __units[${zielId}]
+      local p = __projCreate(
+        schuetze, '/projectiles/aaazealotmissile01/aaazealotmissile01_proj.bp',
+        { 200, 22, 100 }, __orientFromDir({ 0, 0, 1 }), 30, 100, 0, 'Normal', ziel, true
+      )
+      p.__leadTarget = true
+      p.__trackTarget = ${tracking}
+      local ergebnis = 'kein Einschlag'
+      for _ = 1, 100 do
+        __projectileTick()
+        if p.__impactType then ergebnis = tostring(p.__impactType) end
+        __flushDeletions()
+        if p.__destroyed then break end
+      end
+      return ergebnis
+    `) as string
+  const mit = fliege(true)
+  const ohne = fliege(false)
+  check(mit === 'Unit', `MIT Tracking trifft die Rakete (Einschlag: ${mit})`)
+  check(ohne !== 'Unit', `OHNE Tracking fliegt sie vorbei (Einschlag: ${ohne}) — der Unterschied IST UpdateTracking`)
+}
+
 console.log('\n== Was die Sim dabei gemeldet hat ==')
 const uniq = [...new Set(warnings.map((w) => w.split('\n')[0]?.slice(0, 110)))]
 for (const w of uniq.slice(0, 12)) console.log(`  · ${w}`)

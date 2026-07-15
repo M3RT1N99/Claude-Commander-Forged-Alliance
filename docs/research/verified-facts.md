@@ -170,6 +170,36 @@ in CLAUDE.md. Vor Arbeit an einem der Themen: den passenden Abschnitt lesen.*
   (uel0001_unit.bp:125) — orders.lua:923-932 läuft bei jeder ACU-Auswahl und
   braucht `GetAssistingUnitsList` (Cfile:1360671).
 
+## Gelenkte Munition (Projectile-Tracking — Decomp + faf-re, alles belegt)
+
+- **Move-Tick** (Cfile:944100-944260): OHNE Tracking `v += BallisticAcc·0.1`,
+  dann `v += Forward(orient)·(Acceleration·0.1)`; VelocityAlign dreht die
+  Orientierung per `QuatFromVecRot(orient, v, TurnRateDeg·0.0017453292)`
+  (= TurnRate·0.1 Grad/Tick in rad). MIT Tracking (`bp.Physics.TrackTarget`,
+  Struct-Default 0, Cfile:653698): `UpdateTracking` dreht die NASE, dann
+  `v += Forward·Accel·0.1` (kein BallisticAcc). `MaxSpeed≠0` clampt |v|.
+  Position += (v_alt + v_neu)·0.05 (Trapez!).
+- **UpdateTracking** (@944367): Ziel = GetTargetPosGun; Ziel verloren →
+  RunScript `OnLostTarget` + TrackTarget=0 (fliegt auf letzte Zielposition
+  weiter, Flag v207). LeadTarget (mLeadTarget & MaxSpeed>0, Entity-Ziel):
+  ZWEISCHRITTIGE Vorhaltung — t1=|ziel−pos|/(MaxSpeed·0.1)… (iteriert 2×
+  über die Zielgeschwindigkeit). ZigZag (MaxZigZag>0 & Frequency>0): alle
+  f(Frequency) Ticks neue FRand(−max,+max)-Offsets je Achse, skaliert mit
+  min(dist/MaxZigZag, 1), Terrain-Klemme GetElevation+0.5. Am Ende
+  `QuatFromVecRot(orient, richtungZumZiel, TurnRateDeg·0.0017453292)`;
+  VelocityAlign setzt v = Forward·|v| (func_VecSetLength).
+- **QuatFromVecRot** (@0x69AA50, faf-re QuaternionMath.cpp:531): forward =
+  Z-Spalte des Quats; `delta = QuatCrossAdd(forward, ziel)`;
+  `RotateQuatByAngle(delta, rads)`; `quat = delta·quat` (PRE-multiply).
+- **QuatCrossAdd(v1,v2)** (@0x44F880, faf-re Sim.cpp:8759): half =
+  normalize(norm(v1)+norm(v2)); w = dot(half,v1), xyz = cross(v1, half)
+  — die Rotation v1→v2. Antiparallel (|half|=0): (0, v1).
+- **RotateQuatByAngle(q, rads)** (@0x4EB740, faf-re QuaternionMath.cpp:481):
+  begrenzt das DELTA auf rads: wenn sin²(θ/2)=|q.xyz|² ≤ sin²(rads/2) →
+  UNVERÄNDERT (Ziel näher als Limit → volle Drehung); sonst q =
+  (cos(rads/2), axis·±sin(rads/2)) (Vorzeichen folgt w<0). rads/2 ≥ π/2 →
+  unverändert.
+
 ## Effekte/Partikel (Quelle: effects/particle.fx aus effects.scd, 1332 Zeilen — der ECHTE Shader)
 
 - **Partikel-Vertexshader (WorldVS):** `t = time - birth`; `alpha = t/lifetime`

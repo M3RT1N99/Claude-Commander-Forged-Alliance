@@ -597,6 +597,9 @@ local weapon = withNoops(WEAPON_NAMES, {
       self.__damageType or bp.DamageType or 'Normal', self.__target,
       bp.IgnoresAlly ~= false
     )
+    -- LeadTarget kommt von der WAFFE (Struct-Default 1, weapons.md:1001):
+    -- gelenkte Munition haelt dem Ziel vor (UpdateTracking @944470).
+    if proj then proj.__leadTarget = bp.LeadTarget ~= false end
 
     -- Lebensdauer (Cfile:985760ff).
     if proj and not proj.__destroyQueued then
