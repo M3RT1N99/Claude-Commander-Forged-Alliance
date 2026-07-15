@@ -73,15 +73,18 @@ end
 -- ---------------------------------------------------------------------
 -- func_DoDamagePoint (Cfile:1062873) — EIN Ziel.
 -- ---------------------------------------------------------------------
-local function damagePoint(instigator, origin, target, amount, damageType)
+local function damagePoint(instigator, origin, target, amount, damageType, damageSelf)
   if not target or target.__destroyQueued then return end
   if amount == 0 then return end
 
   -- Ein Projektil als Verursacher wird auf seinen Launcher aufgeloest
-  -- (Cfile:1062930-1063000); Selbstschaden faellt weg.
+  -- (Cfile:1062930-1063000). Selbstschaden faellt normalerweise weg — AUSSER die
+  -- Waffe verlangt ihn ausdruecklich (damageSelf, z. B. Kamikaze-/Selbstzerstoerungs-
+  -- Einheiten). Ohne diesen Durchgriff traf DamageArea(damageSelf=true) den
+  -- Verursacher NIE, weil dieser Punkt-Schaden ihn immer uebersprang.
   local inst = instigator
   if inst and inst.__isProj then inst = inst.__launcher or inst end
-  if inst == target then return end
+  if not damageSelf and inst == target then return end
 
   local dealt = amount
   if target.__bp and not target.__isProj then
@@ -136,7 +139,7 @@ function DamageArea(instigator, location, radius, amount, damageType, damageFrie
           local p = u.__pos
           local dx, dy, dz = p[1] - origin[1], p[2] - origin[2], p[3] - origin[3]
           if dx * dx + dy * dy + dz * dz <= radius * radius then
-            damagePoint(instigator, origin, u, amount, damageType)
+            damagePoint(instigator, origin, u, amount, damageType, damageSelf)
           end
         end
       end
@@ -161,7 +164,7 @@ function DamageRing(instigator, location, minRadius, maxRadius, amount, damageTy
           local dx, dy, dz = p[1] - origin[1], p[2] - origin[2], p[3] - origin[3]
           local d2 = dx * dx + dy * dy + dz * dz
           if d2 >= minRadius * minRadius and d2 <= maxRadius * maxRadius then
-            damagePoint(instigator, origin, u, amount, damageType)
+            damagePoint(instigator, origin, u, amount, damageType, damageSelf)
           end
         end
       end

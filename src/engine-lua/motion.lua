@@ -142,6 +142,17 @@ function __advanceMotion()
         if diff ~= 0 and m.turnRadius < math.huge then
           cap = math.min(cap, m.turnRate * m.turnRadius)
         end
+
+        -- ROTATE-ON-SPOT (Bots, viele Experimentelle): erst drehen, dann fahren.
+        -- ComputeSteeringSpeedCapFromParams (movement-path.md:174, CAiPathSpline):
+        -- ist die Ausrichtung zum Ziel schlechter als align 0.98
+        -- (dot(vorwaerts, richtung) < 0.98, ~11.4 Grad), ist die Geschwindigkeit
+        -- 0 — die Einheit dreht sich auf der Stelle. Sonst faehrt sie mit
+        -- vollem Speed an. Ohne das kurven Bots wie Autos statt sich zu drehen.
+        if m.rotateOnSpot then
+          local align = math.cos(diff) -- dot(vorwaerts, zielrichtung) in 2D
+          if align < 0.98 then cap = 0 end
+        end
         -- Stop exactly on the goal: kinematics, v = sqrt(2 * a * d).
         cap = math.min(cap, math.sqrt(2 * m.brake * dist))
 
