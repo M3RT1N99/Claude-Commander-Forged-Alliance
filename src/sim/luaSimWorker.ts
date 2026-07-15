@@ -218,6 +218,10 @@ function tickAndPost(): void {
   // (Nebenwirkung, die damit auch weg ist: eine LEERE Tabelle kam als `{}` statt
   // `[]` an, und der Main-Thread starb an "m.units is not iterable".)
   const units = host.pull<unknown[]>('__readAllUnitsJson()')
+  // Die PROJEKTILE gehoeren zum Zustand: die Engine zeichnet jeden Schuss
+  // (CUIWorldView rendert die Sim-Entities). Ohne diesen Kanal ist der Kampf
+  // im Browser unsichtbar — die Sim schiesst, und niemand sieht es.
+  const projectiles = host.pull<unknown[]>('__readAllProjectilesJson()')
   const a = engine.economy.army(1)
   // Der SIM-TICK gehoert zum Zustand: die Spielzeit-Uhr der UI (score.lua:230,
   // GetGameTime) zaehlt in Sim-Ticks und steht bei Pause still.
@@ -226,6 +230,7 @@ function tickAndPost(): void {
     type: 'states',
     tick,
     units,
+    projectiles,
     economy: {
       mass: a.mass, massStorage: a.maxMass, massIncome: a.incomeMass, massExpense: a.expenseMass,
       energy: a.energy, energyStorage: a.maxEnergy, energyIncome: a.incomeEnergy, energyExpense: a.expenseEnergy,

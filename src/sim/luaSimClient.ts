@@ -38,6 +38,24 @@ export interface LuaUnitSnapshot {
   buildQueue?: { id: string; count: number }[]
 }
 
+/**
+ * Ein fliegendes Projektil, wie die Sim es meldet (__readAllProjectilesJson).
+ * Die Engine zeichnet jeden Schuss — ohne diesen Kanal ist der Kampf im
+ * Browser unsichtbar.
+ */
+export interface LuaProjectileSnapshot {
+  id: number
+  /** BlueprintId, z. B. '/projectiles/tdfgauss01/tdfgauss01_proj.bp'. */
+  bp: string
+  x: number
+  y: number
+  z: number
+  qw: number
+  qx: number
+  qy: number
+  qz: number
+}
+
 /** Was die Sim braucht, um eine Unit dieses Typs zu erzeugen. */
 interface UnitPayload {
   scriptPath: string
@@ -52,6 +70,7 @@ interface StatesMsg {
   /** Der Sim-Tick des Beats — die Spielzeit-Uhr der UI zaehlt damit. */
   tick: number
   units: LuaUnitSnapshot[]
+  projectiles: LuaProjectileSnapshot[]
   economy: EcoSnapshot
 }
 type OutMsg =
@@ -65,6 +84,8 @@ type OutMsg =
 export class LuaSimClient {
   private readonly statesById = new Map<number, LuaUnitSnapshot>()
   private economy: EcoSnapshot | null = null
+  /** Die fliegenden Projektile des letzten Beats — der Renderer zeichnet sie. */
+  private projectileStates: LuaProjectileSnapshot[] = []
   /** Letzter gemeldeter Sim-Tick (Spielzeit = Tick / 10). */
   gameTick = 0
   private nextReq = 1
@@ -139,6 +160,7 @@ export class LuaSimClient {
       case 'states':
         this.economy = m.economy
         this.gameTick = m.tick
+        this.projectileStates = m.projectiles ?? []
         this.statesById.clear()
         for (const u of m.units) this.statesById.set(u.id, u)
         break
@@ -302,6 +324,11 @@ export class LuaSimClient {
   /** Alle bekannten Unit-Zustände (letzter Beat). */
   allStates(): LuaUnitSnapshot[] {
     return [...this.statesById.values()]
+  }
+
+  /** Die fliegenden Projektile des letzten Beats (leer, wenn keiner schießt). */
+  allProjectiles(): LuaProjectileSnapshot[] {
+    return this.projectileStates
   }
 
   /** Letzte Armee-Ökonomie (Armee 1). */
