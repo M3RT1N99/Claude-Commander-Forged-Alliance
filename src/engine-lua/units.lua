@@ -41,15 +41,9 @@ Scenario = Scenario or { MasterChain = { _MASTERCHAIN_ = { Markers = {} } }, Arm
 -- Weapons: the engine instantiates them from the blueprint, using the Lua
 -- class from the unit script's Weapons table (keyed by the weapon Label).
 -- Base class is Weapon from /lua/sim/Weapon.lua (Class(moho.weapon_methods)).
--- Das Skelett je Blueprint. Die Engine laedt das Modell auch in der Sim — an
--- seinen Knochen haengen Waffen-Tuerme, Muendungen, Bau- und Effekt-Knochen.
--- Gefuellt wird es aus der SCM-Datei (src/formats/scm.ts), bevor die erste Unit
--- dieses Typs entsteht.
-__unitBones = {}
-
-function __setBones(bpId, names)
-  __unitBones[string.lower(bpId)] = names or {}
-end
+-- Das Skelett je Blueprint liegt in bones.lua (__unitBones, __setBones ueber
+-- __beginBones/__addBone/__finishBones) — mit Ruhepose, nicht nur Namen: ohne
+-- Knochen-Transform gibt es keine Muendungsposition und damit kein Projektil.
 
 function __createWeapons(u, bp)
   u.__weapons = {}
@@ -98,6 +92,8 @@ function __spawnUnit(scriptPath, bpId, x, y, z, army, complete)
   local u = cls()
   local id = __nextUnitId
   __nextUnitId = id + 1
+  -- IsUnit(e) unterscheidet die Arten (Projektile haben auch ein Blueprint).
+  u.__isUnit = true
   u.__bp = bp
   u.__id = id
   u.__army = army
@@ -105,7 +101,7 @@ function __spawnUnit(scriptPath, bpId, x, y, z, army, complete)
   u.__pos = { x, y, z }
   -- Das Skelett aus dem Modell (siehe __setBones). Es muss VOR OnCreate stehen:
   -- die Waffen pruefen ihre Turm-Knochen beim Aufbau (weapon.lua:67).
-  u.__bones = __unitBones[string.lower(bpId)] or {}
+  u.__bones = __unitBones[string.lower(bpId)] or { names = {}, xform = {}, index = {} }
   u.__heading = 0
   u.__navigator = __getNavigator(id)
   -- echte Felder (nicht der wrapInstance-Stub) für die Physik-Fortschreibung

@@ -104,12 +104,116 @@ local function fillDefaults(target, defaults)
   end
 end
 
+-- PROJEKTIL-Blueprints haben ihren eigenen Struct-Ctor
+-- (RProjectileBlueprintPhysics, Cfile:653667-653712). Auch hier gilt: die Engine
+-- belegt JEDES Feld vor, und die Original-Lua greift ungeprueft darauf zu.
+--
+-- Zwei Werte, die man nicht raten darf:
+--   UseGravity = true   — ohne ihn fliegt jede Kugel schnurgerade weiter
+--   Lifetime   = 15     — ohne ihn lebt sie ewig (oder gar nicht)
+--
+-- Und eine Eigenheit: das Projektil-Blueprint hat GAR KEINE Defense-Sektion
+-- (RProjectileBlueprintTypeInfo::AddFields, Cfile:654222-654240 kennt nur
+-- DevStatus/Display/Economy/Physics). Projectile.lua:75 liest trotzdem
+-- `bp.Defense.MaxHealth or 1` — das laeuft nur dank der LuaPlus-nil-Metatable
+-- (boot.lua). Deshalb wird hier KEINE Defense-Sektion erfunden.
+-- Die FELDNAMEN sind die des PARSERS (AddFields, Cfile:653990-654175), nicht die
+-- internen Member-Namen. Zwei davon hatte ich falsch — mit dem Member-Namen statt
+-- dem .bp-Namen:
+--   CollideEntity (NICHT CollisionEntity): die Kollision mit Einheiten. Ein .bp
+--     mit `CollideEntity = false` (Nukes, Strat-Raketen) flog bei uns trotzdem in
+--     die erste ueberflogene Einheit — der echte Wert wurde nie gelesen.
+--   BounceVelDamp (NICHT BounceVelocityDamping).
+-- Werte aus dem Struct-Ctor (Cfile:653667-653712), Feldliste aus AddFields.
+__projDefaults = {
+  Physics = {
+    Lifetime = 15.0, LifetimeRange = 0.0,
+    InitialSpeed = 1.0, InitialSpeedRange = 0.0,
+    MaxSpeed = 0.0, MaxSpeedRange = 0.0,
+    Acceleration = 0.0, AccelerationRange = 0.0,
+    TurnRate = 0.0, TurnRateRange = 0.0,
+    RotationalVelocity = 0.0, RotationalVelocityRange = 0.0,
+    CollideSurface = true, CollideEntity = true,
+    TrackTarget = false, LeadTarget = true,
+    VelocityAlign = true, StayUpright = false, StayUnderwater = false,
+    UseGravity = true,
+    -- Start-Offset (PositionX/Y/Z ± Range) — die Engine versetzt das Projektil
+    -- damit von der Muendung (Ctor Cfile:653700-653707).
+    PositionX = 0.0, PositionXRange = 0.0,
+    PositionY = 0.0, PositionYRange = 0.0,
+    PositionZ = 0.0, PositionZRange = 0.0,
+    DirectionX = 0.0, DirectionY = 1.0, DirectionZ = 0.0,
+    DirectionXRange = 1.5, DirectionYRange = 0.0, DirectionZRange = 1.5,
+    DestroyOnWater = false,
+    BounceVelDamp = 0.5, MinBounceCount = 0, MaxBounceCount = 0,
+    -- Detonationshoehen und ZigZag (Lenkwaffen) — vom Ctor mit 0 belegt.
+    DetonateAboveHeight = 0.0, DetonateBelowHeight = 0.0,
+    MaxZigZag = 0.0, ZigZagFrequency = 0.0,
+    RealisticOrdinance = false, StraightDownOrdinance = false,
+  },
+  Economy = { BuildTime = 10.0 },
+  Display = { UniformScale = 1.0 },
+}
+
+-- WAFFEN-Defaults. Jede Waffe eines Units ist ein eigenes Struct
+-- (RUnitBlueprintWeapon, 0x184 Bytes, RUnitBlueprintWeaponTypeInfo::Init
+-- Cfile:658191). Seine Felder registriert AddFields (Cfile:658290-658520) mit
+-- TYP und Offset — 23 float, 26 bool, 7 string. Das Struct wird wertinitialisiert:
+-- float -> 0.0, bool -> false, string -> "".
+--
+-- Das ist kein Feinschliff: die ACU-Waffe „RightZephyr" (uel0001_unit.bp:880ff)
+-- setzt KEIN DamageRadius — sie ist Einzelziel. `weapon.lua:287` rechnet aber
+-- ungeprueft `weaponBlueprint.DamageRadius + (self.DamageRadiusMod or 0)`, und
+-- ohne Default steht dort nil. Ergebnis: die ACU schiesst nicht (der Thread
+-- stirbt in schook/lua/sim/weapon.lua:17). Genau so gefunden — im Durchlauf.
+--
+-- Die Feldliste ist die der Engine, nicht eine geratene Auswahl.
+__weaponDefaults = {
+  -- float (Cfile:658290-658520)
+  BombDropThreshold = 0.0, Damage = 0.0, DamageRadius = 0.0, EffectiveRadius = 0.0,
+  FiringRandomness = 0.0, FiringTolerance = 0.0, HeadingArcCenter = 0.0,
+  HeadingArcRange = 0.0, MaxHeightDiff = 0.0, MaxRadius = 0.0,
+  MaximumBeamLength = 0.0, MinRadius = 0.0, MuzzleVelocity = 0.0,
+  MuzzleVelocityRandom = 0.0, MuzzleVelocityReduceDistance = 0.0,
+  ProjectileLifetime = 0.0, ProjectileLifetimeUsesMultiplier = 0.0,
+  RateOfFire = 0.0, RequiresEnergy = 0.0, RequiresMass = 0.0,
+  SlavedToBodyArcRange = 0.0, TargetCheckInterval = 0.0, TrackingRadius = 0.0,
+  -- int
+  AttackGroundTries = 0, MaxProjectileStorage = 0,
+  -- bool
+  AboveWaterFireOnly = false, AboveWaterTargetsOnly = false,
+  AimsStraightOnDisable = false, AlwaysRecheckTarget = false,
+  AutoInitiateAttackCommand = false, BelowWaterFireOnly = false,
+  BelowWaterTargetsOnly = false, CannotAttackGround = false,
+  CountedProjectile = false, DummyWeapon = false, IgnoreIfDisabled = false,
+  IgnoresAlly = false, LeadTarget = false, ManualFire = false, NeedPrep = false,
+  NeedToComputeBombDrop = false, NukeWeapon = false, OverChargeWeapon = false,
+  PrefersPrimaryWeaponTarget = false, ReTargetOnMiss = false, SlavedToBody = false,
+  StopOnPrimaryWeaponBusy = false, Turreted = false,
+  UseFiringSolutionInsteadOfAimBone = false, YawOnlyOnTarget = false,
+  -- string
+  DamageType = '', DisplayName = '', Label = '',
+  TargetRestrictDisallow = '', TargetRestrictOnlyAllow = '',
+  UIMaxRangeVisualId = '', UIMinRangeVisualId = '',
+  ProjectileId = '',
+}
+
 function RegisterUnitBlueprint(bp)
   fillDefaults(bp, __bpDefaults)
+  -- Jeder Waffen-Eintrag ist ein eigenes Struct — also auch eigene Defaults.
+  for _, w in ipairs(bp.Weapon or {}) do
+    fillDefaults(w, __weaponDefaults)
+  end
   __registered.Unit[bp.BlueprintId or '?'] = bp
 end
+
+function RegisterProjectileBlueprint(bp)
+  fillDefaults(bp, __projDefaults)
+  __registered.Projectile[bp.BlueprintId or '?'] = bp
+end
+
 RegisterMeshBlueprint=collector('Mesh')
-RegisterPropBlueprint=collector('Prop'); RegisterProjectileBlueprint=collector('Projectile')
+RegisterPropBlueprint=collector('Prop')
 RegisterEmitterBlueprint=collector('Emitter'); RegisterTrailEmitterBlueprint=collector('TrailEmitter')
 RegisterBeamBlueprint=collector('Beam')
 function BlueprintLoaderUpdateProgress() end

@@ -7,6 +7,7 @@ import { EconomyManager, installEconomy } from '../sim/economy'
 import { installMotion, motionTick } from '../sim/motion'
 import { installBuild, buildCollect, buildApply, factoryTick } from '../sim/build'
 import { setupSession, SANDBOX_SESSION, type SessionInfo } from '../sim/session'
+import { installCombat, weaponTick, projectileTick, flushDeletions } from './combat'
 import { simTick } from './simThreads'
 
 /**
@@ -66,11 +67,20 @@ export function installEngine(
   host.loadGlobal('/lua/system/utils.lua')
   installBlueprintPipeline(host)
   installUnitFactory(host)
+  // Kampf: Schaden, Projektile, Props, Waffen-Tasks. Nach der UnitFactory, weil
+  // die Löschwarteschlange und die Projektile auf __units/__nextUnitId aufsetzen.
+  installCombat(host)
   // Original-Lua, nicht nachgebaut: SimInit.lua:45 fährt `doscript
   // '/lua/SimSync.lua'`. Sie legt die Sim→UI-Brücke an (Sync, UnitData) —
   // ohne sie scheitert Unit:OnPreCreate an SyncMeta (unit.lua:23-40 schreibt
   // in UnitData). Das ist der erste Baustein der echten Boot-Kette.
-  host.loadGlobal('/lua/SimSync.lua')
+  //
+  // Und zwar über `doscript`, nicht über loadGlobal: nur doscript fährt die
+  // HOOKS mit (boot.lua, `hook = {'/schook'}` aus bin/SupComDataPath.lua).
+  // `schook/lua/simsync.lua:61` definiert `RemoveAllUnitEnhancements` — und
+  // genau die ruft unit.lua:1287 beim Tod JEDER Einheit (OnDestroy). Ohne den
+  // Hook stirbt der Todes-Pfad, und kein Wrack bleibt liegen.
+  host.eval(`doscript('/lua/SimSync.lua')`)
   host.eval('ResetSyncTable()')
   // Original Lua: the global TerrainTypes list that GetTerrainType() serves
   // (terraintypes.lua:126; unit.lua:2420 indexes the result unchecked).
@@ -102,7 +112,17 @@ export function beat(engine: Engine): void {
   // Phase 3 — consumers read back their granted LimitingRate and advance.
   buildApply(h)
   h.eval('__econEventsApply()')
-  // Phase 4 — Lua coroutines (CTaskStage::DoFrame), then movement.
+  // Phase 4 — die Waffen-Tasks der Engine (CArmyImpl::OnTick, Cfile:1018024):
+  // Zielsuche (alle TargetCheckInterval·10 Ticks) und Feuertakt (jeden Tick).
+  // Sie laufen VOR der Thread-Stage: `OnFire` wechselt nur den Zustand der
+  // Salven-FSM — geschossen wird im Coroutinen-Slice desselben Beats.
+  weaponTick(h)
+  // Phase 5 — Lua coroutines (CTaskStage::DoFrame), then movement.
   simTick(h)
   motionTick(h)
+  // Phase 6 — Projektile fliegen (Projectile::MotionTick) und schlagen ein.
+  projectileTick(h)
+  // Phase 7 — die Löschwarteschlange (Sim::AdvanceBeat, Cfile:1076638): erst
+  // hier laufen die OnDestroy-Callbacks. Entity:Destroy() löscht NICHT sofort.
+  flushDeletions(h)
 }

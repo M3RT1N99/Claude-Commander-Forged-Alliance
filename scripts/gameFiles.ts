@@ -13,13 +13,24 @@ import { open, readdir, type FileHandle } from 'node:fs/promises'
 import { ZipArchive } from '../src/vfs/zipArchive'
 import type { RandomAccessFile } from '../src/vfs/randomAccess'
 import type { LuaHost } from '../src/lua/host'
-import { loadUnitBlueprint, setUnitBones } from '../src/lua/unitFactory'
+import {
+  loadUnitBlueprint,
+  loadProjectileBlueprints,
+  loadPropBlueprints,
+  setUnitBones,
+  toSimBones,
+  type SimBone,
+} from '../src/lua/unitFactory'
 import { parseBlueprint } from '../src/formats/blueprint'
 import { resolveUnitPaths } from '../src/formats/unitPaths'
 import { parseScm } from '../src/formats/scm'
 
 /**
- * Die Knochennamen einer Unit — aus derselben SCM, die auch der Renderer liest.
+ * Das Skelett einer Unit — aus derselben SCM, die auch der Renderer liest.
+ *
+ * Liefert SimBone[] MIT Ruhepose (Name, Elternindex, Position relativ zum
+ * Eltern, Quaternion): `setUnitBones` braucht die Pose, nicht nur die Namen —
+ * ohne sie gibt es keine Muendungsposition und damit kein Projektil.
  *
  * `read` liefert die Bytes eines Pfads oder null. Die Suiten reichen hier ihren
  * eigenen Archiv-Zugriff herein; sie brauchen dafür kein zweites Mal alle
@@ -30,7 +41,7 @@ export async function bonesFromBlueprint(
   bpBytes: Uint8Array,
   read: (path: string) => Promise<Uint8Array | null>,
   exists: (path: string) => boolean,
-): Promise<string[]> {
+): Promise<SimBone[]> {
   const bp = parseBlueprint(new TextDecoder('utf-8').decode(bpBytes))
   // `exists` ist nicht optional: resolveUnitPaths probiert mehrere Kandidaten
   // durch (RES_CompletePath). Wer immer `true` liefert, bekommt den ersten —
@@ -40,7 +51,7 @@ export async function bonesFromBlueprint(
   if (!paths) return [] // Unit ohne Modell (Effekt-Einheiten) — hat wirklich keine Knochen
   const bytes = await read(paths.mesh)
   if (!bytes) throw new Error(`Modell nicht lesbar: ${paths.mesh} (für ${id})`)
-  return parseScm(bytes).bones.map((b) => b.name)
+  return toSimBones(parseScm(bytes))
 }
 
 class NodeFile implements RandomAccessFile {
@@ -125,13 +136,36 @@ export class GameFiles {
     setUnitBones(host, id, await this.bonesOf(id, bpBytes))
   }
 
-  /** Die Knochennamen aus dem Modell der Unit (dieselbe SCM wie im Renderer). */
-  async bonesOf(id: string, bpBytes?: Uint8Array): Promise<string[]> {
+  /**
+   * Das Skelett aus dem Modell der Unit (dieselbe SCM wie im Renderer) — mit
+   * Ruhepose, nicht nur Namen: die Mündungsposition eines Schusses hängt daran.
+   */
+  async bonesOf(id: string, bpBytes?: Uint8Array): Promise<SimBone[]> {
     const bytes = bpBytes ?? (await this.read(`units/${id}/${id}_unit.bp`))
     const bp = parseBlueprint(new TextDecoder('utf-8').decode(bytes))
     const assetPaths = resolveUnitPaths(id, bp, (p) => this.exists(p))
     if (!assetPaths || !this.exists(assetPaths.mesh)) return []
-    return parseScm(await this.read(assetPaths.mesh)).bones.map((b) => b.name)
+    return toSimBones(parseScm(await this.read(assetPaths.mesh)))
+  }
+
+  /**
+   * Alle Projektil-Blueprints in die Sim (289 Stück). Sie müssen vor dem ersten
+   * Schuss da sein — mitten im Tick kann die Engine nichts nachladen.
+   */
+  loadProjectiles(host: LuaHost): number {
+    // Auch `/effects/entities/**` — dort liegen die TRÜMMER-Projektile
+    // (defaultexplosions.lua:285 wirft beim Tod DebrisMisc0x) und die
+    // Nuke-Effekt-Controller (uel0001_unit.bp:1188). Es sind ProjectileBlueprints.
+    const paths = [...this.paths].filter(
+      (p) => (p.startsWith('projectiles/') || p.startsWith('effects/')) && p.endsWith('.bp'),
+    )
+    return loadProjectileBlueprints(host, paths)
+  }
+
+  /** Die Prop-Blueprints (Wracks) — /props/**.bp. */
+  loadProps(host: LuaHost): number {
+    const paths = [...this.paths].filter((p) => p.startsWith('props/') && p.endsWith('.bp'))
+    return loadPropBlueprints(host, paths)
   }
 
   async close(): Promise<void> {

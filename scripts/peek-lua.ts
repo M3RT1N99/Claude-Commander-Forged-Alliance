@@ -30,7 +30,19 @@ const GAME =
   process.env.CFA_GAME_DIR ??
   'C:/Program Files (x86)/Steam/steamapps/common/Supreme Commander Forged Alliance'
 
-const ARCHIVES = ['lua.scd', 'mohodata.scd', 'units.scd']
+// Die Archive, in denen Lua und Blueprints liegen. `projectiles.scd` (289 `.bp`
+// + 288 `_script.lua`), `props.scd` (Wracks/Reklamierbares) und `effects.scd`
+// gehören dazu: `Weapon.ProjectileId` zeigt nach `/projectiles/<id>/<id>_proj.bp`
+// (uel0201_unit.bp:225) — ohne diese Archive findet das Werkzeug die Wahrheit
+// nicht und man fängt an zu raten.
+const ARCHIVES = [
+  'lua.scd',
+  'mohodata.scd',
+  'units.scd',
+  'projectiles.scd',
+  'props.scd',
+  'effects.scd',
+]
 const args = process.argv.slice(2)
 const files: NodeFile[] = []
 const zips: { name: string; zip: ZipArchive }[] = []

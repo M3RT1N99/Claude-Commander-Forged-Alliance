@@ -1,0 +1,109 @@
+-- =====================================================================
+-- PROPS — Wracks, Felsen, Bäume. Alles, was herumsteht und reklamierbar ist.
+--
+-- Ein WRACK ist kein Engine-Ding: `Unit:CreateWreckage` (unit.lua:1076) und
+-- `CreateWreckageProp` (unit.lua:1090) sind reine LUA. Die Engine liefert nur
+-- `CreateProp(location, prop_blueprint_id)` (Cfile:1015366) und die eine
+-- Prop-Bindung `AddBoundedProp` (Cfile:1015752). Alles andere —
+-- SetReclaimValues, SetPropCollision, SetMaxReclaimValues — steht in
+-- /lua/sim/prop.lua und /lua/wreckage.lua.
+--
+-- Die Klasse eines Props kommt aus dem Blueprint (func_FindBlueprintScriptModule,
+-- Cfile:914189): props/defaultwreckage/defaultwreckage_prop.bp:16-17 sagt
+-- ausdruecklich `ScriptClass = 'Wreckage'`, `ScriptModule = '/lua/wreckage.lua'`.
+-- Ohne Blueprint-Felder gilt der Default: /lua/sim/prop.lua, Klasse "Prop".
+--
+-- STANDARD-LUA 5.4.
+-- =====================================================================
+
+__props = {}
+
+local function propClass(bp)
+  local path = bp.ScriptModule
+  if (not path or path == '') then
+    local src = bp.Source or bp.BlueprintId or ''
+    local cut = string.match(src, '^(.*)_[^_/]*$')
+    if cut then path = cut .. '_script.lua' end
+  end
+  if path and path ~= '' and exists(path) then
+    local ok, mod = pcall(import, path)
+    if ok and mod then
+      local cls = mod[bp.ScriptClass or 'TypeClass']
+      if cls then return cls end
+    end
+  end
+  return import('/lua/sim/Prop.lua').Prop
+end
+
+--- CreateProp(location, prop_blueprint_id) (Cfile:1015366).
+function CreateProp(location, bpId)
+  local key = string.lower(tostring(bpId))
+  local bp = __registered.Prop[key]
+  if not bp then
+    error('CreateProp: Invalid blueprint ' .. tostring(bpId), 2)
+  end
+  local pos = __vec3(location)
+  local cls = propClass(bp)
+  local p = cls()
+
+  local id = __nextUnitId
+  __nextUnitId = id + 1
+
+  p.__isProp = true
+  p.__bp = bp
+  p.__id = id
+  p.__army = -1 -- Props gehoeren niemandem (die Zivilarmee ist -1)
+  p.__pos = pos
+  p.__heading = 0
+  p.__bones = { names = {}, xform = {}, index = {} }
+  p.__health = (bp.Defense and bp.Defense.MaxHealth) or 1
+  p.__fraction = 1
+  p.Trash = TrashBag()
+  __props[id] = p
+
+  if p.OnCreate then
+    local ok, err = pcall(function() p:OnCreate() end)
+    if not ok then WARN('Prop ' .. tostring(bp.BlueprintId) .. ': OnCreate — ' .. tostring(err)) end
+  end
+  return p
+end
+
+--- CreatePropHPR(bp, x, y, z, heading, pitch, roll) (Cfile:1015219).
+function CreatePropHPR(bpId, x, y, z, heading, pitch, roll)
+  local p = CreateProp({ x, y, z }, bpId)
+  p.__heading = heading or 0
+  return p
+end
+
+--- TryCopyPose(from, to, stealAnimation) (unit.lua:1135 kopiert die Pose der
+--- sterbenden Unit auf ihr Wrack). Ohne Animations-System uebernehmen wir
+--- Position und Ausrichtung — mehr gibt es bei uns nicht zu kopieren.
+function TryCopyPose(from, to, stealAnimation)
+  if not from or not to then return end
+  local p = from.__pos or { 0, 0, 0 }
+  to.__pos = { p[1], p[2], p[3] }
+  to.__heading = from.__heading or 0
+end
+
+--- GetTerrainTypeOffset(x, z) — der Hoehenversatz des Terrain-Typs
+--- (unit.lua:1100 setzt das Wrack damit auf den Boden).
+function GetTerrainTypeOffset(x, z)
+  return 0
+end
+
+--- Der Zustand aller Props als JSON (der Renderer zeichnet die Wracks).
+function __readAllPropsJson()
+  local parts = {}
+  local n = 0
+  for id, p in pairs(__props) do
+    if not p.__destroyed and not p.__destroyQueued then
+      n = n + 1
+      local pos = p.__pos
+      parts[n] = string.format(
+        '{"id":%d,"bp":%q,"x":%.6g,"y":%.6g,"z":%.6g,"heading":%.6g}',
+        id, tostring(p.__bp.BlueprintId), pos[1], pos[2], pos[3], p.__heading or 0
+      )
+    end
+  end
+  return '[' .. table.concat(parts, ',') .. ']'
+end

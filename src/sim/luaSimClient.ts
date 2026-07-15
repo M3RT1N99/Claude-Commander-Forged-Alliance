@@ -4,6 +4,7 @@ import type { EcoSnapshot } from '../ui/hud'
 import { parseBlueprint } from '../formats/blueprint'
 import { resolveUnitPaths } from '../formats/unitPaths'
 import { parseScm } from '../formats/scm'
+import { toSimBones, type SimBone } from '../lua/unitFactory'
 
 /**
  * Main-Thread-Fassade für die Lua-Engine im Web-Worker (luaSimWorker.ts).
@@ -35,7 +36,7 @@ interface UnitPayload {
   scriptBytes: Uint8Array | null
   bpBytes: Uint8Array | null
   /** Knochennamen aus der SCM — die Engine hat das Skelett auch in der Sim. */
-  bones: string[]
+  bones: SimBone[]
 }
 
 interface StatesMsg {
@@ -82,6 +83,25 @@ export class LuaSimClient {
     // (vfs.readMany): `lua/**` liegt in lua.scd (7 MB) und mohodata.scd — am
     // Stück gelesen kostet das nichts.
     const files = await vfs.readMany(vfs.find((p) => p.startsWith('lua/') && p.endsWith('.lua')))
+
+    // Dazu ALLE PROJEKTILE (`projectiles/<id>/<id>_proj.bp` + `_script.lua`).
+    //
+    // Sie müssen vor dem ersten Schuss in der Sim liegen: eine Waffe feuert
+    // MITTEN im Tick (defaultweapons.lua ruft `unit:CreateProjectile(
+    // bp.ProjectileId, ...)`, uel0201_unit.bp:225 zeigt auf
+    // `/projectiles/TDFGauss01/TDFGauss01_proj.bp`) — dort ist kein Platz für
+    // einen asynchronen Nachschlag im Hauptthread. Die Engine macht es genauso:
+    // sie lädt beim Start ALLE Blueprints (Blueprints.lua über DiskFindFiles).
+    // Kosten: 289 Blueprints + 288 Skripte = 652 KB, ein Archiv-Zugriff.
+    // Dazu die PROPS (`props/**.bp`) — daraus entstehen die Wracks
+    // (unit.lua:1105 CreateProp(pos, bp.Wreckage.Blueprint)).
+    const projPaths = vfs.find(
+      (p) =>
+        (p.startsWith('projectiles/') || p.startsWith('props/') || p.startsWith('effects/')) &&
+        (p.endsWith('.bp') || p.endsWith('.lua')),
+    )
+    for (const [p, b] of await vfs.readMany(projPaths)) files.set(p, b)
+
     const worker = new Worker(new URL('./luaSimWorker.ts', import.meta.url), { type: 'module' })
     const client = new LuaSimClient(worker, vfs)
     const booted = new Promise<void>((res) => {
@@ -153,7 +173,7 @@ export class LuaSimClient {
         const bp = parseBlueprint(new TextDecoder('utf-8').decode(payload.bpBytes))
         const paths = resolveUnitPaths(id, bp, (p) => this.vfs.exists(p))
         if (paths && this.vfs.exists(paths.mesh)) {
-          payload.bones = parseScm(await this.vfs.read(paths.mesh)).bones.map((b) => b.name)
+          payload.bones = toSimBones(parseScm(await this.vfs.read(paths.mesh)))
         }
       } catch {
         // Kein Modell (z. B. Effekt-Einheiten): dann hat die Unit eben keine
@@ -190,12 +210,14 @@ export class LuaSimClient {
     id: string,
     pos: { x: number; y: number; z: number },
     army = 1,
+    /** Shift gehalten? Dann hängt der Auftrag an die Bau-Reihe an. */
+    queue = false,
   ): Promise<number> {
     const p = await this.unitPayload(id)
     const reqId = this.nextReq++
     return new Promise<number>((resolve, reject) => {
       this.spawnPending.set(reqId, { resolve, reject })
-      this.worker.postMessage({ type: 'build', reqId, builderId, id, ...p, pos, army })
+      this.worker.postMessage({ type: 'build', reqId, builderId, id, ...p, pos, army, queue })
     })
   }
 
@@ -230,6 +252,15 @@ export class LuaSimClient {
   }
   stop(id: number): void {
     this.worker.postMessage({ type: 'stop', id })
+  }
+
+  /**
+   * Der Sammelpunkt einer Fabrik (IssueFactoryRallyPoint, Cfile:1008266). Die
+   * Fabrik BEWEGT sich nicht — ihre frischen Einheiten fahren dorthin
+   * (defaultunits.lua:578 CalculateRollOffPoint liest GetRallyPoint).
+   */
+  setRallyPoint(id: number, x: number, y: number, z: number): void {
+    this.worker.postMessage({ type: 'rally', id, x, y, z })
   }
 
   /**

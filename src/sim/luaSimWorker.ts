@@ -12,7 +12,15 @@
 import { LuaHost } from '../lua/host'
 import { installEngine, beat, type Engine } from '../lua/engine'
 import { queueFactoryBuild } from './build'
-import { loadUnitBlueprint, spawnLuaUnit, spawnBuildSite, setUnitBones } from '../lua/unitFactory'
+import {
+  loadUnitBlueprint,
+  loadProjectileBlueprints,
+  loadPropBlueprints,
+  spawnLuaUnit,
+  spawnBuildSite,
+  setUnitBones,
+  type SimBone,
+} from '../lua/unitFactory'
 import { setTerrainSource } from '../lua/engineGlobals'
 import { Heightfield, type HeightfieldData } from './terrain'
 
@@ -35,9 +43,12 @@ interface Vec3 {
 }
 type InMsg =
   | { type: 'boot'; files: Map<string, Uint8Array>; terrain: HeightfieldData }
-  | { type: 'spawn'; reqId: number; id: string; scriptPath: string; scriptBytes: Uint8Array | null; bpBytes: Uint8Array | null; bones: string[]; pos: Vec3; army: number }
+  | { type: 'spawn'; reqId: number; id: string; scriptPath: string; scriptBytes: Uint8Array | null; bpBytes: Uint8Array | null; bones: SimBone[]; pos: Vec3; army: number }
   | { type: 'move'; id: number; x: number; z: number }
   | { type: 'stop'; id: number }
+  // Der Sammelpunkt einer Fabrik (IssueFactoryRallyPoint, Cfile:1008266) — KEIN
+  // Bewegungsbefehl: die Fabrik bleibt stehen.
+  | { type: 'rally'; id: number; x: number; y: number; z: number }
   | { type: 'reset'; terrain: HeightfieldData }
   // SessionRequestPause/SessionResume (mHelp: „Pause the world simulation.").
   // Die Engine hält die WELT an — der Beat läuft nicht weiter, die UI schon.
@@ -52,9 +63,11 @@ type InMsg =
       scriptPath: string
       scriptBytes: Uint8Array | null
       bpBytes: Uint8Array | null
-      bones: string[]
+      bones: SimBone[]
       pos: Vec3
       army: number
+      /** Shift gehalten? Dann wird der Auftrag an die Bau-Reihe ANGEHÄNGT. */
+      queue: boolean
     }
   // Fabrik-Auftrag (IssueBlueprintCommand "UNITCOMMAND_BuildFactory"): die
   // Einheit geht in die Warteschlange, die Fabrik arbeitet sie im Beat ab.
@@ -65,7 +78,7 @@ type InMsg =
       scriptPath: string
       scriptBytes: Uint8Array | null
       bpBytes: Uint8Array | null
-      bones: string[]
+      bones: SimBone[]
       count: number
     }
 
@@ -83,6 +96,10 @@ ctx.onmessage = async (e: MessageEvent<InMsg>): Promise<void> => {
     // still 0 zu liefern). Dieselbe bilineare Abfrage wie im Renderer.
     const hf = new Heightfield(msg.terrain)
     setTerrainSource(h, (x, z) => hf.at(x, z))
+    // ALLE Projektil- und Prop-Blueprints, VOR dem ersten Schuss. Die Engine
+    // lädt beim Start ebenfalls alles (Blueprints.lua über DiskFindFiles) —
+    // mitten im Tick kann eine Waffe nichts nachladen.
+    loadBlueprintGroups(h, msg.files)
     host = h
     ctx.postMessage({ type: 'booted' })
     setInterval(tickAndPost, 100) // 10-Hz-Sim-Beat im Worker-Thread
@@ -101,7 +118,7 @@ ctx.onmessage = async (e: MessageEvent<InMsg>): Promise<void> => {
   if (!host) return
   // Script, Blueprint und Skelett muessen in der Sim liegen, BEVOR eine Unit
   // dieses Typs entsteht — auch wenn die Fabrik sie spaeter selbst spawnt.
-  const prepare = (m: { id: string; scriptPath: string; scriptBytes: Uint8Array | null; bpBytes: Uint8Array | null; bones: string[] }): void => {
+  const prepare = (m: { id: string; scriptPath: string; scriptBytes: Uint8Array | null; bpBytes: Uint8Array | null; bones: SimBone[] }): void => {
     if (!host) return
     if (m.scriptBytes && !host.hasFile(m.scriptPath)) host.addFile(m.scriptPath, m.scriptBytes)
     if (m.bpBytes) loadUnitBlueprint(host, m.id, m.bpBytes)
@@ -121,7 +138,7 @@ ctx.onmessage = async (e: MessageEvent<InMsg>): Promise<void> => {
       // Reihenfolge wie in der Engine: erst die Baustelle (Sim::CreateUnit mit
       // beingBuilt=1), dann der Auftrag an den Bauer (OnStartBuild/'MobileBuild').
       const uid = spawnBuildSite(host, msg.id, msg.pos, msg.army)
-      host.eval(`__issueBuildTask(${msg.builderId}, ${uid})`)
+      host.eval(`__issueBuildTask(${msg.builderId}, ${uid}, nil, ${!msg.queue})`)
       ctx.postMessage({ type: 'spawned', reqId: msg.reqId, uid })
     } catch (err) {
       ctx.postMessage({ type: 'spawnError', reqId: msg.reqId, error: (err as Error).message })
@@ -131,6 +148,8 @@ ctx.onmessage = async (e: MessageEvent<InMsg>): Promise<void> => {
     queueFactoryBuild(host, msg.factoryId, msg.id, msg.count)
   } else if (msg.type === 'move') {
     host.eval(`local u=__units[${msg.id}]; if u then u:GetNavigator():SetGoal({ ${msg.x}, 0, ${msg.z} }) end`)
+  } else if (msg.type === 'rally') {
+    host.eval(`local u=__units[${msg.id}]; if u then u:SetRallyPoint({ ${msg.x}, ${msg.y}, ${msg.z} }) end`)
   } else if (msg.type === 'stop') {
     host.eval(`local u=__units[${msg.id}]; if u then u:GetNavigator():AbortMove() end`)
   }
@@ -151,7 +170,33 @@ async function resetSession(files: Map<string, Uint8Array>, terrain: Heightfield
   engine = installEngine(h)
   const hf = new Heightfield(terrain)
   setTerrainSource(h, (x, z) => hf.at(x, z))
+  loadBlueprintGroups(h, files)
   host = h
+}
+
+/**
+ * Projektil- und Prop-Blueprints registrieren (die echte Pipeline,
+ * `LoadBlueprints()`). Beides ist Voraussetzung für den Kampf: ohne
+ * Projektil-Blueprint knallt `CreateProjectile` („Invalid blueprint",
+ * Cfile:930793), ohne Prop-Blueprint gibt es kein Wrack.
+ */
+function loadBlueprintGroups(h: LuaHost, files: Map<string, Uint8Array>): void {
+  const proj: string[] = []
+  const props: string[] = []
+  for (const path of files.keys()) {
+    if (!path.endsWith('.bp')) continue
+    // `/effects/entities/**` sind ebenfalls ProjectileBlueprints: die Trümmer
+    // beim Tod (defaultexplosions.lua:285) und die Nuke-Effekt-Controller.
+    if (path.startsWith('projectiles/') || path.startsWith('effects/')) proj.push(path)
+    else if (path.startsWith('props/')) props.push(path)
+  }
+  const nProj = loadProjectileBlueprints(h, proj)
+  const nProps = loadPropBlueprints(h, props)
+  ctx.postMessage({
+    type: 'log',
+    level: 'INFO',
+    msg: `Sim: ${nProj} Projektil-Blueprints, ${nProps} Prop-Blueprints`,
+  })
 }
 
 function tickAndPost(): void {

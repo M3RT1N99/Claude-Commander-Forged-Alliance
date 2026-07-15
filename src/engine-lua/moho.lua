@@ -66,28 +66,130 @@ local entity = withNoops(ENTITY_NAMES, {
   GetAIBrain = function(self) return self.__brain end,
   GetParent = function(self) return self.__parent end,
 
-  -- Lifecycle. IsDestroyed()/BeenDestroyed() read this flag (see globals.lua).
+  -- Lifecycle. Entity::Destroy (Cfile:916089) loescht NICHT sofort: es setzt
+  -- mDestroyQueued und haengt die Entity in Sim::mDeletionQueue. Erst am Ende
+  -- des Beats laeuft Entity::OnDestroy — und damit der Lua-Callback OnDestroy,
+  -- der den TrashBag leert (unit.lua:1244). Wer sofort loescht, verliert ihn.
   Destroy = function(self)
-    self.__destroyed = true
-    if self.__id then
-      __units[self.__id] = nil
-      __econUnregister(self.__army or 1, self.__id)
-    end
+    if self.__destroyQueued then return end
+    self.__destroyQueued = true
+    __queueDeletion(self)
   end,
-  BeenDestroyed = function(self) return self.__destroyed == true end,
+  BeenDestroyed = function(self)
+    return self.__destroyQueued == true or self.__destroyed == true
+  end,
 
-  -- Health.
+  -- Health. Die Engine klemmt nur — sie toetet niemanden bei 0 HP
+  -- (Entity::AdjustHealth, Cfile:915978). Das tut Unit:DoTakeDamage in der Lua.
   GetHealth = function(self) return self.__health or 0 end,
   GetMaxHealth = function(self)
+    if self.__maxHealth then return self.__maxHealth end
     return (self.__bp and self.__bp.Defense and self.__bp.Defense.MaxHealth) or 0
   end,
+  SetMaxHealth = function(self, hp) self.__maxHealth = hp end,
+
+  -- OnHealthChanged feuert NUR, wenn sich der auf 25%-Stufen QUANTISIERTE
+  -- Anteil aendert (round(ratio*4)/4, Cfile:916030-916050). Genau deshalb
+  -- kommentiert unit.lua:823 „Health values come in at fixed 25% intervals" —
+  -- daran haengen die Schadensraucher (ManageDamageEffects).
   SetHealth = function(self, instigator, hp)
-    self.__health = math.max(0, math.min(hp, self:GetMaxHealth()))
+    local max = self:GetMaxHealth()
+    local old = self.__health or 0
+    local new = math.max(0, math.min(hp, max))
+    self.__health = new
+    if max > 0 and self.OnHealthChanged then
+      -- Die Engine quantisiert mit FLOOR, nicht kaufmaennisch: `frndint` mit
+      -- der Korrektur `if (x < round(x)) -1` (Cfile:916030-916037) ergibt fuer
+      -- positive x genau floor(x). Mit +0.5 (round-half-up) feuerte
+      -- OnHealthChanged an den 12.5/37.5/62.5/87.5%-Grenzen einen Tick zu frueh.
+      local qOld = math.floor((old / max) * 4) / 4
+      local qNew = math.floor((new / max) * 4) / 4
+      if qOld ~= qNew then
+        pcall(function() self:OnHealthChanged(qNew, qOld) end)
+      end
+    end
   end,
   AdjustHealth = function(self, instigator, delta)
-    self.__health = math.max(0, math.min((self.__health or 0) + delta, self:GetMaxHealth()))
+    self:SetHealth(instigator, (self.__health or 0) + delta)
   end,
   GetFractionComplete = function(self) return self.__fraction or 1 end,
+
+  -- Moho::Unit::Kill (Cfile:951962) — die Engine toetet, die Lua hat es
+  -- angeordnet (unit.lua:809 aus DoTakeDamage).
+  --
+  --   1. schon tot -> raus
+  --   2. Lua CheckCanBeKilled(self, instigator) darf es verhindern (Cfile:952042)
+  --   3. Baustelle mit FractionComplete < 0.5 -> excessDamageRatio = 10.0
+  --      (Cfile:952122-952126). In der Lua heisst 10.0: KEIN WRACK
+  --      (unit.lua:1079: overkillRatio > 1 -> kein Wrack). Man kann sich das
+  --      nicht ausdenken, und ohne diese Zeile hinterlaesst jede halbfertige
+  --      Baustelle ein volles Wrack.
+  --   4. Lua SetDead (Cfile:952128) -> mIsDead
+  --   5. Lua OnKilled(instigator, type, overkillRatio) (Cfile:952177)
+  Kill = function(self, instigator, damageType, excessDamageRatio)
+    if self.__dead then return end
+    if self.CheckCanBeKilled then
+      local ok, res = pcall(function() return self:CheckCanBeKilled(instigator) end)
+      if ok and res == false then return end
+    end
+    local overkill = excessDamageRatio or 0.0
+    if self.__beingBuilt and (self.__fraction or 1) < 0.5 then overkill = 10.0 end
+
+    self.__dead = true
+    if self.SetDead then pcall(function() self:SetDead() end) end
+
+    -- OnKilled ZUERST, KILLS DANACH — die Reihenfolge in cfunc_EntityKillL:
+    -- erst `v4->Kill(...)` (feuert OnKilled intern, Cfile:936149), dann der
+    -- KILLS-Zaehler auf dem Instigator (Cfile:936183). Das ist load-bearing:
+    -- OnKilled -> instigator:OnKilledUnit -> CheckVeteranLevel liest
+    -- `GetStat('KILLS',0).Value + 1` (unit.lua:3139) — das +1 gilt genau, WEIL
+    -- die Engine diesen Kill noch nicht gezaehlt hat. Zaehlt man vorher, steigt
+    -- die Unit einen Kill zu frueh auf.
+    if self.OnKilled then
+      local ok, err = pcall(function()
+        self:OnKilled(instigator, damageType or '', overkill)
+      end)
+      if not ok then WARN('OnKilled: ' .. tostring(err)) end
+    end
+
+    -- Die Kill-Statistik zaehlt die ENGINE (Cfile:936180-936183) — unit.lua:3083
+    -- verlaesst sich darauf („kills through the engine are already counted").
+    -- BENIGN-Ziele (Wracks, Reklamierbares) zaehlen NICHT (Cfile:936164).
+    if instigator and instigator.__isUnit and not self.__beingBuilt
+      and instigator.__army ~= self.__army
+      and not EntityCategoryContains(categories.BENIGN, self) then
+      local stat = instigator.__stats or {}
+      stat.KILLS = (stat.KILLS or 0) + 1
+      instigator.__stats = stat
+    end
+  end,
+  -- SetCollisionShape(shape, cx, cy, cz, size…) (Cfile:934167). unit.lua:922
+  -- schaltet damit bei der Todes-Animation die Kollision ab ('None').
+  SetCollisionShape = function(self, shape, cx, cy, cz, sx, sy, sz)
+    self.__collisionShape = { shape = shape, x = cx, y = cy, z = cz, sx = sx, sy = sy, sz = sz }
+  end,
+
+  -- Entity:CreateProjectile(proj_bp, [ox,oy,oz], [dx,dy,dz]) (Cfile:930715).
+  -- Startpose = Pose der Entity + Offset; Richtung fehlt -> aus dem Blueprint.
+  -- Damage 0, Typ 'Normal' — ein so erzeugtes Projektil traegt keinen Schaden
+  -- (die Waffe reicht ihn separat durch, PassDamageData).
+  CreateProjectile = function(self, bpId, ox, oy, oz, dx, dy, dz)
+    local p, q = __boneWorld(self, nil)
+    p = { p[1] + (ox or 0), p[2] + (oy or 0), p[3] + (oz or 0) }
+    if dx or dy or dz then
+      local len = math.sqrt((dx or 0) ^ 2 + (dy or 0) ^ 2 + (dz or 0) ^ 2)
+      if len > 0 then
+        q = __orientFromDir({ (dx or 0) / len, (dy or 0) / len, (dz or 0) / len })
+      end
+    end
+    return __projCreate(self, bpId, p, q, nil, 0, 0, 'Normal', nil)
+  end,
+
+  -- Entity:CreateProjectileAtBone(projectile_blueprint, bone) (Cfile:930926).
+  CreateProjectileAtBone = function(self, bpId, bone)
+    local p, q = __boneWorld(self, bone)
+    return __projCreate(self, bpId, p, q, nil, 0, 0, 'Normal', nil)
+  end,
 
   -- Transform. __pos is {x, y, z}, __orient a quaternion.
   --
@@ -95,13 +197,33 @@ local entity = withNoops(ENTITY_NAMES, {
   -- greift auf BEIDES zu — `pos[1]` (aeonweapons.lua:105) und `pos.x`
   -- (effectutilities.lua:274). Ohne die Felder stirbt jeder Bau-Effekt an
   -- "attempt to perform arithmetic on a nil value".
-  GetPosition = function(self)
+  -- "Entity:GetPosition([bone])" (Cfile:934579): MIT Knochen die Weltposition
+  -- genau dieses Knochens — daher kommt der Startpunkt eines Schusses.
+  GetPosition = function(self, bone)
+    if bone ~= nil then
+      local p = __boneWorld(self, bone)
+      return Vector(p[1], p[2], p[3])
+    end
     local p = self.__pos or { 0, 0, 0 }
     return Vector(p[1] or p.x or 0, p[2] or p.y or 0, p[3] or p.z or 0)
   end,
-  GetPositionXYZ = function(self)
+  GetPositionXYZ = function(self, bone)
+    if bone ~= nil then
+      local p = __boneWorld(self, bone)
+      return p[1], p[2], p[3]
+    end
     local p = self.__pos or { 0, 0, 0 }
     return p[1], p[2], p[3]
+  end,
+
+  -- "Entity:GetBoneDirection(nameOrIndex)" (cfunc_EntityGetBoneDirectionL,
+  -- Cfile:931469-931505): die Engine holt die Weltquaternion des Knochens und
+  -- dreht damit (0,0,1) — die Blickrichtung eines Knochens ist seine +Z-ACHSE.
+  -- Rueckgabe: DREI Zahlen, kein Vektor.
+  GetBoneDirection = function(self, bone)
+    local _, q = __boneWorld(self, bone)
+    local d = __quatForward(q)
+    return d[1], d[2], d[3]
   end,
   SetPosition = function(self, pos) self.__pos = pos end,
   GetOrientation = function(self) return self.__orient or { 0, 0, 0, 1 } end,
@@ -119,22 +241,14 @@ local entity = withNoops(ENTITY_NAMES, {
   -- Die Namen kommen aus der SCM-Datei (src/formats/scm.ts) und werden pro
   -- Blueprint gesetzt (__setBones).
   GetBoneCount = function(self)
-    return table.getn(self.__bones or {})
+    return table.getn(__skeletonOf(self).names)
   end,
   GetBoneName = function(self, i)
-    return (self.__bones or {})[i + 1]
+    return __skeletonOf(self).names[i + 1]
   end,
   IsValidBone = function(self, bone)
     if bone == nil then return false end
-    local bones = self.__bones or {}
-    if type(bone) == 'number' then
-      return bone >= 0 and bone < table.getn(bones)
-    end
-    local want = string.lower(tostring(bone))
-    for _, name in ipairs(bones) do
-      if string.lower(name) == want then return true end
-    end
-    return false
+    return __boneIndex(self, bone) ~= nil
   end,
 })
 
@@ -174,11 +288,66 @@ local UNIT_NAMES = {
   'WeaponHasTarget', 'WeaponIsFireControl', 'WeaponPlaySound', 'WeaponSetEnabled',
   'WeaponSetFireControl', 'WeaponSetFireTargetLayerCaps', 'WeaponSetFiringRandomness',
   'WeaponSetTargetingPriorities', 'WeaponTransferTarget',
+  'GetStat', 'SetStat',
 }
 
 local unit = withNoops(UNIT_NAMES, {
   GetUnitId = function(self)
     return (self.__bp and self.__bp.BlueprintId) or self.__id
+  end,
+
+  -- Ruestung. Der Faktor kommt aus /lua/armordefinition.lua — der Datei, die
+  -- die Engine selbst importiert (Cfile:708539). Kein erfundener Wert.
+  GetArmorMult = function(self, damageType) return __armorMult(self, damageType) end,
+  AlterArmor = function(self, damageType, mult)
+    self.__armorOverride = self.__armorOverride or {}
+    self.__armorOverride[string.lower(tostring(damageType))] = mult
+  end,
+
+  -- Unit:GetStat(name, default) -> Tabelle mit .Value (Cfile:978066).
+  -- unit.lua:3139 (CheckVeteranLevel) liest GetStat('KILLS', 0).Value; die
+  -- Engine zaehlt KILLS beim Toeten selbst hoch (Cfile:936068).
+  GetStat = function(self, name, default)
+    local v = (self.__stats or {})[name]
+    if v == nil then v = default end
+    return { Value = v }
+  end,
+  SetStat = function(self, name, value)
+    self.__stats = self.__stats or {}
+    self.__stats[name] = value
+  end,
+
+  -- FIRE-STATE. EFireState (Cfile:702842-702850): Mix = -1, ReturnFire = 0,
+  -- HoldFire = 1, HoldGround = 2. Default der Unit: ReturnFire (Cfile:772277).
+  -- „Return Fire" ist KEIN Mechanismus, sondern schlicht „kein HoldFire" — es
+  -- gibt keinen OnDamage->Feuer-Pfad in der Engine.
+  -- Wirkung: der Feuertakt feuert nicht bei HoldFire (Cfile:983935) und die
+  -- Zielerfassung LOESCHT das Ziel (Cfile:793085-793097). Beides in weapons.lua.
+  GetFireState = function(self) return self.__fireState or 0 end,
+  SetFireState = function(self, state) self.__fireState = state end,
+  ToggleFireState = function(self)
+    self.__fireState = ((self.__fireState or 0) == 1) and 0 or 1
+  end,
+
+  -- SCRIPT-BITS (Unit::ToggleScriptBit, Cfile:951395-951437): 1 << bit auf
+  -- mScriptbits, dann OnScriptBitSet/OnScriptBitClear(bit) in der Lua.
+  -- Indizes (Cfile:656792-656811): 0 Shield, 1 Weapon, 2 Jamming, 3 Intel,
+  -- 4 Production, 5 Stealth, 6 Generic, 7 Special, 8 Cloak.
+  GetScriptBit = function(self, bit)
+    local bits = self.__scriptBits or 0
+    local n = tonumber(bit) or 0
+    return (math.floor(bits / (2 ^ n)) % 2) == 1
+  end,
+  SetScriptBit = function(self, bit, state)
+    local n = tonumber(bit) or 0
+    local was = self:GetScriptBit(n)
+    if was == (state == true) then return end
+    self.__scriptBits = (self.__scriptBits or 0) + (state and (2 ^ n) or -(2 ^ n))
+    local cb = state and self.OnScriptBitSet or self.OnScriptBitClear
+    if cb then pcall(function() cb(self, n) end) end
+  end,
+  ToggleScriptBit = function(self, bit)
+    self:SetScriptBit(bit, not self:GetScriptBit(bit))
   end,
   GetCurrentLayer = function(self) return self.__layer or 'Land' end,
   IsBeingBuilt = function(self) return self.__beingBuilt or false end,
@@ -280,7 +449,122 @@ local weapon = withNoops(WEAPON_NAMES, {
   HasTarget = function(self) return self.__target ~= nil end,
   GetCurrentTarget = function(self) return self.__target end,
   SetEnabled = function(self, e) self.__enabled = e end,
-  CanFire = function(self) return self.__enabled ~= false end,
+
+  -- Weapon:CanFire() (Cfile:987703-987735): HasTarget && UnitWeapon::CanFire &&
+  -- CheckSilo && Zielloesung verfuegbar. `mCanFire` selbst schreibt NUR der
+  -- Aim-Manipulator (Cfile:862074-862092); ohne Turm bleibt es auf dem
+  -- Ctor-Wert 1 (Cfile:984168) — nicht-turmbewehrte Waffen koennen immer feuern.
+  CanFire = function(self)
+    if self.__enabled == false then return false end
+    if self.__unit and self.__unit.__stunned then return false end
+    return self.__target ~= nil
+  end,
+
+  -- Das Ziel setzen — die FLANKE loest die Callbacks aus (Cfile:985364/985494):
+  -- OnGotTarget nur bei kein->ein Ziel, OnLostTarget nur bei ein->kein Ziel.
+  -- Wer sie bei jedem Aufruf feuert, startet die Salven-FSM immer wieder neu.
+  SetTargetEntity = function(self, target) __weaponSetTarget(self, target) end,
+  SetTargetGround = function(self, pos) __weaponSetTarget(self, nil, __vec3(pos)) end,
+  ResetTarget = function(self) __weaponSetTarget(self, nil, nil) end,
+
+  -- GetCurrentTargetPos: die Weltposition dessen, worauf die Waffe zielt
+  -- (Cfile:987621). defaultweapons.lua:114 rechnet damit die Detonationshoehe.
+  GetCurrentTargetPos = function(self)
+    if self.__target and self.__target.__pos then
+      local p = self.__target.__pos
+      return Vector(p[1], p[2], p[3])
+    end
+    if self.__targetGround then
+      local p = self.__targetGround
+      return Vector(p[1], p[2], p[3])
+    end
+    return nil
+  end,
+
+  -- GetFireClockPct = 1 - mFireClock / (10/RoF) (Cfile:988512-988531).
+  GetFireClockPct = function(self)
+    local bp = self.__bp or {}
+    local rof = bp.RateOfFire or 1
+    local full = math.floor(10 / rof)
+    if full <= 0 then return 1 end
+    return 1 - ((self.__fireClock or 0) / full)
+  end,
+
+  -- Laufzeit-Overrides. Der CWeaponAttributes-Ctor setzt sie auf -1
+  -- (Cfile:983289-983304): NEGATIV heisst „nimm den Blueprint-Wert".
+  ChangeRateOfFire = function(self, rof) self.__rateOfFire = rof end,
+  ChangeMaxRadius = function(self, r) self.__maxRadius = r end,
+  ChangeMinRadius = function(self, r) self.__minRadius = r end,
+  ChangeDamage = function(self, d) self.__damage = d end,
+  ChangeDamageRadius = function(self, r) self.__damageRadius = r end,
+  ChangeDamageType = function(self, t) self.__damageType = t end,
+  ChangeProjectileBlueprint = function(self, bpId) self.__projectileId = bpId end,
+  GetProjectileBlueprint = function(self)
+    return self.__projectileId or (self.__bp and self.__bp.ProjectileId)
+  end,
+
+  -- UnitWeapon:CreateProjectile(muzzlebone) — DER SCHUSS (Cfile:985613-985800).
+  --
+  -- Ohne ProjectileId feuert die Engine kein Projektil, sondern macht einen
+  -- DoInstaHit und liefert nil (Cfile:985658-985675) — CreateProjectileAtMuzzle
+  -- prueft genau darauf.
+  --
+  -- MuzzleVelocity != 0 ueberschreibt den Betrag der Startgeschwindigkeit.
+  -- Lebensdauer in TICKS: ProjectileLifetime * 10, sonst
+  -- (MaxRadius / MuzzleVelocity) * ProjectileLifetimeUsesMultiplier * 10.
+  CreateProjectile = function(self, bone)
+    local bp = self.__bp or {}
+    local u = self.__unit
+    local projId = self:GetProjectileBlueprint()
+    if not projId or projId == '' then
+      -- DoInstaHit: der Treffer geschieht sofort, ohne Flugkoerper.
+      __weaponInstaHit(self)
+      return nil
+    end
+
+    local pos, quat = __boneWorld(u, bone)
+    -- Zielrichtung: die Engine nimmt die Muendungsachse, mit
+    -- UseFiringSolutionInsteadOfAimBone die Richtung zum Ziel (Cfile:985700ff).
+    -- Unsere Tuerme drehen sich noch nicht (die AimManipulatoren sind Attrappen),
+    -- deshalb zielen wir IMMER ueber die Zielloesung — sonst schoesse jede Waffe
+    -- stur nach vorn.
+    local tp = self:GetCurrentTargetPos()
+    if tp then
+      local dx, dy, dz = tp[1] - pos[1], tp[2] - pos[2], tp[3] - pos[3]
+      local len = math.sqrt(dx * dx + dy * dy + dz * dz)
+      if len > 0 then
+        quat = __orientFromDir({ dx / len, dy / len, dz / len })
+      end
+    end
+
+    local speed = nil
+    if bp.MuzzleVelocity and bp.MuzzleVelocity ~= 0 then speed = bp.MuzzleVelocity end
+
+    local damage = self.__damage or bp.Damage or 0
+    local radius = self.__damageRadius or bp.DamageRadius or 0
+    local proj = __projCreate(
+      u, projId, pos, quat, speed, damage, radius,
+      self.__damageType or bp.DamageType or 'Normal', self.__target
+    )
+
+    -- Lebensdauer (Cfile:985760ff).
+    if proj and not proj.__destroyQueued then
+      local life
+      if bp.ProjectileLifetime and bp.ProjectileLifetime > 0 then
+        life = bp.ProjectileLifetime
+      elseif bp.MuzzleVelocity and bp.MuzzleVelocity > 0 then
+        life = ((bp.MaxRadius or 0) / bp.MuzzleVelocity)
+          * (bp.ProjectileLifetimeUsesMultiplier or 1)
+      end
+      if life and life > 0 then proj:SetLifetime(life) end
+    end
+    return proj
+  end,
+
+  -- Weapon:PlaySound(cue) — die Waffe bittet um ihren Feuersound. Die Sim hat
+  -- keine Audio-Ausgabe (die hat die UI-VM); gesammelt wird er trotzdem, damit
+  -- die Tests sehen, DASS geschossen wurde.
+  PlaySound = function(self, cue) __simSoundRequested(cue) end,
 }, entity)
 
 -- ---------------------------------------------------------------------
@@ -334,6 +618,14 @@ local aibrain = withNoops(AIBRAIN_NAMES, {
     local s = self.__stats and self.__stats[name]
     return s or { Value = default }
   end,
+
+  -- Die BEDROHUNGSKARTE der Engine (ein Raster, das die KI liest). Unsere Sim
+  -- fuehrt keines — GetThreatAtPosition liefert deshalb 0: „hier ist nichts
+  -- eingetragen". Das ist keine erfundene Zahl, sondern der Zustand einer leeren
+  -- Karte, und es ist eine ZAHL: defaultunits.lua:1223 rechnet ungeprueft
+  -- `threat / 2` und riss ohne sie den ganzen Todes-Pfad mit (kein Wrack).
+  GetThreatAtPosition = function(self, pos, rings, enemy, threatType) return 0 end,
+  AssignThreatAtPosition = function(self, pos, threat, decay, threatType) end,
 })
 
 -- ---------------------------------------------------------------------
@@ -655,9 +947,142 @@ moho = setmetatable({}, {
   end,
 })
 
+-- ---------------------------------------------------------------------
+-- projectile_methods (Moho::Projectile) — 30 Bindungen, nur Sim-VM
+-- (docs/research/engine-api.md, Klasse `Projectile`).
+--
+-- Projectile.lua:16: `Projectile = Class(moho.projectile_methods, Entity)`.
+--
+-- JEDER Setter gibt `self` zurueck (Cfile:947725, `return 1` mit dem Lua-Objekt)
+-- — die Original-Lua verkettet:
+--   defaultweapons.lua:777  unit:CreateProjectile(id,0,0,0,nil,nil,nil):SetCollision(false)
+-- Wer hier nichts zurueckgibt, laesst genau diese Zeile auf nil laufen.
+--
+-- Und SetTurnRate ist GRAD/Sekunde, nicht Radiant: die Engine schreibt direkt
+-- mTurnRateDeg (Cfile:947724) und multipliziert im MotionTick mit
+-- 0.0017453292 = pi/180 * 0.1. Der mHelp-Text („radians_per_second") ist falsch.
+-- ---------------------------------------------------------------------
+local PROJECTILE_NAMES = {
+  'ChangeDetonateAboveHeight', 'ChangeDetonateBelowHeight', 'ChangeMaxZigZag',
+  'ChangeZigZagFrequency', 'CreateChildProjectile', 'GetCurrentSpeed',
+  'GetCurrentTargetPosition', 'GetLauncher', 'GetTrackingTarget', 'GetVelocity',
+  'SetAcceleration', 'SetBallisticAcceleration', 'SetCollideEntity',
+  'SetCollideSurface', 'SetCollision', 'SetDamage', 'SetDestroyOnWater',
+  'SetLifetime', 'SetLocalAngularVelocity', 'SetMaxSpeed', 'SetNewTarget',
+  'SetNewTargetGround', 'SetScaleVelocity', 'SetStayUpright', 'SetTurnRate',
+  'SetVelocity', 'SetVelocityAlign', 'SetVelocityRandomUpVector',
+  'StayUnderwater', 'TrackTarget',
+}
+
+local projectile = withNoops(PROJECTILE_NAMES, {
+  GetLauncher = function(self) return self.__launcher end,
+  GetTrackingTarget = function(self) return self.__target end,
+
+  GetVelocity = function(self)
+    local v = self.__vel or { 0, 0, 0 }
+    return v[1], v[2], v[3]
+  end,
+  GetCurrentSpeed = function(self)
+    local v = self.__vel or { 0, 0, 0 }
+    return math.sqrt(v[1] * v[1] + v[2] * v[2] + v[3] * v[3])
+  end,
+  GetCurrentTargetPosition = function(self)
+    if self.__target and self.__target.__pos then
+      local p = self.__target.__pos
+      return Vector(p[1], p[2], p[3])
+    end
+    if self.__targetGround then
+      local p = self.__targetGround
+      return Vector(p[1], p[2], p[3])
+    end
+    return nil
+  end,
+
+  -- SetVelocity(speed) ODER SetVelocity(vx, vy, vz) — beide Formen sind belegt
+  -- (mHelp der Bindung). Mit einem Argument bleibt die RICHTUNG und nur der
+  -- Betrag wird gesetzt.
+  SetVelocity = function(self, x, y, z)
+    local v = self.__vel or { 0, 0, 0 }
+    if y == nil then
+      local len = math.sqrt(v[1] * v[1] + v[2] * v[2] + v[3] * v[3])
+      if len > 0 then
+        self.__vel = { v[1] / len * x, v[2] / len * x, v[3] / len * x }
+      else
+        local f = __quatForward(self.__orient)
+        self.__vel = { f[1] * x, f[2] * x, f[3] * x }
+      end
+    else
+      self.__vel = { x, y, z }
+    end
+    return self
+  end,
+  SetMaxSpeed = function(self, s) self.__maxSpeed = s; return self end,
+  SetAcceleration = function(self, a) self.__accel = a; return self end,
+  SetBallisticAcceleration = function(self, a)
+    -- Ein Skalar: die Beschleunigung nach UNTEN (defaultexplosions.lua:319 setzt
+    -- damit die Schwerkraft der Truemmer).
+    self.__ballistic = { 0, a, 0 }
+    return self
+  end,
+  SetTurnRate = function(self, degPerSec) self.__turnRate = degPerSec; return self end,
+  SetLifetime = function(self, seconds)
+    self.__lifetimeEnd = __gameTick + math.floor(seconds * 10)
+    return self
+  end,
+  TrackTarget = function(self, on) self.__trackTarget = on ~= false; return self end,
+  SetNewTarget = function(self, target) self.__target = target; return self end,
+  SetNewTargetGround = function(self, pos) self.__targetGround = __vec3(pos); return self end,
+  SetDamage = function(self, amount, radius)
+    self.__damage = amount
+    if radius then self.__damageRadius = radius end
+    if self.DamageData then
+      self.DamageData.DamageAmount = amount
+      if radius then self.DamageData.DamageRadius = radius end
+    end
+    return self
+  end,
+  SetCollision = function(self, on)
+    self.__collideEntity = on ~= false
+    self.__collideSurface = on ~= false
+    return self
+  end,
+  SetCollideEntity = function(self, on) self.__collideEntity = on ~= false; return self end,
+  SetCollideSurface = function(self, on) self.__collideSurface = on ~= false; return self end,
+  SetDestroyOnWater = function(self, on) self.__destroyOnWater = on ~= false; return self end,
+  SetVelocityAlign = function(self, on) self.__velocityAlign = on ~= false; return self end,
+  SetStayUpright = function(self, on) self.__stayUpright = on ~= false; return self end,
+  StayUnderwater = function(self, on) self.__stayUnderwater = on ~= false; return self end,
+  SetScaleVelocity = function(self, s) self.__scaleVel = s; return self end,
+  CreateChildProjectile = function(self, bpId)
+    return __projCreate(self.__launcher, bpId, self.__pos, self.__orient, nil,
+      self.__damage or 0, self.__damageRadius or 0, self.__damageType or 'Normal', self.__target)
+  end,
+}, entity)
+
+-- ---------------------------------------------------------------------
+-- prop_methods (Moho::Prop) — GENAU EINE eigene Bindung: AddBoundedProp
+-- (engine-api.md, Klasse `Prop`; Cfile:1015752). Alles andere erbt ein Prop von
+-- Entity. Prop.lua:16: `Prop = Class(moho.prop_methods, Entity)`.
+-- ---------------------------------------------------------------------
+local prop = withNoops({ 'AddBoundedProp' }, {
+  -- Begrenzt die Zahl der Wracks auf der Karte (Prioritaet = Masse). Unsere Sim
+  -- kennt keine Obergrenze — hier passiert nichts, und das ist keine Luege:
+  -- die Engine wirft nur bei Ueberlauf welche weg.
+  AddBoundedProp = function(self, priority) self.__boundedPriority = priority end,
+}, entity)
+
 rawset(moho, 'entity_methods', Class() (entity))
 rawset(moho, 'unit_methods', Class(moho.entity_methods) (unit))
 rawset(moho, 'weapon_methods', Class(moho.entity_methods) (weapon))
+-- OHNE entity_methods als Basis — und das ist kein Versehen:
+--   Projectile.lua:16  Projectile = Class(moho.projectile_methods, Entity)
+--   Prop.lua:16        Prop       = Class(moho.prop_methods, Entity)
+-- Die Original-Lua mischt die Entity-Methoden SELBST dazu (Entity aus
+-- /lua/sim/Entity.lua ist bereits Class(moho.entity_methods)). Wuerden wir hier
+-- ebenfalls von entity_methods erben, kaeme jedes Entity-Feld ueber ZWEI Wege in
+-- die Klasse — und class.lua:147 bricht mit „field 'X' is ambiguous" ab.
+rawset(moho, 'projectile_methods', Class() (projectile))
+rawset(moho, 'prop_methods', Class() (prop))
 rawset(moho, 'aibrain_methods', Class() (aibrain))
 rawset(moho, 'cursor_methods', Class() (cursor))
 

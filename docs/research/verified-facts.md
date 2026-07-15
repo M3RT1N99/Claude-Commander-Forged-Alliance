@@ -80,6 +80,36 @@ in CLAUDE.md. Vor Arbeit an einem der Themen: den passenden Abschnitt lesen.*
 - **`Sound{}`** ist der einzige DSL-Konstruktor in den `.bp`-Dateien (3445×).
   Fehlt er, bricht die Blueprint-Auswertung mittendrin ab — und das bp landet
   halbfertig unter dem Schlüssel `'null'`.
+- **Feldnamen im `.bp` sind die des PARSERS, nicht die internen Member.**
+  `AddField_*` registriert sie (Projektil-Physics Cfile:653990-654175, Waffe
+  Cfile:658290-658520). Zwei Fallen, an denen der `.bp`-Wert sonst nie gelesen
+  wird: `CollideEntity` (nicht `CollisionEntity` — der Member heißt
+  `mCollisionEntity`) und `BounceVelDamp` (nicht `BounceVelocityDamping`). Ein
+  Projektil mit `CollideEntity = false` (Nukes, Strat-Raketen) flog sonst in die
+  erste überflogene Einheit. Die Waffen-Struct-Defaults (23 float=0, 26
+  bool=false, 7 string="") sind Pflicht: `weapon.lua:287` rechnet ungeprüft
+  `bp.DamageRadius + …`, und die ACU-Waffe setzt kein `DamageRadius`.
+
+## Schaden, Tod, Gesundheit (Details: [combat-projectiles.md](combat-projectiles.md), [damage-binary.md](damage-binary.md))
+
+- **`SetHealth` quantisiert mit FLOOR, nicht kaufmännisch.** Die Engine rechnet
+  `frndint(ratio*4)` mit der Korrektur `if (x < round(x)) −1` (Cfile:916030-916037)
+  — das ist für positive x genau `floor(x)`. `OnHealthChanged(neu, alt)` feuert
+  nur, wenn sich der **25%-quantisierte** Anteil ändert; daran hängen die
+  Schadensraucher (unit.lua:820-823). Mit `+0.5` (round-half-up) feuert es an den
+  12.5/37.5/…-Grenzen einen Tick zu früh.
+- **Kill-Reihenfolge: `OnKilled` ZUERST, KILLS DANACH.** `cfunc_EntityKillL` ruft
+  erst `Unit::Kill` (das OnKilled intern feuert, Cfile:936149), dann den
+  KILLS-Zähler auf dem Instigator (Cfile:936183). `CheckVeteranLevel` liest
+  `GetStat('KILLS',0).Value + 1` (unit.lua:3139) — das `+1` gilt genau, **weil**
+  der aktuelle Kill noch nicht gezählt ist. Zählt man vorher, steigt die Unit
+  einen Kill zu früh auf. **BENIGN**-Ziele (Wracks) zählen nicht (Cfile:936164).
+- **`Kill`:** Baustelle mit `FractionComplete < 0.5` → `excessDamageRatio = 10.0`
+  (Cfile:952122) ⇒ in der Lua **kein Wrack** (unit.lua:1079: `overkill > 1`).
+- **`TargetCheckInterval` wird mit CEIL in Ticks umgerechnet** (`round(x·10) +
+  (x·10 > round)`, min 1; Cfile:792904-792908), `fireClock = (int)(10/RoF)`
+  (Trunkierung, Cfile:983956). Suchradius = `max(MaxRadius, TrackingRadius·MaxRadius)`
+  — ein Maximum, kein Produkt (Cfile:793125).
 
 ## UI (Details: [ui-complete.md](ui-complete.md))
 

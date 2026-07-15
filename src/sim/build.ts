@@ -60,8 +60,19 @@ export function buildApply(host: LuaHost): void {
 }
 
 /** Erteilt einen Bau-Auftrag; liefert die Task-ID (oder -1). */
-export function issueBuildTask(host: LuaHost, builderId: number, targetId: number): number {
-  return Number(host.eval(`return __issueBuildTask(${builderId}, ${targetId})`))
+export function issueBuildTask(
+  host: LuaHost,
+  builderId: number,
+  targetId: number,
+  /**
+   * `true` = die Bau-Reihe des Bauers wird ERSETZT (Klick ohne Shift),
+   * `false` = der Auftrag wird ANGEHÄNGT (Shift-Klick). So macht es die Engine
+   * mit jeder Befehls-Warteschlange: ohne Shift `Clear`, mit Shift anhängen
+   * (commandmode.lua reicht das Feld `Clear` mit).
+   */
+  clear = true,
+): number {
+  return Number(host.eval(`return __issueBuildTask(${builderId}, ${targetId}, nil, ${clear})`))
 }
 
 /** Anzahl offener Bau-Aufgaben. */

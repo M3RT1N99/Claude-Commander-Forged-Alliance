@@ -7,6 +7,28 @@ __language = 'us'
 -- macht den Zugriff auf ein nicht existierendes Global zum Fehler.
 __currentSource = false
 
+-- DiskToLocal(path): ein Pfad des HOST-Dateisystems zurueck in den VFS-Pfad des
+-- Spiels. Der LuaHost mountet jede VFS-Datei unter `/mod/<pfad>`
+-- (src/lua/host.ts: FS_PREFIX) — genau dieser Praefix muss hier wieder weg.
+--
+-- Das ist kein Kosmetikum: `lua/system/Blueprints.lua:70-83` hat ein EIGENES
+-- GetSource(), das den Chunk-Namen aus `debug.getinfo(n).source` nimmt und ihn
+-- durch DiskToLocal schickt. Daraus macht SetBackwardsCompatId die BlueprintId
+-- (`bp.BlueprintId = lower(bp.Source)`, Zeile 104-107) — und ein Projektil heisst
+-- damit `/projectiles/tdfgauss01/tdfgauss01_proj.bp`, GENAU der String, der in
+-- `Weapon.ProjectileId` steht. Mit `/mod` davor findet CreateProjectile den
+-- Blueprint nie („Invalid blueprint") und keine Waffe schiesst.
+-- Units fiel das nie auf: SetShortId schneidet ohnehin bis zum Dateinamen ab.
+__fsPrefix = '/mod'
+
+function DiskToLocal(path)
+  local p = tostring(path)
+  if string.sub(p, 1, string.len(__fsPrefix)) == __fsPrefix then
+    return string.sub(p, string.len(__fsPrefix) + 1)
+  end
+  return p
+end
+
 -- =====================================================================
 -- LuaPlus-Dialekt: nil, Zahlen und Strings HABEN Metatables.
 --
@@ -172,6 +194,15 @@ local function runHooks(name, env)
             end
         end
     end
+end
+
+-- exists(pfad): liegt die Datei im VFS? Eine KERN-Bindung (scr_CoreInits, also
+-- beide VMs, docs/research/engine-api.md). Die Sim braucht sie, um die
+-- Skript-Klasse eines Blueprints aufzuloesen: existiert
+-- `<id>_script.lua` nicht, gilt der Default aus dem Blueprint-Typ
+-- (func_FindBlueprintScriptModule, Cfile:914189-914360).
+function exists(name)
+  return __mountModule(name) ~= false
 end
 
 function doscript(name, env)

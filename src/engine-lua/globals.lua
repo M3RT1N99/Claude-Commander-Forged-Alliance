@@ -14,6 +14,15 @@
 function Sound(t) return t end
 function RPCSound(t) return t end
 
+-- "cue,bank = GetCueBank(params)" (mHelp, Cfile:608558) — eine KERN-Bindung
+-- (scr_CoreInits, also beide VMs). Sie zerlegt ein Sound-Objekt in seine beiden
+-- Bestandteile. aibrain.lua:924 (PlayVOSound) ruft sie beim Tod jeder Einheit —
+-- ohne sie stirbt dort der Thread.
+function GetCueBank(sound)
+  if type(sound) ~= 'table' then return nil, nil end
+  return sound.Cue, sound.Bank
+end
+
 -- === MATH_Lerp (Core-Global, Cfile:598170) ===
 --
 -- mHelp: "MATH_Lerp(s, a, b) or MATH_Lerp(s, sMin, sMax, a, b) -> number".
@@ -79,16 +88,56 @@ function Vector2(x, y)
 end
 
 -- === Entity-Praedikate (cfunc_IsDestroyed/IsUnit/…) ===
+--
+-- Die Praedikate muessen die ARTEN unterscheiden, nicht nur „hat ein Blueprint":
+-- ein Projektil hat auch eines. Solange IsUnit(projektil) true lieferte, waere
+-- jeder Kollisions- und Schadensfilter geraten (unit.lua:934, shield.lua:151).
 function IsDestroyed(e)
   if not e then return true end
   if type(e) ~= 'table' then return true end
-  return e.__destroyed == true
+  return e.__destroyed == true or e.__destroyQueued == true
 end
 function IsEntity(e) return type(e) == 'table' and e.__id ~= nil end
-function IsUnit(e) return type(e) == 'table' and e.__bp ~= nil end
-function IsProp(e) return false end
+function IsUnit(e) return type(e) == 'table' and e.__isUnit == true end
+function IsProjectile(e) return type(e) == 'table' and e.__isProj == true end
+function IsProp(e) return type(e) == 'table' and e.__isProp == true end
+function IsCollisionBeam(e) return false end
 function IsAlly(a, b) return a == b end
 function IsEnemy(a, b) return a ~= b end
+
+-- === Random (Cfile:758FB0) ===
+-- Ohne Argument ein Float [0,1), sonst wie math.random. config.lua:43 setzt
+-- `math.random = Random` — die Sim wuerfelt also ueber die Engine (im Original
+-- deterministisch fuer alle Clients; unsere Sim ist noch nicht lockstep).
+--
+-- Ohne dieses Global stirbt jeder Todes-Thread: unit.lua:1200 DeathThread ruft
+-- GetRandomFloat (utils.lua) -> Random().
+function Random(a, b)
+  if a == nil then return math.random() end
+  if b == nil then return math.random(1, math.floor(a)) end
+  return math.random(math.floor(a), math.floor(b))
+end
+
+-- Warp(unit, location, [orientation]) — eine Entity SOFORT versetzen
+-- (mHelp Cfile:1089605). Die Explosions-Entities werden so an den Ort des Todes
+-- gesetzt (defaultexplosions.lua:121); ohne Warp stirbt der Todes-Thread.
+function Warp(entity, location, orientation)
+  if not entity then return end
+  local p = __vec3(location)
+  entity.__pos = { p[1], p[2], p[3] }
+  if orientation then entity.__orient = orientation end
+end
+
+-- === Physik-Konstanten der Sim (Moho::SPhysConstants) ===
+-- Der Ctor setzt mGravity = { 0, -4.9, 0 } (Cfile:699A90 / sub_699A90:
+-- result[1] = -1063465779 = float -4.9). Daran haengt JEDE ballistische
+-- Flugbahn — ein geschaetzter Wert waere ein anderes Spiel.
+__simGravity = 4.9
+
+-- Der Wasserspiegel der geladenen Karte (aus der .scmap). Ohne Karte: kein
+-- Wasser.
+__mapWaterLevel = 0
+function __setWaterLevel(y) __mapWaterLevel = y or 0 end
 
 -- === Kategorie-System (EntityCategory, categories, ParseEntityCategory) ===
 -- Eine EntityCategory ist ein Ausdrucksbaum ueber Kategorie-Tokens; getestet
@@ -360,6 +409,11 @@ function CreateAttachedEmitter(owner, bone, army, spec) return newEmitter(owner,
 function CreateEmitterAtBone(owner, bone, army, spec) return newEmitter(owner, bone, army, spec) end
 function CreateEmitterAtEntity(owner, army, spec) return newEmitter(owner, -1, army, spec) end
 function CreateEmitterOnEntity(owner, army, spec) return newEmitter(owner, -1, army, spec) end
+-- CreateTrail(owner, bone, army, spec) — die Polytrail-Spur eines Projektils
+-- (defaultprojectiles.lua:78/100/104 haengt sie ungeprueft an und ruft danach
+-- :OffsetEmitter() darauf). Ohne Rueckgabewert stirbt jedes Projektil in seinem
+-- eigenen OnCreate.
+function CreateTrail(owner, bone, army, spec) return newEmitter(owner, bone, army, spec) end
 function CreateBeamEmitter(owner, spec, army) return newEmitter(owner, -1, army, spec) end
 function CreateBeamEmitterOnEntity(owner, bone, army, spec) return newEmitter(owner, bone, army, spec) end
 function AttachBeamEntityToEntity(a, ab, b, bb, army, spec) return newEmitter(a, ab, army, spec) end
@@ -446,7 +500,8 @@ function BuffBlueprint(spec)
 end
 
 -- === Datei-/Pfad-Helfer ===
-function DiskToLocal(path) return path end
+-- DiskToLocal steht in boot.lua (Kern, beide VMs): es nimmt den /mod-Praefix des
+-- Hosts wieder weg. Blueprints.lua leitet daraus die BlueprintId ab.
 function DiskGetFileInfo(path) return false end
 
 -- === Terrain ===
@@ -500,6 +555,25 @@ function IssueMove(units, pos)
   return issueTo(units, function(u)
     u:GetNavigator():SetGoal({ pos[1], pos[2] or 0, pos[3] })
   end)
+end
+
+--- IsCommandDone(command) -> true, wenn der Befehl abgearbeitet ist
+--- (cfunc_IsCommandDoneL, Cfile:1007814: die Engine prueft, ob der
+--- CUnitCommandOpt noch existiert — `pushboolean(opt == 0)`).
+---
+--- Die FABRIK haengt daran: defaultunits.lua:643 (RolloffBody) wartet in einer
+--- Schleife, bis die frisch gebaute Einheit vom Hof gefahren ist —
+--- `while ... and self.MoveCommand and not IsCommandDone(self.MoveCommand) do`.
+--- Fehlt das Global, stirbt der Thread, die Fabrik bleibt BUSY und baut nie
+--- wieder etwas. Genau so sah es im Browser aus.
+---
+--- Fertig ist der Befehl, wenn keine Einheit mehr ein Ziel hat.
+function IsCommandDone(cmd)
+  if not cmd or not cmd.units then return true end
+  for _, u in ipairs(cmd.units) do
+    if u and not u.__destroyQueued and u.__goal then return false end
+  end
+  return true
 end
 
 function IssueStop(units)
