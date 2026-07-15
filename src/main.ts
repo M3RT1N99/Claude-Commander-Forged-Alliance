@@ -419,6 +419,83 @@ let spawnPoint = new THREE.Vector3(20, 0, 20)
 let massSpots: { x: number; z: number }[] = []
 const sandboxAssetCache = new Map<string, SandboxUnitAssets>()
 
+// --- Projektile: die fliegenden Schüsse der Sim, mit ihrem echten Mesh -------
+//
+// Die Engine rendert jede Sim-Entity (CUIWorldView) — auch Projektile, mit
+// Mesh aus dem Blueprint (Display.Mesh.LODs, UniformScale; Shader TMeshGlow).
+// Manche Projektile haben KEIN Mesh (nur Emitter) — die zeichnet erst das
+// Partikelsystem; bis dahin sind sie unsichtbar, wie im Original ohne Effekte.
+interface ProjectileAssets {
+  model: ScmModel
+  albedo: THREE.Texture | null
+  scale: number
+}
+const projAssetCache = new Map<string, Promise<ProjectileAssets | null>>()
+const projMeshes = new Map<number, THREE.Mesh>()
+const projPending = new Set<number>()
+
+function loadProjectileAssets(bpId: string): Promise<ProjectileAssets | null> {
+  let p = projAssetCache.get(bpId)
+  if (!p) {
+    p = (async (): Promise<ProjectileAssets | null> => {
+      if (!vfs) return null
+      // bpId aus der Sim: '/projectiles/tdfgauss01/tdfgauss01_proj.bp'
+      const path = bpId.replace(/^\//, '')
+      // Projektile UND die Effekt-Entities (Trümmer beim Tod, Nuke-Controller:
+      // /effects/entities/**_proj.bp — defaultexplosions.lua:285).
+      const m = path.match(/^((?:projectiles|effects\/entities)\/[^/]+\/[^/]+)_proj\.bp$/)
+      if (!m) return null
+      const base = m[1]!
+      const meshPath = `${base}_lod0.scm`
+      // KEIN Mesh ist bei vielen Projektilen die Wahrheit (ACU-Laser,
+      // Maschinengewehr, Bau-Effekte): sie sind reine Emitter/Trail-Effekte
+      // und werden erst mit dem Partikelsystem sichtbar.
+      if (!vfs.exists(meshPath)) return null
+      const model = parseScm(await vfs.read(meshPath))
+      const albedo = await loadFirstTexture([`${base}_albedo.dds`])
+      const bp = parseBlueprint(await vfs.readText(path))
+      const scale = bpGet(bp, 'Display.UniformScale')
+      return { model, albedo, scale: typeof scale === 'number' && scale > 0 ? scale : 1 }
+    })()
+    projAssetCache.set(bpId, p)
+  }
+  return p
+}
+
+/** Die Projektil-Meshes dem Sim-Zustand nachziehen (pro Frame, aus dem Cache). */
+function updateProjectiles(): void {
+  if (!luaSim) return
+  const list = luaSim.allProjectiles()
+  const seen = new Set<number>()
+  for (const p of list) {
+    seen.add(p.id)
+    const mesh = projMeshes.get(p.id)
+    if (!mesh) {
+      if (!projPending.has(p.id)) {
+        projPending.add(p.id)
+        void loadProjectileAssets(p.bp).then((assets) => {
+          projPending.delete(p.id)
+          if (!assets) return
+          // Der Schuss kann schon eingeschlagen sein, während das Mesh lud —
+          // dann KEIN Geist in der Szene.
+          if (!luaSim?.allProjectiles().some((q) => q.id === p.id)) return
+          projMeshes.set(p.id, viewer.addProjectile(assets.model, assets.albedo, assets.scale))
+        })
+      }
+      continue
+    }
+    mesh.position.set(p.x, p.y, p.z)
+    // Die Sim liefert (w,x,y,z) — three.js will (x,y,z,w).
+    mesh.quaternion.set(p.qx, p.qy, p.qz, p.qw)
+  }
+  for (const [id, mesh] of projMeshes) {
+    if (!seen.has(id)) {
+      projMeshes.delete(id)
+      viewer.removeProjectile(mesh)
+    }
+  }
+}
+
 async function loadSandboxAssets(id: string): Promise<SandboxUnitAssets | null> {
   const cached = sandboxAssetCache.get(id)
   if (cached) return cached
@@ -649,6 +726,11 @@ async function runSelftest(blueprintId: string): Promise<void> {
   await new Promise((r) => setTimeout(r, 600))
   log(`SELFTEST: Bau-Vorschau ${buildPreview?.debugPosition() ?? 'FEHLT'} (Footprint ${fp[0]}×${fp[1]})`)
 
+  // Die Auswahl geht während des Lade-Fades verloren (Fraktionsbild +
+  // InitialAnimations — der Spieler klickt im Original auch erst danach).
+  // Deshalb direkt vor dem Klick ERNEUT wählen; ohne das versandete der
+  // Bau-Befehl still an der leeren Selektion (worldClick: selection == 0).
+  log(`SELFTEST: vor dem Klick — commandMode=${JSON.stringify(gameUi.commandMode())}, Auswahl=${gameUi.select([acu.id])}`)
   await issueWorldCommand(ziel, false)
 
   // Wächst der Bau? Die Zahlen kommen aus der Sim, nicht von hier.
@@ -687,9 +769,51 @@ async function runSelftest(blueprintId: string): Promise<void> {
     )
     if (done >= 2) {
       log('SELFTEST: BEIDE PANZER FERTIG — die Techdemo läuft')
+      await selftestKampf()
       return
     }
   }
+  await selftestKampf()
+}
+
+/**
+ * Kampf-Abschnitt des Selbsttests: ein Feind neben der ACU, die Waffen greifen
+ * von selbst (Zielsuche der Sim) — geprüft wird, dass die PROJEKTILE den
+ * Browser erreichen und als Meshes in der Szene stehen (projMeshes).
+ */
+async function selftestKampf(): Promise<void> {
+  if (!luaSim) return
+  const acu = luaUnits[0]
+  if (!acu) return
+  const s = luaSim.state(acu.id)
+  if (!s) return
+  try {
+    // Auf die FREIE Seite (der Bauplatz der Fabrik liegt bei +9/+9): ein
+    // Panzer mitten im Gebäude-Footprint kommt nicht zum Schuss.
+    const feind = await luaSim.spawn('uel0201', { x: s.x - 14, y: s.y, z: s.z - 14 }, 2)
+    // Dazu ein EIGENER Panzer: das Gauss-Duell (TDFGauss01 hat ein Mesh,
+    // TDFGauss01_proj.bp:29) — der ACU-Laser ist ein reiner Emitter-Effekt
+    // und erst mit dem Partikelsystem sichtbar.
+    const eigener = await luaSim.spawn('uel0201', { x: s.x - 8, y: s.y, z: s.z - 8 }, 1)
+    log(`SELFTEST-KAMPF: Feind ${feind} + eigener Panzer ${eigener} — Gauss-Duell`)
+  } catch (err) {
+    log(`SELFTEST-KAMPF: Spawn scheitert — ${(err as Error).message}`)
+    return
+  }
+  let maxProj = 0
+  let maxMeshes = 0
+  for (let round = 0; round < 45; round++) {
+    await new Promise((r) => setTimeout(r, 500))
+    maxProj = Math.max(maxProj, luaSim.allProjectiles().length)
+    maxMeshes = Math.max(maxMeshes, projMeshes.size)
+    const feindLebt = luaSim.allStates().some((u) => u.army === 2)
+    if (!feindLebt && maxProj > 0) break
+  }
+  log(
+    maxMeshes > 0
+      ? `SELFTEST-KAMPF: Projektile sichtbar — max. ${maxProj} gemeldet, ${maxMeshes} Mesh(es) in der Szene`
+      : `SELFTEST-KAMPF: KEIN Projektil-Mesh (gemeldet: ${maxProj}) — der Sichtweg ist unterbrochen`,
+  )
 }
 
 // --- SupCom-Steuerung ------------------------------------------------------
@@ -1229,6 +1353,9 @@ function luaSimUpdate(): void {
     knownSceneUnits.add(s.id)
     void addLuaUnitToScene(s.id, s.name, { x: s.x, y: s.y, z: s.z })
   }
+
+  // Die fliegenden Projektile — die Engine zeichnet jede Sim-Entity.
+  updateProjectiles()
 
   for (const u of luaUnits) {
     const s = luaSim.state(u.id)

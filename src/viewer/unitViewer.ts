@@ -299,6 +299,35 @@ export class UnitViewer {
   }
 
   /**
+   * Ein PROJEKTIL in die Szene — bewusst NICHT über addUnit: es gehört nicht
+   * in die Trefferliste (ein fliegender Schuss darf keinen Auswahl-Klick
+   * fangen) und braucht kein Skinning. Der Projektil-Shader der Engine ist
+   * TMeshGlow (unbeleuchtet, Albedo pur — z. B. TDFGauss01_proj.bp:32); der
+   * Glow-Anteil kommt mit dem Partikelsystem.
+   */
+  addProjectile(model: ScmModel, albedo: THREE.Texture | null, scale: number): THREE.Mesh {
+    const geometry = new THREE.BufferGeometry()
+    geometry.setAttribute('position', new THREE.BufferAttribute(model.positions, 3))
+    geometry.setAttribute('normal', new THREE.BufferAttribute(model.normals, 3))
+    geometry.setAttribute('uv', new THREE.BufferAttribute(model.uv0, 2))
+    geometry.setIndex(new THREE.BufferAttribute(model.indices, 1))
+    const material = new THREE.MeshBasicMaterial(
+      albedo ? { map: albedo } : { color: 0xffddaa },
+    )
+    const mesh = new THREE.Mesh(geometry, material)
+    mesh.frustumCulled = false
+    mesh.scale.setScalar(scale)
+    this.scene.add(mesh)
+    return mesh
+  }
+
+  removeProjectile(mesh: THREE.Mesh): void {
+    this.scene.remove(mesh)
+    mesh.geometry.dispose()
+    ;(mesh.material as THREE.Material).dispose()
+  }
+
+  /**
    * Eine Einheit wieder aus der Szene nehmen — inklusive der TREFFERLISTE.
    *
    * Das ist der Punkt: `mesh.visible = false` reicht nicht. Der Raycaster von
