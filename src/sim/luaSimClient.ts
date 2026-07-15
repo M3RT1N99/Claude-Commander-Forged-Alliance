@@ -68,6 +68,12 @@ export interface LuaEmitterSnapshot {
   x: number
   y: number
   z: number
+  /** Bone-Orientierung (w,x,y,z) — LocalVelocity/-Acceleration drehen die
+   *  Spawn-Richtungen einmalig in diesen Raum (Cfile:894849-894859). */
+  qw: number
+  qx: number
+  qy: number
+  qz: number
   /** ScaleEmitter-Faktor (Default 1). */
   scale: number
   /** Sim-Tick der Entstehung — Startpunkt für Kurven/Lebensdauer. */

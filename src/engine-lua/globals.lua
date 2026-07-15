@@ -440,12 +440,17 @@ function __readAllEmittersJson()
     if lebt then
       k = k + 1
       kompakt[k] = e
-      local pos = __boneWorld(o, e.__bone)
+      -- Position UND Rotation des Knochens: LocalVelocity/LocalAcceleration
+      -- drehen die Spawn-Richtungen EINMALIG beim Spawn in den Bone-Raum
+      -- (CEfxEmitter::Tick, Cfile:894849-894859) — dafuer braucht der
+      -- Spawner die Bone-Orientierung, nicht nur den Ort.
+      local pos, rot = __boneWorld(o, e.__bone)
       local off = e.__offset
       n = n + 1
       parts[n] = string.format(
-        '{"id":%d,"bp":%q,"x":%.6g,"y":%.6g,"z":%.6g,"scale":%.6g,"born":%d,"enabled":%s%s}',
+        '{"id":%d,"bp":%q,"x":%.6g,"y":%.6g,"z":%.6g,"qw":%.6g,"qx":%.6g,"qy":%.6g,"qz":%.6g,"scale":%.6g,"born":%d,"enabled":%s%s}',
         e.__id, tostring(e.__spec), pos[1], pos[2], pos[3],
+        rot[1], rot[2], rot[3], rot[4],
         e.__scale or 1, e.__born, tostring(e.__enabled == true),
         off and string.format(',"ox":%.6g,"oy":%.6g,"oz":%.6g', off[1] or 0, off[2] or 0, off[3] or 0) or ''
       )

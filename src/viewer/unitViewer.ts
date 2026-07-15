@@ -359,6 +359,11 @@ export class UnitViewer {
   }
 
   /** Hilfsobjekt (Auswahl-Ring o. Ä.) — wird beim Szenenwechsel entfernt. */
+  /** Die Welt-Kamera — das Partikelsystem braucht ihre Achsen (Billboard). */
+  get worldCamera(): THREE.Camera {
+    return this.camera
+  }
+
   addHelper(obj: THREE.Object3D): void {
     this.scene.add(obj)
     this.helpers.push(obj)

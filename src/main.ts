@@ -9,6 +9,8 @@ import {
 } from './vfs/gameSource'
 import { GameVfs } from './vfs/vfs'
 import { parseScm, type ScmModel } from './formats/scm'
+import { ParticleSystem } from './viewer/particles'
+import { EmitterRuntime, type EmitterBpData } from './effects/emitterRuntime'
 import { parseSca } from './formats/sca'
 import { parseScmap } from './formats/scmap'
 import { resolveUnitPaths } from './formats/unitPaths'
@@ -462,6 +464,92 @@ function loadProjectileAssets(bpId: string): Promise<ProjectileAssets | null> {
   return p
 }
 
+// --- Partikel: die Emitter der Sim, gespawnt nach den Original-Kurven --------
+//
+// Pro Sim-Tick tickt jede Emitter-Laufzeit (CEfxEmitter::Tick, 1:1 in
+// src/effects/emitterRuntime.ts) und spawnt Partikel in die Batches des
+// Partikelsystems (src/viewer/particles.ts — der particle.fx-Port). Emitter,
+// die die Sim nicht mehr meldet, hören auf; ihre Partikel leben im
+// Vertex-Shader weiter, wie im Original.
+let particles: ParticleSystem | null = null
+const emitterRuntimes = new Map<number, EmitterRuntime>()
+const emitterBpData = new Map<string, EmitterBpData>()
+const emitterBpPending = new Set<string>()
+let lastEmitterTick = -1
+let lastTickWall = 0
+
+async function prepareEmitterBatch(bpId: string): Promise<void> {
+  if (emitterBpPending.has(bpId) || !luaSim || !particles) return
+  emitterBpPending.add(bpId)
+  const bp = (await luaSim.emitterBlueprint(bpId)) as
+    | (EmitterBpData & { RepeatTexture?: string; TextureName?: string })
+    | null
+  if (!bp) return // kein Emitter-BP unter dieser Id — bleibt aus
+  // Polytrails (TrailEmitterBlueprint: RepeatTexture statt Texture) und Beams
+  // (BeamBlueprint: TextureName) sind EIGENE Render-Familien der Engine
+  // (TPolyTrail_*/TBeam_* in particle.fx — Ribbons, keine Partikel-Quads).
+  // Ihr Renderer folgt; bis dahin sind sie bewusst unsichtbar.
+  if (typeof bp.RepeatTexture === 'string' || typeof bp.TextureName === 'string') {
+    log(`Partikel: ${bpId.split('/').pop()} ist ein ${bp.TextureName ? 'Beam' : 'Polytrail'} — Renderer folgt`)
+    return
+  }
+  const texPath = (bp.Texture ?? '').replace(/^\//, '').toLowerCase()
+  const rampPath = (bp.RampTexture ?? '').replace(/^\//, '').toLowerCase()
+  const [tex, ramp] = await Promise.all([loadFirstTexture([texPath]), loadFirstTexture([rampPath])])
+  if (!tex || !ramp) {
+    log(`Partikel: Textur fehlt für ${bpId} (${texPath || '—'} / ${rampPath || '—'})`)
+    return
+  }
+  emitterBpData.set(bpId, bp)
+  particles?.batchFor(bpId, bp, tex, ramp)
+}
+
+/** Pro NEUEM Sim-Tick: alle gemeldeten Emitter einen Tick weiterdrehen. */
+function updateEmitters(): void {
+  if (!luaSim || !particles) return
+  const tick = luaSim.gameTick
+  if (tick <= lastEmitterTick) return
+  lastEmitterTick = tick
+  lastTickWall = performance.now()
+  const seen = new Set<number>()
+  for (const e of luaSim.allEmitters()) {
+    seen.add(e.id)
+    let rt = emitterRuntimes.get(e.id)
+    if (!rt) {
+      const bp = emitterBpData.get(e.bp)
+      if (!bp || !particles.hasBatch(e.bp)) {
+        // Blueprint/Texturen laden asynchron; der Emitter beginnt, sobald
+        // sie da sind (einmal pro Typ — danach kommt alles aus dem Cache).
+        void prepareEmitterBatch(e.bp)
+        continue
+      }
+      rt = new EmitterRuntime(bp)
+      emitterRuntimes.set(e.id, rt)
+    }
+    const spawns = rt.tick(
+      {
+        x: e.x,
+        y: e.y,
+        z: e.z,
+        qw: e.qw,
+        qx: e.qx,
+        qy: e.qy,
+        qz: e.qz,
+        scale: e.scale,
+        ox: e.ox,
+        oy: e.oy,
+        oz: e.oz,
+        enabled: e.enabled,
+      },
+      tick,
+    )
+    for (const p of spawns) particles.add(e.bp, p)
+  }
+  for (const id of emitterRuntimes.keys()) {
+    if (!seen.has(id)) emitterRuntimes.delete(id)
+  }
+}
+
 /** Die Projektil-Meshes dem Sim-Zustand nachziehen (pro Frame, aus dem Cache). */
 function updateProjectiles(): void {
   if (!luaSim) return
@@ -622,6 +710,12 @@ async function startSandbox(mapFolder: string): Promise<void> {
     // Die Bau-Vorschau (Geistergebäude am Raster) — Engine-Rendering mit den
     // echten Blueprint-Modellen.
     buildPreview = new BuildPreview(viewer, loadSandboxAssets)
+    // Das Partikelsystem — frisch pro Sitzung (setMap → clearContent wirft
+    // die Helper-Meshes weg, also auch die Batches).
+    particles?.dispose()
+    particles = new ParticleSystem((mesh) => viewer.addHelper(mesh))
+    emitterRuntimes.clear()
+    lastEmitterTick = -1
     // Die Naht, über die Befehle der UI in die Sim gehen. Ohne sie KNALLT jeder
     // Befehl — statt still zu verpuffen (ui-globals.lua: __uiSimCommand).
     gameUi.connectSim((name, ids, value) => {
@@ -813,6 +907,14 @@ async function selftestKampf(): Promise<void> {
     maxMeshes > 0
       ? `SELFTEST-KAMPF: Projektile sichtbar — max. ${maxProj} gemeldet, ${maxMeshes} Mesh(es) in der Szene`
       : `SELFTEST-KAMPF: KEIN Projektil-Mesh (gemeldet: ${maxProj}) — der Sichtweg ist unterbrochen`,
+  )
+  // Das Partikelsystem: Mündungsfeuer/Einschläge/Bau-Glow müssen als
+  // Instanzen in den Batches gelandet sein.
+  const nPartikel = particles?.totalParticles() ?? 0
+  log(
+    nPartikel > 0
+      ? `SELFTEST-PARTIKEL: ${nPartikel} Partikel gespawnt — das Partikelsystem lebt`
+      : 'SELFTEST-PARTIKEL: KEIN Partikel gespawnt — Emitter-Kette prüfen',
   )
 }
 
@@ -1356,6 +1458,14 @@ function luaSimUpdate(): void {
 
   // Die fliegenden Projektile — die Engine zeichnet jede Sim-Entity.
   updateProjectiles()
+
+  // Die Emitter: pro neuem Sim-Tick spawnen, pro Frame die Partikel-Uhr
+  // stellen (uTime = Sim-Tick + Frame-Anteil; die Kurven zählen in Ticks).
+  updateEmitters()
+  if (particles && luaSim) {
+    const frac = Math.min((performance.now() - lastTickWall) / 100, 1)
+    particles.update(luaSim.gameTick + frac, viewer.worldCamera)
+  }
 
   for (const u of luaUnits) {
     const s = luaSim.state(u.id)
