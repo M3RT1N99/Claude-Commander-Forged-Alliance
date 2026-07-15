@@ -246,6 +246,16 @@ export class LuaSimClient {
   }
 
   /**
+   * Einen Eintrag der Fabrik-Warteschlange ändern — das Sim-Ende von
+   * Increase/DecreaseBuildCountInQueue (Moho::ISSUE_IncreaseCommandCount
+   * Cfile:1257266 / DecreaseCommandCount Cfile:1257378). `delta` < 0 nimmt
+   * weg; fällt der Zähler auf 0, verschwindet der Eintrag.
+   */
+  adjustBuildQueue(factoryId: number, index: number, delta: number): void {
+    this.worker.postMessage({ type: 'adjustQueue', factoryId, index, delta })
+  }
+
+  /**
    * Setzt die Sitzung zurück: frischer Lua-Host, frische Engine, neues Gelände.
    * Ohne das stapeln sich beim zweiten Sandbox-Start ACUs — und mit ihnen der
    * doppelte Startvorrat aus GiveInitialResources.

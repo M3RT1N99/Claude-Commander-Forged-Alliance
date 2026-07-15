@@ -1078,15 +1078,82 @@ end
 --
 -- Die Eintraege sind { id = <blueprintId>, count = <n> } (construction.lua:1620).
 __uiQueueFactory = false
+-- Die Kopie der zuletzt gemeldeten Queue (sCurrentBuildQueue der Engine) —
+-- der Beat-Waechter vergleicht dagegen.
+__uiQueueCopy = {}
 
 function SetCurrentFactoryForQueueDisplay(unit)
   __uiQueueFactory = unit or false
   if not unit then return {} end
-  return unit:GetBuildQueue()
+  local q = unit:GetBuildQueue()
+  -- Die Engine kopiert die Queue SOFORT in sCurrentBuildQueue (Cfile:1257076,
+  -- sub_837070) — sonst meldete der naechste Beat ein Geister-Update fuer die
+  -- Anzeige, die construction.lua gerade selbst aufgebaut hat.
+  __uiQueueCopy = q
+  return q
 end
 
 function ClearCurrentFactoryForQueueDisplay()
   __uiQueueFactory = false
+end
+
+-- === Der Queue-Waechter (Moho::UI_FactoryCommandQueueHandlerBeat) ===
+--
+-- CUIManager::DoBeat ruft ihn pro Sim-Beat VOR UI_LuaBeat
+-- (Cfile:1273907-1273911). Er vergleicht die Warteschlange der angezeigten
+-- Fabrik STRUKTURELL (id + count je Eintrag) mit der Kopie und ruft bei
+-- Aenderung gamemain.OnQueueChanged(neueQueue) (Cfile:1256936-1256950).
+-- Ist KEINE Fabrik mehr angezeigt, aber die Kopie noch gefuellt, feuert
+-- genau einmal OnQueueChanged(nil) (Cfile:1256928-1256932).
+-- Der Vergleich muss strukturell sein: der Spiegel ersetzt die Tabelle jeden
+-- Beat — ein Referenzvergleich meldete zehnmal pro Sekunde eine Aenderung.
+local function queueEqual(a, b)
+  if #a ~= #b then return false end
+  for i = 1, #a do
+    if a[i].id ~= b[i].id or a[i].count ~= b[i].count then return false end
+  end
+  return true
+end
+
+function __uiFactoryQueueBeat()
+  local f = __uiQueueFactory
+  if f and not f.dead then
+    local q = f:GetBuildQueue()
+    if not queueEqual(q, __uiQueueCopy) then
+      __uiQueueCopy = q
+      import('/lua/ui/game/gamemain.lua').OnQueueChanged(q)
+    end
+  elseif __uiQueueCopy[1] ~= nil then
+    __uiQueueCopy = {}
+    import('/lua/ui/game/gamemain.lua').OnQueueChanged(nil)
+  end
+end
+
+-- "IncreaseBuildCountInQueue(queueIndex, count)" (cfunc,
+-- Cfile:1257189-1257270) und "DecreaseBuildCountInQueue(queueIndex, count)"
+-- (Cfile:1257301-1257380): wirken auf die AKTUELL angezeigte Queue
+-- (sCurrentBuildQueue[index-1], 1-basiert aus der Lua), nur auf
+-- UNITCOMMAND_BuildFactory-Eintraege (Cfile:1257258-1257263), und reichen an
+-- den Sim-Driver durch (ISSUE_IncreaseCommandCount Cfile:1257266 bzw.
+-- DecreaseCommandCount Cfile:1257378). construction.lua:895/988-990 haengt
+-- Rechtsklick (weniger) und Linksklick (mehr) daran.
+--
+-- Bekannte Luecke (dokumentiert, kein Raten): das Original storniert ueber
+-- das Kommando-System auch den GERADE LAUFENDEN Bau; unsere Sim hat den
+-- laufenden Eintrag beim Aufsetzen bereits dekrementiert — ein Decrease auf
+-- Position 1 bricht den aktiven Bau (noch) nicht ab.
+local function adjustQueueCount(name, queueIndex, count)
+  local f = __uiQueueFactory
+  if not f or f.dead then return end
+  __uiSimCommand(name, { f.id }, { index = queueIndex, count = count or 1 })
+end
+
+function IncreaseBuildCountInQueue(queueIndex, count)
+  adjustQueueCount('ISSUE_IncreaseCommandCount', queueIndex, count)
+end
+
+function DecreaseBuildCountInQueue(queueIndex, count)
+  adjustQueueCount('ISSUE_DecreaseCommandCount', queueIndex, count)
 end
 
 -- === Script-Bits (die Umschalter einer Unit) ===

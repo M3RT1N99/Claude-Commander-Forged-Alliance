@@ -141,6 +141,19 @@ function __queueFactoryBuild(factoryId, bpId, count)
   return true
 end
 
+--- Einen Queue-Eintrag um `delta` aendern (1-basierter Index) — das Sim-Ende
+--- von Increase/DecreaseBuildCountInQueue (Moho::ISSUE_IncreaseCommandCount
+--- Cfile:1257266 / DecreaseCommandCount Cfile:1257378). Faellt der Zaehler auf
+--- 0 oder darunter, verschwindet der Eintrag.
+function __adjustFactoryQueue(factoryId, index, delta)
+  local f = __units[factoryId]
+  if not f or not f.__buildQueue then return end
+  local item = f.__buildQueue[index]
+  if not item then return end
+  item.count = item.count + delta
+  if item.count <= 0 then table.remove(f.__buildQueue, index) end
+end
+
 -- Laeuft an dieser Unit gerade ein Bau-Auftrag?
 local function isBuilding(id)
   for _, task in pairs(__buildTasks) do

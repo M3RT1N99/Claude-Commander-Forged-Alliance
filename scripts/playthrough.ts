@@ -140,8 +140,10 @@ const spiegle = (): void => {
       `${e.expenseMass}, ${e.expenseEnergy})`,
   )
   ui.eval(`__uiSetGameTick(${Number(sim.eval('return __gameTick'))})`)
-  // Der Beat-VERTEILER (UI_LuaBeat -> gamemain.OnBeat, Cfile:1262940):
+  // Queue-Waechter VOR dem Beat-Verteiler — Reihenfolge aus CUIManager::DoBeat
+  // (Cfile:1273907-1273911), dann UI_LuaBeat -> gamemain.OnBeat (Cfile:1262940):
   // ALLE registrierten Beat-Funktionen laufen (economy, avatars, commandmode ...).
+  ui.eval(`__uiFactoryQueueBeat()`)
   ui.eval(`import('/lua/ui/game/gamemain.lua').OnBeat()`)
 }
 
@@ -280,6 +282,16 @@ if (!fabrik) {
     .find((u) => u.name === gebaut)
   if (!f2 || f2.fraction <= 0) melde('SIM', 'Die Baustelle wächst nicht (Bau-Kette hängt)')
   else console.log(`   Fortschritt: ${(f2.fraction * 100).toFixed(0)}% — Kette läuft`)
+  // Der Bau wird nicht fertig (teuer + wenig Einkommen) — die FABRIK-Kette
+  // (Auswahl, Sammelpunkt, Warteschlange, Produktion) darf davon nicht
+  // abhängen: eine fertige T1-Landfabrik spawnen, den teuren ACU-Bau stoppen
+  // (er fräße sonst alles Einkommen) und das Lager füllen — mit dem
+  // Original-Weg der Szenario-Skripte (SetArmyEconomy, echtes Engine-Global).
+  fabrik = spawnLuaUnit(sim, 'ueb0101', { x: 120, y: 20, z: 120 }, 1)
+  sim.eval(`__clearBuildQueue(${acu})`)
+  sim.eval(`SetArmyEconomy(1, 4000, 100000)`)
+  takt(2)
+  console.log(`   fertige Fabrik ${fabrik} gespawnt — die Fabrik-Kette läuft trotzdem`)
 }
 
 if (fabrik) {
@@ -299,6 +311,45 @@ if (fabrik) {
   }
   console.log(`   Befehl an die Sim: ${JSON.stringify(simBefehle[0] ?? null)}`)
   queueFactoryBuild(sim, fabrik, 'uel0201', 2)
+
+  tue('Bau-Warteschlange: der Wächter meldet, Decrease geht durch die Naht')
+  // Der Queue-Wächter (UI_FactoryCommandQueueHandlerBeat, Cfile:1256904) muss
+  // die neue 2er-Queue als gamemain.OnQueueChanged melden — GEZÄHLT am Modul.
+  ui.eval(`
+    __qtest = { n = 0 }
+    local gm = import('/lua/ui/game/gamemain.lua')
+    local orig = gm.OnQueueChanged
+    gm.OnQueueChanged = function(q) __qtest.n = __qtest.n + 1 return orig(q) end
+  `)
+  spiegle() // Queue in die UI-Kopie + Wächter läuft (vor OnBeat)
+  const ev1 = Number(ui.eval('return __qtest.n'))
+  if (ev1 < 1) melde('UI', 'OnQueueChanged feuert nicht — der Queue-Wächter meldet die neue Warteschlange nicht')
+  else console.log(`   OnQueueChanged gefeuert (${ev1}×) — die Queue-Anzeige lebt`)
+  // Rechtsklick aufs Queue-Icon = DecreaseBuildCountInQueue (construction.lua:895).
+  simBefehle.length = 0
+  try {
+    ui.eval(`DecreaseBuildCountInQueue(1, 1)`)
+  } catch (e) {
+    melde('UI', `DecreaseBuildCountInQueue: ${(e as Error).message}`)
+  }
+  const dec = simBefehle[0]
+  if (dec?.name !== 'ISSUE_DecreaseCommandCount') melde('UI', `Decrease schickt keinen ISSUE_DecreaseCommandCount (${JSON.stringify(dec ?? null)})`)
+  else console.log(`   Naht: ${dec.name} an Fabrik ${dec.ids.join(',')} ${JSON.stringify(dec.value)}`)
+  // Das Sim-Ende (im Browser routet main.ts den Befehl; hier direkt):
+  sim.eval(`__adjustFactoryQueue(${fabrik}, 1, -1)`)
+  spiegle()
+  const ev2 = Number(ui.eval('return __qtest.n'))
+  const restCount = Number(ui.eval(`local q = __uiUnits[${fabrik}].buildQueue return (q[1] and q[1].count) or 0`))
+  if (ev2 <= ev1) melde('UI', 'Der Wächter meldet die geänderte Queue nicht (Decrease unsichtbar)')
+  if (restCount !== 1) melde('SIM', `__adjustFactoryQueue: erwartet count=1, ist ${restCount}`)
+  else console.log(`   nach Decrease: count=${restCount}, OnQueueChanged ${ev2}×`)
+  // … und Increase (Linksklick, construction.lua:988) stellt den Panzer wieder
+  // her — der Produktions-Schritt erwartet BEIDE.
+  simBefehle.length = 0
+  ui.eval(`IncreaseBuildCountInQueue(1, 1)`)
+  if (simBefehle[0]?.name !== 'ISSUE_IncreaseCommandCount') melde('UI', `Increase schickt keinen ISSUE_IncreaseCommandCount (${JSON.stringify(simBefehle[0] ?? null)})`)
+  sim.eval(`__adjustFactoryQueue(${fabrik}, 1, 1)`)
+  spiegle()
 
   tue('Fabrik produziert (RollOffUnit → IssueMove → IsCommandDone)')
   let panzer: number[] = []

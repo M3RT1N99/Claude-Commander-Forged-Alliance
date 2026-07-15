@@ -279,6 +279,12 @@ export class GameUi {
     //
     // Vorher riefen wir Economy._BeatFunction() DIREKT — damit lief genau ein
     // Panel, und alle anderen registrierten Beat-Funktionen blieben tot.
+    //
+    // Der Queue-Wächter läuft VOR dem Lua-Beat — dieselbe Reihenfolge wie
+    // CUIManager::DoBeat (Cfile:1273907-1273911: erst
+    // UI_FactoryCommandQueueHandlerBeat, dann UI_LuaBeat). Er meldet
+    // Änderungen der Fabrik-Warteschlange als gamemain.OnQueueChanged.
+    lines.push(`__uiFactoryQueueBeat()`)
     lines.push(`import('/lua/ui/game/gamemain.lua').OnBeat()`)
     this.host.eval(lines.join('\n'))
   }

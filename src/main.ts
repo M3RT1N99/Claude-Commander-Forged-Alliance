@@ -548,12 +548,19 @@ async function startSandbox(mapFolder: string): Promise<void> {
     // Die Naht, über die Befehle der UI in die Sim gehen. Ohne sie KNALLT jeder
     // Befehl — statt still zu verpuffen (ui-globals.lua: __uiSimCommand).
     gameUi.connectSim((name, ids, value) => {
-      const v = value as { blueprint?: string; count?: number } | undefined
+      const v = value as { blueprint?: string; count?: number; index?: number } | undefined
       if (name === 'UNITCOMMAND_BuildFactory' && v?.blueprint) {
         // Die Fabrik baut: die Einheit geht in ihre Warteschlange (die Sim spawnt
         // sie selbst, sobald sie an der Reihe ist).
         for (const id of ids) void luaSim?.factoryBuild(id, v.blueprint, v.count ?? 1)
         log(`Fabrik ${ids.join(',')}: ${v.count ?? 1}× ${v.blueprint}`)
+        return
+      }
+      // Increase/DecreaseBuildCountInQueue der Original-UI (Rechtsklick aufs
+      // Queue-Icon nimmt weg, Linksklick legt drauf — construction.lua:895/988).
+      if ((name === 'ISSUE_IncreaseCommandCount' || name === 'ISSUE_DecreaseCommandCount') && v?.index !== undefined) {
+        const delta = (name === 'ISSUE_IncreaseCommandCount' ? 1 : -1) * (v.count ?? 1)
+        for (const id of ids) luaSim?.adjustBuildQueue(id, v.index, delta)
         return
       }
       log(`Befehl an die Sim: ${name}(${ids.join(',')}) — noch kein Weg dorthin`)
