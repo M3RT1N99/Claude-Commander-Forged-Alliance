@@ -56,6 +56,28 @@ export interface LuaProjectileSnapshot {
   qz: number
 }
 
+/**
+ * Ein lebender Partikel-Emitter (Mündungsfeuer, Trail, Bau-/Einschlag-Effekt),
+ * wie die Sim ihn meldet (__readAllEmittersJson). Die Weltposition rechnet die
+ * Sim (Owner + Knochen) — das Partikelsystem des Renderers zeichnet daraus.
+ */
+export interface LuaEmitterSnapshot {
+  id: number
+  /** Emitter-Blueprint-Pfad, z. B. '/effects/emitters/..._emit.bp'. */
+  bp: string
+  x: number
+  y: number
+  z: number
+  /** ScaleEmitter-Faktor (Default 1). */
+  scale: number
+  /** Sim-Tick der Entstehung — Startpunkt für Kurven/Lebensdauer. */
+  born: number
+  enabled: boolean
+  ox?: number
+  oy?: number
+  oz?: number
+}
+
 /** Was die Sim braucht, um eine Unit dieses Typs zu erzeugen. */
 interface UnitPayload {
   scriptPath: string
@@ -71,6 +93,7 @@ interface StatesMsg {
   tick: number
   units: LuaUnitSnapshot[]
   projectiles: LuaProjectileSnapshot[]
+  emitters: LuaEmitterSnapshot[]
   economy: EcoSnapshot
 }
 type OutMsg =
@@ -86,6 +109,8 @@ export class LuaSimClient {
   private economy: EcoSnapshot | null = null
   /** Die fliegenden Projektile des letzten Beats — der Renderer zeichnet sie. */
   private projectileStates: LuaProjectileSnapshot[] = []
+  /** Die lebenden Emitter des letzten Beats — Futter fürs Partikelsystem. */
+  private emitterStates: LuaEmitterSnapshot[] = []
   /** Letzter gemeldeter Sim-Tick (Spielzeit = Tick / 10). */
   gameTick = 0
   private nextReq = 1
@@ -161,6 +186,7 @@ export class LuaSimClient {
         this.economy = m.economy
         this.gameTick = m.tick
         this.projectileStates = m.projectiles ?? []
+        this.emitterStates = m.emitters ?? []
         this.statesById.clear()
         for (const u of m.units) this.statesById.set(u.id, u)
         break
@@ -329,6 +355,11 @@ export class LuaSimClient {
   /** Die fliegenden Projektile des letzten Beats (leer, wenn keiner schießt). */
   allProjectiles(): LuaProjectileSnapshot[] {
     return this.projectileStates
+  }
+
+  /** Die lebenden Emitter des letzten Beats (Mündungsfeuer, Trails, …). */
+  allEmitters(): LuaEmitterSnapshot[] {
+    return this.emitterStates
   }
 
   /** Letzte Armee-Ökonomie (Armee 1). */

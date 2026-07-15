@@ -222,6 +222,9 @@ function tickAndPost(): void {
   // (CUIWorldView rendert die Sim-Entities). Ohne diesen Kanal ist der Kampf
   // im Browser unsichtbar — die Sim schiesst, und niemand sieht es.
   const projectiles = host.pull<unknown[]>('__readAllProjectilesJson()')
+  // Die EMITTER (Muendungsfeuer, Trails, Bau-/Einschlag-Effekte): die Sim
+  // rechnet ihre Weltposition (Owner + Knochen), das Partikelsystem zeichnet.
+  const emitters = host.pull<unknown[]>('__readAllEmittersJson()')
   const a = engine.economy.army(1)
   // Der SIM-TICK gehoert zum Zustand: die Spielzeit-Uhr der UI (score.lua:230,
   // GetGameTime) zaehlt in Sim-Ticks und steht bei Pause still.
@@ -231,6 +234,7 @@ function tickAndPost(): void {
     tick,
     units,
     projectiles,
+    emitters,
     economy: {
       mass: a.mass, massStorage: a.maxMass, massIncome: a.incomeMass, massExpense: a.expenseMass,
       energy: a.energy, energyStorage: a.maxEnergy, energyIncome: a.incomeEnergy, energyExpense: a.expenseEnergy,

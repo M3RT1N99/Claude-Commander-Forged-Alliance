@@ -365,8 +365,21 @@ if (fabrik) {
 tue('Feind spawnen + Kampf (Zielerfassung, Schuss, Treffer, Tod, Wrack)')
 const feind = spawnLuaUnit(sim, 'uel0201', { x: 106, y: 20, z: 106 }, 2)
 let tot = false
+// Der Emitter-Kanal: Mündungsfeuer/Einschläge müssen WÄHREND des Kampfes mit
+// Weltposition gemeldet werden (__readAllEmittersJson — das Futter fürs
+// Partikelsystem). Gezählt wird das Maximum über den Kampf.
+let maxEmitter = 0
+let emitterBeispiel = ''
 for (let i = 0; i < 400 && !tot; i++) {
   takt(1)
+  if (i % 5 === 0) {
+    const em = sim.pull<{ id: number; bp: string; x: number; y: number; z: number }[]>('__readAllEmittersJson()')
+    if (em.length > maxEmitter) {
+      maxEmitter = em.length
+      const e0 = em[0]!
+      emitterBeispiel = `${e0.bp.split('/').pop()} @ ${e0.x.toFixed(1)},${e0.y.toFixed(1)},${e0.z.toFixed(1)}`
+    }
+  }
   tot = sim.eval(`return __units[${feind}] == nil or __units[${feind}].__dead == true`) === true
   if (i % 50 === 49) {
     const hp = sim.eval(`
@@ -379,6 +392,8 @@ for (let i = 0; i < 400 && !tot; i++) {
 }
 console.log(tot ? '   Der Feind ist gefallen' : '   Der Feind lebt noch (kein Kampf?)')
 if (!tot) melde('SIM', 'Der Feind wurde nicht getötet — die Waffen greifen nicht')
+if (maxEmitter > 0) console.log(`   Emitter gemeldet: max. ${maxEmitter} gleichzeitig (z. B. ${emitterBeispiel})`)
+else melde('SIM', 'KEIN Emitter während des Kampfes gemeldet — Mündungsfeuer/Einschläge erreichen den Renderer nicht')
 takt(60)
 const wracks = Number(sim.eval('local n = 0 for _ in pairs(__props) do n = n + 1 end return n'))
 console.log(`   ${wracks} Wrack(s) auf dem Feld`)

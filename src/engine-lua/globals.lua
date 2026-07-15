@@ -414,13 +414,45 @@ function EmitterMeta:Destroy() self.__destroyed = true end
 function EmitterMeta:IsDestroyed() return self.__destroyed == true end
 
 __emitters = {}
+__nextEmitterId = 1
 local function newEmitter(owner, bone, army, spec)
   local e = setmetatable({
     __owner = owner, __bone = bone, __army = army, __spec = spec,
     __params = {}, __enabled = true,
+    __id = __nextEmitterId, __born = __gameTick or 0,
   }, EmitterMeta)
+  __nextEmitterId = __nextEmitterId + 1
   __emitters[#__emitters + 1] = e
   return e
+end
+
+--- Der Zustand aller lebenden Emitter als JSON — der Renderer (Partikelsystem)
+--- zeichnet sie. Die Weltposition rechnet die SIM (Owner + Knochen,
+--- __boneWorld) — der Renderer kennt die Skelette nicht. Zerstoerte Emitter
+--- und Emitter toter Owner werden dabei aus der Liste kompaktiert.
+--- (String statt Rueckgabetabelle — wasmoon-Registry, siehe units.lua.)
+function __readAllEmittersJson()
+  local parts, n = {}, 0
+  local kompakt, k = {}, 0
+  for _, e in ipairs(__emitters) do
+    local o = e.__owner
+    local lebt = not e.__destroyed and o ~= nil and not o.__destroyed and not o.__destroyQueued
+    if lebt then
+      k = k + 1
+      kompakt[k] = e
+      local pos = __boneWorld(o, e.__bone)
+      local off = e.__offset
+      n = n + 1
+      parts[n] = string.format(
+        '{"id":%d,"bp":%q,"x":%.6g,"y":%.6g,"z":%.6g,"scale":%.6g,"born":%d,"enabled":%s%s}',
+        e.__id, tostring(e.__spec), pos[1], pos[2], pos[3],
+        e.__scale or 1, e.__born, tostring(e.__enabled == true),
+        off and string.format(',"ox":%.6g,"oy":%.6g,"oz":%.6g', off[1] or 0, off[2] or 0, off[3] or 0) or ''
+      )
+    end
+  end
+  __emitters = kompakt
+  return '[' .. table.concat(parts, ',') .. ']'
 end
 function CreateAttachedEmitter(owner, bone, army, spec) return newEmitter(owner, bone, army, spec) end
 function CreateEmitterAtBone(owner, bone, army, spec) return newEmitter(owner, bone, army, spec) end
