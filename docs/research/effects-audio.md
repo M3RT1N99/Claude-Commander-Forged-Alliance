@@ -88,6 +88,31 @@ return (random01() - 0.5) * z + y
 ```
 (Datei: `faf-re/src/sdk/moho/effects/rendering/SEfxCurve.cpp:319`)
 
+In der eigenen Decomp verifiziert (Cfile/ForgedAlliance.exe.c) und als
+`src/effects/curves.ts` umgesetzt (Suite: `scripts/verify-emitter-curves.ts`):
+- `Moho::SEfxCurve::GetValue` @0x514E50, Cfile:649014-649070. 0 Keys → 0.0
+  (:649030-649031); Scan `while (key.x <= t)` (:649049); t vor dem ersten Key
+  → Clamp auf first.y/z (:649054-649058); t auf/hinter dem letzten Key →
+  Clamp auf last.y/z (:649036-649045); sonst `(rand-0.5)*(preZ+(curZ-preZ)*f)
+  + f*(curY-preY) + preY` (:649065-649067). rand = Mersenne-Twister × 2^-32,
+  Bereich [0,1), EIN Zug pro Aufruf (func_RandomFloatSafe :648929-648937).
+- GetValue bricht die Zeit NICHT um und liest XRange nicht. Der zyklische
+  Umbruch steht beim AUFRUFER: `t = fmod(TICKCOUNT - tick, Repeattime)` plus
+  Vorzeichen-Korrektur (floored modulo), Cfile:894655-894661 (EmitRate) bzw.
+  :894693-894698 (pro Partikel). `Repeattime = 0` → fmod = NaN → GetValue
+  clampt auf den ersten Key.
+- `func_MakeEmitterCurve` Cfile:649226-649274 baut die Laufzeit-Kurve:
+  Keys werden sortiert eingefügt (stabil aufsteigend nach x, sub_5151B0
+  :649185-649191); Kurve ohne Keys → Default XRange=10, ein Key {5,0,0}
+  (:649264-649271). In den echten Daten: 0 unsortierte Kurven, 159 Kurven
+  mit doppeltem x (Ergebnis dort = y des LETZTEN Keys mit gleichem x).
+- Blueprint-Feldreihenfolge der 21 Kurven: `REmitterBlueprint::Init`
+  Cfile:645017-645079 (= Liste oben). Die Laufzeit-Lanes (`mCurves`,
+  CEfxEmitter-Ctor Cfile:893987-894008) sind anders sortiert: XDir, YDir,
+  ZDir, EmitRate, Lifetime, Velocity, XAccel, YAccel, ZAccel, Resistance,
+  Size, XPos, YPos, ZPos, StartSize, EndSize, InitialRotation, RotationRate,
+  FrameRate, TextureSelection, RampSelection.
+
 Emitter-Laufzeit-Skalare (Enum `EEmitterParam`, per `effect:SetEmitterParam('name',v)` setzbar): `POSITION_X/Y/Z, TICKCOUNT, LIFETIME, REPEATTIME, TICKINCREMENT, BLENDMODE, FRAMECOUNT, USE_LOCAL_VELOCITY, USE_LOCAL_ACCELERATION, USE_GRAVITY, ALIGN_ROTATION, INTERPOLATE_EMISSION, TEXTURE_STRIPCOUNT, ALIGN_TO_BONE, SORTORDER, FLAT, SCALE, LODCUTOFF, EMITIFVISIBLE, CATCHUPEMIT, CREATEIFVISIBLE, SNAPTOWATERLINE, ONLYEMITONWATER, PARTICLERESISTANCE`.
 
 ### Wie die Engine sie abspielt (der entscheidende Teil für den Nachbau)
