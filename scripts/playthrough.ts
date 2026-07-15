@@ -122,13 +122,16 @@ const uiFrame = (n = 1): void => {
 /** Den Sim-Zustand in die UI spiegeln — das tut im Browser gameUi.beat(). */
 const spiegle = (): void => {
   const units = sim.pull<
-    { id: number; name: string; x: number; y: number; z: number; health: number; maxHealth: number; fraction: number; moving: boolean }[]
+    { id: number; name: string; x: number; y: number; z: number; health: number; maxHealth: number; fraction: number; moving: boolean; army: number; idle: boolean; buildQueue: { id: string; count: number }[] }[]
   >('__readAllUnitsJson()')
   for (const u of units) {
     ui.eval(
-      `__uiSetUnit(${u.id}, '${u.name}', 1, ${u.x}, ${u.y}, ${u.z}, ${u.health}, ` +
-        `${u.maxHealth}, ${u.fraction}, ${!u.moving})`,
+      `__uiSetUnit(${u.id}, '${u.name}', ${u.army}, ${u.x}, ${u.y}, ${u.z}, ${u.health}, ` +
+        `${u.maxHealth}, ${u.fraction}, ${u.idle === true})`,
     )
+    // Wie im Browser (gameUi.ts): die Queue IMMER spiegeln, auch leer.
+    const items = (u.buildQueue ?? []).map((i) => `{ id = '${i.id}', count = ${i.count} }`).join(',')
+    ui.eval(`__uiSetBuildQueue(${u.id}, { ${items} })`)
   }
   const e = engine.economy.army(1)
   ui.eval(

@@ -26,6 +26,17 @@ local function activeTask(builderId)
   return best, bestId
 end
 
+--- Hat ein Bauer einen laufenden oder wartenden Bau-Auftrag? Der Unit-Spiegel
+--- meldet daraus „idle": im Original pflegt die Engine Idle-Sets am UserArmy
+--- (Cfile:1352334-1352374) aus dem Task-Zustand — ein Bauer MIT Auftrag ist
+--- nicht leerlaufend, auch wenn er gerade stillsteht.
+function __builderBusy(builderId)
+  for _, task in pairs(__buildTasks) do
+    if task.builder == builderId then return true end
+  end
+  return false
+end
+
 --- Alle wartenden Auftraege eines Bauers loeschen (kein Shift = neue Reihe).
 --- Die noch nicht begonnenen Baustellen verschwinden mit ihnen — genau das tut
 --- die Engine, wenn ein Bau-Befehl die Warteschlange ersetzt.

@@ -302,6 +302,35 @@ check(
   'Das UserUnit-Objekt trägt den echten Blueprint',
 )
 
+console.log('\n== Kategorien + Avatare: die Engine-Sicht auf UserUnits ==')
+// Die Kategorie-Brücke (globals.lua entityBp): die Engine prüft Kategorien
+// auf UserUnits genauso wie auf Sim-Entities (cfunc_EntityCategoryContains).
+// Ohne sie liefert JEDER Filter der UI leere Listen — Avatar-Laschen,
+// Klick-Ziele, orders-Sonderpfade.
+check(
+  host.eval(`return EntityCategoryContains(categories.COMMAND, GetSelectedUnits()[1])`) === true,
+  'EntityCategoryContains(COMMAND, userUnit) — die Kategorie-Brücke lebt',
+)
+// Die UEF-ACU trägt PODSTAGINGPLATFORM (uel0001_unit.bp:125, Drohnen-Upgrades)
+// — orders.lua:923-932 läuft diesen Pfad bei JEDER ACU-Auswahl.
+check(
+  Number(host.eval(`return table.getn(EntityCategoryFilterDown(categories.PODSTAGINGPLATFORM, GetSelectedUnits()))`)) === 1,
+  'FilterDown findet die PODSTAGINGPLATFORM-Kategorie der UEF-ACU',
+)
+// Avatar-Kriterium der Engine (UserUnit-Ctor, Cfile:1362979): General.
+// QuickSelectPriority > 0 — die ACU-.bp setzt 1 (uel0001_unit.bp:817).
+check(
+  Number(host.eval(`return table.getn(GetArmyAvatars())`)) === 1,
+  'GetArmyAvatars() = 1 (QuickSelectPriority > 0, Cfile:1362979)',
+)
+// mIsEngineer (Cfile:1362995-1363014): ENGINEER ohne COMMAND/SCOUT/
+// UNTARGETABLE — die leerlaufende ACU gehört NICHT in die Engineer-Lasche.
+// Bei LEER liefert die Engine nil, keine leere Tabelle (Cfile:1360921).
+check(
+  host.eval(`return GetIdleEngineers() == nil`) === true,
+  'GetIdleEngineers() enthält die idle ACU NICHT (COMMAND-Ausschluss, nil bei leer)',
+)
+
 console.log('\n== orders.lua: die Befehls-Buttons kommen aus dem Blueprint ==')
 // GetUnitCommandData → General.CommandCaps der ACU. Move/Stop/Attack MÜSSEN da
 // sein, sonst hat die UI ihre Befehle erfunden.

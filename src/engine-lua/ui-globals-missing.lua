@@ -19,7 +19,7 @@ local NOT_IMPLEMENTED = {
   'DecreaseBuildCountInQueue', 'DeleteCommand', 'EjectSessionClient', 'EngineStartFrontEndUI', 'EngineStartSplashScreens', 'EntityCategoryContains',
   'EntityCategoryFilterDown', 'EntityCategoryFilterOut', 'ExecLuaInSim', 'ExitApplication', 'ExitGame',
   'FormatTime', 'GenerateBuildTemplateFromSelection', 'GetActiveBuildTemplate', 'GetAntiAliasingOptions',
-  'GetArmiesTable', 'GetArmyAvatars', 'GetArmyScore', 'GetAssistingUnitsList', 'GetAttachedUnitsList', 'GetBlueprint',
+  'GetArmiesTable', 'GetArmyAvatars', 'GetArmyScore', 'GetAttachedUnitsList', 'GetBlueprint',
   'GetCamera', 'GetCommandLineArg', 'GetCurrentUIState', 'GetCursor', 'GetEconomyTotals', 'GetFireState',
   'GetFocusArmy', 'GetFrame', 'GetFrontEndData', 'GetGameSpeed',
   'GetIdleEngineers', 'GetIdleFactories', 'GetInputCapture', 'GetIsAutoMode', 'GetIsAutoSurfaceMode', 'GetIsPaused',

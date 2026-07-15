@@ -202,6 +202,7 @@ end
 -- laufen garantiert auseinander; wer dann welches liest, entscheidet der Zufall.
 local function readRow(id, u)
   local p = u.__pos or { 0, 0, 0 }
+  local moving = (u.__goal ~= nil and u.__goal ~= false)
   return {
     id = id,
     name = (u.__bp and u.__bp.BlueprintId) or '?',
@@ -209,9 +210,19 @@ local function readRow(id, u)
     heading = u.__heading or 0,
     health = u.__health or 0,
     maxHealth = u:GetMaxHealth(),
-    moving = (u.__goal ~= nil and u.__goal ~= false),
+    moving = moving,
     fraction = u.__fraction or 1,
     mesh = u.__meshBp,
+    army = u.__army or 1,
+    -- „idle" im Sinn der Engine (die Idle-Sets am UserArmy, Cfile:1352334-1352374,
+    -- werden aus dem TASK-Zustand gepflegt): kein Bewegungsziel, kein laufender
+    -- oder wartender Bau-Auftrag, keine Fabrik-Produktion — und eine BAUSTELLE
+    -- ist nicht leerlaufend, sie ist noch gar nicht in Betrieb. Ein bauender
+    -- Ingenieur steht still und ist trotzdem NICHT idle.
+    idle = not moving
+      and (u.__fraction or 1) >= 1
+      and not __builderBusy(id)
+      and (u.__buildQueue == nil or u.__buildQueue[1] == nil),
     -- Die Bau-Warteschlange einer Fabrik ({ id, count }) — die UI zeigt sie an
     -- (construction.lua:1620), also gehoert sie in den Zustand, den die Sim meldet.
     buildQueue = u.__buildQueue or {},
@@ -254,6 +265,8 @@ function __readAllUnitsJson()
       .. ',"maxHealth":' .. jnum(r.maxHealth)
       .. ',"moving":' .. tostring(r.moving)
       .. ',"fraction":' .. jnum(r.fraction)
+      .. ',"army":' .. jnum(r.army)
+      .. ',"idle":' .. tostring(r.idle)
       .. ',"buildQueue":[' .. table.concat(q, ',') .. ']'
       .. '}'
   end

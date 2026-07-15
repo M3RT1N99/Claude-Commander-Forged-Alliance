@@ -26,6 +26,12 @@ __bpDefaults = {
     UpgradesFrom = 'none',
     UpgradesFromBase = 'none',
     UpgradesTo = '',
+    -- Der Ctor (Cfile:656079-656081): mQuickSelectPriority = 0, mCapCost = 1.0,
+    -- mSelectionPriority = 1. QuickSelectPriority > 0 macht eine Unit zum
+    -- AVATAR (rechte Leiste; in Vanilla setzen es nur die vier ACU-.bp auf 1).
+    QuickSelectPriority = 0,
+    CapCost = 1.0,
+    SelectionPriority = 1,
   },
   -- IdleEffects: Tabellen-Feld im Struct -> leer, nie nil. unit.lua:2463
   -- indiziert es ungeprueft (bpTable[layer]).

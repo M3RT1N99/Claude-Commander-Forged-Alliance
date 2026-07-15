@@ -205,10 +205,21 @@ local function bpCategorySet(bp)
   return set
 end
 
+-- Das Blueprint hinter einem Kategorie-Argument. Die Engine prueft Kategorien
+-- auf ALLEN Objektarten (cfunc_EntityCategoryContains): Sim-Entities, die
+-- UserUnit-Spiegel der UI und nackte Blueprint-Tabellen. Diese Datei laeuft in
+-- BEIDEN VMs — die Sim-Pfade (__bp) bleiben unangetastet, __registered.Unit
+-- ist in beiden VMs dieselbe Ablage (uiEngine.ts aliast __blueprints darauf).
 local function entityBp(e)
-  if type(e) ~= 'table' then return nil end
-  if e.__bp then return e.__bp end
-  if type(e) == 'string' then return __registered and __registered.Unit[e] end
+  if type(e) == 'table' then
+    -- Sim-Entity: traegt ihr Blueprint direkt.
+    if e.__bp then return e.__bp end
+    -- UI-UserUnit (der Sim-Spiegel aus ui-globals.lua): traegt nur die ID.
+    if e.blueprintId then return __registered and __registered.Unit[e.blueprintId] end
+    -- Eine Blueprint-TABELLE selbst (Rueckgabe von GetBlueprint()).
+    if e.Categories then return e end
+  end
+  if type(e) == 'string' then return __registered and __registered.Unit[string.lower(e)] end
   return nil
 end
 

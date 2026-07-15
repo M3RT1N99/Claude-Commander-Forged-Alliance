@@ -26,6 +26,14 @@ export interface LuaUnitSnapshot {
   moving: boolean
   /** Baufortschritt (1 = fertig). __readAllUnits schickt es, es wurde nur nie gelesen. */
   fraction: number
+  /** Die Armee der Unit (1-basiert) — unitsOfFocusArmy filtert danach. */
+  army: number
+  /**
+   * Leerlauf im Sinn der Engine (Idle-Sets am UserArmy, Cfile:1352334): kein
+   * Bewegungsziel, kein Bau-Auftrag, keine Produktion. NICHT dasselbe wie
+   * `!moving` — ein bauender Ingenieur steht still und ist trotzdem nicht idle.
+   */
+  idle: boolean
   /** Bau-Warteschlange einer Fabrik: { id, count } — leer bei allen anderen. */
   buildQueue?: { id: string; count: number }[]
 }

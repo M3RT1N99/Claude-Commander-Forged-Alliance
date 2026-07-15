@@ -246,15 +246,15 @@ export class GameUi {
     for (const u of units) {
       seen.add(u.id)
       lines.push(
-        `__uiSetUnit(${u.id}, '${u.name}', 1, ${u.x}, ${u.y}, ${u.z}, ` +
-          `${u.health}, ${u.maxHealth}, ${u.fraction ?? 1}, ${!u.moving})`,
+        `__uiSetUnit(${u.id}, '${u.name}', ${u.army ?? 1}, ${u.x}, ${u.y}, ${u.z}, ` +
+          `${u.health}, ${u.maxHealth}, ${u.fraction ?? 1}, ${u.idle === true})`,
       )
       // Die Bau-Warteschlange einer Fabrik (construction.lua zeigt sie an).
+      // IMMER senden, auch leer: sonst bleibt in der UI-Kopie die letzte Queue
+      // stehen, und der Übergang „letzter Eintrag fertig → leer" kommt nie an.
       const q = u.buildQueue ?? []
-      if (q.length > 0) {
-        const items = q.map((i) => `{ id = '${i.id}', count = ${i.count} }`).join(',')
-        lines.push(`__uiSetBuildQueue(${u.id}, { ${items} })`)
-      }
+      const items = q.map((i) => `{ id = '${i.id}', count = ${i.count} }`).join(',')
+      lines.push(`__uiSetBuildQueue(${u.id}, { ${items} })`)
     }
     for (const id of this.knownUnits) {
       if (!seen.has(id)) lines.push(`__uiRemoveUnit(${id})`)

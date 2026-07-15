@@ -237,7 +237,9 @@ function UserUnitMeta:GetFuelRatio() return self.fuelRatio or -1 end
 function UserUnitMeta:GetShieldRatio() return self.shieldRatio or 0 end
 function UserUnitMeta:GetWorkProgress() return self.workProgress or 0 end
 function UserUnitMeta:IsDead() return self.dead == true end
-function UserUnitMeta:IsIdle() return self.idle ~= false end
+-- Der Spiegel meldet idle jetzt ECHT (units.lua readRow: kein Ziel, kein
+-- Bau-Auftrag, keine Produktion) — nil ist hier ein Fehler, kein Idle.
+function UserUnitMeta:IsIdle() return self.idle == true end
 function UserUnitMeta:IsStunned() return false end
 function UserUnitMeta:IsAutoMode() return false end
 function UserUnitMeta:IsAutoSurfaceMode() return false end
@@ -349,14 +351,39 @@ local function hasCategory(bp, want)
 end
 
 function GetArmyAvatars()
-  return unitsOfFocusArmy(function(bp) return hasCategory(bp, 'COMMAND') end)
+  -- Das Kriterium der Engine (UserUnit-Ctor, Cfile:1362979-1362982): ein
+  -- Avatar ist jede Unit mit bp.General.QuickSelectPriority > 0 (Ctor-Default
+  -- 0, Cfile:656079 — in Vanilla setzen es nur die vier ACU-.bp auf 1).
+  -- Einsortiert wird AUFSTEIGEND: vor dem ersten STRIKT groesseren Eintrag
+  -- (Cfile:1352238-1352239); bei gleicher Prioritaet bleibt die
+  -- Entstehungsreihenfolge — hier die Unit-ID (die Sim vergibt sie aufsteigend).
+  local out = unitsOfFocusArmy(function(bp)
+    return (bp.General.QuickSelectPriority or 0) > 0
+  end)
+  -- Bei leerer Liste liefert die Engine NIL, keine leere Tabelle
+  -- (cfunc_GetArmyAvatarsL, Cfile:1360921: ohne Eintraege wird nichts
+  -- gepusht) — avatars.lua:666 prueft `if avatars then`.
+  if not out then return nil end
+  table.sort(out, function(a, b)
+    local pa = (__blueprints[a.blueprintId].General.QuickSelectPriority) or 0
+    local pb = (__blueprints[b.blueprintId].General.QuickSelectPriority) or 0
+    if pa ~= pb then return pa < pb end
+    return a.id < b.id
+  end)
+  return out
 end
 
 -- Leerlaufende Ingenieure/Fabriken (die zwei Knoepfe unter den Avataren).
 -- „Idle" ist der Zustand, den die Sim meldet (u.idle).
 function GetIdleEngineers()
+  -- mIsEngineer (UserUnit-Ctor, Cfile:1362995-1363014): Kategorie ENGINEER,
+  -- aber NICHT COMMAND, SCOUT oder UNTARGETABLE — sonst stuende die
+  -- leerlaufende ACU mit in der Ingenieurs-Lasche.
   return unitsOfFocusArmy(function(bp, u)
     return u.idle == true and hasCategory(bp, 'ENGINEER')
+      and not hasCategory(bp, 'COMMAND')
+      and not hasCategory(bp, 'SCOUT')
+      and not hasCategory(bp, 'UNTARGETABLE')
   end)
 end
 
@@ -364,6 +391,17 @@ function GetIdleFactories()
   return unitsOfFocusArmy(function(bp, u)
     return u.idle == true and hasCategory(bp, 'FACTORY')
   end)
+end
+
+-- "Get a list of units assisting me" (mHelp, Cfile:1360671): die Guards der
+-- gegebenen Units. orders.lua:932 fragt so die Drohnen einer
+-- PODSTAGINGPLATFORM ab — und die UEF-ACU TRAEGT diese Kategorie
+-- (uel0001_unit.bp:125); der Pfad laeuft also bei jeder ACU-Auswahl. Unsere
+-- Sim fuehrt noch kein Guard/Assist-System: der Spiegel kennt keine
+-- Assistenten, die leere Liste ist die WAHRE Antwort. Sobald die Sim Assist
+-- lernt, muss der Spiegel die Guards hierher liefern.
+function GetAssistingUnitsList(units)
+  return {}
 end
 
 -- === Selektion ===
