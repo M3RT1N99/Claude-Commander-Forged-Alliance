@@ -393,6 +393,26 @@ function GetIdleFactories()
   end)
 end
 
+-- "Validate a list of units" (mHelp, Cfile:1360576; Rumpf 1360596-1360650):
+-- filtert eine Unit-Liste auf lebende UserUnits (nicht IsDead, nicht
+-- DestroyQueued), Reihenfolge bleibt erhalten. Rueckgabe ist IMMER eine
+-- Tabelle, auch leer (AssignNewTable + PushStack — anders als die
+-- Avatar-Listen!); ohne Session nil (return 0, Cfile:1360604).
+-- controlgroups.lua:102 (Strg-Gruppen) und selection.lua:82/132/165 filtern
+-- damit tote Einheiten aus gemerkten Listen.
+function ValidateUnitsList(units)
+  if not __uiScenarioInfo then return nil end
+  local out = {}
+  if type(units) == 'table' then
+    for _, u in ipairs(units) do
+      if type(u) == 'table' and u.id and __uiUnits[u.id] and not u.dead then
+        out[table.getn(out) + 1] = u
+      end
+    end
+  end
+  return out
+end
+
 -- "Get a list of units assisting me" (mHelp, Cfile:1360671): die Guards der
 -- gegebenen Units. orders.lua:932 fragt so die Drohnen einer
 -- PODSTAGINGPLATFORM ab — und die UEF-ACU TRAEGT diese Kategorie

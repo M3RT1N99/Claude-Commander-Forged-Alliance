@@ -45,7 +45,7 @@ local NOT_IMPLEMENTED = {
   'SetOverlayFilter', 'SetOverlayFilters', 'SetPaused', 'SetPreference', 'SetUIControlsAlpha', 'SetVolume',
   'SimCallback', 'SoundIsPrepared', 'StartSound', 'StopSound', 'SyncPlayableRect', 'TeamColorMode',
   'ToggleFireState', 'ToggleScriptBit', 'UISelectionByCategory', 'UnProject',
-  'ValidateIPAddress', 'ValidateUnitsList', 'WorldIsLoading', 'WorldIsPlaying', '_c_CreateCursor', '_c_CreateDecal',
+  'ValidateIPAddress', 'WorldIsLoading', 'WorldIsPlaying', '_c_CreateCursor', '_c_CreateDecal',
   '_c_CreatePathDebugger', 'print',
 }
 

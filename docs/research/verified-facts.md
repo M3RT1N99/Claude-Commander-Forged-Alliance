@@ -170,6 +170,30 @@ in CLAUDE.md. Vor Arbeit an einem der Themen: den passenden Abschnitt lesen.*
   (uel0001_unit.bp:125) — orders.lua:923-932 läuft bei jeder ACU-Auswahl und
   braucht `GetAssistingUnitsList` (Cfile:1360671).
 
+## Effekte/Partikel (Quelle: effects/particle.fx aus effects.scd, 1332 Zeilen — der ECHTE Shader)
+
+- **Partikel-Vertexshader (WorldVS):** `t = time - birth`; `alpha = t/lifetime`
+  (= Ramp-U!); Position ohne Drag `P0 + V·t + 0.5·A·t²`, mit Drag
+  `(dz·A − dy·V)·(e^(−dx·t) − 1) + dy·A·t + P0`; Rotation
+  `rot = Pos.w + Vel.w·t` dreht das ±1-Quad; Billboard über
+  `InverseViewMatrix[0/1]` (Flat: Welt-X/Z); Größe `Size.x + Size.y·t`.
+  Frame-Animation: `frame = floor(framerate·t)`, U um `framesize·frame`
+  verschoben; TexOffset.z/x wählen die Textur-Zeile, TexOffset.y die
+  Ramp-Zeile (mTex1 = {alpha, rampOffset}).
+- **Pixelshader:** `Partikeltextur(mTex0) × Ramptextur(mTex1)`; REFRACT
+  versetzt den Hintergrund um `0.005·(2·texel.rg − 1)`.
+- **Blend-States (AlphaState je Technique-Suffix):**
+  MODULATEINVERSE = Zero/InvSrcColor · MODULATE2XINVERSE =
+  InvDestColor/InvSrcColor · ADD = SrcAlpha/One · ALPHABLEND =
+  SrcAlpha/InvSrcAlpha (nur RGB) · PREMODALPHA = One/InvSrcAlpha (nur RGB).
+  Depth: Test Less AN, **Write AUS**; Cull None. Technique-Familien:
+  TRamp[Animate][Align|AlignToBone|Flat]_<BLEND>, TLight, TBeam_One/TwoTexture,
+  TTrail (TrailVS: Ribbon quer zur Blickrichtung, `cross((0,0,1), dirView)`,
+  V aus `(startTime − originTime)/lifetime · repeatRate`).
+- **Emitter-Transport bei uns:** die Sim meldet lebende Emitter pro Beat mit
+  Weltposition (`__readAllEmittersJson`, globals.lua; Owner+Knochen über
+  `__boneWorld`) → Worker → `LuaSimClient.allEmitters()`.
+
 ## Lua-Host
 
 - **FA-Lua knallt bei Vergleichen über Typgrenzen NICHT.** Die Engine hat

@@ -330,6 +330,24 @@ check(
   host.eval(`return GetIdleEngineers() == nil`) === true,
   'GetIdleEngineers() enthält die idle ACU NICHT (COMMAND-Ausschluss, nil bei leer)',
 )
+// ValidateUnitsList (Cfile:1360596-1360650): filtert tote/entfernte Units aus
+// einer gemerkten Liste (Strg-Gruppen, controlgroups.lua:102); Rückgabe ist
+// IMMER eine Tabelle, auch leer.
+check(
+  Number(
+    host.eval(`
+      local acu = GetSelectedUnits()[1]
+      local geist = { id = 9999 }
+      local ok = ValidateUnitsList({ acu, geist })
+      return table.getn(ok)
+    `),
+  ) === 1,
+  'ValidateUnitsList behält die lebende ACU und wirft den Geist raus',
+)
+check(
+  host.eval(`return table.getn(ValidateUnitsList(17)) == 0`) === true,
+  'ValidateUnitsList(nicht-Tabelle) = leere Tabelle (AssignNewTable, Cfile:1360617)',
+)
 
 console.log('\n== orders.lua: die Befehls-Buttons kommen aus dem Blueprint ==')
 // GetUnitCommandData → General.CommandCaps der ACU. Move/Stop/Attack MÜSSEN da
