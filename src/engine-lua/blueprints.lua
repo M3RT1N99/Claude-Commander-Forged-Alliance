@@ -230,6 +230,48 @@ RegisterMeshBlueprint=collector('Mesh')
 RegisterPropBlueprint=collector('Prop')
 RegisterEmitterBlueprint=collector('Emitter'); RegisterTrailEmitterBlueprint=collector('TrailEmitter')
 RegisterBeamBlueprint=collector('Beam')
+
+-- Ein EMITTER-Blueprint als JSON — der Renderer (Partikelsystem im
+-- Main-Thread) holt die geparsten Daten aus der Sim, statt die 2724
+-- _emit.bp-Dateien selbst noch einmal zu laden. Emitter-BPs sind reine
+-- Daten: Zahlen, Strings, Booleans und Tabellen (die 21 Kurven mit
+-- XRange + Keys). Arrays (fortlaufende 1..n) werden als JSON-Array
+-- serialisiert, alles andere als Objekt.
+local function jsonVal(v)
+  local t = type(v)
+  if t == 'number' then
+    return string.format('%.9g', v)
+  elseif t == 'string' then
+    return string.format('%q', v)
+  elseif t == 'boolean' then
+    return tostring(v)
+  elseif t == 'table' then
+    local n = 0
+    for _ in pairs(v) do n = n + 1 end
+    if n == #v and n > 0 then
+      local parts = {}
+      for i = 1, n do parts[i] = jsonVal(v[i]) end
+      return '[' .. table.concat(parts, ',') .. ']'
+    end
+    local parts, i = {}, 0
+    for k, val in pairs(v) do
+      i = i + 1
+      parts[i] = string.format('%q:', tostring(k)) .. jsonVal(val)
+    end
+    return '{' .. table.concat(parts, ',') .. '}'
+  end
+  return 'null'
+end
+
+--- Liefert das Emitter-/Trail-/Beam-Blueprint zur Id als JSON-String —
+--- oder den String 'null', wenn es keines gibt (der Aufrufer prueft).
+function __emitterBpJson(bpId)
+  local bp = __registered.Emitter[bpId]
+    or __registered.TrailEmitter[bpId]
+    or __registered.Beam[bpId]
+  if not bp then return 'null' end
+  return jsonVal(bp)
+end
 function BlueprintLoaderUpdateProgress() end
 __bpFiles = {}
 function DiskFindFiles(dir, pattern)

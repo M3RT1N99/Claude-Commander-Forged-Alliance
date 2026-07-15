@@ -85,6 +85,10 @@ type InMsg =
   // Cfile:1257266 / DecreaseCommandCount Cfile:1257378): einen Eintrag der
   // Fabrik-Warteschlange um delta aendern; <= 0 entfernt ihn.
   | { type: 'adjustQueue'; factoryId: number; index: number; delta: number }
+  // Ein Emitter-Blueprint fuer das Partikelsystem: die Sim hat alle 2724
+  // _emit.bp beim Boot geparst (__registered.Emitter) — der Renderer holt
+  // sie lazy, statt sie selbst noch einmal zu laden.
+  | { type: 'emitterBp'; reqId: number; bp: string }
 
 ctx.onmessage = async (e: MessageEvent<InMsg>): Promise<void> => {
   const msg = e.data
@@ -152,6 +156,10 @@ ctx.onmessage = async (e: MessageEvent<InMsg>): Promise<void> => {
     queueFactoryBuild(host, msg.factoryId, msg.id, msg.count)
   } else if (msg.type === 'adjustQueue') {
     host.eval(`__adjustFactoryQueue(${msg.factoryId}, ${msg.index}, ${msg.delta})`)
+  } else if (msg.type === 'emitterBp') {
+    // __emitterBpJson liefert JSON (oder 'null') — pull parst direkt.
+    const bp = host.pull<unknown>(`__emitterBpJson(${JSON.stringify(msg.bp)})`)
+    ctx.postMessage({ type: 'emitterBp', reqId: msg.reqId, bp })
   } else if (msg.type === 'move') {
     host.eval(`local u=__units[${msg.id}]; if u then u:GetNavigator():SetGoal({ ${msg.x}, 0, ${msg.z} }) end`)
   } else if (msg.type === 'rally') {

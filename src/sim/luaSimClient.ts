@@ -102,6 +102,7 @@ type OutMsg =
   | { type: 'log'; level: string; msg: string }
   | { type: 'spawned'; reqId: number; uid: number }
   | { type: 'spawnError'; reqId: number; error: string }
+  | { type: 'emitterBp'; reqId: number; bp: unknown }
   | StatesMsg
 
 export class LuaSimClient {
@@ -117,6 +118,8 @@ export class LuaSimClient {
   private bootResolve: (() => void) | null = null
   private resetResolve: (() => void) | null = null
   private readonly spawnPending = new Map<number, { resolve: (uid: number) => void; reject: (e: Error) => void }>()
+  private readonly emitterBpPending = new Map<number, (bp: unknown) => void>()
+  private readonly emitterBpCache = new Map<string, Promise<unknown>>()
 
   private constructor(
     private readonly worker: Worker,
@@ -200,6 +203,12 @@ export class LuaSimClient {
         const p = this.spawnPending.get(m.reqId)
         this.spawnPending.delete(m.reqId)
         p?.reject(new Error(m.error))
+        break
+      }
+      case 'emitterBp': {
+        const p = this.emitterBpPending.get(m.reqId)
+        this.emitterBpPending.delete(m.reqId)
+        p?.(m.bp)
         break
       }
     }
@@ -360,6 +369,24 @@ export class LuaSimClient {
   /** Die lebenden Emitter des letzten Beats (Mündungsfeuer, Trails, …). */
   allEmitters(): LuaEmitterSnapshot[] {
     return this.emitterStates
+  }
+
+  /**
+   * Das geparste Emitter-/Trail-/Beam-Blueprint zur Id — aus der Sim, die
+   * beim Boot alle _emit.bp geladen hat (__registered.Emitter). Liefert null,
+   * wenn es keines gibt. Gecacht: jede Id geht höchstens einmal in den Worker.
+   */
+  emitterBlueprint(bp: string): Promise<unknown> {
+    let p = this.emitterBpCache.get(bp)
+    if (!p) {
+      const reqId = this.nextReq++
+      p = new Promise<unknown>((resolve) => {
+        this.emitterBpPending.set(reqId, resolve)
+        this.worker.postMessage({ type: 'emitterBp', reqId, bp })
+      })
+      this.emitterBpCache.set(bp, p)
+    }
+    return p
   }
 
   /** Letzte Armee-Ökonomie (Armee 1). */

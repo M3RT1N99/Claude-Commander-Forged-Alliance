@@ -370,6 +370,7 @@ let tot = false
 // Partikelsystem). Gezählt wird das Maximum über den Kampf.
 let maxEmitter = 0
 let emitterBeispiel = ''
+let emitterBp = ''
 for (let i = 0; i < 400 && !tot; i++) {
   takt(1)
   if (i % 5 === 0) {
@@ -378,6 +379,7 @@ for (let i = 0; i < 400 && !tot; i++) {
       maxEmitter = em.length
       const e0 = em[0]!
       emitterBeispiel = `${e0.bp.split('/').pop()} @ ${e0.x.toFixed(1)},${e0.y.toFixed(1)},${e0.z.toFixed(1)}`
+      emitterBp = e0.bp
     }
   }
   tot = sim.eval(`return __units[${feind}] == nil or __units[${feind}].__dead == true`) === true
@@ -394,6 +396,18 @@ console.log(tot ? '   Der Feind ist gefallen' : '   Der Feind lebt noch (kein Ka
 if (!tot) melde('SIM', 'Der Feind wurde nicht getötet — die Waffen greifen nicht')
 if (maxEmitter > 0) console.log(`   Emitter gemeldet: max. ${maxEmitter} gleichzeitig (z. B. ${emitterBeispiel})`)
 else melde('SIM', 'KEIN Emitter während des Kampfes gemeldet — Mündungsfeuer/Einschläge erreichen den Renderer nicht')
+if (emitterBp) {
+  // Der Blueprint-RPC fürs Partikelsystem: die Sim liefert das GEPARSTE
+  // Emitter-BP als JSON (__emitterBpJson) — mit Textur und Kurven.
+  const bp = sim.pull<{ Texture?: string; EmitRateCurve?: { Keys?: unknown[] } } | null>(
+    `__emitterBpJson('${emitterBp}')`,
+  )
+  if (bp && typeof bp.Texture === 'string' && bp.EmitRateCurve?.Keys) {
+    console.log(`   Emitter-BP über RPC: Texture=${bp.Texture.split('/').pop()}, EmitRateCurve mit ${bp.EmitRateCurve.Keys.length} Keys`)
+  } else {
+    melde('SIM', `__emitterBpJson liefert kein brauchbares BP für ${emitterBp}`)
+  }
+}
 takt(60)
 const wracks = Number(sim.eval('local n = 0 for _ in pairs(__props) do n = n + 1 end return n'))
 console.log(`   ${wracks} Wrack(s) auf dem Feld`)
