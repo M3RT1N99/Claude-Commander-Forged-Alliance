@@ -65,6 +65,10 @@ export interface HudUnitInfo {
   army: number
   strategicIcon: string
   fadeZoom: number
+  /** Baufortschritt (1 = fertig). Unter 1 zeigt der Balken den BAU, nicht die HP. */
+  fraction: number
+  /** Halbe Breite der Einheit (aus dem Blueprint) — so breit ist ihr Balken. */
+  halfWidth: number
 }
 
 /** Datenquelle — von der Lua-Engine (main.ts) bereitgestellt. */
@@ -83,11 +87,101 @@ export class Hud {
   ) {
     this.root = document.createElement('div')
     this.root.id = 'hud'
-    this.root.innerHTML = `<div id="strat-layer"></div>`
+    this.root.innerHTML = `<div id="bar-layer"></div><div id="strat-layer"></div>`
     document.body.appendChild(this.root)
 
-    // Strategic Icons müssen der Kamera pro Frame folgen
-    viewer.onUpdate(() => this.updateStrategicIcons())
+    // Strategic Icons und Lebensbalken müssen der Kamera pro Frame folgen
+    viewer.onUpdate(() => {
+      this.updateStrategicIcons()
+      this.updateLifeBars()
+    })
+  }
+
+  /**
+   * Sollen Lebensbalken gezeichnet werden? Das ist im Original eine
+   * ENGINE-Einstellung, kein UI-Element: die Aktion `toggle_lifebars` (Alt-L,
+   * defaultkeymap.lua:11) schaltet die ConVar `UI_RenderUnitBars`
+   * (keyactions.lua:14). Wir lesen genau diese ConVar.
+   */
+  renderBars = true
+
+  /**
+   * ConVar `ui_AlwaysRenderStrategicIcons` (Cfile:421748) — im Optionen-Dialog
+   * schaltbar. Ist sie an, erscheinen die Icons auf JEDER Zoomstufe, nicht erst
+   * ab `Display.Mesh.IconFadeInZoom` des Blueprints.
+   */
+  alwaysIcons = false
+
+  // -------------------------------------------------------------------------
+  // LEBENSBALKEN + BAU-FORTSCHRITT
+  //
+  // Auch das zeichnet im Original die ENGINE über der Welt (nicht die Lua): ein
+  // Balken über jeder Einheit, so breit wie sie ist. Bei einer BAUSTELLE zeigt
+  // er den Baufortschritt — deshalb sieht man im Original, wie ein Gebäude
+  // wächst, statt dass es fertig dasteht.
+  // -------------------------------------------------------------------------
+  private readonly barPool: HTMLDivElement[] = []
+
+  private updateLifeBars(): void {
+    const layer = this.el('#bar-layer')
+    const rootRect = this.root.getBoundingClientRect()
+    const units = this.source.units()
+    const dist = this.viewer.getRtsDistance()
+
+    while (this.barPool.length < units.length) {
+      const bar = document.createElement('div')
+      bar.className = 'life-bar'
+      bar.innerHTML = '<div class="life-fill"></div>'
+      layer.appendChild(bar)
+      this.barPool.push(bar)
+    }
+
+    for (let i = 0; i < this.barPool.length; i++) {
+      const bar = this.barPool[i]!
+      const u = units[i]
+      // Weit weg übernehmen die strategischen Icons (fadeZoom) — dann ist der
+      // Balken im Original ebenfalls weg.
+      if (!this.renderBars || !u || dist >= u.fadeZoom) {
+        bar.style.display = 'none'
+        continue
+      }
+      const s = this.viewer.worldToScreen(new THREE.Vector3(u.x, u.y + 1, u.z))
+      if (!s) {
+        bar.style.display = 'none'
+        continue
+      }
+      const bauend = u.fraction < 1
+      const anteil = bauend
+        ? u.fraction
+        : u.maxHealth > 0
+          ? Math.max(0, Math.min(1, u.health / u.maxHealth))
+          : 0
+      // Volle Einheiten ohne Schaden zeigen keinen Balken (wie im Original) —
+      // eine Baustelle immer.
+      if (!bauend && anteil >= 0.999 && !u.selected) {
+        bar.style.display = 'none'
+        continue
+      }
+      // So breit wie die Einheit: ihre halbe Breite mal 2, in Bildschirm-Pixel
+      // umgerechnet über einen zweiten projizierten Punkt.
+      const rand = this.viewer.worldToScreen(new THREE.Vector3(u.x + u.halfWidth, u.y + 1, u.z))
+      const breite = rand ? Math.max(16, Math.abs(rand.x - s.x) * 2) : 24
+
+      bar.style.display = 'block'
+      bar.style.width = `${breite}px`
+      bar.style.transform =
+        `translate(${s.x - rootRect.left}px, ${s.y - rootRect.top}px) translate(-50%, -100%)`
+      const fill = bar.firstElementChild as HTMLDivElement
+      fill.style.width = `${anteil * 100}%`
+      // Bau = blau (der Bau-Fortschritt), sonst grün→rot nach Gesundheit.
+      fill.style.background = bauend
+        ? '#3fa9f5'
+        : anteil > 0.6
+          ? '#3ad353'
+          : anteil > 0.3
+            ? '#e8d33a'
+            : '#e84040'
+    }
   }
 
   dispose(): void {
@@ -140,7 +234,7 @@ export class Hud {
     for (let i = 0; i < this.stratPool.length; i++) {
       const img = this.stratPool[i]!
       const u = units[i]
-      if (!u || dist < u.fadeZoom) {
+      if (!u || (dist < u.fadeZoom && !this.alwaysIcons)) {
         img.style.display = 'none'
         continue
       }

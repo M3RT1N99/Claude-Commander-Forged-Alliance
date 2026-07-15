@@ -196,7 +196,11 @@ end
 -- =====================================================================
 __uiUnits = {}
 
-local UserUnitMeta = {}
+-- Die UserUnit-Klasse der UI-VM (Cfile: 35 Bindungen). Sie ist KEINE moho-Klasse:
+-- die Engine gibt der UI eigene Objekte. Global, damit der Engine-Abgleich
+-- (scripts/coverage-engine.ts) sie pruefen kann.
+__userUnitMethods = {}
+local UserUnitMeta = __userUnitMethods
 UserUnitMeta.__index = UserUnitMeta
 
 function UserUnitMeta:GetEntityId() return self.id end
@@ -282,6 +286,55 @@ function __uiRemoveUnit(id)
   local u = __uiUnits[id]
   if u then u.dead = true end
   __uiUnits[id] = nil
+end
+
+-- === Die Listen, aus denen die Avatar-Leiste lebt (rechts oben) ===
+--
+--   "table GetArmyAvatars() - return a table of avatar units for the army"
+--   (mHelp, Cfile:1360874)
+--
+-- avatars.lua:658 baut daraus die anklickbaren Icons (die ACU!), gamemain.lua:79
+-- gibt der ACU beim Start den Spielernamen. Ohne diese Listen bleibt die
+-- Avatar-Leiste LEER — genau das war zu sehen.
+--
+-- Ein „Avatar" ist eine Unit der eigenen Armee in der Kategorie COMMAND
+-- (der Kommandeur; bei Nomads/Sub-Commander mehr). Gefiltert wird ueber die
+-- Kategorien des Blueprints — keine Sonderliste, keine geratene Auswahl.
+local function unitsOfFocusArmy(pred)
+  local out = {}
+  for _, u in pairs(__uiUnits) do
+    if not u.dead and u.army == __uiFocusArmy then
+      local bp = __blueprints[u.blueprintId]
+      if bp and pred(bp, u) then out[table.getn(out) + 1] = u end
+    end
+  end
+  if table.getn(out) == 0 then return nil end
+  return out
+end
+
+local function hasCategory(bp, want)
+  for _, c in ipairs(bp.Categories or {}) do
+    if c == want then return true end
+  end
+  return false
+end
+
+function GetArmyAvatars()
+  return unitsOfFocusArmy(function(bp) return hasCategory(bp, 'COMMAND') end)
+end
+
+-- Leerlaufende Ingenieure/Fabriken (die zwei Knoepfe unter den Avataren).
+-- „Idle" ist der Zustand, den die Sim meldet (u.idle).
+function GetIdleEngineers()
+  return unitsOfFocusArmy(function(bp, u)
+    return u.idle == true and hasCategory(bp, 'ENGINEER')
+  end)
+end
+
+function GetIdleFactories()
+  return unitsOfFocusArmy(function(bp, u)
+    return u.idle == true and hasCategory(bp, 'FACTORY')
+  end)
 end
 
 -- === Selektion ===

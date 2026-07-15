@@ -341,6 +341,30 @@ select.inline {
   pointer-events: none;
 }
 
+/* Lebensbalken + Baufortschritt (die Engine zeichnet sie im Original über der
+   Welt; hier ist die Welt ein Canvas, also liegen sie als Schicht darüber). */
+#bar-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.life-bar {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 4px;
+  background: rgba(0, 0, 0, 0.65);
+  border: 1px solid rgba(0, 0, 0, 0.85);
+  box-sizing: content-box;
+}
+
+.life-fill {
+  height: 100%;
+  width: 0;
+}
+
 .strat-icon {
   position: absolute;
   left: 0;

@@ -299,6 +299,23 @@ export class UnitViewer {
   }
 
   /**
+   * Eine Einheit wieder aus der Szene nehmen — inklusive der TREFFERLISTE.
+   *
+   * Das ist der Punkt: `mesh.visible = false` reicht nicht. Der Raycaster von
+   * three.js prüft `visible` NICHT (Mesh.raycast tut es nicht) — ein nur
+   * unsichtbar gemachtes Modell fängt weiter jeden Klick ab. Genau daran ist die
+   * Bau-Vorschau hängen geblieben: nach dem ersten Bau-Modus saß ein
+   * unsichtbarer Geist in der Liste und verschluckte die Auswahl der ACU.
+   */
+  removeUnit(unit: SceneUnit): void {
+    const i = this.units.indexOf(unit)
+    if (i >= 0) this.units.splice(i, 1)
+    this.scene.remove(unit.mesh)
+    unit.mesh.geometry.dispose()
+    ;(unit.mesh.material as THREE.Material).dispose()
+  }
+
+  /**
    * Ist ein Update-Hook registriert? `clearContent()` (Karten-/Unit-Wechsel)
    * wirft alle Hooks weg. Wer sich das nur in einem eigenen Flag merkt, hat nach
    * dem zweiten Karten-Ladevorgang keinen Hook mehr und wundert sich, warum sich
@@ -318,7 +335,13 @@ export class UnitViewer {
     this.helpers.push(obj)
   }
 
-  /** Nächstgelegene getroffene Einheit unter dem Cursor (oder null). */
+  /**
+   * Nächstgelegene getroffene Einheit unter dem Cursor (oder null).
+   *
+   * NUR SICHTBARE zählen: der Raycaster von three.js prüft `visible` selbst
+   * nicht — ein ausgeblendetes Modell (Bau-Geist, Wrack in der Todes-Animation)
+   * würde sonst weiter Klicks abfangen.
+   */
   pickUnit(clientX: number, clientY: number): SceneUnit | null {
     if (this.units.length === 0) return null
     const rect = this.canvas.getBoundingClientRect()
@@ -329,7 +352,7 @@ export class UnitViewer {
     const raycaster = new THREE.Raycaster()
     raycaster.setFromCamera(ndc, this.camera)
     const hits = raycaster.intersectObjects(
-      this.units.map((u) => u.mesh),
+      this.units.filter((u) => u.mesh.visible).map((u) => u.mesh),
       false,
     )
     const hit = hits[0]

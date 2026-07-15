@@ -135,6 +135,63 @@ if (err === null) {
   const h = Number(host.eval(`return Economy.GUI.bg.panel.Height()`))
   check(w === 324, `panel.Width() = ${w}`)
   check(h === 72, `panel.Height() = ${h}`)
+
+  console.log('\n== Der BALKEN bewegt sich mit dem Vorrat (StatusBar) ==')
+  // statusbar.lua:57-63 setzt `_bar.Right` als LazyVar-FUNKTION, die
+  // `_CalcRangePercent()` liest — der Balken ist also nur so breit wie der
+  // Füllstand. Wer die Breite nicht neu auswertet, hat einen Balken, der zwar
+  // Zahlen zeigt, sich aber nie bewegt.
+  // Gemessen wird das RECHTECK (Right − Left), nicht `Width()`: bitmap.lua:67-70
+  // pinnt Width fest auf die TEXTURBREITE. Genau daran ist der Balken hängen
+  // geblieben — der Renderer las Width, und die ändert sich nie.
+  const barWidth = (): number =>
+    Number(
+      host.eval(`
+        local bar = Economy.GUI.mass.storageBar._bar
+        return bar.Right() - bar.Left()
+      `),
+    )
+  const barPinnedWidth = Number(host.eval(`return Economy.GUI.mass.storageBar._bar.Width()`))
+
+  // __uiSetEconomy(maxM, maxE, storedM, storedE, …) — das LAGER zuerst.
+  host.eval(`__uiSetEconomy(650, 4000, 650, 4000, 1, 20, 0, 0, 0, 0)`)
+  host.eval(`Economy._BeatFunction()`)
+  const full = barWidth()
+
+  host.eval(`__uiSetEconomy(650, 4000, 325, 4000, 1, 20, 0, 0, 0, 0)`)
+  host.eval(`Economy._BeatFunction()`)
+  const half = barWidth()
+
+  host.eval(`__uiSetEconomy(650, 4000, 0, 4000, 1, 20, 0, 0, 0, 0)`)
+  host.eval(`Economy._BeatFunction()`)
+  const empty = barWidth()
+
+  check(full > 0, `Volles Lager: Balken ${full.toFixed(0)} px breit`)
+  check(
+    Math.abs(half - full / 2) <= 1,
+    `Halbes Lager (325/650): Balken halb so breit — ${half.toFixed(0)} px (voll: ${full.toFixed(0)})`,
+  )
+  check(empty === 0, `Leeres Lager: Balken ${empty.toFixed(0)} px`)
+  check(
+    barPinnedWidth > full,
+    `Und Width() bleibt dabei die TEXTURBREITE (${barPinnedWidth}) — deshalb muss ` +
+      'der Renderer das Rechteck nehmen (bitmap.lua:67-70)',
+  )
+
+  // Und dasselbe, wie es der RENDERER sieht: der Snapshot muss die Breite aus
+  // dem Rechteck liefern, nicht aus Width().
+  const snapBar = host.eval(`
+    for _, c in ipairs(__mauiSnapshot()) do
+      if __mauiControls[c.id] == Economy.GUI.mass.storageBar._bar then
+        return string.format('%.0f', c.width)
+      end
+    end
+    return 'nicht im Snapshot'
+  `) as string
+  check(
+    snapBar === '0',
+    `Der Snapshot meldet dem Renderer die echte Balkenbreite: ${snapBar} px (Lager leer)`,
+  )
 }
 
 console.log('\n== Event-Pump: Hit-Test + Original-Bubbling ==')

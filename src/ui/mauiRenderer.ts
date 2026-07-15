@@ -101,6 +101,20 @@ export class MauiRenderer {
   private readonly els = new Map<number, HTMLDivElement>()
   private readonly textures = new Map<string, string | 'pending'>()
   private lastWorldViews: WorldViewRect[] = []
+  /**
+   * Was zuletzt für ein Control im DOM stand.
+   *
+   * Der Grund: eine Zuweisung an `el.style.left` ist auch dann teuer, wenn sich
+   * der Wert nicht ändert — der Browser invalidiert Layout und Style. Bei ~300
+   * Controls × 6 Eigenschaften × 60 Bildern/s sind das 108.000 Schreibzugriffe
+   * pro Sekunde, von denen sich fast keiner geändert hat. Die Bild-Zeit lag
+   * dadurch bei 52 ms (≈19 fps).
+   *
+   * Die Original-Engine hat dieses Problem nicht (sie zeichnet auf die GPU, ohne
+   * Layout-Baum). Das DOM ist unsere Zeichenfläche — also schreiben wir nur, was
+   * sich wirklich geändert hat. Am Verhalten ändert das nichts.
+   */
+  private readonly lastCss = new Map<number, string>()
 
   constructor(
     private readonly host: LuaHost,
@@ -144,6 +158,28 @@ export class MauiRenderer {
         this.els.set(c.id, el)
       }
 
+      // Nur schreiben, was sich geändert hat (siehe `lastCss`). Geometrie UND
+      // Inhalt hängen an demselben Schlüssel: ändert sich nichts, fasst dieses
+      // Bild das Element gar nicht an.
+      //
+      // Listen, Rahmen und Scrollbalken bleiben außen vor — ihr Inhalt steckt in
+      // verschachtelten Daten, die kein billiger Schlüssel abbildet.
+      const complex = c.kind === 'itemlist' || c.kind === 'border' || c.kind === 'scrollbar'
+      // Die Textur wird ASYNCHRON geladen (DDS aus dem VFS). Deshalb steht ihre
+      // aufgelöste URL MIT im Schlüssel: solange sie noch lädt, ist sie `null`,
+      // und sobald sie da ist, ändert sich der Schlüssel — das Bild wird gesetzt.
+      //
+      // Ohne diesen Teil schreibt der Zwischenspeicher „noch nicht geladen" als
+      // Endzustand fest, und die halbe Oberfläche bleibt leer. (Genau so
+      // passiert, nachdem ich den Zwischenspeicher eingebaut hatte.)
+      const url = c.kind === 'bitmap' && c.texture ? this.texture(c.texture) : null
+      const css =
+        `${c.hidden ? 1 : 0}|${c.left}|${c.top}|${c.width}|${c.height}|` +
+        `${Math.round(c.depth)}|${c.alpha}|${c.texture}|${url}|${c.solidColor}|${c.text}|` +
+        `${c.color}|${c.fontSize}|${c.fontFamily}|${c.centerH}`
+      if (!complex && this.lastCss.get(c.id) === css) continue
+      this.lastCss.set(c.id, css)
+
       el.style.display = c.hidden ? 'none' : 'block'
       if (c.hidden) continue
 
@@ -156,7 +192,6 @@ export class MauiRenderer {
 
       if (c.kind === 'bitmap') {
         if (c.texture) {
-          const url = this.texture(c.texture)
           el.style.backgroundImage = url ? `url(${url})` : 'none'
           el.style.backgroundSize = '100% 100%'
         } else if (c.solidColor) {
@@ -201,6 +236,9 @@ export class MauiRenderer {
       if (!seen.has(id)) {
         el.remove()
         this.els.delete(id)
+        // Auch den Zwischenspeicher: die IDs werden weitergezählt, aber ein
+        // liegengebliebener Eintrag hielte sonst ewig Speicher.
+        this.lastCss.delete(id)
       }
     }
 

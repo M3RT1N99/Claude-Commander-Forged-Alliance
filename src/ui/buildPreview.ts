@@ -1,7 +1,8 @@
 import * as THREE from 'three'
-import type { UnitViewer } from '../viewer/unitViewer'
+import type { UnitViewer, SceneUnit } from '../viewer/unitViewer'
 import type { SandboxUnitAssets } from '../sandbox/sandbox'
 import { snapToGrid } from './worldCommands'
+import { bpGet } from '../formats/blueprint'
 
 /**
  * Die Bau-Vorschau: das Geistergebäude am gerasterten Punkt unter dem Cursor.
@@ -19,6 +20,8 @@ import { snapToGrid } from './worldCommands'
  */
 export class BuildPreview {
   private mesh: THREE.Mesh | null = null
+  /** Der Szenen-Eintrag — er muss beim Aufräumen AUS DER TREFFERLISTE raus. */
+  private unit: SceneUnit | null = null
   private blueprintId = ''
   private loading = ''
 
@@ -65,7 +68,14 @@ export class BuildPreview {
         new THREE.Color(0x66ccff),
         assets.shader,
       )
+      this.unit = unit
       this.mesh = unit.mesh
+      // Die GRÖSSE steht im Blueprint: `Display.UniformScale`. Das Modell selbst
+      // ist in Modell-Einheiten gebaut, nicht in Weltmetern — jede echte Einheit
+      // wird damit skaliert (main.ts:addLuaUnitToScene). Ohne diese Zeile stand
+      // der Geist um ein Vielfaches zu groß auf der Karte.
+      const scale = bpGet(assets.bp, 'Display.UniformScale')
+      if (typeof scale === 'number' && scale > 0) this.mesh.scale.setScalar(scale)
       // Durchscheinend — sonst ist der Geist von einem fertigen Gebäude nicht zu
       // unterscheiden.
       const mat = this.mesh.material as THREE.Material
@@ -88,11 +98,19 @@ export class BuildPreview {
     return `${this.blueprintId} @ ${p.x.toFixed(1)}, ${p.z.toFixed(1)}`
   }
 
-  /** Modell aus der Szene nehmen (Modus beendet, Karte gewechselt). */
+  /**
+   * Modell aus der Szene nehmen (Modus beendet, Karte gewechselt).
+   *
+   * Über `viewer.removeUnit` — nicht nur `removeFromParent()`: der Geist muss
+   * auch aus der TREFFERLISTE des Renderers verschwinden. Der Raycaster von
+   * three.js prüft `visible` nicht, und ein liegengebliebener Geist fängt danach
+   * jeden Klick ab. Genau daran ließ sich die ACU nach dem ersten Bau-Befehl
+   * nicht mehr auswählen.
+   */
   dispose(): void {
-    if (this.mesh) {
-      this.mesh.removeFromParent()
-      this.mesh.geometry.dispose()
+    if (this.unit) {
+      this.viewer.removeUnit(this.unit)
+      this.unit = null
       this.mesh = null
     }
     this.blueprintId = ''

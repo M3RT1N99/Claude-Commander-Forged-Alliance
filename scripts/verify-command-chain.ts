@@ -151,6 +151,9 @@ const sim = {
   move: (id: number, x: number, z: number): void => {
     simHost.eval(`local u = __units[${id}] if u then u:GetNavigator():SetGoal({ ${x}, 0, ${z} }) end`)
   },
+  setRallyPoint: (id: number, x: number, y: number, z: number): void => {
+    simHost.eval(`local u = __units[${id}] if u then u:SetRallyPoint({ ${x}, ${y}, ${z} }) end`)
+  },
   build: async (
     builderId: number,
     bpId: string,
@@ -221,6 +224,36 @@ check(
   ecoEnd.maxMass === maxMass0 + 80,
   `Das Lager wuchs um die StorageMass der Fabrik: ${maxMass0} → ${ecoEnd.maxMass} (+80, ueb0101_unit.bp:148)`,
 )
+
+// --- Der Klick mit ausgewählter FABRIK -------------------------------------
+//
+// Eine Fabrik hat kein RULEUCC_Move (ueb0101_unit.bp) — ein Klick in die Welt
+// ist für sie der SAMMELPUNKT (IssueFactoryRallyPoint, Cfile:1008266), kein
+// Bewegungsbefehl. Vorher ging der Move-Befehl an alles, und die Sim hat das
+// Gebäude an den Klickpunkt TELEPORTIERT (motion.lua: MaxSpeed 0 → „sofort am
+// Ziel"). Genau das ist im Browser passiert.
+console.log('\n== Klick mit ausgewählter Fabrik: Sammelpunkt, keine Fahrt ==')
+mirror()
+check(
+  Number(uiHost.eval(`return __uiSelectByIds({ ${siteId} })`)) === 1,
+  'Die fertige Fabrik ist ausgewählt',
+)
+
+const before = readLuaUnit(simHost, siteId)!
+const rallyMsg = await worldClick(uiHost, sim, { x: 140, z: 150 }, () => 20)
+check(rallyMsg === 'Sammelpunkt → 140, 150', `worldClick → ${String(rallyMsg)}`)
+
+for (let i = 0; i < 10; i++) beat(engine)
+const after = readLuaUnit(simHost, siteId)!
+check(
+  after.x === before.x && after.z === before.z,
+  `Die Fabrik STEHT (${after.x.toFixed(1)}, ${after.z.toFixed(1)}) — sie fährt nicht zum Klick`,
+)
+const rally = simHost.eval(`
+  local p = __units[${siteId}]:GetRallyPoint()
+  return string.format('%.0f,%.0f', p[1], p[3])
+`) as string
+check(rally === '140,150', `Ihr Sammelpunkt steht auf dem Klick: ${rally}`)
 
 simHost.close()
 uiHost.close()

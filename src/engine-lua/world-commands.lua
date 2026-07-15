@@ -20,12 +20,45 @@
 
 --- Die ausgewaehlten Einheiten als JSON — dieselbe Liste, mit der orders.lua und
 --- construction.lua arbeiten (GetSelectedUnits).
+--- Dazu, was der Klick in die Welt fuer JEDE Einheit bedeutet — und das
+--- entscheidet nicht die Weltansicht, sondern der BLUEPRINT:
+---
+---   canMove    RULEUCC_Move steht in den CommandCaps  -> Bewegungsbefehl
+---   isFactory  die Einheit baut Einheiten             -> SAMMELPUNKT
+---
+--- Ein Gebaeude hat kein RULEUCC_Move (uel0201 hat es, ueb0101 nicht). Wer den
+--- Bewegungsbefehl trotzdem an alle schickt, laesst Fabriken durch die Gegend
+--- fahren — und die Sim hat sie bis eben sogar an den Klickpunkt teleportiert
+--- (motion.lua). Die Engine hat dafuer eine eigene Bindung:
+--- `IssueFactoryRallyPoint(units, pos)` (sim_SimInits, Cfile:1008266).
 function __uiSelectionJson()
   local sel = GetSelectedUnits()
   if not sel then return '[]' end
   local parts = {}
   for i, u in ipairs(sel) do
-    parts[i] = '{"id":' .. tostring(u:GetEntityId()) .. ',"army":' .. tostring(u:GetArmy()) .. '}'
+    local bp = u:GetBlueprint()
+    -- Die CommandCaps stehen unter GENERAL, nicht oben im Blueprint
+    -- (uel0001_unit.bp:787, und ui-globals.lua:433 liest sie genauso). Wer sie
+    -- auf der obersten Ebene sucht, bekommt nil — und dann kann keine Einheit
+    -- mehr laufen, weil `canMove` immer false ist. Genau so passiert.
+    local caps = (bp.General and bp.General.CommandCaps) or {}
+    -- Und der zweite Teil: eine FABRIK hat RULEUCC_Move in ihren CommandCaps —
+    -- genau deshalb setzt ein Move-Befehl auf sie im Original den SAMMELPUNKT.
+    -- Wer wirklich fahren kann, entscheidet die PHYSIK: `MotionType`. Eine Unit
+    -- mit RULEUMT_None hat keinen Antrieb (und in der Sim keinen Navigator).
+    local immobile = bp.Physics.MotionType == 'RULEUMT_None'
+    local canMove = caps.RULEUCC_Move == true and not immobile
+    -- FACTORY steht in den Categories des Blueprints (ueb0101_unit.bp) — dieselbe
+    -- Liste, aus der das Kategorie-System seine Ausdruecke baut.
+    local isFactory = false
+    for _, c in ipairs(bp.Categories or {}) do
+      if c == 'FACTORY' then isFactory = true end
+    end
+    parts[i] = '{"id":' .. tostring(u:GetEntityId())
+      .. ',"army":' .. tostring(u:GetArmy())
+      .. ',"canMove":' .. tostring(canMove)
+      .. ',"isFactory":' .. tostring(isFactory)
+      .. '}'
   end
   return '[' .. table.concat(parts, ',') .. ']'
 end

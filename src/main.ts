@@ -20,7 +20,7 @@ import {
   type BpObject,
 } from './formats/blueprint'
 import { ddsToTexture } from './viewer/textures'
-import { UnitViewer } from './viewer/unitViewer'
+import { UnitViewer, type SceneUnit } from './viewer/unitViewer'
 import { SandboxController, type SandboxUnitAssets } from './sandbox/sandbox'
 import { LuaSimClient } from './sim/luaSimClient'
 import { SANDBOX_SESSION, type SessionInfo } from './sim/session'
@@ -401,6 +401,17 @@ let gameUi: GameUi | null = null
  */
 function conVarChanged(name: string, value: string | number | boolean): void {
   viewer.setConVar(name, value)
+  // Die Lebensbalken sind eine ENGINE-Einstellung, kein UI-Element: die Aktion
+  // `toggle_lifebars` (Alt-L, defaultkeymap.lua:11) schaltet die ConVar
+  // `UI_RenderUnitBars` (keyactions.lua:14). Der Renderer liest sie — er
+  // entscheidet nicht selbst, ob Balken erscheinen.
+  if (!hud) return
+  const an = value === true || value === 'true' || value === 1
+  if (name.toLowerCase() === 'ui_renderunitbars') hud.renderBars = an
+  // „Strategische Icons immer zeigen" ist ebenfalls eine ConVar der Engine
+  // (ui_AlwaysRenderStrategicIcons, Cfile:421748) und im Optionen-Dialog
+  // schaltbar. Ohne sie erscheinen die Icons erst ab Display.Mesh.IconFadeInZoom.
+  if (name.toLowerCase() === 'ui_alwaysrenderstrategicicons') hud.alwaysIcons = an
 }
 let buildPreview: BuildPreview | null = null
 let currentScmap: ScmapData | null = null
@@ -502,6 +513,9 @@ async function startSandbox(mapFolder: string): Promise<void> {
       }
     }
 
+    // Die Maße des Auswahlrings kommen aus der Original-Datei
+    // lua/renderselectparams.lua (die Engine liest genau sie, Cfile:1215033).
+    await loadSelectParams()
     sandbox = new SandboxController(viewer)
     // massSpots werden NICHT mehr als erfundene Ringe gezeichnet. Sie bleiben
     // geparst (Struktur der Karte), bis der Session-Start sie als echte
@@ -688,6 +702,15 @@ viewportEl.addEventListener('pointerdown', (e) => {
 window.addEventListener('pointermove', (e) => {
   if (spaceHeld && sandbox) {
     viewer.rotateAroundTarget(e.movementX, e.movementY)
+  }
+  // Die Einheit UNTER DEM CURSOR an die UI melden. Genau daraus baut
+  // `unitview.lua` seine Rollover-Anzeige (GetRolloverInfo, unitview.lua:90) —
+  // Name, Leben, Ökonomie der überfahrenen Einheit. Ohne diese Meldung zeigt
+  // die Original-UI schlicht nichts an: sie WEISS nicht, worüber die Maus steht.
+  if (sandbox && gameUi && luaSim) {
+    const hit = viewer.pickUnit(e.clientX, e.clientY)
+    const u = hit ? luaUnits.find((x) => x.scene === hit) : undefined
+    gameUi.setRollover(u ? u.id : null)
   }
   // Bau-Modus: das Geistergebäude folgt dem Cursor — auf dem Raster, mit dem
   // die Sim es gleich setzt (src/ui/buildPreview.ts).
@@ -984,6 +1007,16 @@ interface LuaSceneUnit {
   strategicIcon: string
   fadeZoom: number
   caps: ReadonlySet<string>
+  /** Der Szenen-Eintrag mit Skelett-Animator (für die Laufanimation). */
+  scene: SceneUnit
+  /** Halbachsen + Versatz des Auswahlrings (aus dem Blueprint, siehe ringExtents). */
+  ringExtents: { x: number; z: number; ox: number; oz: number }
+  /**
+   * Läuft die Gehanimation gerade? Die SIM sagt, ob die Einheit fährt
+   * (`moving` aus `__readAllUnitsJson`) — der Renderer spielt nur ab, was die
+   * Sim meldet, er entscheidet nichts.
+   */
+  walking: boolean
 }
 let luaSim: LuaSimClient | null = null
 /**
@@ -1078,17 +1111,71 @@ const hudSource: HudSource = {
       out.push({
         id: u.bpId, name: u.name, health: s.health, maxHealth: s.maxHealth, selected: u.selected,
         x: s.x, y: s.y, z: s.z, army: u.army, strategicIcon: u.strategicIcon, fadeZoom: u.fadeZoom,
+        // Baufortschritt (< 1 = Baustelle) und die halbe Breite der Einheit —
+        // beides braucht die Lebensbalken-Schicht: der Balken schwebt über der
+        // Einheit und zeigt bei einer Baustelle den Fortschritt statt der HP.
+        fraction: s.fraction,
+        halfWidth: u.ringExtents.x,
       })
     }
     return out
   },
 }
 
+/**
+ * Der Auswahlring — ein Kreis mit Radius 1, der pro Einheit SKALIERT wird.
+ *
+ * Die Maße stehen im Blueprint, nicht im Renderer (Cfile:1215195-1215210):
+ *
+ *   halbX = SelectionSizeX > 0 ? SelectionSizeX · ren_UnitSelectionScale
+ *                              : Kollisions-Extent · ren_SelectionSizeFudge
+ *
+ * dazu der Versatz `SelectionCenterOffsetX/Z` und die Höhe
+ * `ren_SelectionHeightFudge`. Die drei ConVars kommen aus der Original-Datei
+ * `lua/renderselectparams.lua` (die Engine liest genau sie, Cfile:1215033) —
+ * kein geschätzter Wert.
+ *
+ * Vorher war der Ring ein fester Kreis mit Radius 1: um eine ACU zu groß, um
+ * eine Fabrik viel zu klein.
+ */
 const luaRingGeo = (() => {
-  const g = new THREE.RingGeometry(0.85, 1, 40)
+  const g = new THREE.RingGeometry(0.85, 1, 48)
   g.rotateX(-Math.PI / 2)
   return g
 })()
+
+/** Die Werte aus `lua/renderselectparams.lua` (Original-Datei, kein Nachbau). */
+let selectParams = { sizeFudge: 1.85, heightFudge: 0.12, unitScale: 0.75 }
+async function loadSelectParams(): Promise<void> {
+  if (!vfs || !vfs.exists('lua/renderselectparams.lua')) return
+  const text = new TextDecoder('utf-8').decode(await vfs.read('lua/renderselectparams.lua'))
+  const p = parseLuaAssignments(text)
+  const num = (k: string, fallback: number): number => {
+    const v = bpGet(p, `RenderSelectParams.${k}`)
+    return typeof v === 'number' ? v : fallback
+  }
+  selectParams = {
+    sizeFudge: num('ren_SelectionSizeFudge', 1.85),
+    heightFudge: num('ren_SelectionHeightFudge', 0.12),
+    unitScale: num('ren_UnitSelectionScale', 0.75),
+  }
+}
+
+/** Die Halbachsen des Auswahlrings einer Einheit (Weltmeter). */
+function ringExtents(bp: BpObject): { x: number; z: number; ox: number; oz: number } {
+  const n = (path: string): number => {
+    const v = bpGet(bp, path)
+    return typeof v === 'number' ? v : 0
+  }
+  const selX = n('SelectionSizeX')
+  const selZ = n('SelectionSizeZ')
+  return {
+    x: selX > 0 ? selX * selectParams.unitScale : (n('SizeX') / 2) * selectParams.sizeFudge,
+    z: selZ > 0 ? selZ * selectParams.unitScale : (n('SizeZ') / 2) * selectParams.sizeFudge,
+    ox: n('SelectionCenterOffsetX'),
+    oz: n('SelectionCenterOffsetZ'),
+  }
+}
 
 /** Links-Klick: Lua-Unit unter dem Cursor auswählen (oder Auswahl leeren). */
 /**
@@ -1145,7 +1232,38 @@ function luaSimUpdate(): void {
     u.mesh.position.set(s.x, s.y, s.z)
     u.mesh.rotation.set(0, s.heading, 0)
     u.ring.visible = u.selected
-    if (u.selected) u.ring.position.set(s.x, s.y + 0.05, s.z)
+    if (u.selected) {
+      // Die Ellipse aus dem Blueprint (siehe ringExtents), am Heading gedreht,
+      // um den Selection-Offset versetzt, auf ren_SelectionHeightFudge angehoben.
+      const e = u.ringExtents
+      const cos = Math.cos(s.heading)
+      const sin = Math.sin(s.heading)
+      u.ring.position.set(
+        s.x + e.ox * cos + e.oz * sin,
+        s.y + selectParams.heightFudge,
+        s.z - e.ox * sin + e.oz * cos,
+      )
+      u.ring.rotation.set(0, s.heading, 0)
+      u.ring.scale.set(e.x, 1, e.z)
+    }
+
+    // Die LAUFANIMATION. Die Sim sagt, ob die Einheit fährt (`moving` kommt aus
+    // `__readAllUnitsJson`, gespeist vom Navigator) — der Renderer spielt sie
+    // dann ab. Die Animation selbst ist die Original-SCA des Blueprints
+    // (`Display.AnimationWalk`, geladen in loadSandboxAssets); ihre
+    // Geschwindigkeit steht ebenfalls dort (`Display.AnimationWalkRate`).
+    //
+    // Bisher wurde sie GELADEN und nie gestartet: jede Einheit glitt bewegungslos
+    // über die Karte.
+    if (s.moving !== u.walking) {
+      u.walking = s.moving
+      const assets = sandboxAssetCache.get(u.bpId)
+      const anim = assets?.walkAnim ?? null
+      if (anim) {
+        const rate = bpGet(assets!.bp, 'Display.AnimationWalkRate')
+        u.scene.play(s.moving ? anim : null, typeof rate === 'number' && rate > 0 ? rate : 1)
+      }
+    }
   }
 }
 
@@ -1193,6 +1311,9 @@ async function addLuaUnitToScene(
     strategicIcon: typeof strat === 'string' ? strat : 'icon_land_generic',
     fadeZoom: typeof fade === 'number' && fade > 0 ? fade : 130,
     caps: readCaps(assets.bp),
+    scene,
+    walking: false,
+    ringExtents: ringExtents(assets.bp as BpObject),
   })
 }
 

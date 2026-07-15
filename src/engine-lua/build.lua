@@ -9,36 +9,100 @@ __nextBuildTask = 1
 -- baut eine Einheit). Die Original-Lua unterscheidet danach — FactoryUnit
 -- (defaultunits.lua:504-513) wechselt bei allem ausser 'Upgrade' in ihren
 -- BuildingState und rollt die fertige Einheit anschliessend vom Hof.
-function __issueBuildTask(builderId, targetId, order)
+--- Der AKTIVE Auftrag eines Bauers — der mit der kleinsten Nummer.
+---
+--- Ein Bauer arbeitet an EINEM Auftrag, nicht an allen gleichzeitig. Die Engine
+--- fuehrt pro Unit eine BEFEHLS-WARTESCHLANGE (UNITCOMMAND_BuildMobile landet
+--- darin, Shift haengt an, ohne Shift wird sie geleert). Ohne das baut die ACU
+--- drei Gebaeude parallel — jedes mit voller Baurate, und die Kosten laufen aus
+--- dem Ruder. Es gibt sie in FA nicht.
+local function activeTask(builderId)
+  local best, bestId = nil, nil
+  for tid, task in pairs(__buildTasks) do
+    if task.builder == builderId then
+      if not bestId or tid < bestId then best, bestId = task, tid end
+    end
+  end
+  return best, bestId
+end
+
+--- Alle wartenden Auftraege eines Bauers loeschen (kein Shift = neue Reihe).
+--- Die noch nicht begonnenen Baustellen verschwinden mit ihnen — genau das tut
+--- die Engine, wenn ein Bau-Befehl die Warteschlange ersetzt.
+function __clearBuildQueue(builderId)
+  for tid, task in pairs(__buildTasks) do
+    if task.builder == builderId then
+      local t = __units[task.target]
+      if t and (t.__fraction or 1) <= 0 then t:Destroy() end
+      __econClearBuildRequest((__units[builderId] and __units[builderId].__army) or 1, tid)
+      __buildTasks[tid] = nil
+    end
+  end
+end
+
+function __issueBuildTask(builderId, targetId, order, clear)
   local b = __units[builderId]
   local t = __units[targetId]
   if not b or not t then return -1 end
   order = order or 'MobileBuild'
+  if clear then __clearBuildQueue(builderId) end
+
   local tid = __nextBuildTask
   __nextBuildTask = tid + 1
   __buildTasks[tid] = {
     builder = builderId, target = targetId, step = 0, blocked = false, order = order,
+    started = false,
   }
+  return tid
+end
 
-  -- Approach: ausserhalb MaxBuildDistance zum Ziel laufen. Eine Fabrik baut in
-  -- sich selbst — die laeuft nirgendwohin.
-  if order ~= 'FactoryBuild' then
-    local mbd = (b.__bp and b.__bp.Economy and b.__bp.Economy.MaxBuildDistance) or 0
-    local bp = b.__pos or { 0, 0, 0 }
-    local tp = t.__pos or { 0, 0, 0 }
-    local dx = tp[1] - bp[1]
-    local dz = tp[3] - bp[3]
-    if mbd > 0 and math.sqrt(dx * dx + dz * dz) > mbd then
-      b.__goal = { tp[1], tp[3] }
-    end
-  end
+--- Einen Auftrag anfangen: hinlaufen, sich AUSRICHTEN, OnStartBuild rufen.
+--- Passiert erst, wenn der Auftrag an der Reihe ist (siehe __buildTick).
+local function startTask(task, tid)
+  local b = __units[task.builder]
+  local t = __units[task.target]
+  if not b or not t then return end
+  task.started = true
 
   -- Die Engine setzt UnitBeingBuilt, BEVOR sie OnStartBuild ruft:
   -- FactoryUnit.RollOffUnit (defaultunits.lua:570) liest genau dieses Feld.
   b.UnitBeingBuilt = t
-  pcall(function() b:OnStartBuild(t, order) end)
-  pcall(function() t:OnStartBeingBuilt(b, order) end)
-  return tid
+  pcall(function() b:OnStartBuild(t, task.order) end)
+  pcall(function() t:OnStartBeingBuilt(b, task.order) end)
+end
+
+--- Pro Beat: der Bauer geht zu seinem aktiven Auftrag und DREHT SICH ZU IHM.
+---
+--- `Economy.NeedToFaceTargetToBuild` (Blueprint) sagt, dass der Bauer das Ziel
+--- ansehen muss — die ACU tut das im Original sichtbar, bevor der Bau-Strahl
+--- kommt. Auch ohne das Flag richtet die Engine den Bauer aus; sein Bau-Arm
+--- haengt an einem Knochen, der auf das Ziel zeigt.
+local function approach(task)
+  local b = __units[task.builder]
+  local t = __units[task.target]
+  if not b or not t or task.order == 'FactoryBuild' then return end
+
+  local mbd = (b.__bp and b.__bp.Economy and b.__bp.Economy.MaxBuildDistance) or 0
+  local bp = b.__pos or { 0, 0, 0 }
+  local tp = t.__pos or { 0, 0, 0 }
+  local dx = tp[1] - bp[1]
+  local dz = tp[3] - bp[3]
+  local dist = math.sqrt(dx * dx + dz * dz)
+
+  if mbd > 0 and dist > mbd then
+    -- Noch zu weit weg: hinlaufen (die Bewegung macht motion.lua).
+    b.__goal = { tp[1], tp[3] }
+    b.__faceGoal = false
+  elseif not b.__goal and dist > 0.01 then
+    -- In Reichweite: stehen bleiben und sich zum Ziel DREHEN.
+    --
+    -- Nicht mit `b.__heading = atan2(...)`: das drehte die Unit in NULL Zeit.
+    -- Eine Einheit dreht mit ihrer `Physics.TurnRate` (Grad/Sekunde) — genau die
+    -- Rate, mit der sie auch beim Fahren einlenkt. Deshalb bekommt sie hier nur
+    -- ein DREH-ZIEL; abgearbeitet wird es in motion.lua, mit derselben
+    -- Winkelgeschwindigkeit wie jede andere Drehung.
+    b.__faceGoal = { tp[1], tp[3] }
+  end
 end
 
 -- === Die Bau-Warteschlange einer Fabrik ===
@@ -98,14 +162,33 @@ function __factoryTick()
 end
 
 -- Phase 1 (VOR dem Oekonomie-Tick): Sollschritt + Ressourcen-Bedarf anmelden.
+--
+-- NUR DER AKTIVE Auftrag jedes Bauers arbeitet — die uebrigen warten in der
+-- Warteschlange (Shift-Bau). Und der Bauer laeuft zu seinem Ziel bzw. dreht sich
+-- zu ihm, bevor der erste Baufortschritt entsteht.
 function __buildCollect()
+  -- Erst die Warteschlange abarbeiten: je Bauer den aktiven Auftrag anstossen.
+  local aktiv = {}
+  for _, task in pairs(__buildTasks) do
+    local a, atid = activeTask(task.builder)
+    if a and atid then
+      aktiv[atid] = true
+      approach(a)
+      if not a.started then startTask(a, atid) end
+    end
+  end
+
   for tid, task in pairs(__buildTasks) do
     local b = __units[task.builder]
     local t = __units[task.target]
     local army = (b and b.__army) or 1
     task.step = 0
     task.blocked = false
-    if b and t and (t.__fraction or 1) < 1 then
+    if not aktiv[tid] then
+      -- Wartet noch in der Warteschlange: kostet nichts, tut nichts.
+      task.blocked = true
+      __econClearBuildRequest(army, tid)
+    elseif b and t and (t.__fraction or 1) < 1 then
       -- Reichweiten-Gate (Economy.MaxBuildDistance)
       local mbd = (b.__bp and b.__bp.Economy and b.__bp.Economy.MaxBuildDistance) or 0
       local bp = b.__pos or { 0, 0, 0 }

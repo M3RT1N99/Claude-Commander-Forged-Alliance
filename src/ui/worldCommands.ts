@@ -34,12 +34,30 @@ export interface CommandMode {
 
 export interface WorldCommandSim {
   move(id: number, x: number, z: number): void
+  /**
+   * Der SAMMELPUNKT einer Fabrik (IssueFactoryRallyPoint, Cfile:1008266). Er ist
+   * kein Bewegungsbefehl: die Fabrik bleibt stehen, nur ihre frischen Einheiten
+   * fahren dorthin (defaultunits.lua:578 CalculateRollOffPoint).
+   */
+  setRallyPoint(id: number, x: number, y: number, z: number): void
   build(
     builderId: number,
     blueprintId: string,
     pos: { x: number; y: number; z: number },
     army: number,
+    /** Shift gehalten → der Bau-Auftrag hängt an die Reihe an, statt sie zu ersetzen. */
+    queue?: boolean,
   ): Promise<number>
+}
+
+/** Eine ausgewählte Einheit, wie die UI-VM sie meldet (__uiSelectionJson). */
+export interface SelectedUnit {
+  id: number
+  army: number
+  /** RULEUCC_Move steht in den CommandCaps des Blueprints. */
+  canMove: boolean
+  /** Kategorie FACTORY — sie bekommt einen Sammelpunkt statt eines Move-Befehls. */
+  isFactory: boolean
 }
 
 /** Der Command-Mode, wie die Original-Lua ihn führt (commandmode.lua:109). */
@@ -89,7 +107,7 @@ export async function worldClick(
 ): Promise<string | null> {
   // pull() liefert JSON — eine LEERE Lua-Tabelle wuerde als `{}` in JS ankommen,
   // nicht als `[]`, und `for…of` warf dann "selection is not iterable".
-  const selection = host.pull<{ id: number; army: number }[]>('__uiSelectionJson()')
+  const selection = host.pull<SelectedUnit[]>('__uiSelectionJson()')
   if (selection.length === 0) return null
 
   const cm = getCommandMode(host)
@@ -101,7 +119,7 @@ export async function worldClick(
     // Nur der erste Bauer der Selektion setzt die Baustelle; die übrigen helfen
     // (Assist) — das kommt, sobald die Sim Assist kennt. Bis dahin baut einer.
     const builder = selection[0]!
-    await sim.build(builder.id, cm.name, pos, builder.army)
+    await sim.build(builder.id, cm.name, pos, builder.army, opts.queue)
     onCommandIssued(host, {
       CommandType: 'BuildMobile',
       Blueprint: cm.name,
@@ -111,15 +129,37 @@ export async function worldClick(
     return `Bau: ${cm.name} auf ${pos.x.toFixed(1)}, ${pos.z.toFixed(1)}`
   }
 
-  // Ohne Bau-Modus ist der Klick ein Bewegungsbefehl — der Standardbefehl der
-  // Weltansicht (RULEUCC_Move), egal ob er über den Move-Button oder direkt kam.
-  for (const u of selection) sim.move(u.id, hit.x, hit.z)
+  // Ohne Bau-Modus hängt der Standardbefehl an den COMMAND-CAPS der Einheit:
+  //
+  //   RULEUCC_Move (Panzer, ACU)  → Bewegungsbefehl
+  //   Fabrik ohne Move            → SAMMELPUNKT (IssueFactoryRallyPoint,
+  //                                 eine eigene Engine-Bindung, Cfile:1008266)
+  //
+  // Wer den Move-Befehl an alles schickt, schickt ihn auch an Gebäude — und die
+  // fuhren dann durch die Gegend, statt einen Sammelpunkt zu bekommen.
+  const y = elevation(hit.x, hit.z)
+  let moved = 0
+  let rallied = 0
+  for (const u of selection) {
+    if (u.canMove) {
+      sim.move(u.id, hit.x, hit.z)
+      moved++
+    } else if (u.isFactory) {
+      sim.setRallyPoint(u.id, hit.x, y, hit.z)
+      rallied++
+    }
+  }
+  if (moved === 0 && rallied === 0) return null
+
   onCommandIssued(host, {
-    CommandType: 'Move',
-    Position: { x: hit.x, y: elevation(hit.x, hit.z), z: hit.z },
+    CommandType: moved > 0 ? 'Move' : 'RallyPoint',
+    Position: { x: hit.x, y, z: hit.z },
     Clear: !opts.queue,
   })
-  return `Move → ${hit.x.toFixed(0)}, ${hit.z.toFixed(0)}`
+  const at = `${hit.x.toFixed(0)}, ${hit.z.toFixed(0)}`
+  if (moved > 0 && rallied > 0) return `Move (${moved}) + Sammelpunkt (${rallied}) → ${at}`
+  if (rallied > 0) return `Sammelpunkt → ${at}`
+  return `Move → ${at}`
 }
 
 /**

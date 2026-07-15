@@ -351,20 +351,9 @@ end
 -- Cursor-Thread (cursor.lua:34-43).
 __uiTime = 0
 
-function __mauiFrame(delta)
-  -- Erst die Uhr, dann die Threads: ein Thread, der auf CurrentTime() wartet,
-  -- muss die neue Zeit sehen.
-  __uiTime = __uiTime + (delta or 0)
-  if __simAdvanceThreads then __simAdvanceThreads() end
-
-  for _, c in pairs(__mauiControls) do
-    if not c.__destroyed and c.__needsFrameUpdate and c.OnFrame then
-      c:OnFrame(delta)
-    end
-  end
-end
-
--- Die Elternkette eines Controls, fuer Fehlermeldungen.
+-- Die Elternkette eines Controls, fuer Fehlermeldungen. Steht VOR der
+-- Bild-Pumpe, weil die sie im Fehlerfall braucht (ein `local` weiter unten waere
+-- hier noch nicht sichtbar).
 local function chainOf(c)
   local chain = tostring(c.__name) .. '(' .. tostring(c.__kind) .. ')'
   local p = c.__parent
@@ -373,6 +362,27 @@ local function chainOf(c)
     p = p.__parent or nil
   end
   return chain
+end
+
+function __mauiFrame(delta)
+  -- Erst die Uhr, dann die Threads: ein Thread, der auf CurrentTime() wartet,
+  -- muss die neue Zeit sehen.
+  __uiTime = __uiTime + (delta or 0)
+  if __simAdvanceThreads then __simAdvanceThreads() end
+
+  for _, c in pairs(__mauiControls) do
+    if not c.__destroyed and c.__needsFrameUpdate and c.OnFrame then
+      -- MIT Traceback. Ein Fehler in einem OnFrame sagt sonst nur „attempt to
+      -- call a nil value" — ohne die Zeile, an der es passiert ist, sucht man in
+      -- 300 Controls. Die Engine loggt an dieser Stelle ebenfalls und macht
+      -- weiter (CMauiControl::Frame -> RunScript).
+      local ok, err = xpcall(function() c:OnFrame(delta) end, debug.traceback)
+      if not ok then
+        c.__needsFrameUpdate = false -- sonst knallt es 60-mal pro Sekunde weiter
+        WARN('OnFrame ' .. chainOf(c) .. ':\n' .. tostring(err))
+      end
+    end
+  end
 end
 
 -- Ein Control ZEICHNET nur, wenn es etwas zu zeichnen hat: ein Bitmap oder ein
@@ -434,16 +444,28 @@ function __mauiSnapshot()
     end
     if laidOut then
       n = n + 1
+      -- Ein Control ist sein RECHTECK (Left, Top, Right, Bottom) — nicht
+      -- Left + Width. Das ist kein Feinschliff, das ist der Unterschied zwischen
+      -- „der Balken bewegt sich" und „der Balken steht":
+      --
+      --   bitmap.lua:67-70  Bitmap:ResetLayout pinnt Width/Height FEST auf die
+      --                     Texturgroesse (BitmapWidth/BitmapHeight).
+      --   statusbar.lua:56-63  Der Fuellbalken setzt nur Left und Right (Right als
+      --                     Funktion des Fuellstands) — Width bleibt die Textur!
+      --
+      -- Wer die Breite aus Width() liest, zeichnet den Balken also IMMER voll.
+      -- Genau so sah es aus: die Zahlen liefen, der Balken nicht.
+      local l, t, r, b = bounds(c)
       out[n] = {
         id = c.__id,
         kind = c.__kind,
         name = c.__name,
         -- Der 9-Slice-Rahmen (nur bei kind == 'border' gesetzt).
         __border = c.__border,
-        left = c.Left(),
-        top = c.Top(),
-        width = c.Width(),
-        height = c.Height(),
+        left = l,
+        top = t,
+        width = r - l,
+        height = b - t,
         depth = c.Depth(),
         hidden = c.__hidden == true,
         alpha = c.__alpha or 1,

@@ -77,6 +77,26 @@ function __advanceMotion()
   for id, u in pairs(__units) do
     local goal = u.__goal
     local p = u.__pos
+
+    -- DREH-ZIEL ohne Fahr-Ziel: die Unit steht und dreht sich zum Ziel — mit
+    -- ihrer `Physics.TurnRate` (Grad/Sekunde), nicht sofort. Der Bauer sieht sein
+    -- Gebaeude an, bevor er anfaengt (build.lua setzt __faceGoal).
+    if not goal and u.__faceGoal and p then
+      local f = u.__faceGoal
+      local m = motionParams(u)
+      local wanted = atan2(f[1] - p[1], f[2] - p[3])
+      local diff = wanted - (u.__heading or 0)
+      while diff > PI do diff = diff - 2 * PI end
+      while diff < -PI do diff = diff + 2 * PI end
+      local turn = m.turnRate
+      if turn <= 0 or math.abs(diff) <= turn then
+        u.__heading = wanted
+        u.__faceGoal = false
+      else
+        u.__heading = (u.__heading or 0) + (diff > 0 and turn or -turn)
+      end
+    end
+
     if goal and p then
       local m = motionParams(u)
       local dx = goal[1] - p[1]
@@ -84,8 +104,17 @@ function __advanceMotion()
       local dist = math.sqrt(dx * dx + dz * dz)
       local speed = u.__speed or 0
 
-      -- Immobile (MaxSpeed 0) or close enough to snap onto the goal this tick.
-      if m.maxSpeed <= 0 or dist <= math.max(speed, 0.05) then
+      -- UNBEWEGLICH (MaxSpeed 0): kein Ziel, keine Bewegung. Punkt.
+      --
+      -- Vorher stand hier `if m.maxSpeed <= 0 or dist <= ...` — und der Zweig
+      -- SETZT die Position auf das Ziel. Ein Gebaeude ist damit bei jedem
+      -- Bewegungsbefehl an den Klickpunkt TELEPORTIERT. Eine Einheit ohne
+      -- Antrieb bewegt sich nicht; sie rutscht auch nicht „schnell" ans Ziel.
+      if m.maxSpeed <= 0 then
+        u.__goal = false
+        u.__speed = 0
+      -- Nah genug: diesen Tick exakt auf dem Ziel ankommen.
+      elseif dist <= math.max(speed, 0.05) then
         p[1] = goal[1]
         p[3] = goal[2]
         p[2] = GetSurfaceHeight(p[1], p[3])
