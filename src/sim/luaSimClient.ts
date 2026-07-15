@@ -82,6 +82,11 @@ export interface LuaEmitterSnapshot {
   ox?: number
   oy?: number
   oz?: number
+  /** Zweiter Endpunkt (nur Beams via AttachBeamEntityToEntity —
+   *  CEfxBeam::AttachEntityToEntity @0x655B50): das Ziel-Bone in Welt. */
+  x2?: number
+  y2?: number
+  z2?: number
 }
 
 /** Was die Sim braucht, um eine Unit dieses Typs zu erzeugen. */

@@ -11,6 +11,7 @@ import { GameVfs } from './vfs/vfs'
 import { parseScm, type ScmModel } from './formats/scm'
 import { ParticleSystem } from './viewer/particles'
 import { TrailSystem, type TrailBpData } from './viewer/trails'
+import { BeamSystem, type BeamBpData } from './viewer/beams'
 import { EmitterRuntime, type EmitterBpData } from './effects/emitterRuntime'
 import { parseSca } from './formats/sca'
 import { parseScmap } from './formats/scmap'
@@ -474,6 +475,7 @@ function loadProjectileAssets(bpId: string): Promise<ProjectileAssets | null> {
 // Vertex-Shader weiter, wie im Original.
 let particles: ParticleSystem | null = null
 let trails: TrailSystem | null = null
+let beams: BeamSystem | null = null
 const emitterRuntimes = new Map<number, EmitterRuntime>()
 const emitterBpData = new Map<string, EmitterBpData>()
 const emitterBpPending = new Set<string>()
@@ -501,9 +503,17 @@ async function prepareEmitterBatch(bpId: string): Promise<void> {
     trails?.registerBp(bpId, t, tex, ramp)
     return
   }
-  // Beams (BeamBlueprint: TextureName) — Renderer folgt; bewusst unsichtbar.
+  // Beams (BeamBlueprint: TextureName) — eigene Render-Familie
+  // (TBeam_OneTexture_*, src/viewer/beams.ts).
   if (typeof bp.TextureName === 'string') {
-    log(`Partikel: ${bpId.split('/').pop()} ist ein Beam — Renderer folgt`)
+    const b = bp as BeamBpData
+    const texP = (b.TextureName ?? '').replace(/^\//, '').toLowerCase()
+    const tex = await loadFirstTexture([texP])
+    if (!tex) {
+      log(`Beam: Textur fehlt für ${bpId} (${texP || '—'})`)
+      return
+    }
+    beams?.registerBp(bpId, b, tex)
     return
   }
   const texPath = (bp.Texture ?? '').replace(/^\//, '').toLowerCase()
@@ -530,6 +540,11 @@ function updateEmitters(): void {
     // Polytrails: pro Tick ein Segment-Punkt an der gemeldeten Position.
     if (trails?.hasBp(e.bp)) {
       trails.point(e.id, e.bp, e.x, e.y, e.z, tick, e.scale)
+      continue
+    }
+    // Beams: das Quad zwischen den Endpunkten nachziehen.
+    if (beams?.hasBp(e.bp)) {
+      beams.set(e.id, e.bp, e, tick)
       continue
     }
     let rt = emitterRuntimes.get(e.id)
@@ -734,6 +749,8 @@ async function startSandbox(mapFolder: string): Promise<void> {
     particles = new ParticleSystem((mesh) => viewer.addHelper(mesh))
     trails?.dispose()
     trails = new TrailSystem((mesh) => viewer.addHelper(mesh))
+    beams?.dispose()
+    beams = new BeamSystem((mesh) => viewer.addHelper(mesh))
     emitterRuntimes.clear()
     lastEmitterTick = -1
     // Die Naht, über die Befehle der UI in die Sim gehen. Ohne sie KNALLT jeder
@@ -942,7 +959,13 @@ async function selftestKampf(): Promise<void> {
       ? `SELFTEST-TRAILS: ${nTrails} Poly-Trail(s) im Bild — die Spuren leben`
       : 'SELFTEST-TRAILS: kein Poly-Trail entstanden (im Gauss-Duell erwartbar: gauss_cannon_polytrail)',
   )
+  // Beams: der Bau-Strahl (build_beam_01) lief während der Bau-Phase; hier
+  // zählt maxBeams über den ganzen Selftest (der Kampf hat meist keine).
+  log(`SELFTEST-BEAMS: max. ${maxBeamsGesehen} Beam(s) gleichzeitig im Bild`)
 }
+
+/** Höchststand gleichzeitiger Beams — gepflegt in luaSimUpdate. */
+let maxBeamsGesehen = 0
 
 // --- SupCom-Steuerung ------------------------------------------------------
 // Linksklick = Auswahl, Links-Drag = Box-Selektion, Rechtsklick = Move
@@ -1493,6 +1516,8 @@ function luaSimUpdate(): void {
     const uTime = luaSim.gameTick + frac
     particles?.update(uTime, viewer.worldCamera)
     trails?.update(uTime)
+    beams?.update(uTime)
+    maxBeamsGesehen = Math.max(maxBeamsGesehen, beams?.totalBeams() ?? 0)
   }
 
   for (const u of luaUnits) {

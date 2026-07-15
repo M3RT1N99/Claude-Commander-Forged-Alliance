@@ -446,13 +446,26 @@ function __readAllEmittersJson()
       -- Spawner die Bone-Orientierung, nicht nur den Ort.
       local pos, rot = __boneWorld(o, e.__bone)
       local off = e.__offset
+      -- Beam-Emitter mit zweitem Ende (AttachBeamEntityToEntity): die
+      -- Zielposition wandert mit — stirbt das Ziel, endet der Beam
+      -- (CEfxBeam::Update prueft die Attachments genauso).
+      local zwei = ''
+      local other = e.__other
+      if other and not other.__destroyed and not other.__destroyQueued then
+        local p2 = __boneWorld(other, e.__otherBone)
+        zwei = string.format(',"x2":%.6g,"y2":%.6g,"z2":%.6g', p2[1], p2[2], p2[3])
+      elseif other then
+        -- Ziel weg -> Beam-Emitter ist tot (im Original zerstoert ihn Update).
+        e.__destroyed = true
+      end
       n = n + 1
       parts[n] = string.format(
-        '{"id":%d,"bp":%q,"x":%.6g,"y":%.6g,"z":%.6g,"qw":%.6g,"qx":%.6g,"qy":%.6g,"qz":%.6g,"scale":%.6g,"born":%d,"enabled":%s%s}',
+        '{"id":%d,"bp":%q,"x":%.6g,"y":%.6g,"z":%.6g,"qw":%.6g,"qx":%.6g,"qy":%.6g,"qz":%.6g,"scale":%.6g,"born":%d,"enabled":%s%s%s}',
         e.__id, tostring(e.__spec), pos[1], pos[2], pos[3],
         rot[1], rot[2], rot[3], rot[4],
         e.__scale or 1, e.__born, tostring(e.__enabled == true),
-        off and string.format(',"ox":%.6g,"oy":%.6g,"oz":%.6g', off[1] or 0, off[2] or 0, off[3] or 0) or ''
+        off and string.format(',"ox":%.6g,"oy":%.6g,"oz":%.6g', off[1] or 0, off[2] or 0, off[3] or 0) or '',
+        zwei
       )
     end
   end
@@ -470,7 +483,16 @@ function CreateEmitterOnEntity(owner, army, spec) return newEmitter(owner, -1, a
 function CreateTrail(owner, bone, army, spec) return newEmitter(owner, bone, army, spec) end
 function CreateBeamEmitter(owner, spec, army) return newEmitter(owner, -1, army, spec) end
 function CreateBeamEmitterOnEntity(owner, bone, army, spec) return newEmitter(owner, bone, army, spec) end
-function AttachBeamEntityToEntity(a, ab, b, bb, army, spec) return newEmitter(a, ab, army, spec) end
+-- Beam ZWISCHEN zwei Entities (CEfxBeam::AttachEntityToEntity @0x655B50):
+-- Start = sourceBone, Ende = targetBone — der Bau-Strahl der Ingenieure
+-- (build_beam_01, EffectUtilities) haengt genau so zwischen Bauer und
+-- Baustelle. Der zweite Endpunkt wandert mit in die Emitter-Meldung.
+function AttachBeamEntityToEntity(a, ab, b, bb, army, spec)
+  local e = newEmitter(a, ab, army, spec)
+  e.__other = b
+  e.__otherBone = bb
+  return e
+end
 function CreateLightParticle(owner, bone, army, size, life, tex, ramp) end
 function CreateLightParticleIntel(owner, bone, army, size, life, tex, ramp) end
 function CreateSplat(pos, heading, tex, sx, sz, lod, life, army) return newEmitter(nil, -1, army, tex) end
