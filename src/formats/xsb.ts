@@ -101,7 +101,9 @@ export function parseXsb(bytes: Uint8Array): XsbBank {
   const numSimpleCues = u16(0x13)
   const numComplexCues = u16(0x15)
   const numWaveBanks = u8(0x1b)
-  const cueNamesLength = u32(0x1e)
+  // u16 wie in MonoGame/FAudio; das u16 @0x20 dahinter ist unbekannt und in
+  // allen 100 FA-Dateien 0 (gemessen) — die Doku liest die 4 Bytes als u32.
+  const cueNamesLength = u16(0x1e)
   const simpleCuesOffset = view.getInt32(0x22, true)
   const complexCuesOffset = view.getInt32(0x26, true)
   const cueNamesOffset = view.getInt32(0x2a, true)
@@ -216,9 +218,15 @@ export function parseXsb(bytes: Uint8Array): XsbBank {
   }
 
   const cues = new Map<string, XsbCueTarget>()
+  const setCue = (name: string, target: XsbCueTarget): void => {
+    // Doppelte Namen würden im Map still verschluckt — in FA kommen keine vor
+    // (gemessen über alle 100 Banks), alles andere ist ein Strukturfehler.
+    if (cues.has(name)) throw new Error(`XSB ${soundBankName}: Cue-Name "${name}" doppelt`)
+    cues.set(name, target)
+  }
   for (let i = 0; i < numSimpleCues; i++) {
     const o = simpleCuesOffset + i * 5
-    cues.set(cueNames[i]!, resolveSound(u32(o + 1)))
+    setCue(cueNames[i]!, resolveSound(u32(o + 1)))
   }
   for (let i = 0; i < numComplexCues; i++) {
     const o = complexCuesOffset + i * 15
@@ -228,7 +236,7 @@ export function parseXsb(bytes: Uint8Array): XsbBank {
       // Fremdquellen übernommen und gegen keine echte Datei prüfbar.
       throw new Error(`XSB ${soundBankName}: Cue "${cueNames[numSimpleCues + i]}" nutzt eine Variationstabelle — in FA nie beobachtet`)
     }
-    cues.set(cueNames[numSimpleCues + i]!, resolveSound(u32(o + 1)))
+    setCue(cueNames[numSimpleCues + i]!, resolveSound(u32(o + 1)))
   }
 
   const targets: XsbCueTarget[] = [...cues.values()]

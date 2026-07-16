@@ -292,7 +292,7 @@ MINIWAVEFORMAT Bitfelder: tag[1:0], channels[4:2], samplesPerSec[22:5], blockAli
 0x13  u16 numSimpleCues        (FA: 0)
 0x15  u16 numComplexCues       (Explosions=9, Music=3)
 0x17  u16 unknown
-0x19  u16 numTotalCues
+0x19  u16 hashBuckets          (KORRIGIERT: Zahl der Cue-Name-Hash-Buckets, NICHT "numTotalCues" — Music hat hier 16 bei 3 Cues; gemessen beim Parser-Bau)
 0x1B  u8  numWaveBanks         (Explosions=2 -> Explosions + ExplosionsStream)
 0x1C  u16 numSounds            (Explosions=10, Music=3)
 0x1E  u32 cueNamesLength
@@ -310,7 +310,7 @@ MINIWAVEFORMAT Bitfelder: tag[1:0], channels[4:2], samplesPerSec[22:5], blockAli
 ```
 Beispiel Explosions.xsb (1253 B): waveBanks = `Explosions`, `ExplosionsStream`; Cues = `Explosion_Medium, Expl_Water_Lrg_01, Expl_Water_Lrg_02, UEF_Nuke_Impact, Aeon_Nuke_Impact, Cybran_Nuke_Impact, Explosion_Large_01, Explosion_Bomb, Expl_Anti_Nuke`.
 Music.xsb: `Main_Menu, Base_Building, Battle`.
-**Gesamt 1896 Cues über alle 80 .xsb.** (Für den Nachbau muss zusätzlich die Complex-Cue/Sound/Variation-Struktur geparst werden, um Cue → Wave-Index/Bank aufzulösen; Track/Event-Struktur ist die aufwändigste Stelle — die Kopfstruktur oben ist verifiziert, die Cue→Sound→Track-Kette noch nicht.)
+**Gesamt 1896 Cues über alle 80 .xsb.** Die Cue→Sound→Clip→Event-Kette ist inzwischen VOLLSTÄNDIG verifiziert und implementiert (src/formats/xsb.ts, byte-genau gegen alle 100 .xsb inkl. Voice gemessen; Endposition == entryLength für alle 4446 Sounds; XACT 3.0 hat 5-Byte-Clip-Meta ohne Filterfelder, Event-Typ 4 = PlayWave + 7-Byte-Pitch/Vol-Variation — eigener Fund, weicht von den XACT-3.4-Referenzen ab). Auflösungs-Fallen: XAS_Weapons.xwb heißt intern `XAS_Weapon` (über den INNEREN Banknamen auflösen); XAA.xsb referenziert bankübergreifend UAA.
 
 ### Referenzierung aus Blueprints
 Globale Lua-Funktion `Sound{}` (`cfunc_SoundL`, baut `CSndParams` aus `{Cue, Bank, LodCutoff}`); zusätzlich `RPCSound{}` (mit RPC-Loop-Variable) und `GetCueBank()`.
