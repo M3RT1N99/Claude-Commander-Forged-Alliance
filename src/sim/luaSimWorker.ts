@@ -46,6 +46,9 @@ type InMsg =
   | { type: 'spawn'; reqId: number; id: string; scriptPath: string; scriptBytes: Uint8Array | null; bpBytes: Uint8Array | null; bones: SimBone[]; pos: Vec3; army: number }
   | { type: 'move'; id: number; x: number; z: number }
   | { type: 'stop'; id: number }
+  // Attack (Dispatch 0x0A, CAttackTargetTask): in Waffenreichweite fahren,
+  // Waffen aufs Befehlsziel.
+  | { type: 'attack'; id: number; targetId: number }
   // Der Sammelpunkt einer Fabrik (IssueFactoryRallyPoint, Cfile:1008266) — KEIN
   // Bewegungsbefehl: die Fabrik bleibt stehen.
   | { type: 'rally'; id: number; x: number; y: number; z: number }
@@ -177,11 +180,16 @@ ctx.onmessage = async (e: MessageEvent<InMsg>): Promise<void> => {
     const ids = msg.unitIds.map((n) => Math.floor(n)).join(',')
     host.eval(`__simCallback(${JSON.stringify(msg.func)}, ${msg.argsLua}, { ${ids} })`)
   } else if (msg.type === 'move') {
-    host.eval(`local u=__units[${msg.id}]; if u then u:GetNavigator():SetGoal({ ${msg.x}, 0, ${msg.z} }) end`)
+    // Der Befehls-Dispatch (IAiCommandDispatchImpl::DispatchTask @0x608EF0):
+    // ein Move ERSETZT die Arbeit — laufender Bau bricht mit der vollen
+    // Abbruch-Kette ab (Cfile:814989), erst dann kommt das Navigator-Ziel.
+    host.eval(`__dispatchMove(${msg.id}, ${msg.x}, ${msg.z})`)
   } else if (msg.type === 'rally') {
     host.eval(`local u=__units[${msg.id}]; if u then u:SetRallyPoint({ ${msg.x}, ${msg.y}, ${msg.z} }) end`)
   } else if (msg.type === 'stop') {
-    host.eval(`local u=__units[${msg.id}]; if u then u:GetNavigator():AbortMove() end`)
+    host.eval(`__dispatchStop(${msg.id})`)
+  } else if (msg.type === 'attack') {
+    host.eval(`__dispatchAttack(${msg.id}, ${msg.targetId})`)
   }
 }
 

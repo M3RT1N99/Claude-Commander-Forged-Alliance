@@ -391,6 +391,10 @@ export class LuaSimClient {
   stop(id: number): void {
     this.worker.postMessage({ type: 'stop', id })
   }
+  /** Attack-Befehl (CAttackTargetTask): Unit `id` greift `targetId` an. */
+  attack(id: number, targetId: number): void {
+    this.worker.postMessage({ type: 'attack', id, targetId })
+  }
 
   /**
    * Der Sammelpunkt einer Fabrik (IssueFactoryRallyPoint, Cfile:1008266). Die

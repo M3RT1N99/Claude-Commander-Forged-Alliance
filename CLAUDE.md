@@ -138,7 +138,7 @@ npx tsx scripts/peek-lua.ts --grep <regex>  # Original-Lua/Blueprints suchen
   `--virtual-time-budget`).
 - **Debuggen:** Fehler in Lua-Threads werden nur geloggt — zuerst nach
   `ForkThread-Fehler:` in den WARN-Zeilen suchen.
-- Commits auf Deutsch, Was + Warum, ein Meilenstein pro Commit.
+- Commits auf ENGLISCH, Was + Warum, ein Meilenstein pro Commit.
 
 ## Arbeitsstil je Modell
 
@@ -215,4 +215,4 @@ Browser-Selbsttest `?sandbox=…&selftest=…`) — nie an „sieht fertig aus".
 
 ## Sprache
 
-Antworten auf Deutsch. Code-Kommentare auf Englisch. Commits auf Englisch.
+Antworten im Chat auf Deutsch. ALLES im Repo auf Englisch: Code-Kommentare, Commits, Log-Meldungen, Check-Texte, neue Doku.

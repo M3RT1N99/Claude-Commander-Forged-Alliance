@@ -1163,7 +1163,7 @@ window.addEventListener('pointerup', (e) => {
   // Klick ein BEFEHL. Sonst ist er eine Auswahl.
   if (gameUi && gameUi.commandMode().mode !== false) {
     const hit = viewer.pickTerrain(e.clientX, e.clientY)
-    if (hit) void issueWorldCommand(hit, e.shiftKey)
+    if (hit) void issueWorldCommand(hit, e.shiftKey, enemyUnter(e.clientX, e.clientY))
     return
   }
   if (luaUnits.length > 0) {
@@ -1183,19 +1183,32 @@ viewportEl.addEventListener('contextmenu', (e) => {
     log('Befehl abgebrochen')
     return
   }
-  // Sonst: der Standardbefehl der Weltansicht auf die Auswahl (Move).
+  // Sonst: der Standardbefehl der Weltansicht auf die Auswahl — Move aufs
+  // Gelände, ATTACK auf eine Feind-Unit (der Engine-Default).
   const hit = viewer.pickTerrain(e.clientX, e.clientY)
-  if (hit) void issueWorldCommand(hit, e.shiftKey)
+  if (hit) void issueWorldCommand(hit, e.shiftKey, enemyUnter(e.clientX, e.clientY))
 })
+
+/** Die FEINDLICHE Unit unter dem Cursor (Picking) — oder undefined. */
+function enemyUnter(clientX: number, clientY: number): number | undefined {
+  const picked = viewer.pickUnit(clientX, clientY)
+  if (!picked) return undefined
+  const u = luaUnits.find((x) => x.scene === picked)
+  return u && u.army !== 1 ? u.id : undefined
+}
 
 /**
  * Klick in die Welt → Befehl. Die Geometrie (Snap, Höhe) rechnet die Engine, die
  * Bedeutung kommt aus commandmode.lua (src/ui/worldCommands.ts).
  */
-async function issueWorldCommand(hit: { x: number; z: number }, queue: boolean): Promise<void> {
+async function issueWorldCommand(
+  hit: { x: number; z: number },
+  queue: boolean,
+  enemyTargetId?: number,
+): Promise<void> {
   if (!luaSim || !gameUi) return
   try {
-    const msg = await gameUi.worldClick(luaSim, hit, (x, z) => viewer.heightAt(x, z), queue)
+    const msg = await gameUi.worldClick(luaSim, hit, (x, z) => viewer.heightAt(x, z), queue, enemyTargetId)
     if (msg) log(msg)
     // Gesetzt (oder Befehl erteilt) → der Geist hat ausgedient, bis der nächste
     // Bau-Modus startet.

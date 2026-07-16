@@ -672,11 +672,100 @@ function IsCommandDone(cmd)
 end
 
 function IssueStop(units)
-  return issueTo(units, function(u) u:GetNavigator():AbortMove() end)
+  return issueTo(units, function(u) __dispatchStop(u.__id) end)
 end
 
 function IssueClearCommands(units)
-  return issueTo(units, function(u) u:GetNavigator():AbortMove() end)
+  return issueTo(units, function(u) __dispatchStop(u.__id) end)
+end
+
+-- === Befehls-Dispatch (IAiCommandDispatchImpl::DispatchTask @0x608EF0) ===
+--
+-- Ein NEUER Befehl ohne Shift ERSETZT die Arbeit einer Unit: der laufende
+-- Bau bricht mit der vollen Kette ab (__abortBuildTasks, Cfile:814989),
+-- die Attack-Order faellt weg, das Bewegungsziel wird neu gesetzt. Genau
+-- daran hing der Nutzer-Befund "bauende Einheiten lassen sich nicht
+-- wegbewegen": ohne Task-Abbruch setzte approach() (build.lua) das
+-- Fahrziel jeden Beat aufs Bau-Ziel zurueck.
+__attackOrders = {}
+
+--- Stop (Dispatch 0x01): Bau-Tasks (mit Abbruch-Hooks), Attack-Order,
+--- Bewegungsziel und Dreh-Ziel — alles weg.
+function __dispatchStop(unitId)
+  local u = __units[unitId]
+  if not u then return end
+  __abortBuildTasks(unitId)
+  __attackOrders[unitId] = nil
+  u:GetNavigator():AbortMove()
+  u.__faceGoal = false
+end
+
+--- Move (Dispatch 0x02): ersetzt Bau und Attack, dann Navigator-Ziel.
+function __dispatchMove(unitId, x, z)
+  local u = __units[unitId]
+  if not u then return end
+  __abortBuildTasks(unitId)
+  __attackOrders[unitId] = nil
+  u:GetNavigator():SetGoal({ x, 0, z })
+end
+
+--- Attack (Dispatch 0x0A, CAttackTargetTask): die Order merken — der
+--- Task-Tick faehrt in Waffenreichweite und die Zielerfassung bevorzugt
+--- das Befehlsziel (weapons.lua).
+function __dispatchAttack(unitId, targetId)
+  local u = __units[unitId]
+  local t = __units[targetId]
+  if not u or not t then return end
+  __abortBuildTasks(unitId)
+  __attackOrders[unitId] = targetId
+end
+
+-- The distance the attack task closes to: the largest FIRING range
+-- (MaxRadius) over all enabled non-manual weapons. NOT
+-- CAiAttackerImpl::GetMaxWeaponRange (Cfile:791342) — that one folds in
+-- TrackingRadius and is only the Lua binding (its sole caller is the
+-- LuaFuncDef); a unit stopping at tracking range never fires (found by the
+-- verify suite: uel0201 halted at 20.45 m with an 18 m gun).
+local function maxWeaponRange(u)
+  if u.__beingBuilt then return 0 end
+  local best = 0
+  for _, w in ipairs(u.__weapons or {}) do
+    local bp = w.__bp or {}
+    if w.__enabled ~= false and not bp.ManualFire then
+      local r = w.__maxRadius or bp.MaxRadius or 0
+      if r > best then best = r end
+    end
+  end
+  return best
+end
+
+--- Pro Beat (Anfang von __weaponTick): jede Attack-Order faehrt ihre Unit
+--- in Waffenreichweite und stoppt dort; totes/fehlendes Ziel beendet den
+--- Task (CAttackTargetTask ueber die AiAttacker-Events).
+function __attackTick()
+  for unitId, targetId in pairs(__attackOrders) do
+    local u = __units[unitId]
+    local t = __units[targetId]
+    if not u or u.__dead or u.__destroyQueued
+      or not t or t.__dead or t.__destroyQueued then
+      __attackOrders[unitId] = nil
+    else
+      local range = maxWeaponRange(u)
+      local p, q = u.__pos, t.__pos
+      local dx, dz = q[1] - p[1], q[3] - p[3]
+      local dist = math.sqrt(dx * dx + dz * dz)
+      if range > 0 and dist > range then
+        u.__goal = { q[1], q[3] }
+        u.__faceGoal = false
+      elseif u.__goal then
+        u.__goal = false
+        u.__speed = 0
+        u.__faceGoal = { q[1], q[3] }
+      elseif dist > 0.01 then
+        u.__faceGoal = { q[1], q[3] }
+      end
+    end
+  end
 end
 
 -- FlattenMapRect(x, z, w, h, y): Gebaeude planieren ihr Baufeld

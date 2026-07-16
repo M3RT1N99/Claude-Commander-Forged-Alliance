@@ -282,6 +282,81 @@ console.log('\n== CollisionBeam: der Dauerstrahl des Cybran-T2-Turms ==')
   check(beamFx.length >= 1, `${beamFx.length} Beam-Effekt(e) mit beiden Enden in der Emitter-Meldung`)
 }
 
+console.log('\n== Befehls-Dispatch: Stop, Move-bricht-Bau, Attack ==')
+// Die Dispatch-Tabelle (IAiCommandDispatchImpl::DispatchTask @0x608EF0): ein
+// neuer Befehl ERSETZT die Arbeit; der Bau-Abbruch faehrt die Kette aus
+// CBuildTaskHelper::OnStopBuild(completed=0) (Cfile:814989-815022).
+{
+  // Ein Ingenieur (ACU) beginnt einen Bau und wird WEGGESCHICKT.
+  await game.giveUnit(host, 'uel0001')
+  await game.giveUnit(host, 'ueb0101')
+  const acu = spawnLuaUnit(host, 'uel0001', { x: 300, y: 20, z: 300 }, 1)
+  const site = Number(
+    host.eval(
+      `local id = __spawnBuildSite('/units/ueb0101/ueb0101_script.lua', 'ueb0101', 303, 20, 303, 1) return id`,
+    ),
+  )
+  host.eval(`__issueBuildTask(${acu}, ${site}, 'MobileBuild')`)
+  host.eval(`SetArmyEconomy(1, 4000, 100000)`)
+  for (let t = 0; t < 40; t++) beat(engine)
+  const frBeforeMove = Number(host.eval(`return __units[${site}].__fraction`))
+  check(frBeforeMove > 0, `Der Bau läuft (fraction ${frBeforeMove.toFixed(3)})`)
+
+  host.eval(`__dispatchMove(${acu}, 260, 300)`)
+  check(
+    host.eval(`return __builderBusy(${acu})`) === false,
+    'Move bricht den Bau-Task ab (Abbruch-Kette Cfile:814989)',
+  )
+  const frAfterMove = Number(host.eval(`return __units[${site}].__fraction`))
+  check(
+    frAfterMove >= frBeforeMove && frAfterMove < 1,
+    `Die Baustelle bleibt mit ihrem Fortschritt stehen (${frAfterMove.toFixed(3)})`,
+  )
+  for (let t = 0; t < 30; t++) beat(engine)
+  const nachher = host.eval(`local p = __units[${acu}].__pos return p[1]`) as number
+  check(nachher < 299, `Der Bauer fährt wirklich weg (x ${Number(nachher).toFixed(1)} < 300)`)
+
+  // STOP haelt die Fahrt an.
+  host.eval(`__dispatchStop(${acu})`)
+  check(
+    host.eval(`return __units[${acu}].__goal == false and __builderBusy(${acu}) == false`) === true,
+    'Stop killt Fahrziel und Bau-Tasks (Dispatch 0x01)',
+  )
+
+  // ATTACK: ein Panzer ausserhalb seiner MaxRadius (18) faehrt heran, die
+  // Waffe nimmt das BEFEHLSZIEL, und das Ziel stirbt.
+  const jaeger = spawnLuaUnit(host, 'uel0201', { x: 400, y: 20, z: 300 }, 1)
+  const beute = spawnLuaUnit(host, 'uel0201', { x: 440, y: 20, z: 300 }, 2)
+  host.eval(`__dispatchAttack(${jaeger}, ${beute})`)
+  let zielGesetzt = false
+  let gestorben = false
+  for (let t = 0; t < 400 && !gestorben; t++) {
+    beat(engine)
+    if (!zielGesetzt) {
+      zielGesetzt =
+        host.eval(
+          `local u = __units[${jaeger}] if not u then return false end
+           for _, w in ipairs(u.__weapons or {}) do if w.__target and w.__target.__id == ${beute} then return true end end
+           return false`,
+        ) === true
+    }
+    gestorben = host.eval(`local b = __units[${beute}] return b == nil or b.__dead == true`) === true
+  }
+  check(zielGesetzt, 'Die Waffe nimmt das BEFEHLSZIEL (CAttackTargetTask → Zielerfassung)')
+  const lage = host.pull<{ jx: number; jhp: number; bhp: number; goal: boolean }>(`(function()
+    local j = __units[${jaeger}]
+    local b = __units[${beute}]
+    return string.format('{"jx":%.6g,"jhp":%.6g,"bhp":%.6g,"goal":%s}',
+      (j and j.__pos[1]) or -1, (j and j.__health) or -1, (b and b.__health) or -1,
+      tostring((j and j.__goal) ~= false and (j and j.__goal) ~= nil))
+  end)()`)
+  check(
+    gestorben,
+    `Attack über die Distanz: in Feuerreichweite (MaxRadius) fahren und töten` +
+      (gestorben ? '' : ` — Lage: Jäger x=${lage.jx} HP=${lage.jhp}, Beute HP=${lage.bhp}, fährt=${lage.goal}`),
+  )
+}
+
 console.log('\n== Was die Sim dabei gemeldet hat ==')
 const uniq = [...new Set(warnings.map((w) => w.split('\n')[0]?.slice(0, 110)))]
 for (const w of uniq.slice(0, 12)) console.log(`  · ${w}`)

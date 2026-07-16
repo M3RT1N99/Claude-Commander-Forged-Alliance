@@ -151,6 +151,9 @@ const sim = {
   move: (id: number, x: number, z: number): void => {
     simHost.eval(`local u = __units[${id}] if u then u:GetNavigator():SetGoal({ ${x}, 0, ${z} }) end`)
   },
+  attack: (id: number, targetId: number): void => {
+    simHost.eval(`__dispatchAttack(${id}, ${targetId})`)
+  },
   setRallyPoint: (id: number, x: number, y: number, z: number): void => {
     simHost.eval(`local u = __units[${id}] if u then u:SetRallyPoint({ ${x}, ${y}, ${z} }) end`)
   },
@@ -254,6 +257,28 @@ const rally = simHost.eval(`
   return string.format('%.0f,%.0f', p[1], p[3])
 `) as string
 check(rally === '140,150', `Ihr Sammelpunkt steht auf dem Klick: ${rally}`)
+
+// A click on an ENEMY unit issues Attack (dispatch 0x0A) instead of Move —
+// the picked target travels as enemyTargetId, exactly like CUIWorldView
+// hands the picked entity to the command dispatch.
+console.log('\n== Klick auf den Feind: Attack statt Move ==')
+{
+  await game.giveUnit(simHost, 'uel0201')
+  const feind = spawnLuaUnit(simHost, 'uel0201', { x: 150, y: 20, z: 150 }, 2)
+  check(
+    Number(uiHost.eval(`return __uiSelectByIds({ ${acu} })`)) === 1,
+    'Die ACU ist ausgewählt',
+  )
+  const atkMsg = await worldClick(uiHost, sim, { x: 150, z: 150 }, () => 20, {
+    queue: false,
+    enemyTargetId: feind,
+  })
+  check(atkMsg === `Attack (1) → Unit ${feind}`, `worldClick → ${String(atkMsg)}`)
+  check(
+    simHost.eval(`return __attackOrders[${acu}] == ${feind}`) === true,
+    'Die Sim führt die Attack-Order (CAttackTargetTask)',
+  )
+}
 
 simHost.close()
 uiHost.close()

@@ -34,6 +34,8 @@ export interface CommandMode {
 
 export interface WorldCommandSim {
   move(id: number, x: number, z: number): void
+  /** Attack (CAttackTargetTask): Unit `id` greift die Ziel-Unit an. */
+  attack(id: number, targetId: number): void
   /**
    * Der SAMMELPUNKT einer Fabrik (IssueFactoryRallyPoint, Cfile:1008266). Er ist
    * kein Bewegungsbefehl: die Fabrik bleibt stehen, nur ihre frischen Einheiten
@@ -103,7 +105,12 @@ export async function worldClick(
   sim: WorldCommandSim,
   hit: { x: number; z: number },
   elevation: (x: number, z: number) => number,
-  opts: { queue: boolean } = { queue: false },
+  opts: {
+    queue: boolean
+    /** Die FEINDLICHE Unit unter dem Cursor (Picking der Engine) — sie macht
+     *  aus dem Standard-Klick einen Attack-Befehl (Dispatch 0x0A). */
+    enemyTargetId?: number
+  } = { queue: false },
 ): Promise<string | null> {
   // pull() liefert JSON — eine LEERE Lua-Tabelle wuerde als `{}` in JS ankommen,
   // nicht als `[]`, und `for…of` warf dann "selection is not iterable".
@@ -111,6 +118,25 @@ export async function worldClick(
   if (selection.length === 0) return null
 
   const cm = getCommandMode(host)
+
+  // Der Attack-Button (orders.lua:151 AttackOrderBehavior) setzt den
+  // Command-Mode 'order' mit RULEUCC_Attack — der nächste Klick greift an.
+  // Attack auf BODEN (ohne Ziel-Unit) ist ein eigener Task (CFireAtTask)
+  // und noch nicht gebaut — das sagt der Rückgabetext, statt still zu enden.
+  if (cm.mode === 'order' && cm.name === 'RULEUCC_Attack') {
+    if (opts.enemyTargetId === undefined) return 'Attack auf Boden: noch kein Weg (CFireAtTask fehlt)'
+    let n = 0
+    for (const u of selection) {
+      sim.attack(u.id, opts.enemyTargetId)
+      n++
+    }
+    onCommandIssued(host, {
+      CommandType: 'Attack',
+      Position: { x: hit.x, y: elevation(hit.x, hit.z), z: hit.z },
+      Clear: !opts.queue,
+    })
+    return `Attack (${n}) → Unit ${opts.enemyTargetId}`
+  }
 
   if (cm.mode === 'build' || cm.mode === 'buildanchored') {
     if (!cm.name) return null
@@ -131,6 +157,7 @@ export async function worldClick(
 
   // Ohne Bau-Modus hängt der Standardbefehl an den COMMAND-CAPS der Einheit:
   //
+  //   Klick auf FEIND             → Attack (der Default der Engine)
   //   RULEUCC_Move (Panzer, ACU)  → Bewegungsbefehl
   //   Fabrik ohne Move            → SAMMELPUNKT (IssueFactoryRallyPoint,
   //                                 eine eigene Engine-Bindung, Cfile:1008266)
@@ -138,6 +165,19 @@ export async function worldClick(
   // Wer den Move-Befehl an alles schickt, schickt ihn auch an Gebäude — und die
   // fuhren dann durch die Gegend, statt einen Sammelpunkt zu bekommen.
   const y = elevation(hit.x, hit.z)
+  if (opts.enemyTargetId !== undefined) {
+    let n = 0
+    for (const u of selection) {
+      sim.attack(u.id, opts.enemyTargetId)
+      n++
+    }
+    onCommandIssued(host, {
+      CommandType: 'Attack',
+      Position: { x: hit.x, y, z: hit.z },
+      Clear: !opts.queue,
+    })
+    return `Attack (${n}) → Unit ${opts.enemyTargetId}`
+  }
   let moved = 0
   let rallied = 0
   for (const u of selection) {

@@ -97,6 +97,22 @@ local function acquireTarget(w, u)
   if maxRadius <= 0 then return end
   local radius = math.max(maxRadius, (bp.TrackingRadius or 1) * maxRadius)
 
+  -- Ein ATTACK-BEFEHL (CAttackTargetTask setzt das Ziel ueber den
+  -- AiAttacker auf die Waffen) hat Vorrang vor der freien Zielsuche —
+  -- sobald das Befehlsziel im Suchradius steht, feuert die Waffe darauf.
+  local forcedId = __attackOrders[u.__id]
+  if forcedId then
+    local ft = __units[forcedId]
+    if ft and canTarget(w, u, ft) then
+      local p, q = u.__pos, ft.__pos
+      local dx, dz = q[1] - p[1], q[3] - p[3]
+      if dx * dx + dz * dz <= radius * radius then
+        __weaponSetTarget(w, ft, nil)
+        return
+      end
+    end
+  end
+
   -- Steht das alte Ziel noch und ist es in Reichweite, bleibt es (die Engine
   -- prueft es ueber CanAttackTarget, Cfile:793034).
   local cur = w.__target
@@ -298,6 +314,10 @@ end
 --- Salven-FSM der Lua Coroutinen benutzt: OnFire setzt den Zustand, und der
 --- Thread-Scheduler laeuft ihn im selben Beat weiter.
 function __weaponTick()
+  -- Attack-Orders ZUERST (CAttackTargetTask laeuft vor den Waffen-Tasks):
+  -- sie steuern die Bewegung in Reichweite, die Zielerfassung unten
+  -- bevorzugt dann das Befehlsziel.
+  __attackTick()
   for _, u in pairs(__units) do
     if not u.__destroyQueued and not u.__dead and u.__weapons then
       for _, w in ipairs(u.__weapons) do

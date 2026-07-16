@@ -402,8 +402,10 @@ export class GameUi {
     hit: { x: number; z: number },
     elevation: (x: number, z: number) => number,
     queue = false,
+    /** Die feindliche Unit unter dem Cursor → Attack (Dispatch 0x0A). */
+    enemyTargetId?: number,
   ): Promise<string | null> {
-    return worldClick(this.host, sim, hit, elevation, { queue })
+    return worldClick(this.host, sim, hit, elevation, { queue, enemyTargetId })
   }
 
   /** Der aktuelle Command-Mode (was der nächste Klick in der Welt tut). */

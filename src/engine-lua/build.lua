@@ -37,18 +37,37 @@ function __builderBusy(builderId)
   return false
 end
 
---- Alle wartenden Auftraege eines Bauers loeschen (kein Shift = neue Reihe).
---- Die noch nicht begonnenen Baustellen verschwinden mit ihnen — genau das tut
---- die Engine, wenn ein Bau-Befehl die Warteschlange ersetzt.
-function __clearBuildQueue(builderId)
+--- Alle Bau-Auftraege eines Bauers ABBRECHEN — die Kette der Engine
+--- (CBuildTaskHelper::OnStopBuild(completed=0), Cfile:814989-815022): am
+--- BEGONNENEN Bau laufen OnFailedToBuild (Bauer), OnFailedToBeBuilt
+--- (Baustelle) und DANN OnStopBuild(target, order); bei Fertigstellung
+--- (__buildApply) laeuft nur OnStopBuild. Die Baustelle bleibt mit ihrem
+--- Fortschritt stehen; eine nie begonnene (fraction 0) verschwindet.
+function __abortBuildTasks(builderId)
+  local b = __units[builderId]
   for tid, task in pairs(__buildTasks) do
     if task.builder == builderId then
       local t = __units[task.target]
+      if task.started and b and not b.__dead then
+        pcall(function() b:OnFailedToBuild() end)
+        if t and not t.__dead then
+          pcall(function() t:OnFailedToBeBuilt() end)
+          pcall(function() b:OnStopBuild(t, task.order) end)
+        end
+      end
       if t and (t.__fraction or 1) <= 0 then t:Destroy() end
-      __econClearBuildRequest((__units[builderId] and __units[builderId].__army) or 1, tid)
+      __econClearBuildRequest((b and b.__army) or 1, tid)
       __buildTasks[tid] = nil
     end
   end
+  if b then b.UnitBeingBuilt = nil end
+end
+
+--- Alle Auftraege eines Bauers loeschen (kein Shift = neue Reihe). Ein neuer
+--- Befehl ERSETZT die Arbeit — auch der laufende Bau bricht mit der vollen
+--- Abbruch-Kette ab.
+function __clearBuildQueue(builderId)
+  __abortBuildTasks(builderId)
 end
 
 function __issueBuildTask(builderId, targetId, order, clear)

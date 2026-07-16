@@ -37,6 +37,11 @@ Der Weg zur echten UI: [PLAN-UI.md](PLAN-UI.md); der 1:1-Gesamtfahrplan:
 - **Tastatur-Folgefunde:** `InternalCreateEdit` fehlt (Chat-/Konsolen-EINGABE),
   `StartCommandMode`-Konsolenbefehl fehlt (Hotkeys wie Shift-P/Patrol laufen
   in die WARN-Liste), `IsAlly` in der UI-VM fehlt ('allies'-Chat).
+- **Command dispatch, remaining gaps:** Stop / Move-cancels-build / Attack
+  on units are 1:1 now (dispatch table @0x608EF0, abort chain
+  Cfile:814989); still open: attack-ground (CFireAtTask), shift-queueing
+  of orders, Patrol, Guard/Assist (resume builds), Reclaim/Repair/Capture,
+  and the command markers (UICommandGraph).
 - **Sim-Funde:** Einheiten stapeln sich am Roll-off (keine Separation),
   Mex-Stall (Produktion × LimitingRate, Cfile:953938), Türme drehen nicht
   (Turret-Aiming), Audio-Loops/Variationen.
