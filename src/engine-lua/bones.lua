@@ -156,6 +156,16 @@ end
 --- Liefert pos {x,y,z}, rot {w,x,y,z}. Ohne Knochen: die Pose der Entity selbst
 --- (das tut die Engine mit Bone-Index -2, Cfile:930866).
 function __boneWorld(e, bone)
+  -- CollisionBeam-Entities haben ZWEI virtuelle Knochen (GetBoneCount = 2,
+  -- Cfile:16624): Bone 0 = Strahlanfang (Muendung), Bone 1 = Treffpunkt.
+  -- CollisionBeam.lua haengt seine FX genau daran (CreateAttachedEmitter
+  -- self,0/1) und liest GetPosition(1) fuer den Schaden.
+  if e.__beamBones then
+    local i = bone
+    if i == nil or i == -1 or i == -2 then i = 0 end
+    local b = e.__beamBones[i + 1] or e.__beamBones[1]
+    return { b[1], b[2], b[3] }, e.__beamOrient or { 1, 0, 0, 0 }
+  end
   local p = e.__pos or { 0, 0, 0 }
   local h = e.__heading or 0
   -- Heading ist eine Drehung um die Y-Achse (motion.lua: vorwaerts = sin/cos h).

@@ -172,6 +172,128 @@ local function fireTick(w, u)
   w.__fireClock = math.floor(10 / rof)
 end
 
+-- ---------------------------------------------------------------------
+-- CollisionBeam-Tick (Moho::CollisionBeamEntity::MotionTick @911386 +
+-- CheckCollision): pro Tick zaehlt der Intervall-Zaehler; erreicht er
+-- CollisionCheckInterval, castet die Engine den Strahl von der Muendung
+-- entlang deren Blickrichtung und ruft bei WECHSEL des Getroffenen
+-- OnImpact(type, entity) — den Schaden macht die Lua (CollisionBeam.lua:186).
+-- Die maximale Strahllaenge ist die Waffenreichweite (bp.MaxRadius) —
+-- ABGELEITET (CheckCollision ist nicht dekompilierbar); ein Beam schiesst
+-- nie weiter, als seine Waffe reicht.
+-- ---------------------------------------------------------------------
+local function beamCast(beam)
+  local w = beam.Weapon
+  local u = w and w.unit
+  if not u or u.__destroyQueued or u.__dead then return end
+  local start, rot = __boneWorld(u, beam.__muzzleBone)
+  -- Die Strahlrichtung: im Original richtet das Turret-Aiming die Muendung
+  -- aufs Ziel; unsere Tuerme drehen (noch) nicht — der Cast zielt deshalb wie
+  -- der Projektilschuss auf die Koerpermitte des AKTUELLEN Waffenziels
+  -- (dieselbe Zielsemantik wie fireTick). Ohne Ziel: Muendungs-Blickrichtung.
+  local dir
+  local aimZiel = w.__target
+  if aimZiel and not aimZiel.__destroyed and not aimZiel.__destroyQueued then
+    local c = __unitCollision(aimZiel)
+    local dx = c[1] - start[1]
+    local dy = c[2] - start[2]
+    local dz = c[3] - start[3]
+    local l = math.sqrt(dx * dx + dy * dy + dz * dz)
+    if l > 0.001 then dir = { dx / l, dy / l, dz / l } end
+  end
+  dir = dir or __quatForward(rot)
+  local maxLen = (w.__bp and w.__bp.MaxRadius) or 30
+  beam.__beamBones[1] = { start[1], start[2], start[3] }
+  beam.__beamOrient = rot
+
+  -- Naechster Treffer entlang des Strahls: Ray-Kugel gegen alle Feind-Units
+  -- (dieselbe Koerperkugel wie die Projektil-Kollision, __unitCollision).
+  local bestT = maxLen
+  local bestUnit = nil
+  for _, ziel in pairs(__units) do
+    if not ziel.__destroyed and not ziel.__destroyQueued and ziel ~= u
+      and not IsAlly(ziel.__army, beam.__army) then
+      local c, r = __unitCollision(ziel)
+      local ox = c[1] - start[1]
+      local oy = c[2] - start[2]
+      local oz = c[3] - start[3]
+      local t = ox * dir[1] + oy * dir[2] + oz * dir[3]
+      if t > 0 and t < bestT + r then
+        local px = start[1] + dir[1] * t
+        local py = start[2] + dir[2] * t
+        local pz = start[3] + dir[3] * t
+        local d2 = (px - c[1]) ^ 2 + (py - c[2]) ^ 2 + (pz - c[3]) ^ 2
+        if d2 <= r * r then
+          local hitT = t - math.sqrt(r * r - d2)
+          if hitT >= 0 and hitT < bestT then
+            bestT = hitT
+            bestUnit = ziel
+          end
+        end
+      end
+    end
+  end
+
+  -- Terrain: Marsch in 1-m-Schritten bis der Strahl unter den Boden taucht.
+  local terrainT = nil
+  if not bestUnit or bestT > 1 then
+    local schritt = 1
+    local t = schritt
+    while t < bestT do
+      local y = start[2] + dir[2] * t
+      local g = GetSurfaceHeight(start[1] + dir[1] * t, start[3] + dir[3] * t)
+      if y <= g then terrainT = t break end
+      t = t + schritt
+    end
+  end
+
+  local impactType, impactEntity, endT
+  if terrainT and terrainT < bestT then
+    impactType, impactEntity, endT = 'Terrain', nil, terrainT
+  elseif bestUnit then
+    impactType, impactEntity, endT = 'Unit', bestUnit, bestT
+  else
+    impactType, impactEntity, endT = 'Air', nil, maxLen
+  end
+  beam.__beamBones[2] = {
+    start[1] + dir[1] * endT,
+    start[2] + dir[2] * endT,
+    start[3] + dir[3] * endT,
+  }
+
+  -- OnImpact NUR bei Wechsel des Getroffenen (CollisionBeam.lua:182-185:
+  -- "only executes this function when the thing it is touching changes").
+  local kennung = impactType .. ':' .. tostring(impactEntity and impactEntity.__id or '')
+  if kennung ~= beam.__lastImpact then
+    beam.__lastImpact = kennung
+    if beam.OnImpact then
+      local ok, err = pcall(function() beam:OnImpact(impactType, impactEntity) end)
+      if not ok then WARN('CollisionBeam OnImpact: ' .. tostring(err)) end
+    end
+  end
+end
+
+function __beamTick()
+  local lebend = {}
+  for _, beam in ipairs(__collisionBeams) do
+    local u = beam.Weapon and beam.Weapon.unit
+    if not beam.__destroyed and not beam.__destroyQueued and u and not u.__destroyed then
+      lebend[#lebend + 1] = beam
+      if beam.__enabled then
+        -- Bone 0 folgt der Muendung JEDEN Tick; der Kollisions-Check laeuft
+        -- im Intervall (MotionTick @911410: Zaehler, dann CheckCollision).
+        beam.__intervalCount = beam.__intervalCount + 1
+        if beam.__intervalCount >= beam.__interval then
+          beam.__intervalCount = 0
+          local ok, err = pcall(function() beamCast(beam) end)
+          if not ok then WARN('CollisionBeam: ' .. tostring(err)) end
+        end
+      end
+    end
+  end
+  __collisionBeams = lebend
+end
+
 --- Ein Waffen-Tick fuer alle Einheiten. Laeuft VOR der Thread-Stage, weil die
 --- Salven-FSM der Lua Coroutinen benutzt: OnFire setzt den Zustand, und der
 --- Thread-Scheduler laeuft ihn im selben Beat weiter.
@@ -198,4 +320,7 @@ function __weaponTick()
       end
     end
   end
+  -- Die Dauerstrahlen ticken im selben Beat (CollisionBeamEntity::MotionTick
+  -- laeuft in derselben Sim-Stage wie die Waffen-Tasks).
+  __beamTick()
 end

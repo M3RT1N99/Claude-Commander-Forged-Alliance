@@ -1126,7 +1126,69 @@ local prop = withNoops({ 'AddBoundedProp' }, {
   AddBoundedProp = function(self, priority) self.__boundedPriority = priority end,
 }, entity)
 
+-- ---------------------------------------------------------------------
+-- CollisionBeamEntity (Moho::CollisionBeamEntity) — die WAFFEN-DAUERSTRAHLEN.
+--
+-- DefaultBeamWeapon:OnCreate baut pro Muendung EINE CollisionBeam-Instanz
+-- (defaultweapons.lua:802-816: BeamType{ Weapon, BeamBone=0, OtherBone=
+-- muzzleBone, CollisionCheckInterval = BeamCollisionDelay*10 }) und
+-- Enable()t sie beim Feuern statt ein Projektil zu erzeugen. Die Engine
+-- castet dann pro CollisionCheckInterval einen Strahl (MotionTick zaehlt,
+-- Cfile:911386-911416; CheckCollision) und ruft bei WECHSEL des Getroffenen
+-- OnImpact(type, entity) — die Lua macht den Schaden (CollisionBeam.lua:186).
+-- Bindungen: __init/SetBeamFx/Enable/Disable/IsEnabled/GetLauncher
+-- (cfunc_CollisionBeamEntity*, Cfile:16648-16658), Rest erbt von Entity
+-- (GetBoneCount = 2: Bone 0 = Anfang, Bone 1 = Treffpunkt).
+-- Der Strahl-Tick selbst laeuft in weapons.lua (__beamTick).
+-- ---------------------------------------------------------------------
+__collisionBeams = {}
+
+local collision_beam = withNoops({
+  '__init', 'SetBeamFx', 'Enable', 'Disable', 'IsEnabled', 'GetLauncher',
+}, {
+  __init = function(self, spec)
+    self.Weapon = spec.Weapon
+    self.__muzzleBone = spec.OtherBone
+    self.__interval = spec.CollisionCheckInterval or 10
+    self.__intervalCount = 0
+    self.__enabled = false
+    self.__army = (spec.Weapon and spec.Weapon.unit and spec.Weapon.unit.__army) or 1
+    -- Bone 0 = Muendung, Bone 1 = Treffpunkt (bis zum ersten Check identisch).
+    self.__beamBones = { { 0, 0, 0 }, { 0, 0, 0 } }
+    self.__beamOrient = { 1, 0, 0, 0 }
+    __collisionBeams[#__collisionBeams + 1] = self
+    -- Die Engine ruft OnCreate bei der Entity-Erzeugung — CollisionBeam.lua:40
+    -- legt darin BeamEffectsBag/TerrainEffectsBag/Trash an; ohne den Aufruf
+    -- stirbt CreateBeamEffects an der fehlenden Tabelle.
+    if self.OnCreate then self:OnCreate() end
+  end,
+  Enable = function(self)
+    if self.__enabled then return end
+    self.__enabled = true
+    self.__lastImpact = nil
+    if self.OnEnable then self:OnEnable() end
+  end,
+  Disable = function(self)
+    if not self.__enabled then return end
+    self.__enabled = false
+    if self.OnDisable then self:OnDisable() end
+  end,
+  IsEnabled = function(self) return self.__enabled == true end,
+  GetLauncher = function(self) return self.Weapon and self.Weapon.unit end,
+  -- Der sichtbare Beam-Emitter haengt ohnehin an uns (AttachBeamToEntity,
+  -- Bone 0 -> Bone 1) — hier nur merken.
+  SetBeamFx = function(self, fx, collideOnStart)
+    self.__fxBeam = fx
+    self.__collideOnStart = collideOnStart == true
+  end,
+  GetBoneCount = function(self) return 2 end,
+}, entity)
+
 rawset(moho, 'entity_methods', Class() (entity))
+-- MIT entity_methods als Basis — anders als projectile/prop: CollisionBeam.lua
+-- mischt Entity NICHT selbst dazu (`Class(moho.CollisionBeamEntity)` pur,
+-- CollisionBeam.lua:16); im Original erbt die C++-Klasse von Entity.
+rawset(moho, 'CollisionBeamEntity', Class(moho.entity_methods) (collision_beam))
 rawset(moho, 'unit_methods', Class(moho.entity_methods) (unit))
 rawset(moho, 'weapon_methods', Class(moho.entity_methods) (weapon))
 -- OHNE entity_methods als Basis — und das ist kein Versehen:

@@ -197,6 +197,43 @@ console.log('\n== Gelenkte Munition: die Zealot-Rakete dreht auf ein seitliches 
   check(ohne !== 'Unit', `OHNE Tracking fliegt sie vorbei (Einschlag: ${ohne}) — der Unterschied IST UpdateTracking`)
 }
 
+console.log('\n== CollisionBeam: der Dauerstrahl des Cybran-T2-Turms ==')
+// urb2301 führt eine CDFParticleCannonWeapon (DefaultBeamWeapon,
+// defaultweapons.lua:785): statt eines Projektils wird pro Mündung eine
+// CollisionBeam-Entity erzeugt (OnCreate :802-816) und beim Feuern Enable()t.
+// Der Sim-Tick castet den Strahl (MotionTick @911386) und OnImpact macht den
+// Schaden (CollisionBeam.lua:186-215).
+{
+  await game.giveUnit(host, 'urb2301')
+  const turm = spawnLuaUnit(host, 'urb2301', { x: 300, y: 20, z: 100 }, 1)
+  const opfer = spawnLuaUnit(host, 'uel0201', { x: 300, y: 20, z: 112 }, 2)
+  check(turm > 0 && opfer > 0, `Turm ${turm} (Cybran T2 PD) und Opfer ${opfer}, 12 Meter`)
+  const beams = Number(host.eval('return #__collisionBeams'))
+  check(beams >= 1, `${beams} CollisionBeam-Entity(s) beim Waffen-OnCreate erzeugt`)
+  let beamAn = false
+  let schaden = false
+  let hpStart = 0
+  for (let t = 0; t < 120; t++) {
+    beat(engine)
+    if (!beamAn) {
+      beamAn = host.eval('for _, b in ipairs(__collisionBeams) do if b:IsEnabled() then return true end end return false') === true
+    }
+    const hp = Number(host.eval(`local u = __units[${opfer}] return (u and u.__health) or 0`))
+    if (t === 0) hpStart = hp
+    if (hp < hpStart && hp >= 0) {
+      schaden = true
+      break
+    }
+  }
+  check(beamAn, 'Der Beam wurde beim Feuern Enable()t (PlayFxBeamStart)')
+  check(schaden, 'Der Dauerstrahl macht Schaden (OnImpact → DoDamage)')
+  // Der SICHTBARE Strahl: CreateBeamEmitter + AttachBeamToEntity hängen den
+  // Beam-Emitter an die CollisionBeam-Entity — die Meldung trägt beide Enden.
+  const fx = host.pull<{ bp: string; x2?: number }[]>('__readAllEmittersJson()')
+  const beamFx = fx.filter((e) => e.x2 !== undefined)
+  check(beamFx.length >= 1, `${beamFx.length} Beam-Effekt(e) mit beiden Enden in der Emitter-Meldung`)
+}
+
 console.log('\n== Was die Sim dabei gemeldet hat ==')
 const uniq = [...new Set(warnings.map((w) => w.split('\n')[0]?.slice(0, 110)))]
 for (const w of uniq.slice(0, 12)) console.log(`  · ${w}`)

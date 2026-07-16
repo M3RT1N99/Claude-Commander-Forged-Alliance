@@ -101,7 +101,8 @@ function IsEntity(e) return type(e) == 'table' and e.__id ~= nil end
 function IsUnit(e) return type(e) == 'table' and e.__isUnit == true end
 function IsProjectile(e) return type(e) == 'table' and e.__isProj == true end
 function IsProp(e) return type(e) == 'table' and e.__isProp == true end
-function IsCollisionBeam(e) return false end
+-- CollisionBeam-Entities tragen ihre zwei virtuellen Knochen (__beamBones).
+function IsCollisionBeam(e) return type(e) == 'table' and e.__beamBones ~= nil end
 function IsAlly(a, b) return a == b end
 function IsEnemy(a, b) return a ~= b end
 
@@ -481,7 +482,25 @@ function CreateEmitterOnEntity(owner, army, spec) return newEmitter(owner, -1, a
 -- :OffsetEmitter() darauf). Ohne Rueckgabewert stirbt jedes Projektil in seinem
 -- eigenen OnCreate.
 function CreateTrail(owner, bone, army, spec) return newEmitter(owner, bone, army, spec) end
-function CreateBeamEmitter(owner, spec, army) return newEmitter(owner, -1, army, spec) end
+-- "CreateBeamEmitter(blueprint, army)" (EffectLuaStartupRegistrations,
+-- effects-audio.md — KEIN Owner-Argument!): erzeugt den sichtbaren
+-- Beam-Effekt frei; AttachBeamToEntity haengt ihn an (CollisionBeam.lua:111f).
+function CreateBeamEmitter(spec, army) return newEmitter(nil, -1, army, spec) end
+
+-- "AttachBeamToEntity(emitter, entity, tobone, army)": haengt einen
+-- EXISTIERENDEN Beam-Emitter an eine Entity. Bei CollisionBeam-Entities
+-- spannt der Strahl von Bone 0 (Anfang) zu Bone 1 (Treffpunkt) — beide an
+-- derselben Entity; die Emitter-Meldung traegt dann x2/y2/z2 mit, und der
+-- Beam-Renderer zeichnet Muendung -> Einschlag.
+function AttachBeamToEntity(emitter, entity, tobone, army)
+  emitter.__owner = entity
+  emitter.__bone = tobone or 0
+  if entity and entity.__beamBones then
+    emitter.__other = entity
+    emitter.__otherBone = 1
+  end
+  return emitter
+end
 function CreateBeamEmitterOnEntity(owner, bone, army, spec) return newEmitter(owner, bone, army, spec) end
 -- Beam ZWISCHEN zwei Entities (CEfxBeam::AttachEntityToEntity @0x655B50):
 -- Start = sourceBone, Ende = targetBone — der Bau-Strahl der Ingenieure
