@@ -843,12 +843,18 @@ async function runSelftest(blueprintId: string): Promise<void> {
   await new Promise((r) => setTimeout(r, 800))
   {
     // Was zeigt die Original-UI wirklich? Zählt, was im DOM ankommt — Bilder
-    // inklusive. Ein Bitmap ohne Hintergrundbild ist eine fehlende Textur.
+    // inklusive. „Ohne Bild" heißt: das Bitmap WILL eine Textur (backgroundImage
+    // gesetzt, mauiRenderer:195), sie ließ sich aber nicht auflösen — UND es ist
+    // sichtbar (Alpha > 0). SolidColor-Bitmaps (nur `background`) und Alpha-0-
+    // Platzhalter sind Original-Verhalten (window.lua:106-115 versteckt seine
+    // Resize-Griffe genau so) — sie zu zählen meldete ewig Phantome.
     const divs = [...document.querySelectorAll<HTMLDivElement>('#maui-root div')]
     const sichtbar = divs.filter((d) => d.style.display !== 'none')
     const bitmaps = sichtbar.filter((d) => d.dataset.kind === 'bitmap')
     const mitBild = bitmaps.filter((d) => d.style.backgroundImage.startsWith('url('))
-    const ohneBild = bitmaps.filter((d) => !d.style.backgroundImage.startsWith('url('))
+    const ohneBild = bitmaps.filter(
+      (d) => d.style.backgroundImage === 'none' && Number(d.style.opacity) > 0,
+    )
     log(
       `SELFTEST-UI: ${sichtbar.length} sichtbare Controls | Bitmaps ${bitmaps.length} ` +
         `(${mitBild.length} mit Bild, ${ohneBild.length} ohne) | ` +
@@ -870,11 +876,13 @@ async function runSelftest(blueprintId: string): Promise<void> {
   await new Promise((r) => setTimeout(r, 600))
   log(`SELFTEST: Bau-Vorschau ${buildPreview?.debugPosition() ?? 'FEHLT'} (Footprint ${fp[0]}×${fp[1]})`)
 
-  // Die Auswahl geht während des Lade-Fades verloren (Fraktionsbild +
-  // InitialAnimations — der Spieler klickt im Original auch erst danach).
-  // Deshalb direkt vor dem Klick ERNEUT wählen; ohne das versandete der
-  // Bau-Befehl still an der leeren Selektion (worldClick: selection == 0).
-  log(`SELFTEST: vor dem Klick — commandMode=${JSON.stringify(gameUi.commandMode())}, Auswahl=${gameUi.select([acu.id])}`)
+  // KEIN Re-Select mehr: seit DoInitializing hinter dem ersten Sync-Beat
+  // liegt (gameUi.beat), sieht gamemain.OnFirstUpdate seine Avatare und der
+  // 3-s-Fork ruft SelectUnits(acu) statt SelectUnits(nil). Bleibt die Auswahl
+  // hier trotzdem leer, ist das ein FUND — der Selftest meldet ihn.
+  const auswahl = gameUi.selectionCount()
+  if (auswahl === 0) log('SELFTEST: FUND — Auswahl vor dem Klick leer (Regression der Init-Reihenfolge?)')
+  log(`SELFTEST: vor dem Klick — commandMode=${JSON.stringify(gameUi.commandMode())}, Auswahl=${auswahl}`)
   await issueWorldCommand(ziel, false)
 
   // Wächst der Bau? Die Zahlen kommen aus der Sim, nicht von hier.

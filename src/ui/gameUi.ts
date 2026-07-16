@@ -44,6 +44,12 @@ export class GameUi {
     private readonly host: LuaHost,
     private readonly renderer: MauiRenderer,
     private readonly log: (msg: string) => void,
+    /**
+     * Der aufgeschobene DoInitializing-Schritt (Cfile:1321030-1321090). Die
+     * Engine fährt ihn erst nach dem ERSTEN Sim-Beat mit Sync-Daten
+     * (Cfile:1321067) — beat() löst ihn aus, sobald Units ankommen.
+     */
+    private worldInit: (() => void) | null = null,
   ) {}
 
   /**
@@ -130,6 +136,8 @@ export class GameUi {
     const host = await LuaHost.create(files, (level, msg) => {
       if (level === 'WARN') log(`UI-WARN: ${msg.slice(0, 400)}`)
     })
+    // Der aufgeschobene DoInitializing-Schritt (nur 'game'-Modus, siehe unten).
+    let worldInit: (() => void) | null = null
 
     installUiEngine(host, {
       exists: (p) => allPaths.has(p),
@@ -186,21 +194,31 @@ export class GameUi {
       // an dieser Stelle ist im Browser null.
       startSessionLoading(host)
 
-      // DoInitializing (Cfile:1321030-1321090): SetNewLuaState räumt die
-      // Root-Frames (der Lade-Dialog verschwindet), SetupUI + StartGameUI
-      // laufen ERNEUT (frischer Provider), dann StopLoadingDialog — das
-      // Fraktionsbild blendet über 1,5 s aus, und die Original-Lua forkt
-      // InitialAnimations (gamemain.lua:253-263): erst DARIN fahren Score,
-      // Economy, Avatare und die Reiter ein.
-      host.eval('__mauiResetFrames()')
-      host.eval('__uiSetupUi()')
-      host.eval('__uiStartGameUI()')
-      finishSessionLoading(host)
+      // DoInitializing (Cfile:1321030-1321090) läuft NICHT hier, sondern erst
+      // nach dem ERSTEN Sim-Beat mit Sync-Daten (Cfile:1321067) — siehe beat().
+      // Der Grund ist kein Timing-Detail, sondern Semantik: gamemain.lua:77-102
+      // (OnFirstUpdate) liest beim ersten Frame `GetArmyAvatars()` und forkt
+      // einen Thread, der 3 s später `SelectUnits(avatars)` ruft. Läuft der
+      // Aufbau VOR dem ersten Unit-Sync, ist avatars nil — der Fork löscht
+      // dann jede inzwischen getätigte Auswahl, der Start-Zoom (UIZoomTo)
+      // entfällt, und die ACU bekommt nie ihren Spielernamen. Genau das war
+      // der „leere UI"-Befund (Orders versteckt, 0 Bau-Icons).
+      worldInit = () => {
+        // SetNewLuaState räumt die Root-Frames (der Lade-Dialog verschwindet),
+        // SetupUI + StartGameUI laufen ERNEUT (frischer Provider), dann
+        // StopLoadingDialog — das Fraktionsbild blendet über 1,5 s aus, und die
+        // Original-Lua forkt InitialAnimations (gamemain.lua:253-263): erst
+        // DARIN fahren Score, Economy, Avatare und die Reiter ein.
+        host.eval('__mauiResetFrames()')
+        host.eval('__uiSetupUi()')
+        host.eval('__uiStartGameUI()')
+        finishSessionLoading(host)
 
-      // Ab hier baut die Original-Lua die UI — in der Reihenfolge aus
-      // gamemain.lua:145-153; in der Engine kommt CreateGameInterface NACH
-      // StopLoadingDialog (Cfile:1321080). Denselben Weg nimmt die Verify-Suite.
-      setupGameUi(host, log)
+        // Ab hier baut die Original-Lua die UI — in der Reihenfolge aus
+        // gamemain.lua:145-153; in der Engine kommt CreateGameInterface NACH
+        // StopLoadingDialog (Cfile:1321080). Denselben Weg nimmt die Verify-Suite.
+        setupGameUi(host, log)
+      }
     }
 
     // Erst rendern, dann zählen — und zwar in dieser Reihenfolge: die Grids der
@@ -228,7 +246,7 @@ export class GameUi {
     renderer.update()
     const count = Number(host.eval('return table.getn(__mauiSnapshot())'))
     log(`UI: ${count} maui-Controls aus der Original-Lua (${Math.round(performance.now() - tStart)} ms)`)
-    return new GameUi(host, renderer, log)
+    return new GameUi(host, renderer, log, worldInit)
   }
 
   /**
@@ -287,6 +305,17 @@ export class GameUi {
     lines.push(`__uiFactoryQueueBeat()`)
     lines.push(`import('/lua/ui/game/gamemain.lua').OnBeat()`)
     this.host.eval(lines.join('\n'))
+
+    // Der erste Beat MIT Units ist der Moment, in dem die Engine DoInitializing
+    // fährt (Cfile:1321067: StopLoadingDialog „nach dem ersten Beat mit
+    // Sync-Daten"). Erst jetzt sieht gamemain.OnFirstUpdate seine Avatare —
+    // vorher löschte dessen 3-s-Fork mit `SelectUnits(nil)` jede Auswahl.
+    if (this.worldInit && units.length > 0) {
+      const init = this.worldInit
+      this.worldInit = null
+      init()
+      this.log('UI: DoInitializing nach dem ersten Sync-Beat (Cfile:1321067)')
+    }
   }
 
   /**
@@ -298,6 +327,11 @@ export class GameUi {
   select(ids: number[]): number {
     const list = ids.join(',')
     return Number(this.host.eval(`return __uiSelectByIds({ ${list} })`))
+  }
+
+  /** Wie viele Units gerade ausgewählt sind (GetSelectedUnits der UI-VM). */
+  selectionCount(): number {
+    return Number(this.host.eval('return table.getn(GetSelectedUnits() or {})'))
   }
 
   /**
