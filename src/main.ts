@@ -12,6 +12,7 @@ import { parseScm, type ScmModel } from './formats/scm'
 import { ParticleSystem } from './viewer/particles'
 import { TrailSystem, type TrailBpData } from './viewer/trails'
 import { BeamSystem, type BeamBpData } from './viewer/beams'
+import { GameAudio } from './ui/audio'
 import { EmitterRuntime, type EmitterBpData } from './effects/emitterRuntime'
 import { parseSca } from './formats/sca'
 import { parseScmap } from './formats/scmap'
@@ -476,6 +477,7 @@ function loadProjectileAssets(bpId: string): Promise<ProjectileAssets | null> {
 let particles: ParticleSystem | null = null
 let trails: TrailSystem | null = null
 let beams: BeamSystem | null = null
+let gameAudio: GameAudio | null = null
 const emitterRuntimes = new Map<number, EmitterRuntime>()
 const emitterBpData = new Map<string, EmitterBpData>()
 const emitterBpPending = new Set<string>()
@@ -734,6 +736,17 @@ async function startSandbox(mapFolder: string): Promise<void> {
     const session: SessionInfo = { ...SANDBOX_SESSION, map: mapFolder }
     gameUi = await GameUi.create(vfs, await loadGameFonts(), log, 'game', conVarChanged, session)
     gameUi.attachEvents()
+    // Die Audio-Ausgabe: die XACT-Banks aus <FA>/sounds/ — StartSound in der
+    // UI-VM landet als PCM im Lautsprecher (StopSound beendet über die
+    // Handle-ID, z. B. die Menümusik beim Sitzungsstart).
+    if (!gameAudio) gameAudio = await GameAudio.create(vfs, log)
+    if (gameAudio) {
+      const audio = gameAudio
+      gameUi.connectAudio(
+        (bank, cue, id) => audio.play(bank, cue, id),
+        (id) => audio.stop(id),
+      )
+    }
     // Der Pause-Reiter der Original-UI (tabs.lua:425/428) hält die WELT an —
     // die Sim, nicht die UI.
     gameUi.connectPause((paused) => {
@@ -962,6 +975,12 @@ async function selftestKampf(): Promise<void> {
   // Beams: der Bau-Strahl (build_beam_01) lief während der Bau-Phase; hier
   // zählt maxBeams über den ganzen Selftest (der Kampf hat meist keine).
   log(`SELFTEST-BEAMS: max. ${maxBeamsGesehen} Beam(s) gleichzeitig im Bild`)
+  const nCues = gameAudio?.playedCount ?? -1
+  log(
+    nCues > 0
+      ? `SELFTEST-AUDIO: ${nCues} Cue(s) als PCM abgespielt — die XACT-Kette lebt`
+      : `SELFTEST-AUDIO: keine Cue abgespielt (${nCues < 0 ? 'kein AudioContext' : 'Kette prüfen'})`,
+  )
 }
 
 /** Höchststand gleichzeitiger Beams — gepflegt in luaSimUpdate. */

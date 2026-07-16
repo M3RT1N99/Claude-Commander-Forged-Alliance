@@ -981,6 +981,10 @@ end
 -- OnDestroy). Ohne Rueckgabewert haette StopSound nichts zu stoppen — die Musik
 -- liefe im Menue ewig weiter, sobald es eine Ausgabe gibt.
 __uiAudioSink = false
+-- Stop-Naht: StopSound meldet die Handle-ID, damit die Ausgabe laufende
+-- Quellen (Musik, Loops) wirklich beendet — nicht nur das Flag setzt.
+__uiAudioStopSink = false
+__uiNextSoundId = 1
 __uiSoundsRequested = {}
 local warnedNoAudio = false
 
@@ -1004,6 +1008,7 @@ local function newHandle(params, kind)
     Bank = params.Bank,
     Cue = params.Cue,
     kind = kind,
+    id = __uiNextSoundId,
     -- Ein Handle ist "prepared", sobald die Bank die Cue geladen hat. Wir laden
     -- nichts — also ist es das sofort. movie.lua:37-49 wartet darauf; ein ewiges
     -- false wuerde den Splash-Film blockieren.
@@ -1011,6 +1016,7 @@ local function newHandle(params, kind)
     playing = false,
     stopped = false,
   }
+  __uiNextSoundId = __uiNextSoundId + 1
   __uiSoundsRequested[table.getn(__uiSoundsRequested) + 1] = h
   return h
 end
@@ -1020,7 +1026,7 @@ function StartSound(handle)
   handle.playing = true
   handle.stopped = false
   if __uiAudioSink then
-    __uiAudioSink(handle.Bank, handle.Cue)
+    __uiAudioSink(handle.Bank, handle.Cue, handle.id)
   elseif not warnedNoAudio then
     warnedNoAudio = true
     WARN('Audio: keine Ausgabe angeschlossen — Cues werden nur protokolliert (__uiSoundsRequested)')
@@ -1051,6 +1057,7 @@ function StopSound(handle, immediate)
   handle.playing = false
   handle.stopped = true
   handle.immediate = immediate == true
+  if __uiAudioStopSink then __uiAudioStopSink(handle.id) end
 end
 
 function StopAllSounds()

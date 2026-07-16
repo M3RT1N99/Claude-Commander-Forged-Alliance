@@ -139,6 +139,24 @@ export class GameVfs {
   }
 
   /**
+   * Einen AUSSCHNITT einer Datei lesen — für Header-Scans über große Dateien
+   * (die Wave-Banks in sounds/ sind bis zu ~100 MB; für die Auflösung des
+   * inneren Banknamens reichen die ersten Bytes). Lose Dateien lesen über
+   * RandomAccess nur den Bereich; Zip-Einträge (klein) werden ganz gelesen
+   * und geschnitten.
+   */
+  async readSlice(path: string, start: number, end: number): Promise<Uint8Array> {
+    const file = this.files.get(this.normalize(path))
+    if (!file) throw new Error(`VFS: Datei nicht gefunden: ${path}`)
+    if (file.kind === 'zip') {
+      const all = await file.zip.read(file.entry)
+      return all.subarray(start, end)
+    }
+    const raf = await this.source.open(file.path)
+    return new Uint8Array(await raf.slice(start, Math.min(end, raf.size)))
+  }
+
+  /**
    * Viele Dateien auf einmal — der Weg für alles, was der Boot braucht.
    *
    * Einzeln gelesen kostet jede Datei zwei Zugriffe aufs Archiv (Header, Daten).

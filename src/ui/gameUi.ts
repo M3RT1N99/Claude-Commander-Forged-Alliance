@@ -481,6 +481,16 @@ export class GameUi {
    * Hängt die Event-Pump an. Capture-Phase: verbraucht die UI das Event, wird es
    * gestoppt, bevor die Kamera-/Selektions-Handler des Viewers es sehen.
    */
+  /**
+   * Die Audio-Ausgabe anschließen: StartSound ruft __uiAudioSink(bank, cue,
+   * id), StopSound __uiAudioStopSink(id) — ohne Sink protokolliert die UI-VM
+   * die Cues nur (ui-globals.lua, __uiSoundsRequested).
+   */
+  connectAudio(play: (bank: string, cue: string, id: number) => void, stop: (id: number) => void): void {
+    this.host.setGlobal('__uiAudioSink', (bank: string, cue: string, id: number) => play(bank, cue, id))
+    this.host.setGlobal('__uiAudioStopSink', (id: number) => stop(id))
+  }
+
   attachEvents(target: Window = window): void {
     const consume = (type: string) => (e: MouseEvent | WheelEvent) => {
       if (this.handleMouse(type, e)) {
