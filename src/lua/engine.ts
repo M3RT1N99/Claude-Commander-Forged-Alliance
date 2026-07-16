@@ -65,6 +65,11 @@ export function installEngine(
   // From here on original Lua runs and may capture engine globals.
   installMoho(host)
   host.loadGlobal('/lua/system/utils.lua')
+  // globalInit.lua:19 lädt repr.lua direkt nach utils — simcallbacks.lua:18
+  // ruft `repr(name)` im Fehlerpfad, unit.lua nutzt es in Debug-Zweigen.
+  // Die UI-VM hatte es (uiEngine.ts), die Sim-VM nicht: gefunden, als der
+  // SimCallback-Dispatcher statt "No callback named …" an `repr == nil` starb.
+  host.loadGlobal('/lua/system/repr.lua')
   installBlueprintPipeline(host)
   installUnitFactory(host)
   // Kampf: Schaden, Projektile, Props, Waffen-Tasks. Nach der UnitFactory, weil

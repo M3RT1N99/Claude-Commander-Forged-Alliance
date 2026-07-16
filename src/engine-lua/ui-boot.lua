@@ -82,6 +82,9 @@ end
 --- VM zweimal faehrt, muss dazwischen __mauiResetFrames() rufen (das ist
 --- das SetNewLuaState der Engine).
 function __uiStartGameUI()
+  -- func_StartGameUI (Cfile:1262514) setzt sUIState = UIS_game (3) VOR dem
+  -- Lua-Aufruf — der Enter-Fallback des Key-Handlers (Chat) prueft ihn.
+  __uiState = 3
   import('/lua/ui/uimain.lua').StartGameUI()
 end
 
@@ -95,6 +98,9 @@ end
 --- Economy, Avatare und die Reiter eingeblendet. Ohne diese Kette stehen die
 --- Panels fuer immer unsichtbar da.
 function __uiProviderStartLoading()
+  -- WorldIsLoading() ist wahr zwischen DoPreload und DoInitializing —
+  -- uimain.EscapeHandler (uimain.lua:120) unterdrueckt ESC waehrend des Ladens.
+  __uiWorldLoading = true
   if __uiWldProvider then __uiWldProvider:StartLoadingDialog() end
 end
 
@@ -103,6 +109,7 @@ function __uiProviderUpdateLoading(elapsed)
 end
 
 function __uiProviderStopLoading()
+  __uiWorldLoading = false
   if __uiWldProvider then __uiWldProvider:StopLoadingDialog() end
 end
 
@@ -135,6 +142,14 @@ function __uiCreateScreenTree()
     __ui.controlCluster:SetNeedsFrameUpdate(false)
     import('/lua/ui/game/gamemain.lua').OnFirstUpdate()
   end
+
+  -- Dieses Gerüst ist unser provider.CreateGameInterface (gamemain.lua:316-328)
+  -- — und der stellt am Ende zwei Zustaende her, ohne die die UI klemmt:
+  -- supressExitDialog = false (Zeile 326; StartLoadingDialog hatte es auf true
+  -- gesetzt — solange es true bleibt, ist ESC im Spiel TOT, uimain.lua:120)
+  -- und FlushEvents (Zeile 327).
+  import('/lua/ui/game/gamemain.lua').supressExitDialog = false
+  FlushEvents()
 end
 
 --- Die Panels der Spiel-UI, in der Reihenfolge aus gamemain.lua:145-154.

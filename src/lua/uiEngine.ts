@@ -178,6 +178,12 @@ export function installUiEngine(host: LuaHost, fs: UiFileSystem): UiEngine {
   host.eval(UI_BOOT_LUA)
   host.eval(WORLD_COMMANDS_LUA)
 
+  // IN_InitKeyHandler (CUIManager::Init → LoadKeyMappings, Cfile:1259476):
+  // die Engine lädt beim UI-Boot SELBST keyNames.lua und
+  // keymapper.GetKeyMappings() in die Keymap — sie wartet nicht auf lobby.lua.
+  // Ohne diesen Schritt bleibt jede Taste tot (die Keymap ist leer).
+  host.eval('__uiInitKeyMap()')
+
   return { host }
 }
 

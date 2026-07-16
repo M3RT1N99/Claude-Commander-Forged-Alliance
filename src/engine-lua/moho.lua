@@ -231,6 +231,9 @@ local entity = withNoops(ENTITY_NAMES, {
   GetHeading = function(self) return self.__heading or 0 end,
 
   SetMesh = function(self, mesh) self.__meshBp = mesh end,
+  -- Der Zeichen-Massstab (unit.lua:1111 gibt dem Wrack den UniformScale der
+  -- Unit mit). Der Renderer liest ihn aus dem Prop-Snapshot.
+  SetScale = function(self, s) self.__drawScale = s end,
 
   -- Das Skelett. Die Engine kennt es, weil sie das Modell der Unit auch in der
   -- SIM laedt (nicht nur im Renderer): Waffen-Tuerme, Bau-Knochen, Muendungen

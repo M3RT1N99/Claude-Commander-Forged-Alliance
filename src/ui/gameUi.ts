@@ -21,6 +21,7 @@ import {
   type CommandMode,
   type WorldCommandSim,
 } from './worldCommands'
+import { translateKey } from './keys'
 import type { GameVfs } from '../vfs/vfs'
 import type { EcoSnapshot } from './hud'
 import type { LuaUnitSnapshot } from '../sim/luaSimClient'
@@ -334,6 +335,11 @@ export class GameUi {
     return Number(this.host.eval('return table.getn(GetSelectedUnits() or {})'))
   }
 
+  /** NUR Debug (CDP-Abnahmen): einen Lua-Ausdruck in der UI-VM auswerten. */
+  debugEval(code: string): unknown {
+    return this.host.eval(code)
+  }
+
   /**
    * Die Weltansichten, die die Original-Lua gebaut hat — mit Lage und Größe.
    *
@@ -445,6 +451,25 @@ export class GameUi {
   }
 
   /**
+   * Die Naht für SimCallback (Cfile:1359123: „Execute a lua function in sim").
+   * Args kommen als JSON-Snapshot (die UI-VM serialisiert wie SCR_ToByteStream),
+   * die Auswahl als Entity-IDs — die Sim baut daraus Unit-Objekte.
+   */
+  connectSimCallback(send: (func: string, argsJson: string, ids: number[]) => void): void {
+    this.host.setGlobal('__uiSimCallbackSink', send)
+  }
+
+  /**
+   * Der Neustart der Session (RestartSession, Cfile:1263968: Teardown +
+   * Neustart mit denselben Session-Infos). Erst mit dieser Naht wird
+   * SessionCanRestart() wahr — ohne sie ist RestartSession ein No-Op,
+   * exakt wie im Original bei nicht-restartbarer Session.
+   */
+  connectRestart(restart: () => void): void {
+    this.host.setGlobal('__uiRestartSink', restart)
+  }
+
+  /**
    * Die Session anhalten/fortsetzen (SessionRequestPause/SessionResume,
    * mHelp: „Pause the world simulation."). Das ist ein Eingriff in die SIM,
    * nicht in die UI — der Pause-Reiter oben (tabs.lua:425/428) hängt daran.
@@ -548,8 +573,60 @@ export class GameUi {
       const name = e.key === 'Shift' ? 'Shift' : e.key === 'Control' ? 'Control' : e.key === 'Alt' ? 'Alt' : null
       if (name) this.host.eval(`__uiSetKeyDown('${name}', ${down})`)
     }
-    target.addEventListener('keydown', (e) => meldeTaste(e, true), true)
-    target.addEventListener('keyup', (e) => meldeTaste(e, false), true)
+
+    // Der TASTATUR-Pfad der Engine (wxWndProc @0x96D090 → maui-Dispatch →
+    // CUIKeyHandler), aus dem Browser-Event nachgezeichnet:
+    //   1. KeyDown an __mauiKey (Fokus-Control / Capture-Top). Konsumiert →
+    //      das folgende Char wird VERSCHLUCKT (Bit-8-Semantik,
+    //      Cfile:1499710-1499717).
+    //   2. Nicht konsumiert → Keymap-Executor (__uiKeyMapExecute): Hotkeys
+    //      aus keymapper.lua via ConExecute; Fallbacks Enter→Chat, ~→Konsole.
+    //   3. Char (echt oder aus dem KeyDown synthetisiert, keys.ts) an
+    //      __mauiKey — NUR darüber bekommen Edit-Felder ihre Zeichen
+    //      (CMauiEdit reagiert ausschließlich auf MET_Char,
+    //      Cfile:1132299-1132318).
+    const mods = (e: KeyboardEvent): string =>
+      `{ ${[e.shiftKey && 'Shift = true', e.ctrlKey && 'Ctrl = true', e.altKey && 'Alt = true']
+        .filter(Boolean)
+        .join(', ')} }`
+    target.addEventListener(
+      'keydown',
+      (e) => {
+        meldeTaste(e, true)
+        const k = translateKey(e)
+        if (!k) return
+        const m = mods(e)
+        const consumed =
+          this.host.eval(`return __mauiKey('KeyDown', ${k.wx}, ${k.vk}, ${m})`) === true
+        let acted = consumed
+        if (!consumed) {
+          // '~' erreicht die Konsole im Original über den Char-Code 126
+          // (Cfile:1262747) — die Taste selbst ist VK 0xC0.
+          const mauiCode = e.key === '~' ? 126 : k.wx
+          acted =
+            this.host.eval(
+              `return __uiKeyMapExecute(${k.vk}, ${e.shiftKey}, ${e.ctrlKey}, ${e.altKey}, ${e.repeat}, ${mauiCode})`,
+            ) === true
+          if (k.charCode !== null) {
+            this.host.eval(`__mauiKey('Char', ${k.charCode}, ${k.vk}, ${m})`)
+          }
+        }
+        if (acted) {
+          e.preventDefault()
+          e.stopPropagation()
+        }
+      },
+      true,
+    )
+    target.addEventListener(
+      'keyup',
+      (e) => {
+        meldeTaste(e, false)
+        const k = translateKey(e)
+        if (k) this.host.eval(`__mauiKey('KeyUp', ${k.wx}, ${k.vk}, ${mods(e)})`)
+      },
+      true,
+    )
     // Fenster verlässt den Fokus → keine Taste gilt mehr als gehalten (sonst
     // klemmt Shift nach Alt+Tab dauerhaft).
     target.addEventListener('blur', () => {

@@ -89,6 +89,14 @@ type InMsg =
   // _emit.bp beim Boot geparst (__registered.Emitter) — der Renderer holt
   // sie lazy, statt sie selbst noch einmal zu laden.
   | { type: 'emitterBp'; reqId: number; bp: string }
+  // Ein Mesh-Blueprint (Wrack-Varianten aus ExtractWreckageBlueprint,
+  // lua/system/blueprints.lua:187): ShaderName/SpecularName fuer den Renderer.
+  | { type: 'meshBp'; reqId: number; bp: string }
+  // SimCallback der UI (Cfile:1359123): eine Funktion aus lua/simcallbacks.lua
+  // in der Sim rufen. argsLua ist der Serialisierungs-Snapshot der UI-VM als
+  // Lua-Konstruktor-Literal (SCR_ToByteStream-Aequivalent), die Auswahl kommt
+  // als Entity-IDs.
+  | { type: 'simCallback'; func: string; argsLua: string; unitIds: number[] }
 
 ctx.onmessage = async (e: MessageEvent<InMsg>): Promise<void> => {
   const msg = e.data
@@ -160,6 +168,14 @@ ctx.onmessage = async (e: MessageEvent<InMsg>): Promise<void> => {
     // __emitterBpJson liefert JSON (oder 'null') — pull parst direkt.
     const bp = host.pull<unknown>(`__emitterBpJson(${JSON.stringify(msg.bp)})`)
     ctx.postMessage({ type: 'emitterBp', reqId: msg.reqId, bp })
+  } else if (msg.type === 'meshBp') {
+    const bp = host.pull<unknown>(`__meshBpJson(${JSON.stringify(msg.bp)})`)
+    ctx.postMessage({ type: 'meshBp', reqId: msg.reqId, bp })
+  } else if (msg.type === 'simCallback') {
+    // KEIN host.call mit Objekten (wasmoon reicht sie als userdata durch,
+    // nicht als Lua-Tabelle) — das Args-Literal wertet die Lua-Seite aus.
+    const ids = msg.unitIds.map((n) => Math.floor(n)).join(',')
+    host.eval(`__simCallback(${JSON.stringify(msg.func)}, ${msg.argsLua}, { ${ids} })`)
   } else if (msg.type === 'move') {
     host.eval(`local u=__units[${msg.id}]; if u then u:GetNavigator():SetGoal({ ${msg.x}, 0, ${msg.z} }) end`)
   } else if (msg.type === 'rally') {
@@ -233,6 +249,9 @@ function tickAndPost(): void {
   // Die EMITTER (Muendungsfeuer, Trails, Bau-/Einschlag-Effekte): die Sim
   // rechnet ihre Weltposition (Owner + Knochen), das Partikelsystem zeichnet.
   const emitters = host.pull<unknown[]>('__readAllEmittersJson()')
+  // Die PROPS (Wracks): Unit.OnKilled → CreateWreckageProp → CreateProp laeuft
+  // komplett in der Original-Lua; ohne diesen Kanal bleibt jedes Wrack unsichtbar.
+  const props = host.pull<unknown[]>('__readAllPropsJson()')
   const a = engine.economy.army(1)
   // Der SIM-TICK gehoert zum Zustand: die Spielzeit-Uhr der UI (score.lua:230,
   // GetGameTime) zaehlt in Sim-Ticks und steht bei Pause still.
@@ -243,6 +262,7 @@ function tickAndPost(): void {
     units,
     projectiles,
     emitters,
+    props,
     economy: {
       mass: a.mass, massStorage: a.maxMass, massIncome: a.incomeMass, massExpense: a.expenseMass,
       energy: a.energy, energyStorage: a.maxEnergy, energyIncome: a.incomeEnergy, energyExpense: a.expenseEnergy,

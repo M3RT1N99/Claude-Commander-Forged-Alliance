@@ -5,6 +5,8 @@ import * as THREE from 'three'
 import UNIT_VS from './shaders/unit.vert.glsl?raw'
 import UNIT_FS from './shaders/unit.frag.glsl?raw'
 import UNIT_SERAPHIM_FS from './shaders/unitSeraphim.frag.glsl?raw'
+import WRECKAGE_VS from './shaders/wreckage.vert.glsl?raw'
+import WRECKAGE_FS from './shaders/wreckage.frag.glsl?raw'
 
 export interface UnitTextures {
   albedo: THREE.Texture
@@ -71,6 +73,44 @@ export function createUnitMaterial(
       sunAmbience: { value: lighting.sunAmbience },
       shadowFillColor: { value: lighting.shadowFillColor },
       glowMultiplier: { value: 2.0 }, // mesh.fx:56
+    },
+    side: THREE.DoubleSide,
+  })
+}
+
+/**
+ * Das WRACK-Material (mesh.fx technique Wreckage, PS:2334 + VS:1153): das
+ * Unit-Mesh, im Vertex-Shader verbeult, Albedo der Unit mit dem Wrack-Noise
+ * aus `/env/common/props/wreckage_noise.dds` (der SpecularName, den
+ * ExtractWreckageBlueprint in lua/system/blueprints.lua:201 setzt).
+ * Keine Team-Farbe, kein Phong, keine Schatten — so das Original.
+ */
+export function createWreckageMaterial(
+  textures: UnitTextures,
+  noise: THREE.Texture,
+  skinMatrices: THREE.Matrix4[],
+  /** Erstellungszeit in Sekunden (Sim-Tick / 10) — variiert das Noise. */
+  creationTime: number,
+  lighting: MapLighting = VIEWER_LIGHT,
+): THREE.ShaderMaterial {
+  const flatNormal = new THREE.DataTexture(new Uint8Array([128, 128, 255, 128]), 1, 1)
+  flatNormal.needsUpdate = true
+
+  return new THREE.ShaderMaterial({
+    vertexShader: WRECKAGE_VS,
+    fragmentShader: WRECKAGE_FS,
+    defines: { MAX_BONES: Math.max(skinMatrices.length, 1) },
+    uniforms: {
+      boneMatrices: { value: skinMatrices.length > 0 ? skinMatrices : [new THREE.Matrix4()] },
+      albedoMap: { value: textures.albedo },
+      normalsMap: { value: textures.normals ?? flatNormal },
+      specularMap: { value: noise },
+      sunDirection: { value: lighting.sunDirection },
+      sunDiffuse: { value: lighting.sunColor },
+      sunAmbient: { value: lighting.sunAmbience },
+      shadowFill: { value: lighting.shadowFillColor },
+      lightMultiplier: { value: lighting.lightingMultiplier },
+      creationTime: { value: creationTime },
     },
     side: THREE.DoubleSide,
   })

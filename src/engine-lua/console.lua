@@ -111,6 +111,21 @@ function ConExecute(cmd)
   if not name then return end
   rest = string.match(rest, '^(.-)%s*$') -- Leerraum hinten weg
 
+  -- UI_Lua <code>: "Run lua code in the appropriate UI lua state."
+  -- (CConFunc_UI_Lua, Cfile:423593-423600). Fast jede Keymap-Aktion aus
+  -- keyactions.lua laeuft darueber (z. B. der Esc-Handler:
+  -- 'UI_Lua import("/lua/ui/uimain.lua").EscapeHandler()').
+  if string.lower(name) == 'ui_lua' then
+    local chunk, err = (loadstring or load)(rest, 'UI_Lua')
+    if not chunk then
+      WARN('UI_Lua: ' .. tostring(err))
+      return
+    end
+    local ok, callErr = pcall(chunk)
+    if not ok then WARN('UI_Lua: ' .. tostring(callErr)) end
+    return
+  end
+
   local entry = __conVars[key(name)]
   if entry then
     local value = parseValue(rest)

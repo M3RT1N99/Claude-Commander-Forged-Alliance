@@ -27,7 +27,7 @@ import {
 import { ddsToTexture } from './viewer/textures'
 import { UnitViewer, type SceneUnit } from './viewer/unitViewer'
 import { SandboxController, type SandboxUnitAssets } from './sandbox/sandbox'
-import { LuaSimClient } from './sim/luaSimClient'
+import { LuaSimClient, type LuaPropSnapshot } from './sim/luaSimClient'
 import { SANDBOX_SESSION, type SessionInfo } from './sim/session'
 import type { HeightfieldData } from './sim/terrain'
 import { Hud, type HudSource, type HudUnitInfo, type EcoSnapshot } from './ui/hud'
@@ -619,6 +619,69 @@ function updateProjectiles(): void {
   }
 }
 
+// --- Props: die Wracks der Sim, mit dem echten Wreckage-Shader ---------------
+//
+// Unit.OnKilled → CreateWreckageProp (unit.lua:1090) läuft komplett in der
+// Original-Lua: CreateProp + SetMesh(Display.MeshBlueprintWrecked) +
+// SetScale(UniformScale) + AssociatedBP. Der Renderer zeichnet das Unit-Mesh
+// mit dem Wreckage-Material (mesh.fx:2334 — Noise über Albedo, verbeult im VS).
+const propMeshes = new Map<number, THREE.Mesh>()
+const propPending = new Set<number>()
+const propSkipLogged = new Set<string>()
+let wreckNoise: Promise<THREE.Texture | null> | null = null
+
+async function addPropMesh(p: LuaPropSnapshot): Promise<void> {
+  const assets = await loadSandboxAssets(p.assoc!)
+  // Das Noise ist der SpecularName, den ExtractWreckageBlueprint
+  // (lua/system/blueprints.lua:201) in JEDES Wrack-Mesh-BP schreibt.
+  wreckNoise ??= loadFirstTexture(['env/common/props/wreckage_noise.dds']).then((t) => {
+    // Der Shader sampelt UV * 5.15 mit Zeit-Offset — die Textur muss kacheln.
+    if (t) t.wrapS = t.wrapT = THREE.RepeatWrapping
+    return t
+  })
+  const noise = await wreckNoise
+  propPending.delete(p.id)
+  if (!assets || !noise) {
+    if (!propSkipLogged.has(p.assoc!)) {
+      propSkipLogged.add(p.assoc!)
+      log(`Wrack: Assets fehlen für ${p.assoc} (${assets ? 'Noise' : 'Modell'})`)
+    }
+    return
+  }
+  // Das Prop kann schon wieder weg sein (Reclaim), während das Mesh lud.
+  if (!luaSim?.allProps().some((q) => q.id === p.id)) return
+  const mesh = viewer.addWreck(assets.model, assets.textures, noise, p.scale, p.spawn / 10)
+  mesh.position.set(p.x, p.y, p.z)
+  mesh.rotation.set(0, p.heading, 0)
+  propMeshes.set(p.id, mesh)
+}
+
+function updateProps(): void {
+  if (!luaSim) return
+  const seen = new Set<number>()
+  for (const p of luaSim.allProps()) {
+    seen.add(p.id)
+    if (propMeshes.has(p.id) || propPending.has(p.id)) continue
+    // Props ohne Mesh/Unit-Bezug (Karten-Props kommen mit dem scmap-Parser-
+    // Schwanz): einmal je Blueprint sagen, nicht raten.
+    if (!p.meshBp || !p.assoc) {
+      if (!propSkipLogged.has(p.bp)) {
+        propSkipLogged.add(p.bp)
+        log(`Prop ohne Wrack-Mesh: ${p.bp} — bleibt unsichtbar (kein SetMesh/AssociatedBP)`)
+      }
+      continue
+    }
+    propPending.add(p.id)
+    void addPropMesh(p)
+  }
+  for (const [id, mesh] of propMeshes) {
+    if (!seen.has(id)) {
+      propMeshes.delete(id)
+      viewer.removeWreck(mesh)
+    }
+  }
+}
+
 async function loadSandboxAssets(id: string): Promise<SandboxUnitAssets | null> {
   const cached = sandboxAssetCache.get(id)
   if (cached) return cached
@@ -769,7 +832,18 @@ async function startSandbox(mapFolder: string): Promise<void> {
     // Die Naht, über die Befehle der UI in die Sim gehen. Ohne sie KNALLT jeder
     // Befehl — statt still zu verpuffen (ui-globals.lua: __uiSimCommand).
     gameUi.connectSim((name, ids, value) => {
+      // SetLexical-Verhalten der Engine (Cfile:1381888-1381946): Enum-Namen
+      // sind case-insensitiv, das "UNITCOMMAND_"-Praefix ist optional —
+      // GetUnitCommandFromCommandCap liefert z. B. 'Stop' ohne Praefix.
+      const cmd = name.replace(/^UNITCOMMAND_/i, '').toLowerCase()
       const v = value as { blueprint?: string; count?: number; index?: number } | undefined
+      if (cmd === 'stop') {
+        // Der Stop-Knopf (orders.lua:205): Bewegungsabbruch über den
+        // Navigator (AbortMove) — der volle Befehls-Dispatch (Task-Abbruch,
+        // Queue leeren) ist Teil des offenen Command-Dispatch-Blocks.
+        for (const id of ids) luaSim?.stop(id)
+        return
+      }
       if (name === 'UNITCOMMAND_BuildFactory' && v?.blueprint) {
         // Die Fabrik baut: die Einheit geht in ihre Warteschlange (die Sim spawnt
         // sie selbst, sobald sie an der Reihe ist).
@@ -785,6 +859,18 @@ async function startSandbox(mapFolder: string): Promise<void> {
         return
       }
       log(`Befehl an die Sim: ${name}(${ids.join(',')}) — noch kein Weg dorthin`)
+    })
+    // SimCallback (Ctrl-K-Selbstzerstörung, Kontrollgruppen, Diplomatie):
+    // die UI ruft eine Funktion aus lua/simcallbacks.lua in der Sim.
+    gameUi.connectSimCallback((func, argsLua, unitIds) => {
+      luaSim?.simCallback(func, argsLua, unitIds)
+    })
+    // RestartSession (Menü → Neustart, tabs.lua:218): Teardown + Neustart mit
+    // denselben Session-Infos (func_DoPreload, Cfile:1320748) — exakt der
+    // Sandbox-Startpfad. Erst diese Naht macht SessionCanRestart() wahr.
+    gameUi.connectRestart(() => {
+      log('RestartSession: Session startet neu')
+      void startSandbox(mapFolder)
     })
 
     // Beide Frame-Hooks an EINER Stelle registrieren, nach dem Karten-Laden
@@ -965,6 +1051,17 @@ async function selftestKampf(): Promise<void> {
     maxMeshes > 0
       ? `SELFTEST-KAMPF: Projektile sichtbar — max. ${maxProj} gemeldet, ${maxMeshes} Mesh(es) in der Szene`
       : `SELFTEST-KAMPF: KEIN Projektil-Mesh (gemeldet: ${maxProj}) — der Sichtweg ist unterbrochen`,
+  )
+  // Das WRACK des Verlierers: Unit.OnKilled → CreateWreckageProp läuft in der
+  // Original-Lua; hier zählt, dass es als Mesh mit Wreckage-Shader ankommt.
+  for (let round = 0; round < 10 && propMeshes.size === 0; round++) {
+    await new Promise((r) => setTimeout(r, 500))
+  }
+  const nProps = luaSim.allProps().length
+  log(
+    propMeshes.size > 0
+      ? `SELFTEST-WRACK: ${nProps} Prop(s) gemeldet, ${propMeshes.size} Wrack-Mesh(es) in der Szene`
+      : `SELFTEST-WRACK: KEIN Wrack-Mesh (gemeldet: ${nProps}) — der Props-Sichtweg ist unterbrochen`,
   )
   // Das Partikelsystem: Mündungsfeuer/Einschläge/Bau-Glow müssen als
   // Instanzen in den Batches gelandet sein.
@@ -1536,8 +1633,28 @@ function luaSimUpdate(): void {
     })
   }
 
+  // TOTE Units verlassen die Szene: die Sim meldet sie nicht mehr (OnDestroy
+  // nach dem DeathThread), ihr Wrack steht als Prop bereits da. Vorher blieb
+  // das tote Mesh ewig stehen — und verdeckte exakt das Wrack, das an
+  // derselben Stelle entsteht (Szene-Debug: Unit 34 visible auf der
+  // Wrack-Position, obwohl längst gestorben). NUR wenn die Sim schon Zustände
+  // gemeldet hat — vor dem ersten Beat ist die Liste leer, und die frisch
+  // gespawnte ACU würde sonst sofort wieder entfernt.
+  if (states.length > 0) {
+    for (let i = luaUnits.length - 1; i >= 0; i--) {
+      const u = luaUnits[i]!
+      if (luaSim.state(u.id)) continue
+      viewer.removeUnit(u.scene)
+      viewer.removeHelper(u.ring)
+      luaUnits.splice(i, 1)
+    }
+  }
+
   // Die fliegenden Projektile — die Engine zeichnet jede Sim-Entity.
   updateProjectiles()
+
+  // Die Props (Wracks) — auch sie sind Sim-Entities mit eigenem Mesh.
+  updateProps()
 
   // Die Emitter: pro neuem Sim-Tick spawnen, pro Frame die Partikel-Uhr
   // stellen (uTime = Sim-Tick + Frame-Anteil; die Kurven zählen in Ticks).
@@ -1673,6 +1790,22 @@ if (import.meta.env.DEV) {
       visible: u.mesh.visible,
       scale: Math.round(u.mesh.scale.x * 1000) / 1000,
     }))
+  // Die Props (Wracks) der Szene — gleiche Sicht wie __cfaSzene.
+  ;(window as unknown as Record<string, unknown>).__cfaProps = () =>
+    [...propMeshes.entries()].map(([id, m]) => ({
+      id,
+      pos: m.position.toArray().map((v) => Math.round(v * 10) / 10),
+      visible: m.visible,
+      scale: Math.round(m.scale.x * 1000) / 1000,
+    }))
+  // Kamera per CDP auf einen Weltpunkt richten (Sicht-Abnahmen ohne Maus).
+  ;(window as unknown as Record<string, unknown>).__cfaFokus = (x: number, z: number, dist = 30) => {
+    viewer.focusOn(new THREE.Vector3(x, viewer.heightAt(x, z), z), dist)
+    return 'ok'
+  }
+  // Lua in der UI-VM auswerten (Fehlersuche der Tastatur-/Keymap-Wege).
+  ;(window as unknown as Record<string, unknown>).__cfaUiEval = (code: string) =>
+    gameUi ? gameUi.debugEval(code) : 'keine UI'
 }
 
 // ---------------------------------------------------------------------------

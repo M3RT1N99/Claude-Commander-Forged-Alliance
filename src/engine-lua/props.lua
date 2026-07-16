@@ -55,6 +55,9 @@ function CreateProp(location, bpId)
   p.__army = -1 -- Props gehoeren niemandem (die Zivilarmee ist -1)
   p.__pos = pos
   p.__heading = 0
+  -- Die Erstellungszeit: der Wreckage-Shader variiert sein Noise darueber
+  -- (mesh.fx WreckageVS: material.x = creation time, PS: frac(0.01*depth.y)).
+  p.__spawnTick = __gameTick or 0
   p.__bones = { names = {}, xform = {}, index = {} }
   p.__health = (bp.Defense and bp.Defense.MaxHealth) or 1
   p.__fraction = 1
@@ -92,6 +95,11 @@ function GetTerrainTypeOffset(x, z)
 end
 
 --- Der Zustand aller Props als JSON (der Renderer zeichnet die Wracks).
+--- meshBp  = was prop:SetMesh bekam (unit.lua:1129: Display.MeshBlueprintWrecked)
+--- assoc   = die Unit hinter dem Wrack (unit.lua:1137: prop.AssociatedBP) —
+---           der Renderer laedt darueber SCM + Albedo/Normals der Unit
+--- scale   = prop:SetScale (unit.lua:1111: Display.UniformScale der Unit)
+--- spawn   = Erstellungs-Tick (mesh.fx: der Wreckage-Shader braucht die Zeit)
 function __readAllPropsJson()
   local parts = {}
   local n = 0
@@ -100,10 +108,22 @@ function __readAllPropsJson()
       n = n + 1
       local pos = p.__pos
       parts[n] = string.format(
-        '{"id":%d,"bp":%q,"x":%.6g,"y":%.6g,"z":%.6g,"heading":%.6g}',
-        id, tostring(p.__bp.BlueprintId), pos[1], pos[2], pos[3], p.__heading or 0
+        '{"id":%d,"bp":%q,"x":%.6g,"y":%.6g,"z":%.6g,"heading":%.6g,"scale":%.6g,"spawn":%d%s%s}',
+        id, tostring(p.__bp.BlueprintId), pos[1], pos[2], pos[3], p.__heading or 0,
+        p.__drawScale or 1, p.__spawnTick or 0,
+        p.__meshBp and string.format(',"meshBp":%q', tostring(p.__meshBp)) or '',
+        p.AssociatedBP and string.format(',"assoc":%q', tostring(p.AssociatedBP)) or ''
       )
     end
   end
   return '[' .. table.concat(parts, ',') .. ']'
+end
+
+--- Ein Mesh-Blueprint als JSON — der Renderer holt sich damit die
+--- Wrack-Varianten (ShaderName 'Wreckage', SpecularName wreckage_noise.dds),
+--- die lua/system/blueprints.lua:187 (ExtractWreckageBlueprint) erzeugt hat.
+function __meshBpJson(bpId)
+  local bp = __registered.Mesh[bpId]
+  if not bp then return 'null' end
+  return __jsonVal(bp)
 end

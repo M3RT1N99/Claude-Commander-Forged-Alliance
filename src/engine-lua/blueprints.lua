@@ -263,6 +263,9 @@ local function jsonVal(v)
   return 'null'
 end
 
+-- Auch fuer andere Engine-Lua-Dateien (props.lua serialisiert Mesh-BPs).
+__jsonVal = jsonVal
+
 --- Liefert das Emitter-/Trail-/Beam-Blueprint zur Id als JSON-String —
 --- oder den String 'null', wenn es keines gibt (der Aufrufer prueft).
 function __emitterBpJson(bpId)

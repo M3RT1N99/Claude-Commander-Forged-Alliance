@@ -3,7 +3,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import type { ScmModel } from '../formats/scm'
 import type { ScmapData } from '../formats/scmap'
 import type { GameVfs } from '../vfs/vfs'
-import { createUnitMaterial, type UnitTextures, type MapLighting } from './unitMaterial'
+import { createUnitMaterial, createWreckageMaterial, type UnitTextures, type MapLighting } from './unitMaterial'
 import { createTerrainMaterial } from './terrainMaterial'
 import { createWaterMaterial } from './waterMaterial'
 import { ddsToTexture } from './textures'
@@ -228,9 +228,9 @@ export class UnitViewer {
     }
   }
 
-  setModel(model: ScmModel, textures: UnitTextures, teamColor: THREE.Color, shader = 'Unit'): void {
-    this.clearContent()
-
+  /** SCM → BufferGeometry mit allen Attributen des Unit-Shaders (UV1,
+   *  Tangenten, Bone-Index) — von setModel, addUnit und addWreck geteilt. */
+  private scmGeometry(model: ScmModel): THREE.BufferGeometry {
     const geometry = new THREE.BufferGeometry()
     geometry.setAttribute('position', new THREE.BufferAttribute(model.positions, 3))
     geometry.setAttribute('normal', new THREE.BufferAttribute(model.normals, 3))
@@ -242,6 +242,13 @@ export class UnitViewer {
     for (let i = 0; i < model.vertexCount; i++) boneIndex[i] = model.boneIndices[i * 4]!
     geometry.setAttribute('scmBoneIndex', new THREE.BufferAttribute(boneIndex, 1))
     geometry.setIndex(new THREE.BufferAttribute(model.indices, 1))
+    return geometry
+  }
+
+  setModel(model: ScmModel, textures: UnitTextures, teamColor: THREE.Color, shader = 'Unit'): void {
+    this.clearContent()
+
+    const geometry = this.scmGeometry(model)
     geometry.computeBoundingSphere()
 
     this.animator = new UnitAnimator(model)
@@ -278,17 +285,7 @@ export class UnitViewer {
     teamColor: THREE.Color,
     shader = 'Unit',
   ): SceneUnit {
-    const geometry = new THREE.BufferGeometry()
-    geometry.setAttribute('position', new THREE.BufferAttribute(model.positions, 3))
-    geometry.setAttribute('normal', new THREE.BufferAttribute(model.normals, 3))
-    geometry.setAttribute('uv', new THREE.BufferAttribute(model.uv0, 2))
-    geometry.setAttribute('scmUv1', new THREE.BufferAttribute(model.uv1, 2))
-    geometry.setAttribute('scmTangent', new THREE.BufferAttribute(model.tangents, 3))
-    geometry.setAttribute('scmBinormal', new THREE.BufferAttribute(model.binormals, 3))
-    const boneIndex = new Float32Array(model.vertexCount)
-    for (let i = 0; i < model.vertexCount; i++) boneIndex[i] = model.boneIndices[i * 4]!
-    geometry.setAttribute('scmBoneIndex', new THREE.BufferAttribute(boneIndex, 1))
-    geometry.setIndex(new THREE.BufferAttribute(model.indices, 1))
+    const geometry = this.scmGeometry(model)
 
     const animator = new UnitAnimator(model)
     // Auf der Karte rechnen Einheiten mit dem KARTEN-Licht (mesh.fx
@@ -343,6 +340,43 @@ export class UnitViewer {
   }
 
   /**
+   * Ein WRACK in die Szene (mesh.fx technique Wreckage): das Unit-Mesh mit dem
+   * Wreckage-Material — im Vertex-Shader verbeult, Albedo mit Wrack-Noise,
+   * Karten-Licht ohne Schatten. Nicht über addUnit: Wracks stehen (noch) nicht
+   * in der Treffer-/Auswahlliste — die Reclaim-Interaktion ist ein eigener,
+   * dokumentiert offener Schritt.
+   */
+  addWreck(
+    model: ScmModel,
+    textures: UnitTextures,
+    noise: THREE.Texture,
+    scale: number,
+    creationTime: number,
+  ): THREE.Mesh {
+    const geometry = this.scmGeometry(model)
+    const animator = new UnitAnimator(model)
+    const material = createWreckageMaterial(
+      textures,
+      noise,
+      animator.skinMatrices,
+      creationTime,
+      this.mapLighting ?? undefined,
+    )
+    const mesh = new THREE.Mesh(geometry, material)
+    mesh.frustumCulled = false
+    mesh.scale.setScalar(scale)
+    this.scene.add(mesh)
+    return mesh
+  }
+
+  /** Ein Wrack wieder entfernen (Reclaim/Zerstörung). */
+  removeWreck(mesh: THREE.Mesh): void {
+    this.scene.remove(mesh)
+    mesh.geometry.dispose()
+    ;(mesh.material as THREE.Material).dispose()
+  }
+
+  /**
    * Eine Einheit wieder aus der Szene nehmen — inklusive der TREFFERLISTE.
    *
    * Das ist der Punkt: `mesh.visible = false` reicht nicht. Der Raycaster von
@@ -382,6 +416,13 @@ export class UnitViewer {
   addHelper(obj: THREE.Object3D): void {
     this.scene.add(obj)
     this.helpers.push(obj)
+  }
+
+  /** Ein Hilfsobjekt gezielt entfernen (z. B. der Ring einer toten Einheit). */
+  removeHelper(obj: THREE.Object3D): void {
+    const i = this.helpers.indexOf(obj)
+    if (i >= 0) this.helpers.splice(i, 1)
+    this.scene.remove(obj)
   }
 
   /**

@@ -549,6 +549,157 @@ check(
   'currentScores bleibt false — 1:1: Vanilla hat keinen Score-Sync-Produzenten',
 )
 
+console.log('\n== Die Hoch-Stubs der Inventur: CommandCap, SimCallback, Chat, Restart ==')
+// GetUnitCommandFromCommandCap (Cfile:1264844 + Mapping Cfile:1242230):
+// RULEUCC-Name (case-insensitiv, Praefix optional) -> Kommandoname OHNE
+// "UNITCOMMAND_"-Praefix — orders.lua:205 steckt ihn direkt in IssueCommand.
+check(
+  host.eval(`return GetUnitCommandFromCommandCap('RULEUCC_Stop')`) === 'Stop',
+  "GetUnitCommandFromCommandCap('RULEUCC_Stop') = 'Stop' (ohne Praefix)",
+)
+check(
+  host.eval(`return GetUnitCommandFromCommandCap('ruleucc_overcharge')`) === 'OverCharge',
+  "…('ruleucc_overcharge') = 'OverCharge' — case-insensitiv, grosses C (Cfile:696219)",
+)
+check(
+  host.eval(`return GetUnitCommandFromCommandCap('RULEUCC_RetaliateToggle')`) === 'None',
+  "…('RULEUCC_RetaliateToggle') = 'None' (kein Mapping -> UNITCOMMAND_None)",
+)
+
+// SimCallback (Cfile:1359123): der Sink bekommt (Func, Args-als-Lua-Literal,
+// Auswahl-IDs); das Literal ist der Serialisierungs-SNAPSHOT (Kopie).
+{
+  let sink: [string, string, unknown] | null = null
+  host.setGlobal('__uiSimCallbackSink', (f: string, a: string, ids: unknown) => {
+    sink = [f, a, ids]
+  })
+  host.eval(`SimCallback({ Func = 'ToggleSelfDestruct', Args = { units = { 4, 5 }, owner = 1 } })`)
+  const [func, argsLua] = sink ?? ['', '', null]
+  check(func === 'ToggleSelfDestruct', `SimCallback: Func = ${func} erreicht den Sink`)
+  const argsOk = host.eval(`
+    local a = ${argsLua || 'nil'}
+    return a and a.owner == 1 and a.units[1] == 4 and a.units[2] == 5
+  `)
+  check(argsOk === true, `SimCallback: Args-Snapshot als Lua-Literal auswertbar (${argsLua})`)
+}
+
+// GetSessionClients (Felder aus cfunc_GetSessionClientsL, Cfile:1321886-1321957).
+check(
+  host.eval(`
+    local c = GetSessionClients()
+    return table.getn(c) == 1 and c[1]['local'] == true and c[1].connected == true
+      and type(c[1].name) == 'string' and table.getn(c[1].authorizedCommandSources) == 1
+  `) === true,
+  'GetSessionClients: 1 lokaler Client mit den Engine-Feldern',
+)
+
+// SessionSendChatMessage (Cfile:1322106-1322227): Snapshot + asynchrone
+// Zustellung an gamemain.ReceiveChat — msg.echo NACH dem Senden (chat.lua:759)
+// darf die zugestellte Kopie NICHT erreichen.
+host.eval(`
+  __chatTest = false
+  import('/lua/ui/game/gamemain.lua').RegisterChatFunc(function(sender, data)
+    __chatTest = { sender = sender, text = data.text, echo = data.echo }
+  end, 'Chat')
+  local msg = { text = 'verify', Chat = true }
+  SessionSendChatMessage(msg)
+  msg.echo = true
+`)
+check(host.eval('return __chatTest') === false, 'Chat: Zustellung ist ASYNCHRON (nicht im Sende-Stack)')
+host.eval('__mauiFrame(0.016)')
+host.eval('__mauiFrame(0.016)')
+const chat = host.eval('return __chatTest') as { sender?: string; text?: string; echo?: unknown } | false
+check(chat !== false && chat.text === 'verify', `Chat: kommt beim naechsten Frame an (text=${chat && chat.text})`)
+check(chat !== false && chat.echo == null, 'Chat: msg.echo nach dem Senden erreicht die Kopie NICHT (Snapshot)')
+check(
+  host.eval(`
+    local ok, err = pcall(SessionSendChatMessage, { text = string.rep('x', 1100), Chat = true })
+    return not ok and string.find(tostring(err), 'Message too long', 1, true) ~= nil
+  `) === true,
+  'Chat: > 1024 Bytes serialisiert -> "Message too long." (Cfile:1322198)',
+)
+
+console.log('\n== Der Tastatur-Pfad: Keymap, Executor, Fallbacks ==')
+// IN_InitKeyHandler (Cfile:1259476): die Engine hat beim Boot keyNames.lua +
+// keymapper.GetKeyMappings() geladen — die Keymap ist NICHT leer.
+{
+  const n = Number(
+    host.eval(`local n = 0 for _ in pairs(__uiKeyActions) do n = n + 1 end return n`),
+  )
+  check(n > 30, `${n} Hotkeys aus keymapper.GetKeyMappings() geparst (defaultKeyMap.lua)`)
+  // Der Esc-Eintrag ist die Keymap-Aktion Nr. 1 (defaultKeyMap.lua:8 ->
+  // keyactions.lua:8, 'UI_Lua import(...).EscapeHandler()'), VK_ESCAPE=0x1B.
+  check(
+    host.eval(`return __uiKeyActions[27] ~= nil and string.find(__uiKeyActions[27], 'EscapeHandler', 1, true) ~= nil`) === true,
+    `Esc ist gemappt: ${host.eval('return tostring(__uiKeyActions[27])')}`,
+  )
+}
+// Executor-Weg Ende-zu-Ende: eigene Aktion -> ConExecute -> UI_Lua (der
+// Konsolenbefehl hinter fast jeder Keymap-Aktion, CConFunc_UI_Lua Cfile:423593).
+host.eval(`
+  __keyTest = 0
+  IN_AddKeyMapTable({ ['Ctrl-Shift-P'] = { action = 'UI_Lua __keyTest = __keyTest + 1' } })
+`)
+// VK von P = 0x50; Modifier-Bits Shift+Ctrl (Cfile:1259010-1259023).
+check(
+  host.eval(`return __uiKeyMapExecute(80, true, true, false, false, 80)`) === true &&
+    Number(host.eval('return __keyTest')) === 1,
+  'Ctrl-Shift-P: Keymap-Treffer -> ConExecute -> UI_Lua läuft (__keyTest = 1)',
+)
+check(
+  host.eval(`return __uiKeyMapExecute(80, true, true, false, true, 80)`) === false &&
+    Number(host.eval('return __keyTest')) === 1,
+  'Auto-Repeat ohne keyRepeat-Flag wird verworfen (Cfile:1259049)',
+)
+// (Shift-P allein ist im Original WIRKLICH belegt — Patrol. Für den
+// Negativ-Test also ein VK, den keine Keymap kennt: 0x07 ist undefiniert.)
+check(
+  host.eval(`return __uiKeyMapExecute(7, true, true, false, false, 7)`) === false,
+  'unbelegte Taste -> kein Treffer, keine Aktion',
+)
+// Fokus blockt ALLE Hotkeys (Cfile:1259003-1259005) — auch passende.
+check(
+  host.eval(`
+    __mauiFocus = { __destroyed = false }
+    local r = __uiKeyMapExecute(80, true, true, false, false, 80)
+    __mauiFocus = false
+    return r
+  `) === false,
+  'ein Fokus-Control blockt den Key-Handler komplett',
+)
+host.eval(`IN_RemoveKeyMapTable({ ['Ctrl-Shift-P'] = true })`)
+check(
+  host.eval(`return __uiKeyMapExecute(80, true, true, false, false, 80)`) === false,
+  'IN_RemoveKeyMapTable entfernt den Eintrag wieder',
+)
+// WorldIsLoading: von der Provider-Kette gepflegt (ui-boot.lua) — nach
+// StopLoadingDialog ist die Welt nicht mehr am Laden.
+check(host.eval('return WorldIsLoading()') === false, 'WorldIsLoading() = false nach DoInitializing')
+// Der Enter-Fallback (Cfile:1263522-1263568) haengt am UI-Zustand: nur im
+// Spiel (sUIState = UIS_game, gesetzt von __uiStartGameUI) oeffnet Enter den
+// Chat. Diese Suite faehrt setupGameUi ohne die Provider-Kette — der Zustand
+// wird hier wie von func_StartGameUI gesetzt und der Fallback geprueft.
+host.eval(`__uiState = 3`)
+check(
+  host.eval(`return GetCurrentUIState()`) === 'game' &&
+    host.eval(`return __uiKeyMapExecute(13, false, false, false, false, 13)`) === true,
+  'Enter ohne Keymap-Treffer geht an chat.ActivateChat (nur im Spiel, UIS_game=3)',
+)
+
+// RestartSession (Cfile:1263968): ohne Sink ist die Session nicht restartbar —
+// der Aufruf ist dann ein No-Op, KEIN Fehler; mit Sink laeuft der Neustart.
+check(host.eval('return SessionCanRestart()') === false, 'SessionCanRestart = false ohne Engine-Naht')
+host.eval('RestartSession()')
+{
+  let restarted = false
+  host.setGlobal('__uiRestartSink', () => {
+    restarted = true
+  })
+  check(host.eval('return SessionCanRestart()') === true, 'SessionCanRestart = true mit Naht')
+  host.eval('RestartSession()')
+  check(restarted, 'RestartSession loest den Neustart aus')
+}
+
 host.close()
 for (const f of openFiles) await f.close()
 console.log(failures === 0 ? '\nUI-PANELS BESTANDEN' : `\n${failures} CHECK(S) FEHLGESCHLAGEN`)

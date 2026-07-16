@@ -633,6 +633,68 @@ local function sendSim(name, units, value)
   __uiSimCommand(name, idsOf(units), value)
 end
 
+-- === SimCallback — Lua-Funktionen in der Sim aufrufen ===
+--
+-- mHelp woertlich (Cfile:1359123-1359128): "SimCallback(callback[,bool]):
+-- Execute a lua function in sim. callback = { Func = function name (in the
+-- SimCallbacks.lua module) to call, Args = Arguments as a lua object }. If
+-- bool is specified and true, sends the current selection with the command."
+--
+-- Der Weg im Original (cfunc_SimCallbackL, Cfile:1359139-1359305): Args werden
+-- SOFORT serialisiert (SCR_ToByteStream — ein Snapshot, keine Referenz;
+-- Funktionen darin sind ein harter Fehler, CMarshaller Cfile:999128), die
+-- Auswahl geht als Entity-ID-Set mit. Die Sim-Seite (Moho::Sim::LuaSimCallback,
+-- Cfile:1076180-1076287) baut daraus Unit-Objekte (leeres Set -> nil) und ruft
+-- import('/lua/SimCallbacks.lua').DoCallback(name, args, units).
+__uiSimCallbackSink = false
+
+-- Der Serialisierungs-Snapshot (SCR_ToByteStream): die Args werden zu einem
+-- LUA-KONSTRUKTOR-Literal serialisiert (string.format('%q') escaped
+-- Lua-sicher), das die Sim-VM beim Empfang auswertet — eine Kopie, keine
+-- Referenz. Funktionen/Userdata knallen wie im Original ("Unable to marshal
+-- lua function", CMarshaller Cfile:999128).
+local function marshalArgs(v, depth)
+  local t = type(v)
+  if t == 'number' then return string.format('%.9g', v) end
+  if t == 'string' then return string.format('%q', v) end
+  if t == 'boolean' then return tostring(v) end
+  if t == 'nil' then return 'nil' end
+  if t == 'table' then
+    if (depth or 0) > 16 then error('Unable to marshal: table too deep', 0) end
+    local parts, i = {}, 0
+    for k, val in pairs(v) do
+      local kt = type(k)
+      local key
+      if kt == 'string' then
+        key = string.format('%q', k)
+      elseif kt == 'number' then
+        key = string.format('%.9g', k)
+      elseif kt == 'boolean' then
+        key = tostring(k)
+      else
+        error('Unable to marshal lua ' .. kt .. ' key', 0)
+      end
+      i = i + 1
+      parts[i] = '[' .. key .. ']=' .. marshalArgs(val, (depth or 0) + 1)
+    end
+    return '{' .. table.concat(parts, ',') .. '}'
+  end
+  error('Unable to marshal lua ' .. t, 0)
+end
+
+function SimCallback(callback, addSelection)
+  if type(callback) ~= 'table' or type(callback.Func) ~= 'string' then
+    -- Cfile:1359229-1359231: Func muss ein String sein.
+    error('SimCallback: callback.Func must be a string', 2)
+  end
+  if not __uiSimCallbackSink then
+    error('SimCallback "' .. callback.Func .. '" hat keinen Weg in die Sim (__uiSimCallbackSink fehlt)', 2)
+  end
+  local ids = {}
+  if addSelection == true then ids = idsOf(GetSelectedUnits()) end
+  __uiSimCallbackSink(callback.Func, marshalArgs(callback.Args), ids)
+end
+
 -- === Befehle mit einem Blueprint als Ziel ===
 --
 -- IssueBlueprintCommand(command, blueprintId, count, clear) — construction.lua:884
@@ -831,6 +893,138 @@ function SessionIsActive()
   return __uiScenarioInfo ~= false
 end
 
+-- === Neustart der Session ===
+--
+-- cfunc_RestartSessionL (Cfile:1263968-1263985): NUR wenn eine Session laeuft
+-- UND sie restartbar ist (dasselbe Flag liefert SessionCanRestart,
+-- Cfile:1330810-1330826), wird die Frame-Action auf CREATE_SESSION gesetzt —
+-- der Haupt-Loop faehrt dann Teardown + Neustart mit den UNVERAENDERTEN
+-- Session-Infos (func_DoPreload, Cfile:1320748-1320784). Sonst: No-Op, KEIN
+-- Fehler. Die Engine-Seite haengt sich hier als __uiRestartSink ein; ohne
+-- Sink ist die Session schlicht nicht restartbar (mCanRestart = false).
+__uiRestartSink = false
+
+function SessionCanRestart()
+  return __uiScenarioInfo ~= false and __uiRestartSink ~= false
+end
+
+function RestartSession()
+  if not SessionCanRestart() then return end
+  __uiRestartSink()
+end
+
+-- === Die Clients der Session ===
+--
+-- Felder je Client aus cfunc_GetSessionClientsL (Cfile:1321886-1321957):
+-- name, uid, connected, ping, quiet, local, authorizedCommandSources,
+-- ejectedBy. Im Einzelspieler gibt es genau einen Client — den Spieler
+-- (dieselbe Quelle wie SessionGetCommandSourceNames).
+function GetSessionClients()
+  if not __uiScenarioInfo then error('GetSessionClients(): no active session.', 2) end
+  local clients = {}
+  for i, name in ipairs(__uiCommandSources) do
+    clients[i] = {
+      name = name,
+      uid = i,
+      connected = true,
+      ping = 0,
+      quiet = 0,
+      ['local'] = (i == __uiLocalCommandSource),
+      authorizedCommandSources = { i },
+      ejectedBy = {},
+    }
+  end
+  return clients
+end
+
+-- === Chat ===
+--
+-- "SessionSendChatMessage([client-or-clients,] message)" (mHelp,
+-- Cfile:1322062). Der Weg im Original (cfunc, Cfile:1322106-1322227):
+--   * 1 Argument: alle Clients; (int, msg): EIN Client-Index (1-basiert,
+--     validiert); (table, msg): Menge von Indizes — Indizes in die
+--     GetSessionClients-Liste.
+--   * msg wird SOFORT serialisiert (Snapshot! chat.lua:759 setzt msg.echo
+--     erst NACH dem Senden — die zugestellte Kopie bleibt unberuehrt);
+--     > 1024 Bytes serialisiert -> "Message too long." (Cfile:1322198-1322204).
+--   * Zustellung ASYNCHRON (THREAD_InvokeAsync, Cfile:1320454): beim
+--     naechsten Frame ruft func_ReceiveChat (Cfile:1263605-1263646)
+--     gamemain.ReceiveChat(senderName, msgTable) — der Sender ist dabei,
+--     wenn er in der Empfaengermaske steht (Loopback).
+-- Chat laeuft auf der NETZSCHICHT (Client-Manager), nicht ueber Sim/Sync —
+-- im Einzelspieler heisst das: komplett in dieser VM.
+function SessionSendChatMessage(clientsOrMsg, msg)
+  if not __uiScenarioInfo then error('GameSendChatMessage(): No active game.', 2) end
+  local targets, message
+  if msg == nil then
+    message = clientsOrMsg
+    targets = false -- alle
+  else
+    message = msg
+    targets = clientsOrMsg
+  end
+  if type(message) ~= 'table' then error("Can't encode message.", 2) end
+
+  -- Der Serialisierungs-Snapshot (SCR_ToByteStream): eine tiefe Kopie JETZT,
+  -- mit Byte-Zaehlung als Naeherung der ByteStream-Groesse fuer die
+  -- 1024er-Grenze (Cfile:1322198-1322204). Funktionen/Userdata knallen wie im
+  -- Original ("Can't encode message.").
+  local function snapshot(v, bytes, depth)
+    local t = type(v)
+    if t == 'number' then return v, bytes + 8 end
+    if t == 'string' then return v, bytes + string.len(v) + 4 end
+    if t == 'boolean' or t == 'nil' then return v, bytes + 1 end
+    if t == 'table' then
+      if depth > 16 then error("Can't encode message.", 0) end
+      local out = {}
+      bytes = bytes + 8
+      for k, val in pairs(v) do
+        local kc, vc
+        kc, bytes = snapshot(k, bytes, depth + 1)
+        vc, bytes = snapshot(val, bytes, depth + 1)
+        out[kc] = vc
+      end
+      return out, bytes
+    end
+    error("Can't encode message.", 0)
+  end
+  local ok, copy, size = pcall(snapshot, message, 0, 0)
+  if not ok then error("Can't encode message.", 2) end
+  if size > 1024 then error('Message too long.', 2) end
+
+  local n = table.getn(__uiCommandSources)
+  local localIncluded = false
+  if targets == false then
+    localIncluded = true -- Maske (1 << N) - 1: alle, auch der Sender
+  elseif type(targets) == 'number' then
+    if targets < 1 or targets > n then
+      error('Invalid client index ' .. tostring(targets), 2)
+    end
+    localIncluded = (targets == __uiLocalCommandSource)
+  elseif type(targets) == 'table' then
+    for _, idx in ipairs(targets) do
+      if type(idx) ~= 'number' then
+        error('Invalid value for client-or-clients argument', 2)
+      end
+      if idx < 1 or idx > n then
+        error('Invalid client index ' .. tostring(idx), 2)
+      end
+      if idx == __uiLocalCommandSource then localIncluded = true end
+    end
+  else
+    error('Invalid value for client-or-clients argument', 2)
+  end
+
+  if localIncluded then
+    -- Die Kopie aus dem Snapshot zustellen — NICHT die Original-Tabelle.
+    local nick = __uiCommandSources[__uiLocalCommandSource] or 'Player'
+    ForkThread(function()
+      WaitFrames(1)
+      import('/lua/ui/game/gamemain.lua').ReceiveChat(nick, copy)
+    end)
+  end
+end
+
 -- === Der WldUIProvider — die Naht zwischen Welt-Laden und UI ===
 --
 -- InternalCreateWldUIProvider(self) (cfunc, Cfile:28934) baut den
@@ -902,6 +1096,43 @@ end
 -- eine TABELLE (orderData mit TaskName/Enhancement) fuer ein ACU-Upgrade. Die
 -- Engine reicht sie unveraendert an die Sim durch — also tun wir das auch, statt
 -- sie zu einem String zu verbiegen.
+-- "string GetUnitCommandFromCommandCap(string) - given a RULEUCC type command"
+-- (mHelp, Cfile:1264832). Der Weg im Original (cfunc, Cfile:1264844-1264889):
+-- Eingabe per REnumType::SetLexical parsen (case-insensitiv, Praefix optional,
+-- Cfile:1381888-1381946), dann Moho::UnitCommandCapToCommandType
+-- (Cfile:1242230-1242328), Rueckgabe per GetLexical — und EUnitCommandType
+-- speichert seine Namen OHNE das "UNITCOMMAND_"-Praefix (mPrefix,
+-- Cfile:696168-696248; Beweis: UICommandGraph::LoadPathParams setzt den
+-- Praefix per STR_Printf("%s%s", ...) selbst davor, Cfile:1244372-1244378).
+-- Der Stop-Knopf (orders.lua:205) steckt das Ergebnis direkt in IssueCommand —
+-- dort parst SetLexical den Praefix-losen Namen genauso.
+local CAP_TO_COMMAND = {
+  -- Das VOLLSTAENDIGE Mapping aus func_UnitCommandCapToCommandType
+  -- (Cfile:1242230-1242328); nicht gemappte Caps liefern 'None'.
+  move = 'Move', stop = 'Stop', attack = 'Attack', guard = 'Guard',
+  patrol = 'Patrol', retaliatetoggle = 'None', repair = 'Repair',
+  capture = 'Capture', transport = 'TransportUnloadUnits',
+  calltransport = 'TransportLoadUnits', nuke = 'Nuke', tactical = 'Tactical',
+  teleport = 'Teleport', ferry = 'Ferry', silobuildtactical = 'BuildSiloTactical',
+  silobuildnuke = 'BuildSiloNuke', sacrifice = 'Sacrifice', pause = 'Pause',
+  overcharge = 'OverCharge', dive = 'Dive', reclaim = 'Reclaim',
+  specialaction = 'SpecialAction', dock = 'None', script = 'None',
+  invalid = 'None',
+}
+
+function GetUnitCommandFromCommandCap(cap)
+  if type(cap) ~= 'string' then
+    error('GetUnitCommandFromCommandCap: string erwartet', 2)
+  end
+  local key = string.gsub(string.lower(cap), '^ruleucc_', '')
+  local cmd = CAP_TO_COMMAND[key]
+  if not cmd then
+    -- SetLexical wirft bei unbekannten Enum-Namen (Cfile:1381940-1381946).
+    error('GetUnitCommandFromCommandCap: unbekannter Command-Cap "' .. cap .. '"', 2)
+  end
+  return cmd
+end
+
 function IssueCommand(command, data, clear)
   local sel = GetSelectedUnits()
   if not sel then return end
@@ -1548,28 +1779,170 @@ function ExitApplication()
   LOG('ExitApplication')
 end
 
--- === Keymap ===
--- Die Engine fuehrt EINE Tastenzuordnung (Taste -> Konsolenbefehl). IN_AddKeyMapTable
--- legt Eintraege hinein, IN_RemoveKeyMapTable nimmt genau diese Tasten wieder
--- heraus (mHelp Cfile:1260010: "removes the keys from the key map"), IN_ClearKeyMap
--- leert sie. uimain.lua:52 raeumt so den Debug-Teil ab, sobald das Front-End
--- startet. Das Ausloesen der Aktionen ist Sache des Key-Handlers (M3).
-__uiKeyMap = {}
+-- WorldIsLoading: wahr zwischen DoPreload (StartLoadingDialog) und
+-- DoInitializing (StopLoadingDialog) — gepflegt von der Provider-Kette
+-- (ui-boot.lua). uimain.lua:120 (EscapeHandler) prueft es vor jedem ESC.
+__uiWorldLoading = false
+
+function WorldIsLoading()
+  return __uiWorldLoading == true
+end
+
+-- === Keymap — der CUIKeyHandler der Engine ===
+--
+-- Die Engine fuehrt EINE Tastenzuordnung (Taste -> KONSOLENBEFEHL, kein
+-- Lua-Call): CUIKeyHandler::AddKeyMapTable (Cfile:1259176-1259264) parst jeden
+-- Schluessel mit IN_ParseKeyModifiers (Cfile:1259566-1259700: Split an '-',
+-- der LETZTE Token ist der Tastenname aus der keyNames-Tabelle,
+-- case-insensitiv; Modifier: Shift=0x80000000, Ctrl=0x40000000,
+-- Alt=0x20000000) und liest vom Wert NUR value['action'] (Pflicht-String) und
+-- value['keyRepeat'] (optional) — category/order ignoriert die Engine.
+-- Ausgeloest wird die Aktion vom Key-Handler unten (__uiKeyMapExecute) ueber
+-- Moho::CON_Execute (Cfile:1259059).
+__uiKeyMap = {}      -- Roh-Tabelle (keyString -> action-Table), fuer Remove
+__uiKeyNames = {}    -- VK (Zahl) -> Anzeigename (SetKeyNameTable)
+__uiKeyVks = {}      -- lower(Name) -> VK
+__uiKeyActions = {}  -- (VK + Modifier-Bits) -> Konsolenbefehl-String
+__uiKeyRepeatOk = {} -- (VK + Modifier-Bits) -> true (Auto-Repeat erlaubt)
+
+-- SetKeyNameTable (Cfile:1259403-1259473): keyNames mit HEX-VK-Strings
+-- (STR_Xtoi); > 0xFF gibt eine Warnung und wird verworfen.
+function SetKeyNameTable(names)
+  __uiKeyNames = {}
+  __uiKeyVks = {}
+  for hex, name in pairs(names or {}) do
+    local vk = tonumber(hex, 16)
+    if vk and vk <= 0xFF then
+      __uiKeyNames[vk] = name
+      __uiKeyVks[string.lower(name)] = vk
+    else
+      WARN('SetKeyNameTable: key code out of range: ' .. tostring(hex))
+    end
+  end
+end
+
+-- IN_ParseKeyModifiers (Cfile:1259566-1259700): liefert den uint-Schluessel
+-- oder nil (unbekannte Taste/Modifier -> Warnung, wie die Engine).
+local function parseKeyString(s)
+  local tokens = {}
+  for token in string.gmatch(tostring(s), '[^-]+') do
+    tokens[#tokens + 1] = token
+  end
+  if #tokens == 0 then return nil end
+  local keyName = tokens[#tokens]
+  local vk = __uiKeyVks[string.lower(keyName)]
+  if not vk then
+    WARN('Key map contains unrecognized key string: ' .. tostring(s))
+    return nil
+  end
+  local key = vk
+  for i = 1, #tokens - 1 do
+    local m = string.lower(tokens[i])
+    if m == 'shift' then
+      key = key + 0x80000000
+    elseif m == 'ctrl' then
+      key = key + 0x40000000
+    elseif m == 'alt' then
+      key = key + 0x20000000
+    else
+      WARN('Key map contains unrecognized modifier string: ' .. tostring(tokens[i]))
+    end
+  end
+  return key
+end
 
 function IN_AddKeyMapTable(map)
-  for key, action in pairs(map or {}) do
-    __uiKeyMap[key] = action
+  for keyStr, action in pairs(map or {}) do
+    __uiKeyMap[keyStr] = action
+    local keyInt = parseKeyString(keyStr)
+    if keyInt then
+      -- Die Engine liest value['action'] per GetString (Pflichtfeld).
+      local act = type(action) == 'table' and action.action or nil
+      if type(act) == 'string' then
+        __uiKeyActions[keyInt] = act
+        if type(action) == 'table' and action.keyRepeat == true then
+          __uiKeyRepeatOk[keyInt] = true
+        else
+          __uiKeyRepeatOk[keyInt] = nil
+        end
+      else
+        WARN('Key map entry without action string: ' .. tostring(keyStr))
+      end
+    end
   end
 end
 
 function IN_RemoveKeyMapTable(map)
-  for key, _ in pairs(map or {}) do
-    __uiKeyMap[key] = nil
+  for keyStr, _ in pairs(map or {}) do
+    __uiKeyMap[keyStr] = nil
+    local keyInt = parseKeyString(keyStr)
+    if keyInt then
+      __uiKeyActions[keyInt] = nil
+      __uiKeyRepeatOk[keyInt] = nil
+    end
   end
 end
 
 function IN_ClearKeyMap()
   __uiKeyMap = {}
+  __uiKeyActions = {}
+  __uiKeyRepeatOk = {}
+end
+
+-- Der KEY-HANDLER hinter dem maui-Dispatch (CUIKeyHandler::sub_838D10,
+-- Cfile:1258983-1259080). Er laeuft, wenn __mauiKey('KeyDown', ...) false
+-- lieferte ("skipped"). Ablauf woertlich:
+--   1. Existiert IRGENDEIN Fokus-Control -> sofort Skip (Cfile:1259003-1259005)
+--      — ein fokussiertes Edit schaltet ALLE Hotkeys ab.
+--   2. Schluessel = VK | Modifier-Bits (Cfile:1259010-1259023).
+--   3. Auto-Repeat nur, wenn der Schluessel keyRepeat erlaubt (Cfile:1259049).
+--   4. Treffer -> CON_Execute(action) (Cfile:1259059).
+--   5. Kein Treffer: Enter -> chat.ActivateChat (nur im Spiel,
+--      Cfile:1263522-1263568), '~' (maui-Code 126) -> uimain.ToggleConsole
+--      (Cfile:1262747-1262777).
+-- Rueckgabe: true, wenn eine Aktion lief (die Browser-Seite unterdrueckt dann
+-- das Standard-Verhalten).
+function __uiKeyMapExecute(vk, shift, ctrl, alt, isRepeat, mauiCode)
+  if __mauiFocus and not __mauiFocus.__destroyed then return false end
+  local key = vk
+  if shift then key = key + 0x80000000 end
+  if ctrl then key = key + 0x40000000 end
+  if alt then key = key + 0x20000000 end
+  if isRepeat and not __uiKeyRepeatOk[key] then return false end
+  local action = __uiKeyActions[key]
+  if action then
+    ConExecute(action)
+    return true
+  end
+  if mauiCode == 13 and GetCurrentUIState() == 'game' then
+    -- Fehler in Lua, die die Engine ruft, werden geloggt, nicht geworfen
+    -- (RunScript -> gpg::Warnf) — sonst risse ein fehlendes Teil (z. B. das
+    -- Edit-Control des Chats) den ganzen Tasten-Handler mit.
+    local ok, err = pcall(function()
+      import('/lua/ui/game/chat.lua').ActivateChat({
+        Shift = shift or nil, Ctrl = ctrl or nil, Alt = alt or nil,
+      })
+    end)
+    if not ok then WARN('ActivateChat: ' .. tostring(err)) end
+    return true
+  end
+  if mauiCode == 126 then
+    local ok, err = pcall(function()
+      import('/lua/ui/uimain.lua').ToggleConsole()
+    end)
+    if not ok then WARN('ToggleConsole: ' .. tostring(err)) end
+    return true
+  end
+  return false
+end
+
+-- IN_InitKeyHandler / CUIKeyHandler::LoadKeyMappings (Cfile:1259476-1259528):
+-- die Engine laedt beim UI-Boot SELBST keyNames.lua (SetKeyNameTable) und
+-- keymapper.GetKeyMappings() -> AddKeyMapTable — sie wartet nicht darauf,
+-- dass lobby.lua es tut.
+function __uiInitKeyMap()
+  SetKeyNameTable(import('/lua/keymap/keyNames.lua').keyNames)
+  IN_AddKeyMapTable(import('/lua/keymap/keymapper.lua').GetKeyMappings())
 end
 
 -- === Session / Umgebung ===

@@ -117,6 +117,39 @@ in CLAUDE.md. Vor Arbeit an einem der Themen: den passenden Abschnitt lesen.*
   bool=false, 7 string="") sind Pflicht: `weapon.lua:287` rechnet ungeprüft
   `bp.DamageRadius + …`, und die ACU-Waffe setzt kein `DamageRadius`.
 
+- **Wrack- und Bau-Meshes erzeugt die LUA, nicht die Engine:**
+  `lua/system/blueprints.lua:187` (`ExtractWreckageBlueprint`) kopiert das
+  Mesh-BP jeder Unit zu `<meshid>_wreck` (ShaderName `Wreckage`, SpecularName
+  `/env/common/props/wreckage_noise.dds`; Alpha-Shader → `BlackenedNormalMappedAlpha`)
+  und setzt `bp.Display.MeshBlueprintWrecked`; `:210`
+  (`ExtractBuildMeshBlueprint`) analog `<meshid>_build` (Shader
+  `<Faction>Build`, SecondaryName BuildSpecular, Seraphim + Lookup) →
+  `bp.Display.BuildMeshBlueprint`. Beides läuft in unserer echten
+  `LoadBlueprints()`-Kette automatisch mit. Im Binary existiert der String
+  `MeshBlueprintWrecked` NICHT (IDA-Stringsuche: nur `CreateWreckageProp`).
+
+## Wracks (mesh.fx technique Wreckage — der ECHTE Shader)
+
+- **WreckageVS_HighFidelity (mesh.fx:1153-1203) VERBEULT das Mesh:** nach der
+  World-Transformation `nvert = normalize(worldPos)`, `s = nvert.x * 0.15`
+  (HLSL trunkiert `float s = float3*0.15` auf .x), `r = length(worldPos)`,
+  `phi = frac(0.01 * length(row3))` (row3 = Translation der Bone-Weltmatrix →
+  Phase pro Standort); dann `pos.x += sin(14.5*r*nvert.z + phi)*s`,
+  `pos.y += cos(10.8*r*nvert.x + phi)*s`, `pos.z += sin(20.5*r*nvert.y + phi)*s`.
+  `depth.y = material.x` = **Erstellungszeit** (Sekunden).
+- **WreckagePS (mesh.fx:2334-2356):** Albedo der Unit; Noise-Specular mit
+  `texcoord.x += frac(0.01*creationTime)`, `.y -= frac(...)`, dann `* 5.15`
+  gesampelt. `color = albedo * ComputeLight(dLN, 1)` — **Wracks empfangen
+  keine Schatten** (Original-Kommentar: Artefakte); dann
+  `spec.g < 0.22 ? color *= (albedo + spec.r + spec.a) * spec.b * 2.5
+  : color *= spec.b * 2`. Keine Team-Farbe, kein Phong; Alpha = glowMinimum
+  (mesh.fx:57 = 0.010). Cull CW.
+- **Der Sim-Pfad ist reine Original-Lua** (unit.lua:1076-1146): OnKilled →
+  DeathThread → `CreateWreckage` (Gate: `bp.Wreckage.WreckageLayers[layer]`) →
+  `CreateWreckageProp`: `CreateProp(pos, bp.Wreckage.Blueprint)` +
+  `SetMesh(Display.MeshBlueprintWrecked)` + `SetScale(Display.UniformScale)` +
+  `SetOrientation` + `TryCopyPose` + `prop.AssociatedBP = <unit-bp-id>`.
+
 ## Schaden, Tod, Gesundheit (Details: [combat-projectiles.md](combat-projectiles.md), [damage-binary.md](damage-binary.md))
 
 - **`SetHealth` quantisiert mit FLOOR, nicht kaufmännisch.** Die Engine rechnet
@@ -196,6 +229,37 @@ in CLAUDE.md. Vor Arbeit an einem der Themen: den passenden Abschnitt lesen.*
   `if avatars then`. Die UEF-ACU trägt PODSTAGINGPLATFORM
   (uel0001_unit.bp:125) — orders.lua:923-932 läuft bei jeder ACU-Auswahl und
   braucht `GetAssistingUnitsList` (Cfile:1360671).
+
+- **`GetUnitCommandFromCommandCap`** (Cfile:1264844) liefert den
+  EUnitCommandType-Namen **OHNE** `UNITCOMMAND_`-Präfix (`'Stop'`,
+  `'OverCharge'` — großes C, Cfile:696219): der Enum speichert die Namen
+  gestrippt (`mPrefix`, Cfile:696168-696248; Beweis:
+  `UICommandGraph::LoadPathParams` setzt den Präfix per
+  `STR_Printf("%s%s",…)` selbst davor, Cfile:1244372-1244378). Eingabe
+  case-insensitiv, Präfix optional (SetLexical, Cfile:1381888-1381946).
+  Vollständiges Mapping: func_UnitCommandCapToCommandType
+  (Cfile:1242230-1242328); RetaliateToggle/Dock/Script/Invalid → `'None'`.
+- **`SimCallback`** (Cfile:1359139-1359305): Args werden SOFORT serialisiert
+  (Snapshot; Funktionen → „Unable to marshal lua function", Cfile:999128),
+  Auswahl als Entity-ID-Set durch den LOCKSTEP-Befehlsstrom
+  (MSGOP_LuaSimCallback). Sim-Seite (Cfile:1076180-1076287): IDs → Tabelle
+  von Sim-Units (nur existierende; leeres Set → **nil**), dann
+  `import('/lua/SimCallbacks.lua').DoCallback(name, args, units)`.
+- **`SessionSendChatMessage`** (Cfile:1322106-1322227) läuft über die
+  NETZSCHICHT (Client-Manager), nicht Sim/Sync: Empfänger sind 1-basierte
+  **Client-Indizes** (dieselbe Liste wie `GetSessionClients`, Felder
+  Cfile:1321886-1321957: name/uid/connected/ping/quiet/local/
+  authorizedCommandSources/ejectedBy); msg sofort serialisiert (Snapshot —
+  chat.lua:759 setzt `msg.echo` erst NACH dem Senden), > 1024 Bytes →
+  „Message too long."; Zustellung ASYNCHRON (THREAD_InvokeAsync,
+  Cfile:1320454) an `gamemain.ReceiveChat(senderName, msgTable)`.
+- **`RestartSession`** (Cfile:1263968-1263985): No-Op ohne restartbare
+  Session (Flag = `SessionCanRestart()`, Cfile:1330810); sonst Frame-Action
+  CREATE_SESSION → Teardown + Neustart mit den UNVERÄNDERTEN Session-Infos
+  (func_DoPreload, Cfile:1320748-1320784) — kein Lobby-Umweg.
+- **Boot-Lücke gefunden:** `repr` ist ein Global aus `/lua/system/repr.lua`
+  (globalinit.lua:19, direkt nach utils.lua) — die Sim-VM lud es nicht, und
+  `simcallbacks.lua:18` starb an `repr == nil` statt „No callback named …".
 
 ## Gelenkte Munition (Projectile-Tracking — Decomp + faf-re, alles belegt)
 

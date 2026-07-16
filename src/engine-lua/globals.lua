@@ -688,3 +688,34 @@ function FlattenMapRect(x, z, w, h, y)
   __flattenRects[#__flattenRects + 1] = { x = x, z = z, w = w, h = h, y = y }
   if __terrainFlatten then __terrainFlatten(x, z, w, h, y) end
 end
+
+-- === SimCallback — der Empfaenger (Moho::Sim::LuaSimCallback) ===
+--
+-- Die UI schickt {Func, Args, EntityIds} durch den Befehlsstrom (CMarshaller::
+-- LuaSimCallback, Cfile:999094-999136); die Sim-Seite (Cfile:1076180-1076287)
+-- baut aus den Ids eine Tabelle von Sim-Unit-Objekten — NUR existierende,
+-- leeres Set -> nil (Cfile:1076219-1076251) — und ruft
+-- import('/lua/simcallbacks.lua').DoCallback(name, args, units).
+-- Fehler im Callback werden geloggt, nicht geworfen (gpg::Warnf-Verhalten).
+function __simCallback(func, args, unitIds)
+  local units = nil
+  if unitIds then
+    for _, id in ipairs(unitIds) do
+      local u = __units[id]
+      if u and not u.__destroyQueued then
+        units = units or {}
+        units[#units + 1] = u
+      end
+    end
+  end
+  local ok, err = pcall(function()
+    local cb = import('/lua/simcallbacks.lua').DoCallback
+    if type(cb) ~= 'function' then
+      error('No DoCallback in simcallbacks.lua')
+    end
+    cb(func, args, units)
+  end)
+  if not ok then
+    WARN('SimCallback ' .. tostring(func) .. ': ' .. tostring(err))
+  end
+end

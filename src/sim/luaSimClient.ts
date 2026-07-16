@@ -89,6 +89,30 @@ export interface LuaEmitterSnapshot {
   z2?: number
 }
 
+/**
+ * Ein PROP (Wrack, Fels, Baum), wie die Sim es meldet (__readAllPropsJson).
+ * Wracks entstehen komplett in der Original-Lua (unit.lua:1090
+ * CreateWreckageProp): CreateProp + SetMesh(Display.MeshBlueprintWrecked) +
+ * SetScale(UniformScale) + AssociatedBP = Unit-Blueprint-Id.
+ */
+export interface LuaPropSnapshot {
+  id: number
+  /** Prop-Blueprint-Pfad, z. B. '/props/defaultwreckage/defaultwreckage_prop.bp'. */
+  bp: string
+  x: number
+  y: number
+  z: number
+  heading: number
+  /** prop:SetScale — beim Wrack der UniformScale der Unit (unit.lua:1111). */
+  scale: number
+  /** Sim-Tick der Entstehung (der Wreckage-Shader variiert sein Noise damit). */
+  spawn: number
+  /** Mesh-Blueprint aus prop:SetMesh, z. B. '/units/uel0201/uel0201_mesh_wreck'. */
+  meshBp?: string
+  /** Die Unit hinter dem Wrack (unit.lua:1137) — liefert SCM + Texturen. */
+  assoc?: string
+}
+
 /** Was die Sim braucht, um eine Unit dieses Typs zu erzeugen. */
 interface UnitPayload {
   scriptPath: string
@@ -105,6 +129,7 @@ interface StatesMsg {
   units: LuaUnitSnapshot[]
   projectiles: LuaProjectileSnapshot[]
   emitters: LuaEmitterSnapshot[]
+  props: LuaPropSnapshot[]
   economy: EcoSnapshot
 }
 type OutMsg =
@@ -114,6 +139,7 @@ type OutMsg =
   | { type: 'spawned'; reqId: number; uid: number }
   | { type: 'spawnError'; reqId: number; error: string }
   | { type: 'emitterBp'; reqId: number; bp: unknown }
+  | { type: 'meshBp'; reqId: number; bp: unknown }
   | StatesMsg
 
 export class LuaSimClient {
@@ -123,6 +149,8 @@ export class LuaSimClient {
   private projectileStates: LuaProjectileSnapshot[] = []
   /** Die lebenden Emitter des letzten Beats — Futter fürs Partikelsystem. */
   private emitterStates: LuaEmitterSnapshot[] = []
+  /** Die Props des letzten Beats (Wracks) — der Renderer zeichnet sie. */
+  private propStates: LuaPropSnapshot[] = []
   /** Letzter gemeldeter Sim-Tick (Spielzeit = Tick / 10). */
   gameTick = 0
   private nextReq = 1
@@ -131,6 +159,8 @@ export class LuaSimClient {
   private readonly spawnPending = new Map<number, { resolve: (uid: number) => void; reject: (e: Error) => void }>()
   private readonly emitterBpPending = new Map<number, (bp: unknown) => void>()
   private readonly emitterBpCache = new Map<string, Promise<unknown>>()
+  private readonly meshBpPending = new Map<number, (bp: unknown) => void>()
+  private readonly meshBpCache = new Map<string, Promise<unknown>>()
 
   private constructor(
     private readonly worker: Worker,
@@ -209,6 +239,7 @@ export class LuaSimClient {
         this.gameTick = m.tick
         this.projectileStates = m.projectiles ?? []
         this.emitterStates = m.emitters ?? []
+        this.propStates = m.props ?? []
         this.statesById.clear()
         for (const u of m.units) this.statesById.set(u.id, u)
         break
@@ -227,6 +258,12 @@ export class LuaSimClient {
       case 'emitterBp': {
         const p = this.emitterBpPending.get(m.reqId)
         this.emitterBpPending.delete(m.reqId)
+        p?.(m.bp)
+        break
+      }
+      case 'meshBp': {
+        const p = this.meshBpPending.get(m.reqId)
+        this.meshBpPending.delete(m.reqId)
         p?.(m.bp)
         break
       }
@@ -404,6 +441,38 @@ export class LuaSimClient {
         this.worker.postMessage({ type: 'emitterBp', reqId, bp })
       })
       this.emitterBpCache.set(bp, p)
+    }
+    return p
+  }
+
+  /** Die Props des letzten Beats (Wracks, Felsen, Bäume). */
+  allProps(): LuaPropSnapshot[] {
+    return this.propStates
+  }
+
+  /**
+   * SimCallback der UI (Cfile:1359123): ruft eine Funktion aus
+   * lua/simcallbacks.lua in der Sim-VM. argsLua ist der Snapshot der UI-VM
+   * als Lua-Literal, unitIds die mitgeschickte Auswahl.
+   */
+  simCallback(func: string, argsLua: string, unitIds: number[]): void {
+    this.worker.postMessage({ type: 'simCallback', func, argsLua, unitIds })
+  }
+
+  /**
+   * Ein Mesh-Blueprint aus der Sim (z. B. die Wrack-Variante
+   * '/units/uel0201/uel0201_mesh_wreck' aus ExtractWreckageBlueprint,
+   * lua/system/blueprints.lua:187). null, wenn es keines gibt. Gecacht.
+   */
+  meshBlueprint(bp: string): Promise<unknown> {
+    let p = this.meshBpCache.get(bp)
+    if (!p) {
+      const reqId = this.nextReq++
+      p = new Promise<unknown>((resolve) => {
+        this.meshBpPending.set(reqId, resolve)
+        this.worker.postMessage({ type: 'meshBp', reqId, bp })
+      })
+      this.meshBpCache.set(bp, p)
     }
     return p
   }

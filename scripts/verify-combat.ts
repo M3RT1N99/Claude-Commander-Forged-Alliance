@@ -160,6 +160,54 @@ check(
   `Es ist das DefaultWreckage-Prop aus dem Blueprint der Unit (${wreck})`,
 )
 
+// Der SICHTWEG des Wracks (H8): __readAllPropsJson liefert dem Renderer alles,
+// was er zum Zeichnen braucht — das Wrack-Mesh aus ExtractWreckageBlueprint
+// (lua/system/blueprints.lua:187, laeuft in unserer echten LoadBlueprints-
+// Kette), die Unit dahinter (SCM + Texturen), Massstab und Erstellungs-Tick.
+{
+  const snap = JSON.parse(String(host.eval('return __readAllPropsJson()'))) as {
+    meshBp?: string
+    assoc?: string
+    scale?: number
+    spawn?: number
+  }[]
+  const w = snap[0]
+  check(
+    w?.meshBp === '/units/uel0201/uel0201_mesh_wreck',
+    `Snapshot meshBp = ${w?.meshBp} (SetMesh mit Display.MeshBlueprintWrecked, unit.lua:1129)`,
+  )
+  check(w?.assoc === 'uel0201', `Snapshot assoc = ${w?.assoc} (prop.AssociatedBP, unit.lua:1137)`)
+  const uniScale = Number(host.eval(`return __registered.Unit['uel0201'].Display.UniformScale`))
+  check(
+    typeof w?.scale === 'number' && Math.abs(w.scale - uniScale) < 1e-9,
+    `Snapshot scale = ${w?.scale} = UniformScale des Panzers (${uniScale}, unit.lua:1111)`,
+  )
+  check(typeof w?.spawn === 'number' && w.spawn > 0, `Snapshot spawn = ${w?.spawn} (Erstellungs-Tick)`)
+  const meshBp = JSON.parse(String(host.eval(`return __meshBpJson('/units/uel0201/uel0201_mesh_wreck')`))) as {
+    LODs?: { ShaderName?: string; SpecularName?: string }[]
+  }
+  check(
+    meshBp?.LODs?.[0]?.ShaderName === 'Wreckage' &&
+      meshBp?.LODs?.[0]?.SpecularName === '/env/common/props/wreckage_noise.dds',
+    `Wrack-Mesh-BP: Shader ${meshBp?.LODs?.[0]?.ShaderName}, Noise ${meshBp?.LODs?.[0]?.SpecularName} (blueprints.lua:200-201)`,
+  )
+}
+
+console.log('\n== SimCallback: der Sim-Empfänger dispatcht über simcallbacks.lua ==')
+// Moho::Sim::LuaSimCallback (Cfile:1076180-1076287): DoCallback(name, args,
+// units) — unbekannte Namen enden im error('No callback named …',
+// simcallbacks.lua:18), den der Empfänger als WARN loggt (gpg::Warnf-Weg).
+{
+  const before = warnings.length
+  host.eval(`__simCallback('GibtEsNicht', { probe = true }, {})`)
+  const warned = warnings.slice(before).some((w) => w.includes('No callback named'))
+  check(warned, 'unbekannter Callback → WARN "No callback named" (simcallbacks.lua:18)')
+  check(
+    host.eval(`return type(import('/lua/simcallbacks.lua').DoCallback) == 'function'`) === true,
+    'DoCallback existiert im echten simcallbacks.lua-Modul',
+  )
+}
+
 console.log('\n== Gelenkte Munition: die Zealot-Rakete dreht auf ein seitliches Ziel ==')
 // AAAZealotMissile01: TrackTarget=true, TurnRate=180, MaxSpeed=50, Accel=6
 // (das Blueprint aus projectiles.scd). UpdateTracking (@944367) dreht die
