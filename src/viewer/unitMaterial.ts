@@ -14,11 +14,35 @@ export interface UnitTextures {
   lookup?: THREE.Texture | null
 }
 
+/**
+ * Die Beleuchtung der KARTE (scmap-Lighting-Block) — dieselben Werte, mit
+ * denen das Terrain rechnet. mesh.fx ComputeLight (Zeilen 552-560) mischt
+ * daraus das Einheiten-Licht; mit anderen Werten passen Einheiten und Boden
+ * nie zusammen (genau das war der „dunkel/flach"-Eindruck).
+ */
+export interface MapLighting {
+  sunDirection: THREE.Vector3
+  sunColor: THREE.Color
+  sunAmbience: THREE.Color
+  shadowFillColor: THREE.Color
+  lightingMultiplier: number
+}
+
+/** Werkzeug-Licht für den Unit-VIEWER (kein Spiel, keine Karte geladen). */
+const VIEWER_LIGHT: MapLighting = {
+  sunDirection: new THREE.Vector3(0.35, 0.8, 0.5).normalize(),
+  sunColor: new THREE.Color(1.3, 1.25, 1.15),
+  sunAmbience: new THREE.Color(0.28, 0.3, 0.35),
+  shadowFillColor: new THREE.Color(0.5, 0.5, 0.55),
+  lightingMultiplier: 1.0,
+}
+
 export function createUnitMaterial(
   textures: UnitTextures,
   teamColor: THREE.Color,
   skinMatrices: THREE.Matrix4[],
   shader = 'Unit',
+  lighting: MapLighting = VIEWER_LIGHT,
 ): THREE.ShaderMaterial {
   const white = new THREE.DataTexture(new Uint8Array([255, 255, 255, 0]), 1, 1)
   white.needsUpdate = true
@@ -36,10 +60,17 @@ export function createUnitMaterial(
       normalsMap: { value: textures.normals ?? flatNormal },
       specTeamMap: { value: textures.specTeam ?? white },
       teamColor: { value: teamColor },
-      sunDirection: { value: new THREE.Vector3(0.35, 0.8, 0.5).normalize() },
-      sunColor: { value: new THREE.Color(1.3, 1.25, 1.15) },
-      ambientColor: { value: new THREE.Color(0.28, 0.3, 0.35) },
-      glowMultiplier: { value: 2.0 },
+      sunDirection: { value: lighting.sunDirection },
+      // mesh.fx-Namen (unit.frag.glsl) …
+      sunDiffuse: { value: lighting.sunColor },
+      sunAmbient: { value: lighting.sunAmbience },
+      shadowFill: { value: lighting.shadowFillColor },
+      lightMultiplier: { value: lighting.lightingMultiplier },
+      // … und die scmap-Namen des Seraphim-Ports (bekam sie vorher NIE —
+      // Seraphim-Einheiten rechneten mit Null-Licht).
+      sunAmbience: { value: lighting.sunAmbience },
+      shadowFillColor: { value: lighting.shadowFillColor },
+      glowMultiplier: { value: 2.0 }, // mesh.fx:56
     },
     side: THREE.DoubleSide,
   })

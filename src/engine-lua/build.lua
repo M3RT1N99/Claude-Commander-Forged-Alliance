@@ -104,6 +104,14 @@ local function approach(task)
     -- Noch zu weit weg: hinlaufen (die Bewegung macht motion.lua).
     b.__goal = { tp[1], tp[3] }
     b.__faceGoal = false
+  elseif b.__goal and mbd > 0 and dist <= mbd then
+    -- IN Reichweite angekommen: das Fahrziel LOESCHEN. Es zeigte aufs
+    -- ZENTRUM der Baustelle — ohne diesen Stopp fuhr motion.lua den Bauer
+    -- exakt dorthin weiter, und die ACU stand mitten IM Gebaeude
+    -- (Szene-Debug: ACU und Fabrik auf identischer Position).
+    b.__goal = false
+    b.__speed = 0
+    b.__faceGoal = { tp[1], tp[3] }
   elseif not b.__goal and dist > 0.01 then
     -- In Reichweite: stehen bleiben und sich zum Ziel DREHEN.
     --

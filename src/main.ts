@@ -1521,7 +1521,11 @@ function luaSimUpdate(): void {
   for (const s of states) {
     if (knownSceneUnits.has(s.id)) continue
     knownSceneUnits.add(s.id)
-    void addLuaUnitToScene(s.id, s.name, { x: s.x, y: s.y, z: s.z })
+    // Fehler LAUT machen: ein still verworfenes Promise ließ Einheiten ohne
+    // Modell zurück (Lebensbalken ohne Mesh darunter) — ohne eine Log-Zeile.
+    addLuaUnitToScene(s.id, s.name, { x: s.x, y: s.y, z: s.z }).catch((e) => {
+      log(`FEHLER Modell für ${s.name} (Unit ${s.id}): ${e instanceof Error ? e.message : e}`)
+    })
   }
 
   // Die fliegenden Projektile — die Engine zeichnet jede Sim-Entity.
@@ -1648,6 +1652,19 @@ async function spawnViaLua(id: string): Promise<void> {
   } catch (err) {
     log(`FEHLER Lua-Spawn: ${err instanceof Error ? err.message : err}`)
   }
+}
+
+// Debug-Sicht auf die Szene (nur DEV): welcher Sim-Unit gehört welches Mesh,
+// wo steht es, ist es sichtbar — für die Fehlersuche per DevTools/CDP.
+if (import.meta.env.DEV) {
+  ;(window as unknown as Record<string, unknown>).__cfaSzene = () =>
+    luaUnits.map((u) => ({
+      id: u.id,
+      bp: u.bpId,
+      pos: u.mesh.position.toArray().map((v) => Math.round(v * 10) / 10),
+      visible: u.mesh.visible,
+      scale: Math.round(u.mesh.scale.x * 1000) / 1000,
+    }))
 }
 
 // ---------------------------------------------------------------------------

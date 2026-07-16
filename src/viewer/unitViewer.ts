@@ -3,7 +3,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import type { ScmModel } from '../formats/scm'
 import type { ScmapData } from '../formats/scmap'
 import type { GameVfs } from '../vfs/vfs'
-import { createUnitMaterial, type UnitTextures } from './unitMaterial'
+import { createUnitMaterial, type UnitTextures, type MapLighting } from './unitMaterial'
 import { createTerrainMaterial } from './terrainMaterial'
 import { createWaterMaterial } from './waterMaterial'
 import { ddsToTexture } from './textures'
@@ -202,6 +202,9 @@ export class UnitViewer {
     this.animator = null
     this.animPlaying = false
     this.heightfield = null
+    this.mapLighting = null
+    // Werkzeug-Modus: der Viewer-Nebel kommt zurück (auf der Karte ist er aus).
+    this.scene.fog = new THREE.Fog(0x10141c, 60, 220)
     this.updateHooks.length = 0
     for (const unit of this.units) {
       this.scene.remove(unit.mesh)
@@ -288,7 +291,16 @@ export class UnitViewer {
     geometry.setIndex(new THREE.BufferAttribute(model.indices, 1))
 
     const animator = new UnitAnimator(model)
-    const material = createUnitMaterial(textures, teamColor, animator.skinMatrices, shader)
+    // Auf der Karte rechnen Einheiten mit dem KARTEN-Licht (mesh.fx
+    // ComputeLight, dieselben scmap-Werte wie das Terrain) — ohne Karte
+    // (Unit-Viewer-Werkzeug) mit dem Werkzeug-Fallback.
+    const material = createUnitMaterial(
+      textures,
+      teamColor,
+      animator.skinMatrices,
+      shader,
+      this.mapLighting ?? undefined,
+    )
     const mesh = new THREE.Mesh(geometry, material)
     mesh.frustumCulled = false
     this.scene.add(mesh)
@@ -297,6 +309,9 @@ export class UnitViewer {
     this.units.push(unit)
     return unit
   }
+
+  /** Das Licht der geladenen Karte — gesetzt in setMap, gelesen von addUnit. */
+  private mapLighting: MapLighting | null = null
 
   /**
    * Ein PROJEKTIL in die Szene — bewusst NICHT über addUnit: es gehört nicht
@@ -756,6 +771,21 @@ export class UnitViewer {
 
   async setMap(scmap: ScmapData, vfs: GameVfs): Promise<void> {
     this.clearContent()
+
+    // Das Karten-Licht — für Terrain UND Einheiten dieselben scmap-Werte
+    // (mesh.fx ComputeLight); vorher rechneten die Einheiten mit erfundenen
+    // Konstanten und wirkten dunkel/fremd in der Szene.
+    this.mapLighting = {
+      sunDirection: new THREE.Vector3(...scmap.lighting.sunDirection).normalize(),
+      sunColor: new THREE.Color(...scmap.lighting.sunColor),
+      sunAmbience: new THREE.Color(...scmap.lighting.sunAmbience),
+      shadowFillColor: new THREE.Color(...scmap.lighting.shadowFillColor),
+      lightingMultiplier: scmap.lighting.lightingMultiplier,
+    }
+    // Kein Distanznebel auf der Karte: der Fog gehört zum Unit-Viewer-Werkzeug
+    // (Bodenraster-Optik). Im Original gibt es keinen solchen Nebel — er
+    // tönte MeshBasic-Objekte (Projektile, Ringe) jenseits ~220 m dunkelblau.
+    this.scene.fog = null
 
     const { width, height } = scmap
     this.heightfield = {
