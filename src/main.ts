@@ -734,6 +734,7 @@ async function startSandbox(mapFolder: string): Promise<void> {
     if (luaSim && currentScmap) {
       luaUnits.length = 0
       knownSceneUnits.clear()
+      unitLerp.clear()
       await luaSim.reset({
         data: currentScmap.heightmap,
         width: currentScmap.width,
@@ -1460,6 +1461,22 @@ const luaUnits: LuaSceneUnit[] = []
 /** Welche Sim-Units bereits ein Modell in der Szene haben (Ladevorgang läuft asynchron). */
 const knownSceneUnits = new Set<number>()
 
+// Beat-Interpolation (M6): je Unit der letzte und der aktuelle Sim-Zustand —
+// der Renderer blendet innerhalb der 100 ms eines Beats dazwischen.
+interface UnitLerp {
+  px: number
+  py: number
+  pz: number
+  ph: number
+  cx: number
+  cy: number
+  cz: number
+  ch: number
+}
+const unitLerp = new Map<number, UnitLerp>()
+let lastLerpTick = -1
+let lastLerpWall = 0
+
 // Solange die Sim nicht läuft, gibt es nichts — keine erfundenen Startwerte.
 // Vorrat und Lager entstehen ausschließlich in der Sim: das Lager aus den
 // Storage*-Feldern der Units, der Startvorrat aus GiveInitialResources der ACU
@@ -1646,6 +1663,7 @@ function luaSimUpdate(): void {
       if (luaSim.state(u.id)) continue
       viewer.removeUnit(u.scene)
       viewer.removeHelper(u.ring)
+      unitLerp.delete(u.id)
       luaUnits.splice(i, 1)
     }
   }
@@ -1668,27 +1686,75 @@ function luaSimUpdate(): void {
     maxBeamsGesehen = Math.max(maxBeamsGesehen, beams?.totalBeams() ?? 0)
   }
 
+  // BEAT-INTERPOLATION: die Sim tickt mit 10 Hz, das Bild mit 60+ — die Engine
+  // zeichnet Entities zwischen zwei Beats interpoliert (sonst ruckelt jede
+  // Bewegung im 100-ms-Raster). Beim NEUEN Beat wird der bisherige Zielwert
+  // zum Startwert; innerhalb des Beats läuft alpha 0→1 über die Wanduhr.
+  if (luaSim.gameTick !== lastLerpTick) {
+    lastLerpTick = luaSim.gameTick
+    lastLerpWall = performance.now()
+    for (const u of luaUnits) {
+      const s = luaSim.state(u.id)
+      if (!s) continue
+      const l = unitLerp.get(u.id)
+      if (!l) {
+        unitLerp.set(u.id, { px: s.x, py: s.y, pz: s.z, ph: s.heading, cx: s.x, cy: s.y, cz: s.z, ch: s.heading })
+      } else {
+        l.px = l.cx
+        l.py = l.cy
+        l.pz = l.cz
+        l.ph = l.ch
+        l.cx = s.x
+        l.cy = s.y
+        l.cz = s.z
+        l.ch = s.heading
+        // Sprung (Spawn/Teleport/Reset): nicht über die Karte gleiten.
+        if (Math.hypot(l.cx - l.px, l.cz - l.pz) > 5) {
+          l.px = l.cx
+          l.py = l.cy
+          l.pz = l.cz
+          l.ph = l.ch
+        }
+      }
+    }
+  }
+  const lerpAlpha = Math.min((performance.now() - lastLerpWall) / 100, 1)
+
   for (const u of luaUnits) {
     const s = luaSim.state(u.id)
     if (!s) continue
     // Die Y-Koordinate kommt aus der SIM (motion.lua schreibt sie über
     // GetSurfaceHeight fort). Vorher rechnete der Renderer seine eigene Höhe —
     // zwei Wahrheiten, die dauerhaft auseinanderliefen.
-    u.mesh.position.set(s.x, s.y, s.z)
-    u.mesh.rotation.set(0, s.heading, 0)
+    const l = unitLerp.get(u.id)
+    let x = s.x
+    let y = s.y
+    let z = s.z
+    let heading = s.heading
+    if (l) {
+      x = l.px + (l.cx - l.px) * lerpAlpha
+      y = l.py + (l.cy - l.py) * lerpAlpha
+      z = l.pz + (l.cz - l.pz) * lerpAlpha
+      // Drehung über den KURZEN Weg (−π..π), sonst wirbelt jede Wende einmal
+      // falsch herum.
+      const dh = ((l.ch - l.ph + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI
+      heading = l.ph + dh * lerpAlpha
+    }
+    u.mesh.position.set(x, y, z)
+    u.mesh.rotation.set(0, heading, 0)
     u.ring.visible = u.selected
     if (u.selected) {
       // Die Ellipse aus dem Blueprint (siehe ringExtents), am Heading gedreht,
       // um den Selection-Offset versetzt, auf ren_SelectionHeightFudge angehoben.
       const e = u.ringExtents
-      const cos = Math.cos(s.heading)
-      const sin = Math.sin(s.heading)
+      const cos = Math.cos(heading)
+      const sin = Math.sin(heading)
       u.ring.position.set(
-        s.x + e.ox * cos + e.oz * sin,
-        s.y + selectParams.heightFudge,
-        s.z - e.ox * sin + e.oz * cos,
+        x + e.ox * cos + e.oz * sin,
+        y + selectParams.heightFudge,
+        z - e.ox * sin + e.oz * cos,
       )
-      u.ring.rotation.set(0, s.heading, 0)
+      u.ring.rotation.set(0, heading, 0)
       u.ring.scale.set(e.x, 1, e.z)
     }
 
@@ -1806,6 +1872,11 @@ if (import.meta.env.DEV) {
   // Lua in der UI-VM auswerten (Fehlersuche der Tastatur-/Keymap-Wege).
   ;(window as unknown as Record<string, unknown>).__cfaUiEval = (code: string) =>
     gameUi ? gameUi.debugEval(code) : 'keine UI'
+  // Einen Move-Befehl absetzen (Bewegungs-/Interpolations-Abnahmen per CDP).
+  ;(window as unknown as Record<string, unknown>).__cfaMove = (id: number, x: number, z: number) => {
+    luaSim?.move(id, x, z)
+    return 'ok'
+  }
 }
 
 // ---------------------------------------------------------------------------
