@@ -323,6 +323,49 @@ console.log('\n== Befehls-Dispatch: Stop, Move-bricht-Bau, Attack ==')
     'Stop killt Fahrziel und Bau-Tasks (Dispatch 0x01)',
   )
 
+  // SITE DECAY (Unit::OnTick, Cfile:952824-952840): the abandoned site
+  // loses 0.1/max(BuildCostEnergy, BuildCostMass, BuildTime) per tick.
+  const fVerlassen = Number(host.eval(`return __units[${site}].__fraction`))
+  for (let t = 0; t < 100; t++) beat(engine)
+  const fDecayed = Number(host.eval(`return __units[${site}].__fraction`))
+  check(
+    fDecayed < fVerlassen,
+    `Die verlassene Baustelle zerfällt (${fVerlassen.toFixed(4)} → ${fDecayed.toFixed(4)})`,
+  )
+
+  // REPAIR (dispatch 0x14): the right-click default on an own unfinished
+  // structure resumes construction through the same build task.
+  host.eval(`__dispatchRepair(${acu}, ${site})`)
+  for (let t = 0; t < 250; t++) beat(engine)
+  const fRepariert = Number(host.eval(`return __units[${site}].__fraction`))
+  check(
+    fRepariert > fDecayed,
+    `Repair nimmt den Bau wieder auf (${fDecayed.toFixed(4)} → ${fRepariert.toFixed(4)})`,
+  )
+
+  // A STARTED site aborted at ~0% stays (no instant delete) and dies through
+  // OnDecayed → Destroy (unit.lua:551) once its health falls to 0.
+  const acu2 = spawnLuaUnit(host, 'uel0001', { x: 500, y: 20, z: 500 }, 1)
+  const site2 = Number(
+    host.eval(
+      `local id = __spawnBuildSite('/units/ueb0101/ueb0101_script.lua', 'ueb0101', 503, 20, 503, 1) return id`,
+    ),
+  )
+  host.eval(`__issueBuildTask(${acu2}, ${site2}, 'MobileBuild')`)
+  beat(engine) // startTask runs (builder already in range)
+  host.eval(`__dispatchStop(${acu2})`)
+  check(
+    host.eval(`return __units[${site2}] ~= nil`) === true,
+    'Die BEGONNENE 0%-Baustelle bleibt beim Abbruch stehen',
+  )
+  // One paid build step (~0.33%) decays at 0.1/max(2100, …) per tick —
+  // about 70 ticks until health reaches 0.
+  for (let t = 0; t < 120; t++) beat(engine)
+  check(
+    host.eval(`return __units[${site2}] == nil or __units[${site2}].__dead == true`) === true,
+    'Sie stirbt über den Decay-Weg (OnDecayed → Destroy, unit.lua:551)',
+  )
+
   // ATTACK: ein Panzer ausserhalb seiner MaxRadius (18) faehrt heran, die
   // Waffe nimmt das BEFEHLSZIEL, und das Ziel stirbt.
   const jaeger = spawnLuaUnit(host, 'uel0201', { x: 400, y: 20, z: 300 }, 1)

@@ -37,30 +37,63 @@ function __builderBusy(builderId)
   return false
 end
 
---- Alle Bau-Auftraege eines Bauers ABBRECHEN — die Kette der Engine
---- (CBuildTaskHelper::OnStopBuild(completed=0), Cfile:814989-815022): am
---- BEGONNENEN Bau laufen OnFailedToBuild (Bauer), OnFailedToBeBuilt
---- (Baustelle) und DANN OnStopBuild(target, order); bei Fertigstellung
---- (__buildApply) laeuft nur OnStopBuild. Die Baustelle bleibt mit ihrem
---- Fortschritt stehen; eine nie begonnene (fraction 0) verschwindet.
+--- Abort every build task of a builder — the graceful task-end path of the
+--- engine (CUnitMobileBuildTask end, Cfile:815890-815915): the helper runs
+--- ONLY the Lua OnStopBuild(target, order) on the builder
+--- (OnStopBuild(helper, 1) -> Cfile:815022), and because the task did not
+--- reach its success state the task additionally runs OnFailedToBuild on
+--- the BUILDER (Cfile:815911 — harmless: callbacks/consumption/sound,
+--- unit.lua:1716). OnFailedToBeBuilt (which DESTROYS the site,
+--- unit.lua:1632) belongs to the destructor emergency path only
+--- (OnStopBuild(helper, 0), Cfile:814888) and must NOT run here — the
+--- site stays with its progress and decays (__decayTick).
 function __abortBuildTasks(builderId)
   local b = __units[builderId]
   for tid, task in pairs(__buildTasks) do
     if task.builder == builderId then
       local t = __units[task.target]
       if task.started and b and not b.__dead then
-        pcall(function() b:OnFailedToBuild() end)
         if t and not t.__dead then
-          pcall(function() t:OnFailedToBeBuilt() end)
           pcall(function() b:OnStopBuild(t, task.order) end)
         end
+        pcall(function() b:OnFailedToBuild() end)
       end
-      if t and (t.__fraction or 1) <= 0 then t:Destroy() end
+      -- Only a NEVER-STARTED site vanishes on abort: in the engine the
+      -- structure does not exist before OnStartBuild ran (the build task
+      -- creates it on arrival) — we spawn it at click time, so remove it
+      -- here to match. A STARTED site stays, keeps its progress, and dies
+      -- through the decay path (Unit::OnTick, Cfile:952824-952840).
+      if t and not task.started and (t.__fraction or 1) <= 0 then t:Destroy() end
       __econClearBuildRequest((b and b.__army) or 1, tid)
       __buildTasks[tid] = nil
     end
   end
   if b then b.UnitBeingBuilt = nil end
+end
+
+--- Site decay (Unit::OnTick, Cfile:952808-952840): every unit that is
+--- still being built loses 0.1 / max(BuildCostEnergy, BuildCostMass,
+--- BuildTime) of its build fraction PER TICK, starting 2 ticks after
+--- creation — even while a builder works against it. Health follows the
+--- fraction (Materialize); at health <= 0 the engine runs OnDecayed and
+--- unit.lua:551 destroys the unit.
+function __decayTick()
+  for id, u in pairs(__units) do
+    if u.__beingBuilt and not u.__dead and not u.__destroyQueued
+      and (__gameTick - (u.__spawnTick or 0)) > 1 then
+      local e = (u.__bp and u.__bp.Economy) or {}
+      local maxVal = math.max(e.BuildCostEnergy or 0, e.BuildCostMass or 0, e.BuildTime or 0)
+      if maxVal > 0 then
+        local f = (u.__fraction or 0) - 0.1 / maxVal
+        u.__fraction = f
+        u.__health = u:GetMaxHealth() * f
+        if u.__health <= 0 then
+          local ok, err = pcall(function() u:OnDecayed() end)
+          if not ok then WARN('OnDecayed: ' .. tostring(err)) end
+        end
+      end
+    end
+  end
 end
 
 --- Alle Auftraege eines Bauers loeschen (kein Shift = neue Reihe). Ein neuer

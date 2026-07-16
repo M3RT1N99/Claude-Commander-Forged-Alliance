@@ -1163,7 +1163,7 @@ window.addEventListener('pointerup', (e) => {
   // Klick ein BEFEHL. Sonst ist er eine Auswahl.
   if (gameUi && gameUi.commandMode().mode !== false) {
     const hit = viewer.pickTerrain(e.clientX, e.clientY)
-    if (hit) void issueWorldCommand(hit, e.shiftKey, enemyUnter(e.clientX, e.clientY))
+    if (hit) void issueWorldCommand(hit, e.shiftKey, zielUnter(e.clientX, e.clientY))
     return
   }
   if (luaUnits.length > 0) {
@@ -1183,18 +1183,26 @@ viewportEl.addEventListener('contextmenu', (e) => {
     log('Befehl abgebrochen')
     return
   }
-  // Sonst: der Standardbefehl der Weltansicht auf die Auswahl — Move aufs
-  // Gelände, ATTACK auf eine Feind-Unit (der Engine-Default).
+  // Otherwise the view's default order for the selection: Move onto
+  // terrain, Attack on an enemy unit, Repair on an own unfinished one.
   const hit = viewer.pickTerrain(e.clientX, e.clientY)
-  if (hit) void issueWorldCommand(hit, e.shiftKey, enemyUnter(e.clientX, e.clientY))
+  if (hit) void issueWorldCommand(hit, e.shiftKey, zielUnter(e.clientX, e.clientY))
 })
 
-/** Die FEINDLICHE Unit unter dem Cursor (Picking) — oder undefined. */
-function enemyUnter(clientX: number, clientY: number): number | undefined {
+/**
+ * The unit under the cursor, classified for the command dispatch: an ENEMY
+ * turns the default click into Attack, an OWN UNFINISHED structure into
+ * Repair (resume construction).
+ */
+function zielUnter(clientX: number, clientY: number): { enemy?: number; repair?: number } {
   const picked = viewer.pickUnit(clientX, clientY)
-  if (!picked) return undefined
+  if (!picked || !luaSim) return {}
   const u = luaUnits.find((x) => x.scene === picked)
-  return u && u.army !== 1 ? u.id : undefined
+  if (!u) return {}
+  if (u.army !== 1) return { enemy: u.id }
+  const s = luaSim.state(u.id)
+  if (s && s.fraction < 1) return { repair: u.id }
+  return {}
 }
 
 /**
@@ -1204,11 +1212,11 @@ function enemyUnter(clientX: number, clientY: number): number | undefined {
 async function issueWorldCommand(
   hit: { x: number; z: number },
   queue: boolean,
-  enemyTargetId?: number,
+  ziel: { enemy?: number; repair?: number } = {},
 ): Promise<void> {
   if (!luaSim || !gameUi) return
   try {
-    const msg = await gameUi.worldClick(luaSim, hit, (x, z) => viewer.heightAt(x, z), queue, enemyTargetId)
+    const msg = await gameUi.worldClick(luaSim, hit, (x, z) => viewer.heightAt(x, z), queue, ziel)
     if (msg) log(msg)
     // Gesetzt (oder Befehl erteilt) → der Geist hat ausgedient, bis der nächste
     // Bau-Modus startet.

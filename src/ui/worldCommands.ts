@@ -36,6 +36,8 @@ export interface WorldCommandSim {
   move(id: number, x: number, z: number): void
   /** Attack (CAttackTargetTask): Unit `id` greift die Ziel-Unit an. */
   attack(id: number, targetId: number): void
+  /** Repair (dispatch 0x14): resume building the unfinished target. */
+  repair(id: number, targetId: number): void
   /**
    * Der SAMMELPUNKT einer Fabrik (IssueFactoryRallyPoint, Cfile:1008266). Er ist
    * kein Bewegungsbefehl: die Fabrik bleibt stehen, nur ihre frischen Einheiten
@@ -58,6 +60,8 @@ export interface SelectedUnit {
   army: number
   /** RULEUCC_Move steht in den CommandCaps des Blueprints. */
   canMove: boolean
+  /** RULEUCC_Repair — darf Bauten weiterbauen (repair task, dispatch 0x14). */
+  canRepair: boolean
   /** Kategorie FACTORY — sie bekommt einen Sammelpunkt statt eines Move-Befehls. */
   isFactory: boolean
 }
@@ -110,6 +114,9 @@ export async function worldClick(
     /** Die FEINDLICHE Unit unter dem Cursor (Picking der Engine) — sie macht
      *  aus dem Standard-Klick einen Attack-Befehl (Dispatch 0x0A). */
     enemyTargetId?: number
+    /** An OWN UNFINISHED unit under the cursor — the default click resumes
+     *  its construction via the repair task (dispatch 0x14). */
+    repairTargetId?: number
   } = { queue: false },
 ): Promise<string | null> {
   // pull() liefert JSON — eine LEERE Lua-Tabelle wuerde als `{}` in JS ankommen,
@@ -177,6 +184,25 @@ export async function worldClick(
       Clear: !opts.queue,
     })
     return `Attack (${n}) → Unit ${opts.enemyTargetId}`
+  }
+  // Click on an OWN UNFINISHED structure: units with RULEUCC_Repair resume
+  // its construction (repair task, dispatch 0x14) — the engine default.
+  if (opts.repairTargetId !== undefined) {
+    let n = 0
+    for (const u of selection) {
+      if (u.canRepair && u.id !== opts.repairTargetId) {
+        sim.repair(u.id, opts.repairTargetId)
+        n++
+      }
+    }
+    if (n > 0) {
+      onCommandIssued(host, {
+        CommandType: 'Repair',
+        Position: { x: hit.x, y, z: hit.z },
+        Clear: !opts.queue,
+      })
+      return `Repair (${n}) → Unit ${opts.repairTargetId}`
+    }
   }
   let moved = 0
   let rallied = 0

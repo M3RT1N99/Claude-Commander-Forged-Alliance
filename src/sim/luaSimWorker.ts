@@ -49,6 +49,8 @@ type InMsg =
   // Attack (Dispatch 0x0A, CAttackTargetTask): in Waffenreichweite fahren,
   // Waffen aufs Befehlsziel.
   | { type: 'attack'; id: number; targetId: number }
+  // Repair (dispatch 0x14): resume building an unfinished structure.
+  | { type: 'repair'; id: number; targetId: number }
   // Der Sammelpunkt einer Fabrik (IssueFactoryRallyPoint, Cfile:1008266) — KEIN
   // Bewegungsbefehl: die Fabrik bleibt stehen.
   | { type: 'rally'; id: number; x: number; y: number; z: number }
@@ -190,6 +192,8 @@ ctx.onmessage = async (e: MessageEvent<InMsg>): Promise<void> => {
     host.eval(`__dispatchStop(${msg.id})`)
   } else if (msg.type === 'attack') {
     host.eval(`__dispatchAttack(${msg.id}, ${msg.targetId})`)
+  } else if (msg.type === 'repair') {
+    host.eval(`__dispatchRepair(${msg.id}, ${msg.targetId})`)
   }
 }
 

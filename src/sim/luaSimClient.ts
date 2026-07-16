@@ -395,6 +395,10 @@ export class LuaSimClient {
   attack(id: number, targetId: number): void {
     this.worker.postMessage({ type: 'attack', id, targetId })
   }
+  /** Repair (dispatch 0x14): resume building the unfinished `targetId`. */
+  repair(id: number, targetId: number): void {
+    this.worker.postMessage({ type: 'repair', id, targetId })
+  }
 
   /**
    * Der Sammelpunkt einer Fabrik (IssueFactoryRallyPoint, Cfile:1008266). Die

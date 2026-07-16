@@ -154,6 +154,9 @@ const sim = {
   attack: (id: number, targetId: number): void => {
     simHost.eval(`__dispatchAttack(${id}, ${targetId})`)
   },
+  repair: (id: number, targetId: number): void => {
+    simHost.eval(`__dispatchRepair(${id}, ${targetId})`)
+  },
   setRallyPoint: (id: number, x: number, y: number, z: number): void => {
     simHost.eval(`local u = __units[${id}] if u then u:SetRallyPoint({ ${x}, ${y}, ${z} }) end`)
   },

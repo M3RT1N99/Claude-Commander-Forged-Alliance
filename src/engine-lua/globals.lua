@@ -720,6 +720,24 @@ function __dispatchAttack(unitId, targetId)
   __attackOrders[unitId] = targetId
 end
 
+--- Repair (dispatch 0x14, CUnitRepairTask): on an UNFINISHED structure the
+--- repair task resumes construction — it is the same build task (approach
+--- within MaxBuildDistance, economy-paid progress), issued with order
+--- 'Repair'. Repairing FINISHED but damaged units (health-only rebuild with
+--- RepairConsume* costs) is a documented gap and rejected loudly.
+function __dispatchRepair(unitId, targetId)
+  local u = __units[unitId]
+  local t = __units[targetId]
+  if not u or not t then return end
+  if (t.__fraction or 1) >= 1 then
+    WARN('Repair on a finished unit is not built yet (health-only repair)')
+    return
+  end
+  __attackOrders[unitId] = nil
+  u:GetNavigator():AbortMove()
+  __issueBuildTask(unitId, targetId, 'Repair', true)
+end
+
 -- The distance the attack task closes to: the largest FIRING range
 -- (MaxRadius) over all enabled non-manual weapons. NOT
 -- CAiAttackerImpl::GetMaxWeaponRange (Cfile:791342) — that one folds in

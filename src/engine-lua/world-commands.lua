@@ -54,9 +54,14 @@ function __uiSelectionJson()
     for _, c in ipairs(bp.Categories or {}) do
       if c == 'FACTORY' then isFactory = true end
     end
+    -- RULEUCC_Repair: a right-click on an own unfinished structure resumes
+    -- the build through the repair task (dispatch 0x14) — only units with
+    -- the cap get the order.
+    local canRepair = caps.RULEUCC_Repair == true
     parts[i] = '{"id":' .. tostring(u:GetEntityId())
       .. ',"army":' .. tostring(u:GetArmy())
       .. ',"canMove":' .. tostring(canMove)
+      .. ',"canRepair":' .. tostring(canRepair)
       .. ',"isFactory":' .. tostring(isFactory)
       .. '}'
   end

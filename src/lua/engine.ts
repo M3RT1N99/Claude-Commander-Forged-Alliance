@@ -125,6 +125,9 @@ export function beat(engine: Engine): void {
   // Phase 5 — Lua coroutines (CTaskStage::DoFrame), then movement.
   simTick(h)
   motionTick(h)
+  // Site decay is part of Unit::OnTick (same engine phase as motion,
+  // Cfile:952824-952840): unfinished units lose build fraction every tick.
+  h.eval('__decayTick()')
   // Phase 6 — Projektile fliegen (Projectile::MotionTick) und schlagen ein.
   projectileTick(h)
   // Phase 7 — die Löschwarteschlange (Sim::AdvanceBeat, Cfile:1076638): erst
