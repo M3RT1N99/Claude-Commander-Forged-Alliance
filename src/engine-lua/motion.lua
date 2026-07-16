@@ -121,40 +121,67 @@ function __advanceMotion()
         u.__goal = false
         u.__speed = 0
       else
-        -- Turn toward the goal, at most turnRate this tick.
+        -- Heading/Forward VOM TICK-ANFANG: die Cap-Kaskade der Engine rechnet
+        -- gegen die Ausrichtung VOR der Drehung (CAiPathSpline::Generate).
+        local h0 = u.__heading or 0
+        local fwdX = math.sin(h0)
+        local fwdZ = math.cos(h0)
+        local speedFrac = speed / m.maxSpeed -- Cfile:766083: |v|*10 / MaxSpeed
+
+        -- Turn toward the goal. Effektive Drehrate = max(turnRate,
+        -- v / turnRadius), auf PI geklemmt (Cfile:766161-766163 + 942169-942170):
+        -- eine schnelle Einheit darf ihren TurnRadius-Kreis mit omega = v/r
+        -- halten, auch ueber die nominelle TurnRate hinaus (Schiffe).
         local wanted = atan2(dx, dz)
-        local diff = wanted - (u.__heading or 0)
+        local diff = wanted - h0
         while diff > PI do diff = diff - 2 * PI end
         while diff < -PI do diff = diff + 2 * PI end
         local turn = m.turnRate
+        if m.turnRadius > 0 and m.turnRadius < math.huge then
+          local omega = speed / m.turnRadius
+          if omega > turn then turn = omega end
+        end
+        if turn > PI then turn = PI end
         if math.abs(diff) <= turn then
           u.__heading = wanted
-          diff = 0
         else
-          u.__heading = (u.__heading or 0) + (diff > 0 and turn or -turn)
-          diff = diff - (diff > 0 and turn or -turn)
+          u.__heading = h0 + (diff > 0 and turn or -turn)
         end
 
-        -- Speed cap from the turn circle: v = omega * r. A unit that still has
-        -- to turn cannot drive faster than its turn radius allows, which is what
-        -- TurnRadius (10 for the ACU) is for.
-        local cap = m.maxSpeed
-        if diff ~= 0 and m.turnRadius < math.huge then
-          cap = math.min(cap, m.turnRate * m.turnRadius)
+        -- Die Speed-Cap-Kaskade der Engine, 1:1 (sub_699760 @0x699760,
+        -- Cfile:942291-942328; gerufen aus CAiPathSpline::Generate 766232ff):
+        local cap
+        if m.rotateOnSpot and m.rotateOnSpotThreshold > speedFrac then
+          -- GATE 1 (942301): RotateOnSpot NUR unterhalb der Speed-Schwelle
+          -- (Default 50 % MaxSpeed). align = dot(normalize(ziel), forward)
+          -- mit dem Heading vor der Drehung (942303-942306): schlechter als
+          -- 0.98 (~11.5 Grad) -> stehen und drehen; sonst voller MaxSpeed
+          -- (der Bogen-Cap wird uebersprungen, 942307-942308).
+          local align = (dx * fwdX + dz * fwdZ) / dist
+          cap = (align < 0.98) and 0 or m.maxSpeed
+        else
+          -- Bogen-Geometrie (942310-942314): der Kreis durch Position und
+          -- Ziel, tangential zum Heading. cross = dz*fwd.x - fwd.z*dx;
+          -- r = dist^2 * 0.5 / cross.
+          local cross = dz * fwdX - fwdZ * dx
+          local absR = 0
+          if cross ~= 0 then absR = math.abs((dist * dist) * 0.5 / cross) end
+          if absR < m.turnRadius then
+            -- GATE 2 (942316-942321): nur Kurven ENGER als der TurnRadius
+            -- drosseln — v = turnRate * |r| * 0.5.
+            cap = (absR == 0) and m.maxSpeed or (m.turnRate * absR * 0.5)
+          else
+            -- weiter Bogen: turnRadius wirkt nach der min-Klemme wie
+            -- "kein Cap" (942315/942327).
+            cap = m.turnRadius
+          end
         end
+        if cap > m.maxSpeed then cap = m.maxSpeed end
 
-        -- ROTATE-ON-SPOT (Bots, viele Experimentelle): erst drehen, dann fahren.
-        -- ComputeSteeringSpeedCapFromParams (movement-path.md:174, CAiPathSpline):
-        -- ist die Ausrichtung zum Ziel schlechter als align 0.98
-        -- (dot(vorwaerts, richtung) < 0.98, ~11.4 Grad), ist die Geschwindigkeit
-        -- 0 — die Einheit dreht sich auf der Stelle. Sonst faehrt sie mit
-        -- vollem Speed an. Ohne das kurven Bots wie Autos statt sich zu drehen.
-        if m.rotateOnSpot then
-          local align = math.cos(diff) -- dot(vorwaerts, zielrichtung) in 2D
-          if align < 0.98 then cap = 0 end
-        end
-        -- Stop exactly on the goal: kinematics, v = sqrt(2 * a * d).
-        cap = math.min(cap, math.sqrt(2 * m.brake * dist))
+        -- Anhalte-Kinematik (Cfile:766249-766262): innerhalb eines
+        -- Brems-Ticks exakt die Restdistanz, sonst v = sqrt(2*brake*dist).
+        local stopCap = (dist <= m.brake) and dist or math.sqrt(2 * m.brake * dist)
+        if stopCap < cap then cap = stopCap end
 
         local dv = cap - speed
         if dv > m.accel then speed = speed + m.accel

@@ -312,10 +312,18 @@ export function installEconomy(host: LuaHost, mgr: EconomyManager): void {
   })
   host.setGlobal('__econStored', (army: number, res: string) => mgr.army(army).stored((res === 'MASS' ? 'MASS' : 'ENERGY')))
   host.setGlobal('__econStoredRatio', (army: number, res: string) => mgr.army(army).storedRatio(res === 'MASS' ? 'MASS' : 'ENERGY'))
-  host.setGlobal('__econIncome', (army: number, res: string) => mgr.army(army).income(res === 'MASS' ? 'MASS' : 'ENERGY'))
+  // Die Brain-Getter liefern PER-TICK-Werte — rohe Feld-Reads aus
+  // CEconomy.mTotals ohne Skalierung (GetEconomyIncome Cfile:739923, Usage =
+  // mLastUseActual Cfile:739997, Requested = mLastUseRequested Cfile:740071;
+  // Befüllung pro Tick: HandleResourceManagement ×0.1 Cfile:954011-954028,
+  // Übernahme func_ArmyProcessEconomy Cfile:1106790). Die Original-Lua rechnet
+  // SELBST hoch: defaultweapons.lua:970 `GetEconomyIncome('ENERGY') * 10
+  // # per tick to per seconds`, xab1401 (Paragon) ebenso. Unsere internen
+  // Felder bleiben pro Sekunde (HUD/Worker) — nur die Bridge skaliert.
+  host.setGlobal('__econIncome', (army: number, res: string) => mgr.army(army).income(res === 'MASS' ? 'MASS' : 'ENERGY') * DT)
 
-  host.setGlobal('__econUsage', (army: number, res: string) => mgr.army(army).usage(res === 'MASS' ? 'MASS' : 'ENERGY'))
-  host.setGlobal('__econRequested', (army: number, res: string) => mgr.army(army).requested(res === 'MASS' ? 'MASS' : 'ENERGY'))
+  host.setGlobal('__econUsage', (army: number, res: string) => mgr.army(army).usage(res === 'MASS' ? 'MASS' : 'ENERGY') * DT)
+  host.setGlobal('__econRequested', (army: number, res: string) => mgr.army(army).requested(res === 'MASS' ? 'MASS' : 'ENERGY') * DT)
   host.setGlobal('__econTrend', (army: number, res: string) => mgr.army(army).trend(res === 'MASS' ? 'MASS' : 'ENERGY'))
 
   // Das Brain ist KEIN Engine-Objekt mit angeflanschten Feldern, sondern die

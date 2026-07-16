@@ -102,6 +102,37 @@ check(Math.abs(zf - 128) < 1.5, `Spur gehalten: z ${zf.toFixed(2)} ≈ 128`)
 check(host.eval(`return not __units[${id}].__goal`) === true, 'Ziel erreicht → Goal geleert')
 check(!bool(host, `__units[${id}]:IsMoving()`), 'IsMoving() = false nach Ankunft')
 
+console.log('\n== Die Speed-Cap-Kaskade (sub_699760 @0x699760, Cfile:942291-942328) ==')
+// (a) Ziel exakt 90° seitlich in Distanz d: der Bogen-Kreis hat r = d/2 —
+// liegt er unter dem TurnRadius, ist der Cap turnRate·|r|·0.5 (GATE 2).
+{
+  const kid = spawnLuaUnit(host, 'uel0001', { x: 200, y: 20, z: 200 }, 1)
+  // ACU-TurnRadius aus dem Blueprint — Ziel seitlich (Heading 0 = +Z, Ziel +X).
+  const bpRadius = num(host, `__units[${kid}].__bp.Physics.TurnRadius`)
+  const d = Math.min(bpRadius, 4) // r = d/2 < TurnRadius → Gate greift sicher
+  host.eval(`__units[${kid}]:GetNavigator():SetGoal({ ${200 + d}, 20, 200 })`)
+  beat()
+  beat()
+  const v = num(host, `__units[${kid}].__speed or 0`)
+  const turnRateTick = num(host, `(__units[${kid}].__bp.Physics.TurnRate or 0) * 0.0017453292`)
+  const capErwartet = turnRateTick * (d / 2) * 0.5
+  check(
+    v <= capErwartet + 1e-6,
+    `(a) 90°-Ziel in ${d} m: v=${v.toFixed(4)} ≤ turnRate·(d/2)·0.5 = ${capErwartet.toFixed(4)} m/Tick`,
+  )
+  host.eval(`__units[${kid}]:GetNavigator():AbortMove()`)
+}
+// (b) Ziel exakt geradeaus: |r| = 0 → kein Bogen-Cap, voller Anlauf.
+{
+  const kid = spawnLuaUnit(host, 'uel0001', { x: 220, y: 20, z: 200 }, 1)
+  host.eval(`__units[${kid}]:GetNavigator():SetGoal({ 220, 20, 260 })`)
+  const accel = num(host, `(__units[${kid}].__bp.Physics.MaxAcceleration or 0) * 0.01`)
+  beat()
+  const v1 = num(host, `__units[${kid}].__speed or 0`)
+  check(Math.abs(v1 - accel) < 1e-6, `(b) geradeaus: erster Tick beschleunigt voll (v=${v1.toFixed(4)} = accel/Tick)`)
+  host.eval(`__units[${kid}]:GetNavigator():AbortMove()`)
+}
+
 if (warnings.length > 0) {
   console.log(`\n${warnings.length} WARN (erste 3):`)
   for (const w of warnings.slice(0, 3)) console.log(`  ${w.slice(0, 110)}`)

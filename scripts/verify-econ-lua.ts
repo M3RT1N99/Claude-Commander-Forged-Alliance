@@ -107,8 +107,14 @@ check(near(army.energy, 20), `Energie nach 1 s ab 0: ${army.energy.toFixed(1)} (
 console.log('\n== brain:GetEconomyStored / GetEconomyIncome (moho, liest Live-Zustand) ==')
 const brainE = Number(host.eval(`return __units[${acu}]:GetAIBrain():GetEconomyStored('ENERGY')`))
 check(near(brainE, army.energy, 0.01), `GetEconomyStored('ENERGY') = ${brainE.toFixed(1)} == ${army.energy.toFixed(1)}`)
+// PER TICK, nicht pro Sekunde: GetEconomyIncome ist ein roher Feld-Read aus
+// CEconomy.mTotals (Cfile:739923), befüllt pro Tick mit ×0.1
+// (HandleResourceManagement, Cfile:954011-954028). Der Kronzeuge ist die
+// Original-Lua selbst: defaultweapons.lua:970 rechnet
+// `GetEconomyIncome('ENERGY') * 10 # per tick to per seconds`.
 const brainInc = Number(host.eval(`return __units[${acu}]:GetAIBrain():GetEconomyIncome('ENERGY')`))
-check(brainInc === 20, `GetEconomyIncome('ENERGY') = ${brainInc}`)
+check(near(brainInc, 2.0, 0.001), `GetEconomyIncome('ENERGY') = ${brainInc} (pro TICK: 20/s ÷ 10)`)
+check(near(brainInc * 10, 20, 0.001), 'die defaultweapons-Rechnung (×10) ergibt wieder 20/s')
 
 console.log('\n== SetProductionActive(false): Einkommen stoppt ==')
 host.eval(`__units[${acu}]:SetProductionActive(false)`)

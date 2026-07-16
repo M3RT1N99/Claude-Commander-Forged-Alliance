@@ -25,6 +25,22 @@ in CLAUDE.md. Vor Arbeit an einem der Themen: den passenden Abschnitt lesen.*
   `SSTIArmyVariableData`-Ctor (@0x6FD390) startet mit `mStored = 0/0`,
   `mMaxStorage = 0/0`. (Ein zusätzlicher „Sockel 650/4000" wäre die ACU doppelt.)
 
+- **Die Brain-Ökonomie-Getter liefern PER-TICK-Werte** — rohe Feld-Reads aus
+  `CEconomy.mTotals` ohne Skalierung (GetEconomyIncome Cfile:739923, Usage =
+  mLastUseActual Cfile:739997, Requested = mLastUseRequested Cfile:740071;
+  Befüllung pro Tick ×0.1 in HandleResourceManagement Cfile:954011-954028).
+  Die Original-Lua rechnet selbst hoch: defaultweapons.lua:970
+  `GetEconomyIncome('ENERGY') * 10 # per tick to per seconds`; economy.lua:277
+  multipliziert die GetEconomyTotals-Felder mit GetSimTicksPerSecond().
+  Der einzige ×10-Faktor im Binary sitzt bei den Armee-STATS
+  (Economy_Trend_*, Cfile:1107170) — nie bei den Brain-Gettern.
+- **OFFEN (belegt, noch nicht umgesetzt):** Produktion skaliert mit der
+  LimitingRate des eigenen Verbrauchs, wenn das Blueprint NICHT
+  `Economy.NaturalProducer` hat (HandleResourceManagement Cfile:953938-953944 +
+  954011-954012; NaturalProducer haben nur ACUs/sACUs + uea0001/uea0003) —
+  der bekannte „Mex-Stall". Unsere ArmyEconomy.tick hat die Kopplung nicht;
+  economy-binary.md:117-129 behauptet fälschlich das Gegenteil.
+
 ## Bau (Details: [build-task-binary.md](build-task-binary.md))
 
 - **Bau-Fortschritt:** `delta = buildRate/BuildTime · ResourceConsumed · 0.1`
@@ -45,6 +61,17 @@ in CLAUDE.md. Vor Arbeit an einem der Themen: den passenden Abschnitt lesen.*
   keinen `MaxBrake` — falsch gelesen pinnt das ihre Geschwindigkeit auf 0.
 - Motion-Parameter sind **pro Tick** skaliert (`·0.1` Speed, `·0.01` Accel,
   `·0.0017453` deg/s → rad/Tick).
+
+- **Die Speed-Cap-Kaskade der Bewegung** (sub_699760 @0x699760,
+  Cfile:942291-942328, gerufen aus CAiPathSpline::Generate 766232ff):
+  RotateOnSpot gilt NUR unter der Speed-Schwelle
+  (`RotateOnSpotThreshold > |v|·10/MaxSpeed`, Default 0.5; Cfile:942301) —
+  dann stehen bis `dot(fwd, ziel) ≥ 0.98`, danach voller MaxSpeed. Sonst
+  Bogen-Geometrie: `r = dist²·0.5 / (dz·fwdX − fwdZ·dx)`; nur Kurven ENGER
+  als der TurnRadius drosseln: `v = turnRate·|r|·0.5` (Cfile:942316-942321).
+  Effektive Drehrate = `max(turnRate, v/turnRadius)`, auf π geklemmt
+  (Cfile:766161-766163). Anhalten: `dist ≤ brake ? dist : sqrt(2·brake·dist)`
+  (Cfile:766249-766262). Struct-Default TurnRadius = 5.0 (Cfile:656160).
 
 ## Units, Waffen, Skelett (Details: [weapons.md](weapons.md))
 
