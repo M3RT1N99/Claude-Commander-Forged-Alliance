@@ -310,6 +310,11 @@ export class UnitViewer {
   /** Das Licht der geladenen Karte — gesetzt in setMap, gelesen von addUnit. */
   private mapLighting: MapLighting | null = null
 
+  /** Das Karten-Licht für Materialien, die außerhalb entstehen (Baustellen). */
+  get lighting(): MapLighting | null {
+    return this.mapLighting
+  }
+
   /**
    * Ein PROJEKTIL in die Szene — bewusst NICHT über addUnit: es gehört nicht
    * in die Trefferliste (ein fliegender Schuss darf keinen Auswahl-Klick

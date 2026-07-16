@@ -7,6 +7,9 @@ import UNIT_FS from './shaders/unit.frag.glsl?raw'
 import UNIT_SERAPHIM_FS from './shaders/unitSeraphim.frag.glsl?raw'
 import WRECKAGE_VS from './shaders/wreckage.vert.glsl?raw'
 import WRECKAGE_FS from './shaders/wreckage.frag.glsl?raw'
+import BUILD_UEF_FS from './shaders/buildUef.frag.glsl?raw'
+import BUILD_OVERLAY_VS from './shaders/buildOverlay.vert.glsl?raw'
+import BUILD_OVERLAY_FS from './shaders/buildOverlay.frag.glsl?raw'
 
 export interface UnitTextures {
   albedo: THREE.Texture
@@ -76,6 +79,70 @@ export function createUnitMaterial(
     },
     side: THREE.DoubleSide,
   })
+}
+
+/**
+ * Die BAUSTELLEN-Materialien (mesh.fx technique UEFBuild, :5627-5683):
+ * Pass P0 = das Gebäude blau-durchscheinend (UEFBuildHiFiPS:2928,
+ * AlphaBlend SrcAlpha/InvSrcAlpha), Pass P1 = das scrollende Bau-Gitter
+ * (UEFBuildOverlayHiFiPS:2977 auf EffectVertexNormalHiFiVS:1513).
+ * material.y = FractionComplete (PARAM_FRACTIONCOMPLETE), material.x =
+ * Alter der Unit in Sekunden. `fraction`/`time` werden pro Frame über die
+ * zurückgegebenen Uniform-Referenzen gestellt.
+ */
+export function createUefBuildMaterials(
+  textures: UnitTextures,
+  /** Das Bau-Gitter: /textures/effects/UEFBuildSpecular.dds (kachelnd). */
+  buildSpecular: THREE.Texture,
+  teamColor: THREE.Color,
+  skinMatrices: THREE.Matrix4[],
+  lighting: MapLighting = VIEWER_LIGHT,
+): { base: THREE.ShaderMaterial; overlay: THREE.ShaderMaterial } {
+  const white = new THREE.DataTexture(new Uint8Array([255, 255, 255, 0]), 1, 1)
+  white.needsUpdate = true
+  const flatNormal = new THREE.DataTexture(new Uint8Array([128, 128, 255, 128]), 1, 1)
+  flatNormal.needsUpdate = true
+
+  const bones = { value: skinMatrices.length > 0 ? skinMatrices : [new THREE.Matrix4()] }
+  const base = new THREE.ShaderMaterial({
+    vertexShader: UNIT_VS,
+    fragmentShader: BUILD_UEF_FS,
+    defines: { MAX_BONES: Math.max(skinMatrices.length, 1) },
+    uniforms: {
+      boneMatrices: bones,
+      albedoMap: { value: textures.albedo },
+      normalsMap: { value: textures.normals ?? flatNormal },
+      specTeamMap: { value: textures.specTeam ?? white },
+      secondaryMap: { value: buildSpecular },
+      teamColor: { value: teamColor },
+      sunDirection: { value: lighting.sunDirection },
+      sunDiffuse: { value: lighting.sunColor },
+      sunAmbient: { value: lighting.sunAmbience },
+      shadowFill: { value: lighting.shadowFillColor },
+      lightMultiplier: { value: lighting.lightingMultiplier },
+      glowMultiplier: { value: 2.0 }, // mesh.fx:56
+      fraction: { value: 0 },
+      unitAge: { value: 0 },
+      time: { value: 0 },
+    },
+    transparent: true, // AlphaBlend_SrcAlpha_InvSrcAlpha (mesh.fx:5640/5669)
+    side: THREE.DoubleSide,
+  })
+  const overlay = new THREE.ShaderMaterial({
+    vertexShader: BUILD_OVERLAY_VS,
+    fragmentShader: BUILD_OVERLAY_FS,
+    defines: { MAX_BONES: Math.max(skinMatrices.length, 1) },
+    uniforms: {
+      boneMatrices: bones,
+      secondaryMap: { value: buildSpecular },
+      fraction: { value: 0 },
+      unitAge: { value: 0 },
+    },
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  })
+  return { base, overlay }
 }
 
 /**

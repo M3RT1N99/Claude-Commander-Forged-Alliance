@@ -26,6 +26,8 @@ export interface LuaUnitSnapshot {
   moving: boolean
   /** Baufortschritt (1 = fertig). __readAllUnits schickt es, es wurde nur nie gelesen. */
   fraction: number
+  /** Erstellungs-Tick — die Build-Shader zählen ihr Alter darüber (material.x). */
+  born: number
   /** Die Armee der Unit (1-basiert) — unitsOfFocusArmy filtert danach. */
   army: number
   /**

@@ -34,7 +34,7 @@ import { Hud, type HudSource, type HudUnitInfo, type EcoSnapshot } from './ui/hu
 import { GameUi } from './ui/gameUi'
 import { BuildPreview } from './ui/buildPreview'
 import type { ScmapData } from './formats/scmap'
-import type { UnitTextures } from './viewer/unitMaterial'
+import { createUefBuildMaterials, type UnitTextures } from './viewer/unitMaterial'
 
 const $ = <T extends HTMLElement>(sel: string): T => {
   const el = document.querySelector<T>(sel)
@@ -629,6 +629,9 @@ const propMeshes = new Map<number, THREE.Mesh>()
 const propPending = new Set<number>()
 const propSkipLogged = new Set<string>()
 let wreckNoise: Promise<THREE.Texture | null> | null = null
+// Das UEF-Bau-Gitter (SecondaryName aus ExtractBuildMeshBlueprint,
+// lua/system/blueprints.lua:221) — einmal geladen, von allen Baustellen geteilt.
+let uefBuildSpecular: Promise<THREE.Texture | null> | null = null
 
 async function addPropMesh(p: LuaPropSnapshot): Promise<void> {
   const assets = await loadSandboxAssets(p.assoc!)
@@ -1424,6 +1427,17 @@ interface LuaSceneUnit {
    * Sim meldet, er entscheidet nichts.
    */
   walking: boolean
+  /**
+   * BAUSTELLE (mesh.fx technique UEFBuild): solange fraction < 1 trägt das
+   * Mesh die Build-Materialien; bei Fertigstellung kommt das normale
+   * Unit-Material zurück und das Overlay verschwindet.
+   */
+  build?: {
+    base: THREE.ShaderMaterial
+    overlay: THREE.ShaderMaterial
+    overlayMesh: THREE.Mesh
+    normalMaterial: THREE.Material
+  }
 }
 let luaSim: LuaSimClient | null = null
 /**
@@ -1645,7 +1659,7 @@ function luaSimUpdate(): void {
     knownSceneUnits.add(s.id)
     // Fehler LAUT machen: ein still verworfenes Promise ließ Einheiten ohne
     // Modell zurück (Lebensbalken ohne Mesh darunter) — ohne eine Log-Zeile.
-    addLuaUnitToScene(s.id, s.name, { x: s.x, y: s.y, z: s.z }).catch((e) => {
+    addLuaUnitToScene(s.id, s.name, { x: s.x, y: s.y, z: s.z }, s.fraction < 1).catch((e) => {
       log(`FEHLER Modell für ${s.name} (Unit ${s.id}): ${e instanceof Error ? e.message : e}`)
     })
   }
@@ -1758,6 +1772,26 @@ function luaSimUpdate(): void {
       u.ring.scale.set(e.x, 1, e.z)
     }
 
+    // BAUSTELLE: die Build-Technique lebt von drei Uniforms — Baufortschritt
+    // (material.y), Unit-Alter und Weltzeit in Sekunden (mesh.fx `time`).
+    // Bei Fertigstellung kommt das normale Unit-Material zurück.
+    if (u.build) {
+      const sek = (luaSim.gameTick + lerpAlpha) / 10
+      if (s.fraction >= 1) {
+        u.mesh.remove(u.build.overlayMesh)
+        u.build.overlay.dispose()
+        ;(u.scene.mesh as THREE.Mesh).material = u.build.normalMaterial
+        u.build.base.dispose()
+        u.build = undefined
+      } else {
+        u.build.base.uniforms.fraction!.value = s.fraction
+        u.build.base.uniforms.unitAge!.value = sek - s.born / 10
+        u.build.base.uniforms.time!.value = sek
+        u.build.overlay.uniforms.fraction!.value = s.fraction
+        u.build.overlay.uniforms.unitAge!.value = sek - s.born / 10
+      }
+    }
+
     // Die LAUFANIMATION. Die Sim sagt, ob die Einheit fährt (`moving` kommt aus
     // `__readAllUnitsJson`, gespeist vom Navigator) — der Renderer spielt sie
     // dann ab. Die Animation selbst ist die Original-SCA des Blueprints
@@ -1789,6 +1823,8 @@ async function addLuaUnitToScene(
   uid: number,
   bpId: string,
   pos: { x: number; y: number; z: number },
+  /** Baustelle (fraction < 1): startet mit den Build-Materialien (UEFBuild). */
+  building = false,
 ): Promise<void> {
   knownSceneUnits.add(uid)
   const id = bpId.toLowerCase()
@@ -1798,6 +1834,41 @@ async function addLuaUnitToScene(
   const scale = bpGet(assets.bp, 'Display.UniformScale')
   if (typeof scale === 'number' && scale > 0) scene.mesh.scale.setScalar(scale)
   scene.mesh.position.set(pos.x, pos.y, pos.z)
+
+  // BAUSTELLE: die Build-Technique der Fraktion (lua/system/blueprints.lua:210
+  // erzeugt das Build-Mesh-BP mit Shader '<Faction>Build'). Portiert ist
+  // UEFBuild (mesh.fx:5627); die übrigen Fraktionen behalten bis zu ihrem
+  // Port das fertige Material — einmal je Fraktion gesagt.
+  let build: LuaSceneUnit['build']
+  if (building) {
+    const faction = bpGet(assets.bp, 'General.FactionName')
+    if (faction === 'UEF') {
+      uefBuildSpecular ??= loadFirstTexture(['textures/effects/uefbuildspecular.dds']).then((t) => {
+        if (t) t.wrapS = t.wrapT = THREE.RepeatWrapping
+        return t
+      })
+      const gitter = await uefBuildSpecular
+      if (gitter) {
+        const mats = createUefBuildMaterials(
+          assets.textures,
+          gitter,
+          currentTeamColor(),
+          scene.animator.skinMatrices,
+          viewer.lighting ?? undefined,
+        )
+        const normalMaterial = scene.mesh.material as THREE.Material
+        scene.mesh.material = mats.base
+        const overlayMesh = new THREE.Mesh(scene.mesh.geometry, mats.overlay)
+        overlayMesh.frustumCulled = false
+        overlayMesh.renderOrder = 1
+        scene.mesh.add(overlayMesh)
+        build = { base: mats.base, overlay: mats.overlay, overlayMesh, normalMaterial }
+      }
+    } else if (typeof faction === 'string' && !propSkipLogged.has(`build:${faction}`)) {
+      propSkipLogged.add(`build:${faction}`)
+      log(`Baustellen-Shader ${faction}Build fehlt noch — Baustelle zeigt das fertige Material`)
+    }
+  }
   const ring = new THREE.Mesh(
     luaRingGeo,
     new THREE.MeshBasicMaterial({ color: 0x44ff66, transparent: true, opacity: 0.9, depthTest: false }),
@@ -1825,6 +1896,7 @@ async function addLuaUnitToScene(
     scene,
     walking: false,
     ringExtents: ringExtents(assets.bp as BpObject),
+    build,
   })
 }
 

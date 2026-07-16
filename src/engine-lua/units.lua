@@ -109,6 +109,9 @@ function __spawnUnit(scriptPath, bpId, x, y, z, army, complete)
   u.__speed = 0
   u.__health = (bp.Defense and bp.Defense.MaxHealth) or 0
   u.__fraction = 1
+  -- Erstellungs-Tick: die Build-/Wreckage-Shader zaehlen ihr Alter darueber
+  -- (mesh.fx: material.x = time - creationTime).
+  u.__spawnTick = __gameTick or 0
   -- Engine-bereitgestellte Instanz-Felder (vor OnCreate vorhanden)
   u.Trash = TrashBag()
   __units[id] = u
@@ -212,6 +215,7 @@ local function readRow(id, u)
     maxHealth = u:GetMaxHealth(),
     moving = moving,
     fraction = u.__fraction or 1,
+    born = u.__spawnTick or 0,
     mesh = u.__meshBp,
     army = u.__army or 1,
     -- „idle" im Sinn der Engine (die Idle-Sets am UserArmy, Cfile:1352334-1352374,
@@ -265,6 +269,7 @@ function __readAllUnitsJson()
       .. ',"maxHealth":' .. jnum(r.maxHealth)
       .. ',"moving":' .. tostring(r.moving)
       .. ',"fraction":' .. jnum(r.fraction)
+      .. ',"born":' .. jnum(r.born)
       .. ',"army":' .. jnum(r.army)
       .. ',"idle":' .. tostring(r.idle)
       .. ',"buildQueue":[' .. table.concat(q, ',') .. ']'
