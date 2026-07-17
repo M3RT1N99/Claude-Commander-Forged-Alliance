@@ -14,6 +14,7 @@ import { bgraToRgba, decodeDxt } from '../formats/dxt'
 import { UnitAnimator } from '../anim/animator'
 import type { ScaAnim } from '../formats/sca'
 import { MapProps } from './mapProps'
+import { MapDecals } from './mapDecals'
 
 /** Eine in die Szene gesetzte Einheit (Sandbox-Modus). */
 export class SceneUnit {
@@ -56,6 +57,7 @@ export class UnitViewer {
   private waterMesh: THREE.Mesh | null = null
   private skirtMesh: THREE.Mesh | null = null
   private mapProps: MapProps | null = null
+  private mapDecals: MapDecals | null = null
   /** Map '<default>' env cube — mesh.fx environmentSampler (Cfile:1189598). */
   private envCube: THREE.Texture | null = null
   private animator: UnitAnimator | null = null
@@ -249,6 +251,11 @@ export class UnitViewer {
       this.scene.remove(this.mapProps.group)
       this.mapProps.dispose()
       this.mapProps = null
+    }
+    if (this.mapDecals) {
+      this.scene.remove(this.mapDecals.group)
+      this.mapDecals.dispose()
+      this.mapDecals = null
     }
     if (this.envCube) {
       this.envCube.dispose()
@@ -983,6 +990,47 @@ export class UnitViewer {
     this.scene.add(mesh)
     this.current = mesh
 
+    // Albedo decals (type 1, terrain.fx TDecals/TDecalsXP) — instanced
+    // terrain patches projected through the inverse DecalMatrix. Normals
+    // decals (type 2) need a normal render target and stay open.
+    this.mapDecals = await MapDecals.load(
+      scmap.decals,
+      vfs,
+      {
+        heightTex,
+        heightScale: scmap.heightScale,
+        hmUvScale: new THREE.Vector2((hmW - 1) / hmW, (hmH - 1) / hmH),
+        hmUvOffset: new THREE.Vector2(0.5 / hmW, 0.5 / hmH),
+        hmTexel: new THREE.Vector2(1 / hmW, 1 / hmH),
+        mapSize: new THREE.Vector2(width, height),
+        waterRamp,
+        waterElevation: scmap.water.elevation,
+        depthToG,
+        xpShader: scmap.terrainShader === 'TTerrainXP',
+        lighting: {
+          sunDirection: new THREE.Vector3(...scmap.lighting.sunDirection).normalize(),
+          sunColor: new THREE.Color(...scmap.lighting.sunColor),
+          sunAmbience: new THREE.Color(...scmap.lighting.sunAmbience),
+          shadowFillColor: new THREE.Color(...scmap.lighting.shadowFillColor),
+          specularColor: new THREE.Vector4(...scmap.lighting.specularColor),
+          lightingMultiplier: scmap.lighting.lightingMultiplier,
+        },
+      },
+      this.s3tcSupported,
+    )
+    this.scene.add(this.mapDecals.group)
+    if (this.mapDecals.stats.instances > 0) {
+      console.log(
+        `map decals: ${this.mapDecals.stats.instances} albedo instances, ` +
+          `${this.mapDecals.stats.textures} texture sets` +
+          (this.mapDecals.stats.skippedTypes.size > 0
+            ? `, skipped ${[...this.mapDecals.stats.skippedTypes]
+                .map(([t, n]) => `type${t}=${n}`)
+                .join(' ')}`
+            : ''),
+      )
+    }
+
     if (scmap.water.hasWater) {
       const waterGeo = new THREE.PlaneGeometry(width, height)
       waterGeo.rotateX(-Math.PI / 2)
@@ -1003,6 +1051,9 @@ export class UnitViewer {
         sunColor: new THREE.Color(...scmap.lighting.sunColor),
       })
       this.waterMesh = new THREE.Mesh(waterGeo, waterMat)
+      // Water draws AFTER the decal patches (both are blended; the decals
+      // belong to the terrain surface below the water plane).
+      this.waterMesh.renderOrder = 2
       this.scene.add(this.waterMesh)
     }
 

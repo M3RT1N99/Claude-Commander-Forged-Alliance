@@ -225,6 +225,22 @@ console.log('\n== SCMAP-Schwanz: alle Karten bis exakt EOF ==')
     `Prop-Mesh parsbar: ${pineLods[0]!.mesh} (${propModel.vertexCount} Vertices, Shader ${pineLods[0]!.shader})`,
   )
 
+  // Albedo decals (type 1): every referenced texture must resolve in the
+  // VFS — mapDecals.ts groups by texture set and skips nothing silently.
+  const decalT1 = m9.decals.filter((d) => d.type === 1)
+  const decalTex = [
+    ...new Set(
+      decalT1.flatMap((d) => d.textures.filter((t) => t.length > 0))
+        .map((t) => t.replace(/^\//, '').toLowerCase()),
+    ),
+  ]
+  const decalMissing = decalTex.filter((t) => !vfs.exists(t))
+  check(
+    decalT1.length > 1000 && decalMissing.length === 0,
+    `SCMP_009: ${decalT1.length} albedo decals, ${decalTex.length} textures all resolvable` +
+      (decalMissing.length ? ` (missing: ${decalMissing[0]})` : ''),
+  )
+
   // Stratum normal maps (render-details.md par. 4: lower + strata 0-3 are
   // populated on the retail maps): every non-empty path must exist.
   const normalPaths = m9.normalStrata
