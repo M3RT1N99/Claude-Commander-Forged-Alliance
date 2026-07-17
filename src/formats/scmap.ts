@@ -9,6 +9,14 @@ export interface ScmapStratum {
   albedoScale: number
 }
 
+/** One of the four scrolling wave normal-map layers (water2.fx). */
+export interface ScmapWaveNormal {
+  repeat: number
+  movementX: number
+  movementY: number
+  path: string
+}
+
 export interface ScmapWater {
   hasWater: boolean
   elevation: number
@@ -18,7 +26,68 @@ export interface ScmapWater {
   colorLerpMin: number
   colorLerpMax: number
   refractionScale: number
+  fresnelBias: number
+  fresnelPower: number
+  unitReflection: number
+  skyReflection: number
+  sunShininess: number
+  sunStrength: number
+  sunDirection: [number, number, number]
+  sunColor: [number, number, number]
+  sunReflection: number
+  sunGlow: number
+  /** The sky cubemap the water reflects (water2.fx SkySampler). */
+  texPathCubemap: string
   texPathWaterRamp: string
+  /** Exactly 4 layers (water2.fx NormalSampler0-3). */
+  waveNormals: ScmapWaveNormal[]
+}
+
+/** A terrain decal (CDecalTypes.h SDecalInfo; type enum CWldTerrainDecalTYPE:
+ *  1 Albedo, 2 Normals, 4 WaterAlbedo, 6 Glow, 8 GlowMask, 9 AlbedoXp). */
+export interface ScmapDecal {
+  type: number
+  textures: string[]
+  scale: [number, number, number]
+  position: [number, number, number]
+  rotation: [number, number, number]
+  cutOffLOD: number
+  nearCutOffLOD: number
+  army: number
+}
+
+/** A map prop instance (render-details.md par. 1: 3x3 orthonormal rotation
+ *  basis, verified over all 60 retail maps down to exact EOF). */
+export interface ScmapProp {
+  blueprintPath: string
+  position: [number, number, number]
+  rotationX: [number, number, number]
+  rotationY: [number, number, number]
+  rotationZ: [number, number, number]
+  scale: [number, number, number]
+}
+
+/** The v60 skybox block (independently confirmed by sky.fx + SkyDome.cpp:
+ *  dome 16x6, subHeight 1.2566371). */
+export interface ScmapSkybox {
+  position: [number, number, number]
+  horizonHeight: number
+  scale: number
+  subHeight: number
+  subDivAx: number
+  subDivHeight: number
+  zenithHeight: number
+  horizonColor: [number, number, number]
+  zenithColor: [number, number, number]
+  decalGlowMultiplier: number
+  albedo: string
+  glow: string
+  planets: { position: [number, number, number]; rotation: number; scale: [number, number]; uv: [number, number, number, number] }[]
+  midRgbColor: [number, number, number]
+  cirrusMultiplier: number
+  cirrusColor: [number, number, number]
+  cirrusTexture: string
+  cirrusLayers: { frequency: [number, number]; speed: number; direction: [number, number] }[]
 }
 
 export interface ScmapLighting {
@@ -44,6 +113,16 @@ export interface ScmapData {
   water: ScmapWater
   /** Lower, Stratum0-7, Upper — genau 10 Lagen (FA) */
   strata: ScmapStratum[]
+  /** The 9 stratum normal-map layers (path + scale). */
+  normalStrata: ScmapStratum[]
+  /** Environment cubemaps for mesh.fx environmentSampler: name -> path. */
+  envCubes: { name: string; path: string }[]
+  decals: ScmapDecal[]
+  /** Terrain type index per cell (width * height bytes) — GetTerrainType. */
+  terrainTypeData: Uint8Array
+  /** Only versionMinor >= 60 (older maps use the header background/skyCubemap). */
+  skybox: ScmapSkybox | null
+  props: ScmapProp[]
   /** Eingebettete DDS-Bilder */
   previewDds: Uint8Array
   normalMapDds: Uint8Array | null
@@ -179,9 +258,9 @@ export function parseScmap(data: Uint8Array): ScmapData {
   const background = r.cstr()
   const skyCubemap = r.cstr()
   const envCubeCount = r.u32()
+  const envCubes: { name: string; path: string }[] = []
   for (let i = 0; i < envCubeCount; i++) {
-    r.cstr() // Name
-    r.cstr() // Pfad
+    envCubes.push({ name: r.cstr(), path: r.cstr() })
   }
 
   // --- Lighting ----------------------------------------------------------------
@@ -208,25 +287,25 @@ export function parseScmap(data: Uint8Array): ScmapData {
   const refractionScale = r.f32()
   const fresnelBias = r.f32()
   const fresnelPower = r.f32()
-  void fresnelBias
-  void fresnelPower
-  r.f32() // unitReflection
-  r.f32() // skyReflection
-  r.f32() // waveTexture-Skalen: sunShininess
-  r.f32() // sunStrength
-  r.vec3() // sunDirection (Wasser)
-  r.vec3() // sunColor (Wasser)
-  r.f32() // sunReflection
-  r.f32() // sunGlow
-  r.cstr() // texPathCubemap
+  const unitReflection = r.f32()
+  const skyReflection = r.f32()
+  const sunShininess = r.f32()
+  const sunStrength = r.f32()
+  const waterSunDirection = r.vec3()
+  const waterSunColor = r.vec3()
+  const sunReflection = r.f32()
+  const sunGlow = r.f32()
+  const texPathCubemap = r.cstr()
   const texPathWaterRamp = r.cstr()
 
-  // Wellen-Normal-Maps: erst ALLE 4 Repeat-Werte, dann 4 × (Movement + Pfad)
-  for (let i = 0; i < 4; i++) r.f32() // waveNormalRepeat[4]
+  // Wave normal maps: ALL 4 repeat values first, then 4 x (movement + path).
+  const waveRepeats: number[] = []
+  for (let i = 0; i < 4; i++) waveRepeats.push(r.f32())
+  const waveNormals: ScmapWaveNormal[] = []
   for (let i = 0; i < 4; i++) {
-    r.f32() // normalMovement.x
-    r.f32() // normalMovement.y
-    r.cstr() // texPath
+    const movementX = r.f32()
+    const movementY = r.f32()
+    waveNormals.push({ repeat: waveRepeats[i]!, movementX, movementY, path: r.cstr() })
   }
   // WaveGenerators
   const waveGenCount = r.u32()
@@ -258,30 +337,37 @@ export function parseScmap(data: Uint8Array): ScmapData {
     const albedoScale = r.f32()
     strata.push({ albedoPath, albedoScale })
   }
+  const normalStrata: ScmapStratum[] = []
   for (let i = 0; i < 9; i++) {
-    r.cstr() // Normal-Pfad (später für Stratum-Normals)
-    r.f32() // Normal-Skalierung
+    normalStrata.push({ albedoPath: r.cstr(), albedoScale: r.f32() })
   }
 
   r.u32() // unknown
   r.u32() // unknown
 
-  // --- Decals (überspringen) -----------------------------------------------------
+  // --- Decals (SDecalInfo, CDecalTypes.h:89-101) --------------------------------
   const decalCount = r.u32()
+  const decals: ScmapDecal[] = []
   for (let i = 0; i < decalCount; i++) {
     r.u32() // id
-    r.u32() // type
+    const type = r.u32()
     const texCount = r.u32()
+    const textures: string[] = []
     for (let t = 0; t < texCount; t++) {
       const strLen = r.u32()
+      textures.push(new TextDecoder('ascii').decode(r.data.subarray(r.pos, r.pos + strLen)))
       r.skip(strLen)
     }
-    r.vec3() // scale
-    r.vec3() // position
-    r.vec3() // rotation
-    r.f32() // cutOffLOD
-    r.f32() // nearCutOffLOD
-    r.u32() // ownerArmy
+    decals.push({
+      type,
+      textures,
+      scale: r.vec3(),
+      position: r.vec3(),
+      rotation: r.vec3(),
+      cutOffLOD: r.f32(),
+      nearCutOffLOD: r.f32(),
+      army: r.u32(),
+    })
   }
   const decalGroupCount = r.u32()
   for (let i = 0; i < decalGroupCount; i++) {
@@ -306,8 +392,72 @@ export function parseScmap(data: Uint8Array): ScmapData {
   const waterMapCount = r.u32() // immer 1
   void waterMapCount
   const waterMapDds = embeddedDds(r)
-  // Danach: Foam/Flatness/Depth-Bias-Masken (je (w/2)*(h/2) Bytes), Terrain-Type,
-  // Props — für das Rendering des Terrains nicht nötig; hier beenden wir.
+
+  // --- Tail (render-details.md par. 1 — verified over all 60 retail maps
+  // down to exact EOF): foam/flatness/depthBias masks, terrain type,
+  // v60 skybox block, then the props list.
+  const maskBytes = (width / 2) * (height / 2)
+  r.skip(maskBytes) // waterFoamMask
+  r.skip(maskBytes) // waterFlatnessMask
+  r.skip(maskBytes) // waterDepthBiasMask
+  const terrainTypeData = r.data.subarray(r.pos, r.pos + width * height)
+  r.skip(width * height)
+
+  let skybox: ScmapSkybox | null = null
+  if (versionMinor >= 60) {
+    const position = r.vec3()
+    const horizonHeight = r.f32()
+    const scale = r.f32()
+    const subHeight = r.f32()
+    const subDivAx = r.i32()
+    const subDivHeight = r.i32()
+    const zenithHeight = r.f32()
+    const horizonColor = r.vec3()
+    const zenithColor = r.vec3()
+    const decalGlowMultiplier = r.f32()
+    const albedo = r.cstr()
+    const glow = r.cstr()
+    const planetCount = r.i32()
+    const planets: ScmapSkybox['planets'] = []
+    for (let i = 0; i < planetCount; i++) {
+      planets.push({ position: r.vec3(), rotation: r.f32(), scale: [r.f32(), r.f32()], uv: r.vec4() })
+    }
+    const midRgbColor: [number, number, number] = [r.data[r.pos]!, r.data[r.pos + 1]!, r.data[r.pos + 2]!]
+    r.skip(3)
+    const cirrusMultiplier = r.f32()
+    const cirrusColor = r.vec3()
+    const cirrusTexture = r.cstr()
+    const cirrusLayerCount = r.i32()
+    const cirrusLayers: ScmapSkybox['cirrusLayers'] = []
+    for (let i = 0; i < cirrusLayerCount; i++) {
+      cirrusLayers.push({ frequency: [r.f32(), r.f32()], speed: r.f32(), direction: [r.f32(), r.f32()] })
+    }
+    r.f32() // clouds7 (always 0.0)
+    skybox = {
+      position, horizonHeight, scale, subHeight, subDivAx, subDivHeight,
+      zenithHeight, horizonColor, zenithColor, decalGlowMultiplier, albedo,
+      glow, planets, midRgbColor, cirrusMultiplier, cirrusColor,
+      cirrusTexture, cirrusLayers,
+    }
+  }
+
+  const propCount = r.u32()
+  const props: ScmapProp[] = []
+  for (let i = 0; i < propCount; i++) {
+    props.push({
+      blueprintPath: r.cstr(),
+      position: r.vec3(),
+      rotationX: r.vec3(),
+      rotationY: r.vec3(),
+      rotationZ: r.vec3(),
+      scale: r.vec3(),
+    })
+  }
+  // The tail structure is fully decoded — anything left over is a parse
+  // error, not something to ignore.
+  if (r.pos !== r.data.length) {
+    throw new Error(`SCMAP: ${r.data.length - r.pos} bytes left after props (parsed ${r.pos})`)
+  }
 
   return {
     versionMinor,
@@ -335,9 +485,27 @@ export function parseScmap(data: Uint8Array): ScmapData {
       colorLerpMin,
       colorLerpMax,
       refractionScale,
+      fresnelBias,
+      fresnelPower,
+      unitReflection,
+      skyReflection,
+      sunShininess,
+      sunStrength,
+      sunDirection: waterSunDirection,
+      sunColor: waterSunColor,
+      sunReflection,
+      sunGlow,
+      texPathCubemap,
       texPathWaterRamp,
+      waveNormals,
     },
     strata,
+    normalStrata,
+    envCubes,
+    decals,
+    terrainTypeData,
+    skybox,
+    props,
     previewDds,
     normalMapDds,
     textureMaskLowDds,

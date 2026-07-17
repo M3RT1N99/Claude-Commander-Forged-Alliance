@@ -16,6 +16,7 @@
  */
 import { open, readdir, stat, type FileHandle } from 'node:fs/promises'
 import { GameVfs } from '../src/vfs/vfs'
+import { parseScmap } from '../src/formats/scmap'
 import type { GameSource, GameDirEntry } from '../src/vfs/gameSource'
 import type { RandomAccessFile } from '../src/vfs/randomAccess'
 import { join } from 'node:path'
@@ -103,6 +104,49 @@ check(
   vfs.resolve('lua/ui/menus/main.lua')?.toLowerCase().includes('lua/ui/menus/main.lua') === true,
   'die Archive behalten Vorrang (SupComDataPath: erster Treffer gewinnt)',
 )
+
+// --- SCMAP tail: every retail map must parse down to exact EOF ---------------
+// (render-details.md par. 1 decoded the full tail: masks, terrain type,
+// v60 skybox, props; the parser now throws on leftover bytes.)
+console.log('\n== SCMAP-Schwanz: alle Karten bis exakt EOF ==')
+{
+  // Only real maps under maps/ — lua/ai/opai/opaimap.scmap is a v51 SC1-format
+  // helper the parser rejects by design.
+  const realMaps = scmaps.filter((p) => p.startsWith('maps/'))
+  let parsed = 0
+  let withProps = 0
+  let withSkybox = 0
+  let failed = 0
+  for (const p of realMaps) {
+    try {
+      const m = parseScmap(await vfs.read(p))
+      parsed++
+      if (m.props.length > 0) withProps++
+      if (m.skybox) withSkybox++
+      if (m.water.waveNormals.length !== 4) throw new Error('waveNormals != 4')
+    } catch (e) {
+      failed++
+      if (failed <= 3) console.log(`  · FEHLER ${p}: ${e instanceof Error ? e.message : e}`)
+    }
+  }
+  check(failed === 0 && parsed === realMaps.length, `${parsed}/${realMaps.length} Karten bis EOF geparst`)
+  check(withProps > 10, `${withProps} Karten mit Props (SCMP_005 hat ~47k)`)
+  check(withSkybox > 0, `${withSkybox} Karten mit v60-Skybox-Block`)
+  // Spot checks on one known map: props carry real blueprint paths and an
+  // orthonormal rotation basis.
+  const m9 = parseScmap(await vfs.read('maps/scmp_009/scmp_009.scmap'))
+  check(
+    m9.props.length > 100 && m9.props[0]!.blueprintPath.endsWith('_prop.bp'),
+    `SCMP_009: ${m9.props.length} Props, erster: ${m9.props[0]!.blueprintPath}`,
+  )
+  const p0 = m9.props[0]!
+  const dot = p0.rotationX[0] * p0.rotationZ[0] + p0.rotationX[1] * p0.rotationZ[1] + p0.rotationX[2] * p0.rotationZ[2]
+  check(Math.abs(dot) < 1e-4, `Rotationsbasis orthonormal (rotX·rotZ = ${dot.toFixed(6)})`)
+  check(
+    m9.terrainTypeData.length === m9.width * m9.height,
+    `TerrainType-Daten ${m9.terrainTypeData.length} = ${m9.width}×${m9.height}`,
+  )
+}
 
 await source.close()
 console.log(failures === 0 ? '\nVFS-MAPS BESTANDEN' : `\n${failures} CHECK(S) FEHLGESCHLAGEN`)
