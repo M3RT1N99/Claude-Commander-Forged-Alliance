@@ -120,6 +120,7 @@ console.log('\n== SCMAP-Schwanz: alle Karten bis exakt EOF ==')
   let withProps = 0
   let withSkybox = 0
   let failed = 0
+  const shaderCount = new Map<string, number>()
   for (const p of realMaps) {
     try {
       const m = parseScmap(await vfs.read(p))
@@ -127,12 +128,22 @@ console.log('\n== SCMAP-Schwanz: alle Karten bis exakt EOF ==')
       if (m.props.length > 0) withProps++
       if (m.skybox) withSkybox++
       if (m.water.waveNormals.length !== 4) throw new Error('waveNormals != 4')
+      shaderCount.set(m.terrainShader, (shaderCount.get(m.terrainShader) ?? 0) + 1)
     } catch (e) {
       failed++
       if (failed <= 3) console.log(`  · FEHLER ${p}: ${e instanceof Error ? e.message : e}`)
     }
   }
   check(failed === 0 && parsed === realMaps.length, `${parsed}/${realMaps.length} Karten bis EOF geparst`)
+  // Terrain shader split documented in render-details.md par. 4:
+  // TTerrain 39, TTerrainXP 20, TTerrainGlow 1 — the variant choice in
+  // terrainMaterial.ts depends on exactly these strings.
+  check(
+    shaderCount.get('TTerrain') === 39 &&
+      shaderCount.get('TTerrainXP') === 20 &&
+      shaderCount.get('TTerrainGlow') === 1,
+    `terrain shader split: ${[...shaderCount].map(([k, v]) => `${k}=${v}`).join(', ')}`,
+  )
   check(withProps > 10, `${withProps} Karten mit Props (SCMP_005 hat ~47k)`)
   check(withSkybox > 0, `${withSkybox} Karten mit v60-Skybox-Block`)
   // Spot checks on one known map: props carry real blueprint paths and an
@@ -212,6 +223,17 @@ console.log('\n== SCMAP-Schwanz: alle Karten bis exakt EOF ==')
   check(
     propModel.vertexCount > 0 && propModel.indices.length > 0,
     `Prop-Mesh parsbar: ${pineLods[0]!.mesh} (${propModel.vertexCount} Vertices, Shader ${pineLods[0]!.shader})`,
+  )
+
+  // Stratum normal maps (render-details.md par. 4: lower + strata 0-3 are
+  // populated on the retail maps): every non-empty path must exist.
+  const normalPaths = m9.normalStrata
+    .map((s) => s?.albedoPath ?? '')
+    .filter((p) => p.length > 0)
+    .map((p) => p.replace(/^\//, '').toLowerCase())
+  check(
+    normalPaths.length >= 5 && normalPaths.every((p) => vfs.exists(p)),
+    `SCMP_009: ${normalPaths.length} stratum normal maps, all resolvable (${normalPaths[0]})`,
   )
 }
 

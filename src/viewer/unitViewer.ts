@@ -7,6 +7,8 @@ import { createUnitMaterial, createWreckageMaterial, type UnitTextures, type Map
 import { createTerrainMaterial } from './terrainMaterial'
 import { createWaterMaterial } from './waterMaterial'
 import { ddsToTexture, ddsToCubeTexture } from './textures'
+import SKIRT_VS from './shaders/skirt.vert.glsl?raw'
+import SKIRT_FS from './shaders/skirt.frag.glsl?raw'
 import { parseDds } from '../formats/dds'
 import { bgraToRgba, decodeDxt } from '../formats/dxt'
 import { UnitAnimator } from '../anim/animator'
@@ -52,6 +54,7 @@ export class UnitViewer {
   private readonly controls: OrbitControls
   private current: THREE.Mesh | null = null
   private waterMesh: THREE.Mesh | null = null
+  private skirtMesh: THREE.Mesh | null = null
   private mapProps: MapProps | null = null
   /** Map '<default>' env cube — mesh.fx environmentSampler (Cfile:1189598). */
   private envCube: THREE.Texture | null = null
@@ -106,6 +109,12 @@ export class UnitViewer {
 
     this.renderer.setAnimationLoop(() => {
       const dt = this.clock.getDelta()
+      // TTerrainGlow: the stratum1 lava layer scrolls with Time (terrain.fx
+      // :510-514) — feed the elapsed clock into the terrain material.
+      const terrainMat = this.current?.material as THREE.ShaderMaterial | undefined
+      if (terrainMat?.uniforms?.time) {
+        terrainMat.uniforms.time.value = this.clock.elapsedTime
+      }
       if (this.animator && this.animPlaying) {
         this.animTime += dt * this.animationSpeed
         this.animator.update(this.animTime)
@@ -229,6 +238,12 @@ export class UnitViewer {
       this.waterMesh.geometry.dispose()
       ;(this.waterMesh.material as THREE.Material).dispose()
       this.waterMesh = null
+    }
+    if (this.skirtMesh) {
+      this.scene.remove(this.skirtMesh)
+      this.skirtMesh.geometry.dispose()
+      ;(this.skirtMesh.material as THREE.Material).dispose()
+      this.skirtMesh = null
     }
     if (this.mapProps) {
       this.scene.remove(this.mapProps.group)
@@ -891,6 +906,23 @@ export class UnitViewer {
       ...mid.map((s) => loadLayer(s?.albedoPath ?? '')),
     ])
 
+    // Stratum normal maps (terrain.fx TerrainNormalsPS/XP): lower + strata
+    // 0-7, blended with the same masks as the albedos. Missing paths stay
+    // null — the material then skips that blend step.
+    const loadNormal = async (path: string): Promise<THREE.Texture | null> => {
+      if (!path || !vfs.exists(path)) return null
+      const tex = ddsToTexture(await vfs.read(path), this.s3tcSupported)
+      tex.wrapS = THREE.RepeatWrapping
+      tex.wrapT = THREE.RepeatWrapping
+      return tex
+    }
+    const nLower = scmap.normalStrata[0]
+    const nMid = scmap.normalStrata.slice(1, 9)
+    const [lowerNormalTex, ...midNormalTex] = await Promise.all([
+      loadNormal(nLower?.albedoPath ?? ''),
+      ...nMid.map((s) => loadNormal(s?.albedoPath ?? '')),
+    ])
+
     const embedded = (dds: Uint8Array | null): THREE.Texture => {
       if (!dds) return dummy
       // Eingebettete Masken/Watermaps haben dieselbe Zeilen-Orientierung
@@ -909,6 +941,7 @@ export class UnitViewer {
         : null
 
     const material = createTerrainMaterial({
+      terrainShader: scmap.terrainShader,
       heightTex,
       heightScale: scmap.heightScale,
       hmWidth: hmW,
@@ -925,6 +958,12 @@ export class UnitViewer {
         strataScales: mid.map((s) => s?.albedoScale || 4),
         upperScale: upper?.albedoScale || 4,
         strataEnabled: mid.map((s) => (s?.albedoPath ? 1 : 0)),
+      },
+      normals: {
+        lower: lowerNormalTex,
+        strata: midNormalTex,
+        lowerScale: nLower?.albedoScale || 4,
+        strataScales: nMid.map((s) => s?.albedoScale || 4),
       },
       waterRamp,
       waterElevation: scmap.water.elevation,
@@ -966,6 +1005,19 @@ export class UnitViewer {
       this.waterMesh = new THREE.Mesh(waterGeo, waterMat)
       this.scene.add(this.waterMesh)
     }
+
+    // Terrain skirt (terrain.fx TerrainSkirtPS :584): constant dark grey
+    // outside the map. The engine builds the skirt strip on the C++ side
+    // (HighFidelityTerrain::DrawTerrainSkirt :489); a large ground quad
+    // under the map gives the same constant-grey surround.
+    const skirtGeo = new THREE.PlaneGeometry(width * 9, height * 9)
+    skirtGeo.rotateX(-Math.PI / 2)
+    skirtGeo.translate(width / 2, -0.02, height / 2)
+    this.skirtMesh = new THREE.Mesh(
+      skirtGeo,
+      new THREE.ShaderMaterial({ vertexShader: SKIRT_VS, fragmentShader: SKIRT_FS }),
+    )
+    this.scene.add(this.skirtMesh)
 
     // The map's environment cube — Moho::MeshEnvironment resolves the
     // '<default>' entry of the scmap envCubes list (engine default
