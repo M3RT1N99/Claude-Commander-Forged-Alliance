@@ -62,6 +62,8 @@ export class UnitViewer {
   private skyDome: SkyDome | null = null
   /** Map '<default>' env cube — mesh.fx environmentSampler (Cfile:1189598). */
   private envCube: THREE.Texture | null = null
+  /** Named env cubes from the scmap list ('<aeon>', '<seraphim>', …). */
+  private readonly envCubesByName = new Map<string, THREE.Texture>()
   private animator: UnitAnimator | null = null
   private animPlaying = false
   private animTime = 0
@@ -274,6 +276,8 @@ export class UnitViewer {
       this.envCube.dispose()
       this.envCube = null
     }
+    for (const t of this.envCubesByName.values()) t.dispose()
+    this.envCubesByName.clear()
   }
 
   /** SCM → BufferGeometry mit allen Attributen des Unit-Shaders (UV1,
@@ -372,6 +376,14 @@ export class UnitViewer {
   /** Sky dome diagnosis: number of loaded passes (null = no dome). */
   get skyInfo(): { passes: number } | null {
     return this.skyDome ? { passes: this.skyDome.group.children.length } : null
+  }
+
+  /**
+   * Env cube for a faction: the scmap's named entry ('<aeon>'/'<seraphim>')
+   * if present, else the '<default>' cube.
+   */
+  envCubeFor(faction: string): THREE.Texture | null {
+    return this.envCubesByName.get(`<${faction.toLowerCase()}>`) ?? this.envCube
   }
 
   /**
@@ -1136,6 +1148,14 @@ export class UnitViewer {
     } else {
       console.warn(`env cube not found: ${envPath}`)
       this.envCube = null
+    }
+    // The named entries ('<aeon>', '<seraphim>') feed the faction shaders
+    // (e.g. the SeraphimBuild environment term).
+    for (const e of scmap.envCubes) {
+      const p = e.path.replace(/^\//, '').toLowerCase()
+      if (e.name !== '<default>' && vfs.exists(p)) {
+        this.envCubesByName.set(e.name, ddsToCubeTexture(await vfs.read(p), this.s3tcSupported))
+      }
     }
 
     // Map props (trees, rocks) — one InstancedMesh per blueprint, lit with

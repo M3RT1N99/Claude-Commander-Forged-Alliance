@@ -10,6 +10,13 @@ import WRECKAGE_FS from './shaders/wreckage.frag.glsl?raw'
 import BUILD_UEF_FS from './shaders/buildUef.frag.glsl?raw'
 import BUILD_OVERLAY_VS from './shaders/buildOverlay.vert.glsl?raw'
 import BUILD_OVERLAY_FS from './shaders/buildOverlay.frag.glsl?raw'
+import BUILD_FACTION_VS from './shaders/buildFaction.vert.glsl?raw'
+import BUILD_AEON_FS from './shaders/buildAeon.frag.glsl?raw'
+import BUILD_AEON_OVERLAY_FS from './shaders/buildAeonOverlay.frag.glsl?raw'
+import BUILD_CYBRAN_FS from './shaders/buildCybran.frag.glsl?raw'
+import BUILD_CYBRAN_OVERLAY_VS from './shaders/buildCybranOverlay.vert.glsl?raw'
+import BUILD_CYBRAN_OVERLAY_FS from './shaders/buildCybranOverlay.frag.glsl?raw'
+import BUILD_SERAPHIM_FS from './shaders/buildSeraphim.frag.glsl?raw'
 
 export interface UnitTextures {
   albedo: THREE.Texture
@@ -151,6 +158,118 @@ export function createUefBuildMaterials(
     side: THREE.DoubleSide,
   })
   return { base, overlay }
+}
+
+/**
+ * The build-site materials of the other three factions (blueprints.lua:210
+ * gives every build mesh the shader '<Faction>Build' and the secondary
+ * texture '/textures/effects/<Faction>BuildSpecular.dds'):
+ *
+ *  - AeonBuild (mesh.fx:5349): opaque growing shell (AeonBuildPS :2713,
+ *    mesh scaled by max(pc, 0.75) in AeonBuildVS :1307) + a blended
+ *    scanline overlay (AeonBuildOverlayPS :2748).
+ *  - CybranBuild (:5491): blended hologram (CybranBuildPS :2837, insect
+ *    aniso lookup) + red scanline overlay (CybranBuildOverlayPS :2883,
+ *    EffectVertexNormalLoFiVS(14,4,0,0,-0.008,0.008)).
+ *  - SeraphimBuild (:5580): single blended pass (SeraphimBuildPS :2895,
+ *    mesh scaled by 0.25 + pc*0.75, UV distortion from the secondary,
+ *    falloff ramp per blueprints.lua:229).
+ *
+ * `fraction`/`unitAge` update per frame via the returned uniform refs,
+ * like the UEF pair above.
+ */
+export function createFactionBuildMaterials(
+  faction: 'Aeon' | 'Cybran' | 'Seraphim',
+  textures: UnitTextures,
+  /** /textures/effects/<Faction>BuildSpecular.dds */
+  buildSpecular: THREE.Texture,
+  /** Cybran only: /textures/engine/insectlookup.dds (Cfile:1194790). */
+  insectLookup: THREE.Texture | null,
+  /** Seraphim only: /textures/environment/Falloff_seraphim_lookup.dds. */
+  falloffLookup: THREE.Texture | null,
+  teamColor: THREE.Color,
+  skinMatrices: THREE.Matrix4[],
+  lighting: MapLighting = VIEWER_LIGHT,
+  envCube: THREE.Texture | null = null,
+): { base: THREE.ShaderMaterial; overlay: THREE.ShaderMaterial | null } {
+  const white = new THREE.DataTexture(new Uint8Array([255, 255, 255, 0]), 1, 1)
+  white.needsUpdate = true
+  const flatNormal = new THREE.DataTexture(new Uint8Array([128, 128, 255, 128]), 1, 1)
+  flatNormal.needsUpdate = true
+
+  const bones = { value: skinMatrices.length > 0 ? skinMatrices : [new THREE.Matrix4()] }
+  const shared = {
+    boneMatrices: bones,
+    albedoMap: { value: textures.albedo },
+    normalsMap: { value: textures.normals ?? flatNormal },
+    specTeamMap: { value: textures.specTeam ?? white },
+    secondaryMap: { value: buildSpecular },
+    teamColor: { value: teamColor },
+    sunDirection: { value: lighting.sunDirection },
+    sunDiffuse: { value: lighting.sunColor },
+    sunAmbient: { value: lighting.sunAmbience },
+    shadowFill: { value: lighting.shadowFillColor },
+    lightMultiplier: { value: lighting.lightingMultiplier },
+    glowMultiplier: { value: 2.0 }, // mesh.fx:56
+    fraction: { value: 0 },
+    unitAge: { value: 0 },
+    environmentMap: { value: envCube },
+  }
+  const defines: Record<string, number | boolean> = {
+    MAX_BONES: Math.max(skinMatrices.length, 1),
+  }
+  if (envCube) defines.ENVCUBE = true
+
+  if (faction === 'Aeon') {
+    const base = new THREE.ShaderMaterial({
+      vertexShader: BUILD_FACTION_VS,
+      fragmentShader: BUILD_AEON_FS,
+      defines: { ...defines, AEON_SCALE: true },
+      uniforms: { ...shared },
+      side: THREE.DoubleSide, // pass P0 is opaque (AlphaBlend_Disable)
+    })
+    const overlay = new THREE.ShaderMaterial({
+      vertexShader: BUILD_FACTION_VS,
+      fragmentShader: BUILD_AEON_OVERLAY_FS,
+      defines: { ...defines, AEON_SCALE: true },
+      uniforms: { ...shared },
+      transparent: true,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    })
+    return { base, overlay }
+  }
+
+  if (faction === 'Cybran') {
+    const base = new THREE.ShaderMaterial({
+      vertexShader: BUILD_FACTION_VS,
+      fragmentShader: BUILD_CYBRAN_FS,
+      defines: { ...defines },
+      uniforms: { ...shared, insectMap: { value: insectLookup ?? white } },
+      transparent: true, // AlphaBlend_SrcAlpha (mesh.fx:5502)
+      side: THREE.DoubleSide,
+    })
+    const overlay = new THREE.ShaderMaterial({
+      vertexShader: BUILD_CYBRAN_OVERLAY_VS,
+      fragmentShader: BUILD_CYBRAN_OVERLAY_FS,
+      defines: { ...defines },
+      uniforms: { ...shared },
+      transparent: true,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    })
+    return { base, overlay }
+  }
+
+  const base = new THREE.ShaderMaterial({
+    vertexShader: BUILD_FACTION_VS,
+    fragmentShader: BUILD_SERAPHIM_FS,
+    defines: { ...defines, SERAPHIM_SCALE: true },
+    uniforms: { ...shared, lookupMap: { value: falloffLookup ?? white } },
+    transparent: true, // AlphaBlend_SrcAlpha (mesh.fx:5592)
+    side: THREE.DoubleSide,
+  })
+  return { base, overlay: null }
 }
 
 /**

@@ -34,7 +34,11 @@ import { Hud, type HudSource, type HudUnitInfo, type EcoSnapshot } from './ui/hu
 import { GameUi } from './ui/gameUi'
 import { BuildPreview } from './ui/buildPreview'
 import type { ScmapData } from './formats/scmap'
-import { createUefBuildMaterials, type UnitTextures } from './viewer/unitMaterial'
+import {
+  createUefBuildMaterials,
+  createFactionBuildMaterials,
+  type UnitTextures,
+} from './viewer/unitMaterial'
 import { OrderLineSystem, type OrderLineEntry } from './viewer/orderLines'
 
 const $ = <T extends HTMLElement>(sel: string): T => {
@@ -634,6 +638,22 @@ let wreckNoise: Promise<THREE.Texture | null> | null = null
 // Das UEF-Bau-Gitter (SecondaryName aus ExtractBuildMeshBlueprint,
 // lua/system/blueprints.lua:221) — einmal geladen, von allen Baustellen geteilt.
 let uefBuildSpecular: Promise<THREE.Texture | null> | null = null
+
+// Shared cache for the faction build textures (build speculars, the Cybran
+// insect lookup, the Seraphim falloff ramp).
+const buildTexCache = new Map<string, Promise<THREE.Texture | null>>()
+function buildTexture(path: string, repeat: boolean): Promise<THREE.Texture | null> {
+  let p = buildTexCache.get(path)
+  if (!p) {
+    p = loadFirstTexture([path]).then((t) => {
+      if (t && repeat) t.wrapS = t.wrapT = THREE.RepeatWrapping
+      if (t && !repeat) t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping
+      return t
+    })
+    buildTexCache.set(path, p)
+  }
+  return p
+}
 
 async function addPropMesh(p: LuaPropSnapshot): Promise<void> {
   const assets = await loadSandboxAssets(p.assoc!)
@@ -1485,8 +1505,9 @@ interface LuaSceneUnit {
    */
   build?: {
     base: THREE.ShaderMaterial
-    overlay: THREE.ShaderMaterial
-    overlayMesh: THREE.Mesh
+    /** Seraphim has no overlay pass (single-pass technique). */
+    overlay: THREE.ShaderMaterial | null
+    overlayMesh: THREE.Mesh | null
     normalMaterial: THREE.Material
   }
 }
@@ -1863,17 +1884,20 @@ function luaSimUpdate(): void {
     if (u.build) {
       const sek = (luaSim.gameTick + lerpAlpha) / 10
       if (s.fraction >= 1) {
-        u.mesh.remove(u.build.overlayMesh)
-        u.build.overlay.dispose()
+        if (u.build.overlayMesh) u.mesh.remove(u.build.overlayMesh)
+        u.build.overlay?.dispose()
         ;(u.scene.mesh as THREE.Mesh).material = u.build.normalMaterial
         u.build.base.dispose()
         u.build = undefined
       } else {
+        const age = sek - s.born / 10
         u.build.base.uniforms.fraction!.value = s.fraction
-        u.build.base.uniforms.unitAge!.value = sek - s.born / 10
-        u.build.base.uniforms.time!.value = sek
-        u.build.overlay.uniforms.fraction!.value = s.fraction
-        u.build.overlay.uniforms.unitAge!.value = sek - s.born / 10
+        u.build.base.uniforms.unitAge!.value = age
+        if (u.build.base.uniforms.time) u.build.base.uniforms.time.value = sek
+        if (u.build.overlay) {
+          u.build.overlay.uniforms.fraction!.value = s.fraction
+          u.build.overlay.uniforms.unitAge!.value = age
+        }
       }
     }
 
@@ -1922,13 +1946,29 @@ async function addLuaUnitToScene(
   if (typeof scale === 'number' && scale > 0) scene.mesh.scale.setScalar(scale)
   scene.mesh.position.set(pos.x, pos.y, pos.z)
 
-  // BAUSTELLE: die Build-Technique der Fraktion (lua/system/blueprints.lua:210
-  // erzeugt das Build-Mesh-BP mit Shader '<Faction>Build'). Portiert ist
-  // UEFBuild (mesh.fx:5627); die übrigen Fraktionen behalten bis zu ihrem
-  // Port das fertige Material — einmal je Fraktion gesagt.
+  // BUILD SITE: the faction's build technique (lua/system/blueprints.lua:210
+  // gives every build mesh the shader '<Faction>Build' and the secondary
+  // '/textures/effects/<Faction>BuildSpecular.dds'). All four factions are
+  // ported: UEFBuild (mesh.fx:5627), AeonBuild (:5349), CybranBuild
+  // (:5491), SeraphimBuild (:5580).
   let build: LuaSceneUnit['build']
   if (building) {
     const faction = bpGet(assets.bp, 'General.FactionName')
+    const attach = (mats: {
+      base: THREE.ShaderMaterial
+      overlay: THREE.ShaderMaterial | null
+    }): void => {
+      const normalMaterial = scene.mesh.material as THREE.Material
+      scene.mesh.material = mats.base
+      let overlayMesh: THREE.Mesh | null = null
+      if (mats.overlay) {
+        overlayMesh = new THREE.Mesh(scene.mesh.geometry, mats.overlay)
+        overlayMesh.frustumCulled = false
+        overlayMesh.renderOrder = 1
+        scene.mesh.add(overlayMesh)
+      }
+      build = { base: mats.base, overlay: mats.overlay, overlayMesh, normalMaterial }
+    }
     if (faction === 'UEF') {
       uefBuildSpecular ??= loadFirstTexture(['textures/effects/uefbuildspecular.dds']).then((t) => {
         if (t) t.wrapS = t.wrapT = THREE.RepeatWrapping
@@ -1943,17 +1983,37 @@ async function addLuaUnitToScene(
           scene.animator.skinMatrices,
           viewer.lighting ?? undefined,
         )
-        const normalMaterial = scene.mesh.material as THREE.Material
-        scene.mesh.material = mats.base
-        const overlayMesh = new THREE.Mesh(scene.mesh.geometry, mats.overlay)
-        overlayMesh.frustumCulled = false
-        overlayMesh.renderOrder = 1
-        scene.mesh.add(overlayMesh)
-        build = { base: mats.base, overlay: mats.overlay, overlayMesh, normalMaterial }
+        attach(mats)
       }
-    } else if (typeof faction === 'string' && !propSkipLogged.has(`build:${faction}`)) {
-      propSkipLogged.add(`build:${faction}`)
-      log(`Baustellen-Shader ${faction}Build fehlt noch — Baustelle zeigt das fertige Material`)
+    } else if (faction === 'Aeon' || faction === 'Cybran' || faction === 'Seraphim') {
+      const spec = await buildTexture(
+        `textures/effects/${faction.toLowerCase()}buildspecular.dds`,
+        true,
+      )
+      const insect =
+        faction === 'Cybran' ? await buildTexture('textures/engine/insectlookup.dds', false) : null
+      const falloff =
+        faction === 'Seraphim'
+          ? await buildTexture('textures/environment/falloff_seraphim_lookup.dds', false)
+          : null
+      if (spec) {
+        attach(
+          createFactionBuildMaterials(
+            faction,
+            assets.textures,
+            spec,
+            insect,
+            falloff,
+            currentTeamColor(),
+            scene.animator.skinMatrices,
+            viewer.lighting ?? undefined,
+            viewer.envCubeFor(faction),
+          ),
+        )
+      } else if (!propSkipLogged.has(`build:${faction}`)) {
+        propSkipLogged.add(`build:${faction}`)
+        log(`build specular missing for ${faction} — site shows the finished material`)
+      }
     }
   }
   const ring = new THREE.Mesh(
