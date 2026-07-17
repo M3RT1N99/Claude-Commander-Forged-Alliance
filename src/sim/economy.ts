@@ -28,6 +28,19 @@ export interface UnitEcon {
   prodActive: boolean
   /** Unit:SetConsumptionActive */
   consActive: boolean
+  /**
+   * Economy.NaturalProducer: exempt from the production throttle. Only the
+   * ACUs/sACUs and uea0001/uea0003 carry it (verified-facts).
+   */
+  naturalProducer?: boolean
+  /**
+   * The consumption request's LimitingRate from the PREVIOUS economy tick —
+   * Unit::HandleResourceManagement (Cfile:953936-953944 + 954011-954012)
+   * multiplies the unit's production by exactly this rate unless the
+   * blueprint is a NaturalProducer (the "mex stall"). Persistent like
+   * mConsumptionData in the engine.
+   */
+  lastRate?: number
 }
 
 interface Consumer {
@@ -157,18 +170,33 @@ export class ArmyEconomy {
     let maxM = 0
     let maxE = 0
     const consumers: Consumer[] = []
+    const unitConsumers: [UnitEcon, Consumer][] = []
     for (const u of this.units.values()) {
       if (!u.complete) continue // Baustellen tragen weder Produktion noch Lager bei
       maxM = f(maxM + u.storeM)
       maxE = f(maxE + u.storeE)
       if (u.prodActive) {
-        prodM = f(prodM + u.prodM)
-        prodE = f(prodE + u.prodE)
+        // The mex stall (Unit::HandleResourceManagement,
+        // Cfile:953936-953944 + 954011-954012): non-NaturalProducers scale
+        // their production by the LimitingRate of their OWN consumption
+        // request from the previous economy tick. A mass extractor whose
+        // energy upkeep is only partially granted produces proportionally
+        // less mass; the ACU (NaturalProducer) never throttles.
+        let factor = 1
+        if (!u.naturalProducer && u.consActive && (u.consM > 0 || u.consE > 0)) {
+          factor = u.lastRate ?? 1
+        }
+        prodM = f(prodM + f(u.prodM * factor))
+        prodE = f(prodE + f(u.prodE * factor))
       }
       if (u.consActive) {
         const cm = f(u.consM * DT)
         const ce = f(u.consE * DT)
-        if (cm > 0 || ce > 0) consumers.push({ mass: cm, energy: ce, rate: 1 })
+        if (cm > 0 || ce > 0) {
+          const c: Consumer = { mass: cm, energy: ce, rate: 1 }
+          consumers.push(c)
+          unitConsumers.push([u, c])
+        }
       }
     }
     // Bau-Aufgaben sind ebenfalls Verbraucher (CEconRequest); ihre gewährte
@@ -189,6 +217,8 @@ export class ArmyEconomy {
     const availMass = f(this.mass + f(prodM * DT))
     const availEnergy = f(this.energy + f(prodE * DT))
     const { spentMass, spentEnergy } = distribute(availMass, availEnergy, consumers)
+    // Persist each unit's granted rate for next tick's production factor.
+    for (const [u, c] of unitConsumers) u.lastRate = c.rate
 
     this.mass = f(Math.min(Math.max(availMass - spentMass, 0), maxM))
     this.energy = f(Math.min(Math.max(availEnergy - spentEnergy, 0), maxE))
@@ -259,10 +289,11 @@ export class EconomyManager {
  */
 export function installEconomy(host: LuaHost, mgr: EconomyManager): void {
   const armyIndex = new Map<string, number>()
-  host.setGlobal('__econRegister', (army: number, id: number, pm: number, pe: number, cm: number, ce: number, sm: number, se: number) => {
+  host.setGlobal('__econRegister', (army: number, id: number, pm: number, pe: number, cm: number, ce: number, sm: number, se: number, naturalProducer?: boolean) => {
     mgr.army(army).register(id, {
       prodM: pm, prodE: pe, consM: cm, consE: ce, storeM: sm, storeE: se,
       complete: true, prodActive: true, consActive: true,
+      naturalProducer: naturalProducer === true, lastRate: 1,
     })
   })
   // Getrennte Toggles wie im Original (Produktion ≠ Verbrauch), plus der

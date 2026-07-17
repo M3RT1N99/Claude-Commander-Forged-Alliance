@@ -122,7 +122,10 @@ function __spawnUnit(scriptPath, bpId, x, y, z, army, complete)
   __econRegister(army, id,
     e.ProductionPerSecondMass or 0, e.ProductionPerSecondEnergy or 0,
     e.MaintenanceConsumptionPerSecondMass or 0, e.MaintenanceConsumptionPerSecondEnergy or 0,
-    e.StorageMass or 0, e.StorageEnergy or 0)
+    e.StorageMass or 0, e.StorageEnergy or 0,
+    -- NaturalProducer exempts the unit from the production throttle
+    -- (mex stall, Cfile:953936-953944) — only ACUs/sACUs carry it.
+    e.NaturalProducer == true)
 
   -- OnPreCreate VOR OnCreate — so ruft es die Engine (Cfile: OnPreCreate
   -- @943748, danach OnCreate @944007). Dort entstehen self.Sync (SyncMeta),

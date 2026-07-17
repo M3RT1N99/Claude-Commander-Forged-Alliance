@@ -73,5 +73,45 @@ console.log('\n== Determinismus (float32, stabile Iteration) ==')
   check(run() === run(), `identische Läufe (${run()})`)
 }
 
+// ── Mex-Stall: production × LimitingRate of own consumption ─────────────
+// Unit::HandleResourceManagement (Cfile:953936-953944 + 954011-954012):
+// non-NaturalProducers scale production by their consumption request's
+// LimitingRate from the previous economy tick; NaturalProducers never do.
+console.log('\n== Mex-Stall (Produktion × LimitingRate des Verbrauchs) ==')
+{
+  const a = new ArmyEconomy()
+  // A mex: 2 mass/s production, 10 energy/s upkeep, no NaturalProducer.
+  a.register(1, {
+    prodM: 2, prodE: 0, consM: 0, consE: 10, storeM: 100, storeE: 100,
+    complete: true, prodActive: true, consActive: true,
+    naturalProducer: false, lastRate: 1,
+  })
+  // No energy income, empty storage -> the upkeep request starves.
+  for (let i = 0; i < 5; i++) a.tick()
+  check(
+    a.incomeMass < 0.2,
+    `gestallter Mex produziert fast nichts (income ${a.incomeMass.toFixed(3)} statt 2)`,
+  )
+  // Feed energy: the mex recovers to full production.
+  a.register(2, {
+    prodM: 0, prodE: 100, consM: 0, consE: 0, storeM: 0, storeE: 0,
+    complete: true, prodActive: true, consActive: true,
+  })
+  for (let i = 0; i < 5; i++) a.tick()
+  check(near(a.incomeMass, 2, 1e-2), `mit Energie wieder volle Produktion (${a.incomeMass.toFixed(2)})`)
+}
+{
+  const a = new ArmyEconomy()
+  // The ACU (NaturalProducer) never throttles its own production, even
+  // while its consumption starves.
+  a.register(1, {
+    prodM: 1, prodE: 20, consM: 0, consE: 500, storeM: 100, storeE: 100,
+    complete: true, prodActive: true, consActive: true,
+    naturalProducer: true, lastRate: 1,
+  })
+  for (let i = 0; i < 5; i++) a.tick()
+  check(near(a.incomeMass, 1, 1e-3), `NaturalProducer bleibt bei voller Produktion (${a.incomeMass.toFixed(3)})`)
+}
+
 console.log(failures === 0 ? '\nECONOMY BESTANDEN' : `\n${failures} CHECK(S) FEHLGESCHLAGEN`)
 process.exit(failures === 0 ? 0 : 1)

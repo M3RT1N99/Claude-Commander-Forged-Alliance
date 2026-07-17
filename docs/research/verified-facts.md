@@ -34,12 +34,12 @@ in CLAUDE.md. Vor Arbeit an einem der Themen: den passenden Abschnitt lesen.*
   multipliziert die GetEconomyTotals-Felder mit GetSimTicksPerSecond().
   Der einzige ×10-Faktor im Binary sitzt bei den Armee-STATS
   (Economy_Trend_*, Cfile:1107170) — nie bei den Brain-Gettern.
-- **OFFEN (belegt, noch nicht umgesetzt):** Produktion skaliert mit der
-  LimitingRate des eigenen Verbrauchs, wenn das Blueprint NICHT
-  `Economy.NaturalProducer` hat (HandleResourceManagement Cfile:953938-953944 +
-  954011-954012; NaturalProducer haben nur ACUs/sACUs + uea0001/uea0003) —
-  der bekannte „Mex-Stall". Unsere ArmyEconomy.tick hat die Kopplung nicht;
-  economy-binary.md:117-129 behauptet fälschlich das Gegenteil.
+- **Mex-Stall (umgesetzt):** Produktion skaliert mit der LimitingRate des
+  eigenen Verbrauchs, wenn das Blueprint NICHT `Economy.NaturalProducer`
+  hat (HandleResourceManagement Cfile:953938-953944 + 954011-954012;
+  NaturalProducer haben nur ACUs/sACUs + uea0001/uea0003). Die Rate ist die
+  des VORHERIGEN Economy-Ticks (mConsumptionData ist persistent) — genau so
+  koppelt ArmyEconomy.tick (UnitEcon.lastRate).
 
 ## Bau (Details: [build-task-binary.md](build-task-binary.md))
 
