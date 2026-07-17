@@ -126,6 +126,27 @@ function ConExecute(cmd)
     return
   end
 
+  -- StartCommandMode <mode> <name> (CConFunc, Cfile:423450;
+  -- CON_StartCommandMode Cfile:1255125-1255261): most keymap actions use it
+  -- (keyactions.lua:194-200, e.g. 'StartCommandMode order RULEUCC_Attack').
+  -- Issuing the SAME mode+name again toggles the command mode OFF (the
+  -- stricmp pair against UI_GetCommandMode), otherwise it starts.
+  if string.lower(name) == 'startcommandmode' then
+    local mode, orderName = string.match(rest, '^(%S+)%s+(%S+)$')
+    if not mode then
+      WARN('StartCommandMode: expected "<mode> <name>", got "' .. tostring(rest) .. '"')
+      return
+    end
+    local cm = import('/lua/ui/game/commandmode.lua')
+    local cur = cm.GetCommandMode()
+    if cur[1] == mode and type(cur[2]) == 'table' and cur[2].name == orderName then
+      cm.EndCommandMode(true)
+    else
+      cm.StartCommandMode(mode, { name = orderName })
+    end
+    return
+  end
+
   local entry = __conVars[key(name)]
   if entry then
     local value = parseValue(rest)

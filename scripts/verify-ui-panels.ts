@@ -672,6 +672,26 @@ check(
   host.eval(`return __uiKeyMapExecute(80, true, true, false, false, 80)`) === false,
   'IN_RemoveKeyMapTable entfernt den Eintrag wieder',
 )
+// StartCommandMode as a console command (CON_StartCommandMode,
+// Cfile:1255125): the keymap actions run through it — same mode+name
+// again toggles the command mode OFF.
+host.eval(`ConExecute('StartCommandMode order RULEUCC_Attack')`)
+check(
+  host.eval(`
+    local m = import('/lua/ui/game/commandmode.lua').GetCommandMode()
+    return m[1] == 'order' and type(m[2]) == 'table' and m[2].name == 'RULEUCC_Attack'
+  `) === true,
+  "ConExecute('StartCommandMode order RULEUCC_Attack') startet den Command-Mode",
+)
+host.eval(`ConExecute('StartCommandMode order RULEUCC_Attack')`)
+check(
+  host.eval(`
+    local m = import('/lua/ui/game/commandmode.lua').GetCommandMode()
+    return m[1] == false
+  `) === true,
+  'derselbe Befehl erneut schaltet ihn AUS (Toggle, Cfile:1255233)',
+)
+
 // WorldIsLoading: von der Provider-Kette gepflegt (ui-boot.lua) — nach
 // StopLoadingDialog ist die Welt nicht mehr am Laden.
 check(host.eval('return WorldIsLoading()') === false, 'WorldIsLoading() = false nach DoInitializing')
