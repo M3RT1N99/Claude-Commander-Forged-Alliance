@@ -336,3 +336,28 @@ in CLAUDE.md. Vor Arbeit an einem der Themen: den passenden Abschnitt lesen.*
   moho-Namensliste stehen: `GetHealth` stand in ENTITY_NAMES *und* UNIT_NAMES —
   der No-Op auf der Unit überschattete die echte Implementierung, jede Unit
   meldete 0 HP.
+
+## Shadows (H7 groundwork — mesh.fx, read and verified, not yet built)
+
+- **ComputeShadow (mesh.fx:459-545):** `ComputeShadowStandard` compares
+  `shadowCoords.z > tex2D(shadowSampler, xy/w).r + shadowBias` -> shadow 0,
+  else 1. `ComputeShadowPCF` averages 5 taps (offsets: (-t/2,0), (0,-t/2),
+  (-t,0), (+t,0), (0,+t) with t = 1/shadowSize) comparing
+  `depth + shadowBias > shadowCoords.z - 0.001`. `ComputeShadow(coords,
+  hiDefFiltering)` picks PCF only when `hiDefFiltering && shadowBlur`.
+  Everything sits behind `#ifdef SELF_SHADOW` (without it: 1.0).
+- **Shadow texcoord (NormalMappedVS :951, EffectVertexNormalLoFiVS
+  :1517-1523):** `mShadow = mul(position, ShadowMatrix); x = (x+w)*0.5;
+  y = (-y+w)*0.5; z -= 0.01` (epsilon in the VS).
+- **Terrain receives** via `tex2D(ShadowSampler, mShadow.xy).g`
+  (TerrainAlbedoXP :760) or `ComputeShadow` inside CalculateLighting
+  (:373); terrain does not cast through the mesh depth path.
+- **Casters:** every mesh technique with STAGE_DEPTH in its renderStage
+  and a `depthTechnique` annotation ('Depth' for solid units,
+  'DepthClip' for alpha-tested foliage/props, 'SeraphimBuildDepth' for
+  the growing Seraphim site).
+- **Build plan:** light ortho camera over the map AABB along the scmap
+  sun direction, depth RT, depth-twin meshes sharing geometry +
+  bone-uniform references (instanced props share the instanceMatrix
+  attribute), then the ComputeShadow term in terrain/unit/prop/decal
+  shaders behind a define.
