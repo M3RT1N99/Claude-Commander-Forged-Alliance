@@ -2023,10 +2023,16 @@ if (import.meta.env.DEV) {
       visible: m.visible,
       scale: Math.round(m.scale.x * 1000) / 1000,
     }))
+  // Tilt the RTS camera (sky/horizon acceptance shots via CDP).
+  ;(window as unknown as Record<string, unknown>).__cfaKippen = (dyPixels: number) => {
+    viewer.rotateAroundTarget(0, dyPixels)
+    return 'ok'
+  }
   // Map/prop diagnosis: parsed prop count vs. rendered instances (CDP).
   ;(window as unknown as Record<string, unknown>).__cfaMapInfo = () => ({
     props: currentScmap?.props.length ?? -1,
     skybox: currentScmap?.skybox !== null,
+    sky: viewer.skyInfo,
     stats: viewer.propStats,
   })
   // Kamera per CDP auf einen Weltpunkt richten (Sicht-Abnahmen ohne Maus).

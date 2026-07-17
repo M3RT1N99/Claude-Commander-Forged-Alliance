@@ -241,6 +241,18 @@ console.log('\n== SCMAP-Schwanz: alle Karten bis exakt EOF ==')
       (decalMissing.length ? ` (missing: ${decalMissing[0]})` : ''),
   )
 
+  // Sky dome assets (sky.fx): the fixed horizon lookup (SkyDome.cpp:158)
+  // plus the map's planet atlas and cirrus texture must resolve.
+  const skyTex = [
+    'textures/environment/horizonlookup.dds',
+    m9.skybox!.albedo.replace(/^\//, '').toLowerCase(),
+    m9.skybox!.cirrusTexture.replace(/^\//, '').toLowerCase(),
+  ]
+  check(
+    m9.skybox !== null && skyTex.every((t) => vfs.exists(t)) && m9.skybox!.planets.length === 9,
+    `SCMP_009 skybox: ${m9.skybox!.planets.length} planets, ${m9.skybox!.cirrusLayers.length} cirrus layers, textures resolvable`,
+  )
+
   // Stratum normal maps (render-details.md par. 4: lower + strata 0-3 are
   // populated on the retail maps): every non-empty path must exist.
   const normalPaths = m9.normalStrata

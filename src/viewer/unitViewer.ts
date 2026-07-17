@@ -15,6 +15,7 @@ import { UnitAnimator } from '../anim/animator'
 import type { ScaAnim } from '../formats/sca'
 import { MapProps } from './mapProps'
 import { MapDecals } from './mapDecals'
+import { SkyDome } from './skyDome'
 
 /** Eine in die Szene gesetzte Einheit (Sandbox-Modus). */
 export class SceneUnit {
@@ -58,6 +59,7 @@ export class UnitViewer {
   private skirtMesh: THREE.Mesh | null = null
   private mapProps: MapProps | null = null
   private mapDecals: MapDecals | null = null
+  private skyDome: SkyDome | null = null
   /** Map '<default>' env cube — mesh.fx environmentSampler (Cfile:1189598). */
   private envCube: THREE.Texture | null = null
   private animator: UnitAnimator | null = null
@@ -117,6 +119,7 @@ export class UnitViewer {
       if (terrainMat?.uniforms?.time) {
         terrainMat.uniforms.time.value = this.clock.elapsedTime
       }
+      this.skyDome?.update(this.clock.elapsedTime)
       if (this.animator && this.animPlaying) {
         this.animTime += dt * this.animationSpeed
         this.animator.update(this.animTime)
@@ -257,6 +260,11 @@ export class UnitViewer {
       this.mapDecals.dispose()
       this.mapDecals = null
     }
+    if (this.skyDome) {
+      this.scene.remove(this.skyDome.group)
+      this.skyDome.dispose()
+      this.skyDome = null
+    }
     if (this.envCube) {
       this.envCube.dispose()
       this.envCube = null
@@ -354,6 +362,11 @@ export class UnitViewer {
   /** Prop rendering stats of the current map (null before setMap). */
   get propStats(): { instances: number; blueprints: number; missing: string[] } | null {
     return this.mapProps?.stats ?? null
+  }
+
+  /** Sky dome diagnosis: number of loaded passes (null = no dome). */
+  get skyInfo(): { passes: number } | null {
+    return this.skyDome ? { passes: this.skyDome.group.children.length } : null
   }
 
   /**
@@ -1055,6 +1068,13 @@ export class UnitViewer {
       // belong to the terrain surface below the water plane).
       this.waterMesh.renderOrder = 2
       this.scene.add(this.waterMesh)
+    }
+
+    // Sky dome (sky.fx Atmosphere/Decal/Cirrus, M9) from the v60 skybox
+    // block — draws first, without depth, behind everything.
+    if (scmap.skybox) {
+      this.skyDome = await SkyDome.load(scmap.skybox, vfs, this.s3tcSupported)
+      this.scene.add(this.skyDome.group)
     }
 
     // Terrain skirt (terrain.fx TerrainSkirtPS :584): constant dark grey
