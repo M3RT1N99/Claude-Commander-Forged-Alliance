@@ -1779,6 +1779,32 @@ function ExitApplication()
   LOG('ExitApplication')
 end
 
+-- === Category volumes (SetVolume/GetVolume) ===
+--
+-- CUserSoundManager::SetVolume (Cfile:1346194, @0x8AAF60) resets the Duck
+-- variable and forwards the RAW float to every AudioEngine instance —
+-- and if none exists it simply caches (no error). AudioEngine::SetVolume
+-- (Cfile:603714) stores the float in a map; GetVolume NEVER reads back
+-- from XACT, only from that cache, insert-default 1.0
+-- (Cfile:605038-605065). options.lua:700-779 drives it with 0..1
+-- (Master='Global', FX='World'+'Interface', Music='Music').
+__uiVolumeSink = false
+__uiVolumes = {}
+
+function SetVolume(category, volume)
+  __uiVolumes[category] = volume
+  if __uiVolumeSink then __uiVolumeSink(category, volume) end
+end
+
+function GetVolume(category)
+  local v = __uiVolumes[category]
+  if v == nil then
+    v = 1.0
+    __uiVolumes[category] = v
+  end
+  return v
+end
+
 -- WorldIsLoading: wahr zwischen DoPreload (StartLoadingDialog) und
 -- DoInitializing (StopLoadingDialog) — gepflegt von der Provider-Kette
 -- (ui-boot.lua). uimain.lua:120 (EscapeHandler) prueft es vor jedem ESC.

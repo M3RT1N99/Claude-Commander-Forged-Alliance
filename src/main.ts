@@ -818,6 +818,9 @@ async function startSandbox(mapFolder: string): Promise<void> {
         (bank, cue, id) => audio.play(bank, cue, id),
         (id) => audio.stop(id),
       )
+      // The volume options (options.lua:700-779 -> SetVolume) reach the
+      // XACT category gains; boot-time values are replayed by connectVolume.
+      gameUi.connectVolume((cat, vol) => audio.setVolume(cat, vol))
     }
     // Der Pause-Reiter der Original-UI (tabs.lua:425/428) hält die WELT an —
     // die Sim, nicht die UI.

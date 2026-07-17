@@ -71,6 +71,12 @@ export interface XsbCueTarget {
   waveIndex: number
   /** Zahl der Wave-Alternativen (1 = keine Variation; Stufe 1 nimmt Eintrag 0). */
   variantCount: number
+  /**
+   * XACT category index (u16 in the sound header) — 0-based into the xgs
+   * category table (verified: Music.xsb cues -> 2 Music, UAAWeapon -> 6
+   * Weapons, Interface.xsb menu cues -> 9 Interface / selects -> 19).
+   */
+  category: number
 }
 
 export interface XsbBank {
@@ -138,6 +144,7 @@ export function parseXsb(bytes: Uint8Array): XsbBank {
    */
   function resolveSound(off: number): XsbCueTarget {
     const flags = u8(off)
+    const category = u16(off + 1) // 0-based xgs category index (header, s. o.)
     const entryLength = u16(off + 7)
     let p = off + 9
     const complex = (flags & 0x01) !== 0
@@ -148,7 +155,7 @@ export function parseXsb(bytes: Uint8Array): XsbBank {
       numClips = u8(p)
       p += 1
     } else {
-      direct = { waveIndex: u16(p), waveBankIndex: u8(p + 2), variantCount: 1 }
+      direct = { waveIndex: u16(p), waveBankIndex: u8(p + 2), variantCount: 1, category }
       p += 3
     }
     if ((flags & 0x0e) !== 0) p += u16(p) // RPC-Block; Länge inkl. Längenfeld
@@ -190,7 +197,7 @@ export function parseXsb(bytes: Uint8Array): XsbBank {
           const waveBankIndex = u8(p + 3)
           p += 9 // flags, wave, bank, loopCount, position, angle
           if (type === 4) p += 7 // Effekt-Variation (XACT 3.0: 7 B, s. o.)
-          if (!target) target = { waveBankIndex, waveIndex, variantCount: 1 }
+          if (!target) target = { waveBankIndex, waveIndex, variantCount: 1, category }
         } else if (type === 3 || type === 6) {
           p += 6 // flags, loopCount, position, angle
           if (type === 6) p += 7
@@ -198,7 +205,7 @@ export function parseXsb(bytes: Uint8Array): XsbBank {
           p += 8 // + 4 B unbekannt (FAudio FACT_internal.c:2312)
           for (let j = 0; j < count; j++) {
             if (j === 0 && !target) {
-              target = { waveIndex: u16(p), waveBankIndex: u8(p + 2), variantCount: count }
+              target = { waveIndex: u16(p), waveBankIndex: u8(p + 2), variantCount: count, category }
             }
             p += 5 // u16 wave, u8 bank, u8 weightMin, u8 weightMax
           }

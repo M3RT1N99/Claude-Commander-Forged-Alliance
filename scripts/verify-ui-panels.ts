@@ -672,6 +672,25 @@ check(
   host.eval(`return __uiKeyMapExecute(80, true, true, false, false, 80)`) === false,
   'IN_RemoveKeyMapTable entfernt den Eintrag wieder',
 )
+// SetVolume/GetVolume (CUserSoundManager, Cfile:1346194/603714/605038):
+// SetVolume caches and forwards the raw float; without an audio engine it
+// simply caches (no error). GetVolume NEVER reads back — cache only,
+// insert-default 1.0.
+check(Number(host.eval(`return GetVolume('Music')`)) === 1.0, "GetVolume('Music') default = 1.0")
+host.eval(`SetVolume('Music', 0.25)`)
+check(Number(host.eval(`return GetVolume('Music')`)) === 0.25, 'SetVolume cached, GetVolume liest den Cache')
+{
+  const gesehen: [string, number][] = []
+  host.setGlobal('__uiVolumeSink', (c: string, v: number) => {
+    gesehen.push([c, v])
+  })
+  host.eval(`SetVolume('World', 0.5)`)
+  check(
+    gesehen.length === 1 && gesehen[0]![0] === 'World' && gesehen[0]![1] === 0.5,
+    'Mit Naht erreicht der rohe Float die Audio-Engine',
+  )
+}
+
 // StartCommandMode as a console command (CON_StartCommandMode,
 // Cfile:1255125): the keymap actions run through it — same mode+name
 // again toggles the command mode OFF.

@@ -493,6 +493,23 @@ export class GameUi {
   }
 
   /**
+   * The volume sink (CUserSoundManager::SetVolume forwards the raw float
+   * to the audio engine, Cfile:1346194/603714). Values set BEFORE the sink
+   * existed (options Apply during boot) are replayed once.
+   */
+  connectVolume(setVolume: (category: string, volume: number) => void): void {
+    this.host.setGlobal('__uiVolumeSink', setVolume)
+    const cached = this.host.pull<[string, number][]>(`(function()
+      local parts = {}
+      for k, v in pairs(__uiVolumes) do
+        parts[#parts + 1] = '["' .. tostring(k) .. '",' .. tostring(v) .. ']'
+      end
+      return '[' .. table.concat(parts, ',') .. ']'
+    end)()`)
+    for (const [cat, vol] of cached) setVolume(cat, vol)
+  }
+
+  /**
    * Die Session anhalten/fortsetzen (SessionRequestPause/SessionResume,
    * mHelp: „Pause the world simulation."). Das ist ein Eingriff in die SIM,
    * nicht in die UI — der Pause-Reiter oben (tabs.lua:425/428) hängt daran.

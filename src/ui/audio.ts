@@ -1,5 +1,6 @@
 import { parseXsb, type XsbBank } from '../formats/xsb'
 import { parseXwb, type XwbBank } from '../formats/xwb'
+import { parseXgs, type XgsData } from '../formats/xgs'
 import type { GameVfs } from '../vfs/vfs'
 
 /**
@@ -20,10 +21,23 @@ import type { GameVfs } from '../vfs/vfs'
  *
  * Stufe-1-Grenzen (dokumentiert): keine Loop-Auswertung (Musik spielt einen
  * Durchlauf), keine Zufalls-Variation (xsb.ts nimmt Playlist-Eintrag 0),
- * keine Kategorien-Lautstärken aus SupCom.xgs.
+ * keine Instanz-Limits/Fades je Kategorie.
+ *
+ * KATEGORIE-LAUTSTÄRKEN (SupCom.xgs): every cue's sound carries a 0-based
+ * category index; the xgs category table gives name, parent and the
+ * authored volume (dB byte). Per category one GainNode with
+ * gain = authoredLinear x userVolume, chained along the parent to
+ * 'Global' -> destination (FAudio semantics; the engine caches the user
+ * float and never reads it back — AudioEngine::SetVolume/GetVolume,
+ * Cfile:603714/605038).
  */
 export class GameAudio {
   private readonly ctx: AudioContext
+  /** xgs categories in file order (= xsb category index). */
+  private xgs: XgsData | null = null
+  private categoryNodes: GainNode[] = []
+  /** User volume per category NAME — SetVolume cache, default 1.0. */
+  private readonly userVolumes = new Map<string, number>()
   /** soundBankName (klein) → geparste .xsb. */
   private readonly soundBanks = new Map<string, XsbBank>()
   /** innerer WaveBank-Name (klein) → VFS-Pfad der .xwb. */
@@ -83,8 +97,58 @@ export class GameAudio {
       }
     }
 
+    // The global settings: category tree + authored volumes (SupCom.xgs).
+    // Missing file is loud, not silent — without it every cue runs untinted
+    // through the destination and the volume options do nothing.
+    try {
+      const xgsPath = vfs.find((p) => p.startsWith('sounds/') && p.endsWith('.xgs'))[0]
+      if (!xgsPath) throw new Error('no .xgs under sounds/')
+      audio.xgs = parseXgs(await vfs.read(xgsPath))
+      audio.buildCategoryNodes()
+      log(`Audio: ${audio.xgs.categories.length} XACT-Kategorien (${xgsPath})`)
+    } catch (e) {
+      log(`Audio: GlobalSettings fehlen — ${e instanceof Error ? e.message : e}`)
+    }
+
     log(`Audio: ${audio.soundBanks.size} Sound-Banks, ${audio.waveBankFiles.size} Wave-Banks bereit`)
     return audio
+  }
+
+  /** One GainNode per category, chained along `parent` up to destination. */
+  private buildCategoryNodes(): void {
+    if (!this.xgs) return
+    const cats = this.xgs.categories
+    this.categoryNodes = cats.map((c) => {
+      const node = this.ctx.createGain()
+      node.gain.value = c.volumeLinear
+      return node
+    })
+    for (let i = 0; i < cats.length; i++) {
+      const parent = cats[i]!.parent
+      const target = parent >= 0 ? this.categoryNodes[parent]! : this.ctx.destination
+      this.categoryNodes[i]!.connect(target)
+    }
+  }
+
+  /**
+   * SetVolume(category, float) — the raw user float, multiplied onto the
+   * authored gain (FAudio: current = authored x set). Cached; GetVolume
+   * never reads back from the engine (Moho AudioEngine, Cfile:605038,
+   * insert-default 1.0).
+   */
+  setVolume(category: string, volume: number): void {
+    this.userVolumes.set(category, volume)
+    if (!this.xgs) return
+    const i = this.xgs.categories.findIndex((c) => c.name === category)
+    if (i < 0) {
+      this.warnOnce(`SetVolume: Kategorie '${category}' unbekannt`)
+      return
+    }
+    this.categoryNodes[i]!.gain.value = this.xgs.categories[i]!.volumeLinear * volume
+  }
+
+  getVolume(category: string): number {
+    return this.userVolumes.get(category) ?? 1.0
   }
 
   private waveBank(innerName: string): Promise<{ bank: XwbBank; bytes: Uint8Array } | null> {
@@ -148,7 +212,11 @@ export class GameAudio {
       }
       const source = this.ctx.createBufferSource()
       source.buffer = buffer
-      source.connect(this.ctx.destination)
+      // Route through the cue's XACT category node (authored volume x user
+      // volume, chained to Global); without xgs data fall back to the raw
+      // destination.
+      const catNode = this.categoryNodes[cue.category]
+      source.connect(catNode ?? this.ctx.destination)
       source.onended = () => this.playing.delete(handleId)
       this.playing.set(handleId, source)
       source.start()

@@ -16,6 +16,7 @@ import { readFileSync, readdirSync, writeFileSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { parseXwb, wavFromEntry, type XwbBank } from '../src/formats/xwb'
 import { parseXsb, type XsbBank } from '../src/formats/xsb'
+import { parseXgs } from '../src/formats/xgs'
 
 // Wie scripts/gameFiles.ts (dort GAME_DIR) — hier dupliziert, damit die Suite
 // ohne den Lua-Loader (--import register-lua) lauffähig bleibt.
@@ -245,6 +246,49 @@ if (probeWav) {
   }
 } else {
   check(false, 'kein Stichproben-WAV erzeugt')
+}
+
+// --- XACT global settings (SupCom.xgs): categories for the volume path ----
+console.log('\n== SupCom.xgs: Kategorien, Hierarchie, Volumes ==')
+{
+  const xgs = parseXgs(readFileSync(`${SOUNDS_DIR}/SupCom.xgs`))
+  check(xgs.categories.length === 39, `${xgs.categories.length} Kategorien (Header 0x13 = 39)`)
+  const byName = new Map(xgs.categories.map((c, i) => [c.name, { c, i }]))
+  const music = byName.get('Music')
+  check(
+    music !== undefined && music.c.instanceLimit === 1 && music.c.fadeOutMs === 200,
+    `Music: instanceLimit 1, fadeOut 200 ms (${music?.c.instanceLimit}/${music?.c.fadeOutMs})`,
+  )
+  // Hierarchy: Units -> World -> Global (root -1).
+  const units = byName.get('Units')
+  const world = byName.get('World')
+  const global = byName.get('Global')
+  check(
+    units !== undefined && world !== undefined && global !== undefined &&
+      units.c.parent === world.i && world.c.parent === global.i && global.c.parent === -1,
+    'Hierarchie: Units → World → Global (Wurzel -1)',
+  )
+  // Volume byte decoding: 0xB4 = 0 dB (Units), Interface -5 dB, Global +6 dB.
+  const iface = byName.get('Interface')
+  check(
+    Math.abs(units!.c.volumeDb) < 0.1 &&
+      Math.abs(iface!.c.volumeDb + 5) < 0.1 &&
+      Math.abs(global!.c.volumeDb - 6) < 0.1,
+    `dB-Dekodierung: Units ${units!.c.volumeDb.toFixed(1)}, Interface ${iface!.c.volumeDb.toFixed(1)}, Global ${global!.c.volumeDb.toFixed(1)}`,
+  )
+  check(
+    xgs.variables.some((v) => v.name === 'SpeedOfSound' && Math.abs(v.initial - 343.5) < 0.01),
+    'Variable SpeedOfSound: init 343.5 m/s',
+  )
+
+  // xsb -> xgs: the sound header's u16 category indexes this table
+  // (verified pairs from the format research).
+  const musicBank = parseXsb(readFileSync(`${SOUNDS_DIR}/Music.xsb`))
+  const anyMusicCue = [...musicBank.cues.values()][0]
+  check(anyMusicCue?.category === music!.i, `Music.xsb-Cues → Kategorie ${music!.i} (Music)`)
+  const ifaceBank = parseXsb(readFileSync(`${SOUNDS_DIR}/Interface.xsb`))
+  const menuCue = ifaceBank.cues.get('X_Main_Menu_On')
+  check(menuCue?.category === iface!.i, `Interface.xsb 'X_Main_Menu_On' → Kategorie ${iface!.i} (Interface)`)
 }
 
 console.log(failures === 0 ? '\nAUDIO BESTANDEN' : `\n${failures} CHECK(S) FEHLGESCHLAGEN`)
