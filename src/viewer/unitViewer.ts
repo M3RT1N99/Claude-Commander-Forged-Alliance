@@ -11,6 +11,7 @@ import { parseDds } from '../formats/dds'
 import { bgraToRgba, decodeDxt } from '../formats/dxt'
 import { UnitAnimator } from '../anim/animator'
 import type { ScaAnim } from '../formats/sca'
+import { MapProps } from './mapProps'
 
 /** Eine in die Szene gesetzte Einheit (Sandbox-Modus). */
 export class SceneUnit {
@@ -51,6 +52,7 @@ export class UnitViewer {
   private readonly controls: OrbitControls
   private current: THREE.Mesh | null = null
   private waterMesh: THREE.Mesh | null = null
+  private mapProps: MapProps | null = null
   private animator: UnitAnimator | null = null
   private animPlaying = false
   private animTime = 0
@@ -226,6 +228,11 @@ export class UnitViewer {
       ;(this.waterMesh.material as THREE.Material).dispose()
       this.waterMesh = null
     }
+    if (this.mapProps) {
+      this.scene.remove(this.mapProps.group)
+      this.mapProps.dispose()
+      this.mapProps = null
+    }
   }
 
   /** SCM → BufferGeometry mit allen Attributen des Unit-Shaders (UV1,
@@ -313,6 +320,11 @@ export class UnitViewer {
   /** Das Karten-Licht für Materialien, die außerhalb entstehen (Baustellen). */
   get lighting(): MapLighting | null {
     return this.mapLighting
+  }
+
+  /** Prop rendering stats of the current map (null before setMap). */
+  get propStats(): { instances: number; blueprints: number; missing: string[] } | null {
+    return this.mapProps?.stats ?? null
   }
 
   /**
@@ -946,6 +958,17 @@ export class UnitViewer {
       })
       this.waterMesh = new THREE.Mesh(waterGeo, waterMat)
       this.scene.add(this.waterMesh)
+    }
+
+    // Map props (trees, rocks) — one InstancedMesh per blueprint, lit with
+    // the same scmap values as terrain and units (render-details.md par. 2).
+    this.mapProps = await MapProps.load(scmap.props, vfs, this.mapLighting, this.s3tcSupported)
+    this.scene.add(this.mapProps.group)
+    if (this.mapProps.stats.instances > 0) {
+      console.log(
+        `map props: ${this.mapProps.stats.instances} instances, ` +
+          `${this.mapProps.stats.blueprints} blueprints`,
+      )
     }
 
     this.frameObject(geometry)

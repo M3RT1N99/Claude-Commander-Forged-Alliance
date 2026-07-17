@@ -2023,6 +2023,12 @@ if (import.meta.env.DEV) {
       visible: m.visible,
       scale: Math.round(m.scale.x * 1000) / 1000,
     }))
+  // Map/prop diagnosis: parsed prop count vs. rendered instances (CDP).
+  ;(window as unknown as Record<string, unknown>).__cfaMapInfo = () => ({
+    props: currentScmap?.props.length ?? -1,
+    skybox: currentScmap?.skybox !== null,
+    stats: viewer.propStats,
+  })
   // Kamera per CDP auf einen Weltpunkt richten (Sicht-Abnahmen ohne Maus).
   ;(window as unknown as Record<string, unknown>).__cfaFokus = (x: number, z: number, dist = 30) => {
     viewer.focusOn(new THREE.Vector3(x, viewer.heightAt(x, z), z), dist)

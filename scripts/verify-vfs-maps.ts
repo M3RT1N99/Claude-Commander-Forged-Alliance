@@ -17,6 +17,9 @@
 import { open, readdir, stat, type FileHandle } from 'node:fs/promises'
 import { GameVfs } from '../src/vfs/vfs'
 import { parseScmap } from '../src/formats/scmap'
+import { parseScm } from '../src/formats/scm'
+import { parseBlueprint } from '../src/formats/blueprint'
+import { resolvePropLods } from '../src/formats/unitPaths'
 import type { GameSource, GameDirEntry } from '../src/vfs/gameSource'
 import type { RandomAccessFile } from '../src/vfs/randomAccess'
 import { join } from 'node:path'
@@ -145,6 +148,70 @@ console.log('\n== SCMAP-Schwanz: alle Karten bis exakt EOF ==')
   check(
     m9.terrainTypeData.length === m9.width * m9.height,
     `TerrainType-Daten ${m9.terrainTypeData.length} = ${m9.width}×${m9.height}`,
+  )
+
+  // Prop asset resolution (render-details.md par. 2): every distinct prop
+  // blueprint of SCMP_009 must resolve to an existing mesh via
+  // blueprints.lua:170 (`_prop.bp` -> `_mesh` -> prefix), the mesh must
+  // parse as SCM, and every LOD's albedo must exist in the VFS (the pine
+  // props reference them as '../Pine06_V1_albedo.dds' — the '..' has to
+  // resolve).
+  const distinct = [...new Set(m9.props.map((p) => p.blueprintPath.toLowerCase().replace(/^\//, '')))]
+  let resolved = 0
+  let lodTotal = 0
+  let albedoOk = 0
+  const unresolved: string[] = []
+  const albedoMissing: string[] = []
+  for (const bpPath of distinct) {
+    if (!vfs.exists(bpPath)) {
+      unresolved.push(`${bpPath} (bp fehlt)`)
+      continue
+    }
+    const bp = parseBlueprint(await vfs.readText(bpPath))
+    const lods = resolvePropLods(bpPath, bp, (p) => vfs.exists(p))
+    if (lods.length === 0) {
+      unresolved.push(bpPath)
+      continue
+    }
+    resolved++
+    for (const lod of lods) {
+      lodTotal++
+      if (lod.albedo.some((a) => vfs.exists(a))) albedoOk++
+      else albedoMissing.push(`${bpPath}: ${lod.albedo[0]}`)
+    }
+  }
+  check(
+    unresolved.length === 0,
+    `SCMP_009: ${resolved}/${distinct.length} Prop-Blueprints aufgelöst` +
+      (unresolved.length ? ` (fehlt: ${unresolved.slice(0, 3).join(', ')})` : ''),
+  )
+  check(
+    albedoMissing.length === 0,
+    `alle Prop-LOD-Albedos vorhanden (${albedoOk}/${lodTotal})` +
+      (albedoMissing.length ? ` — fehlt: ${albedoMissing.slice(0, 3).join(' | ')}` : ''),
+  )
+  // The pine group is the '..'-reference case: LOD chain 30/175/700 with
+  // per-LOD meshes and the LOD0 albedo one directory up.
+  const pineBp = 'env/evergreen/props/trees/groups/pine06_groupa_prop.bp'
+  const pineLods = resolvePropLods(pineBp, parseBlueprint(await vfs.readText(pineBp)), (p) =>
+    vfs.exists(p),
+  )
+  check(
+    pineLods.length === 3 &&
+      pineLods[0]!.cutoff === 30 &&
+      pineLods[1]!.cutoff === 175 &&
+      pineLods[2]!.cutoff === 700,
+    `Pine06_GroupA: LOD-Kette ${pineLods.map((l) => l.cutoff).join('/')}`,
+  )
+  check(
+    pineLods[0]!.albedo[0]!.toLowerCase() === 'env/evergreen/props/trees/pine06_v1_albedo.dds' &&
+      vfs.exists(pineLods[0]!.albedo[0]!),
+    `'..'-Referenz aufgelöst: ${pineLods[0]!.albedo[0]}`,
+  )
+  const propModel = parseScm(await vfs.read(pineLods[0]!.mesh))
+  check(
+    propModel.vertexCount > 0 && propModel.indices.length > 0,
+    `Prop-Mesh parsbar: ${pineLods[0]!.mesh} (${propModel.vertexCount} Vertices, Shader ${pineLods[0]!.shader})`,
   )
 }
 
