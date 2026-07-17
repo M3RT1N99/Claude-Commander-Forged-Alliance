@@ -241,6 +241,19 @@ console.log('\n== SCMAP-Schwanz: alle Karten bis exakt EOF ==')
       (decalMissing.length ? ` (missing: ${decalMissing[0]})` : ''),
   )
 
+  // Water assets (water2.fx): the four wave normal maps and the sky
+  // cubemap referenced by the water block must resolve.
+  const waveTex = m9.water.waveNormals.map((w) => w.path.replace(/^\//, '').toLowerCase())
+  const skyCubePath = m9.water.texPathCubemap.replace(/^\//, '').toLowerCase()
+  check(
+    m9.water.hasWater &&
+      waveTex.length === 4 &&
+      waveTex.every((t) => vfs.exists(t)) &&
+      vfs.exists(skyCubePath) &&
+      m9.waterMapDds !== null,
+    `SCMP_009 water: 4 wave maps + sky cube (${skyCubePath.split('/').pop()}) + baked water map resolvable`,
+  )
+
   // Sky dome assets (sky.fx): the fixed horizon lookup (SkyDome.cpp:158)
   // plus the map's planet atlas and cirrus texture must resolve.
   const skyTex = [

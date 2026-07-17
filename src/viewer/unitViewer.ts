@@ -120,6 +120,11 @@ export class UnitViewer {
         terrainMat.uniforms.time.value = this.clock.elapsedTime
       }
       this.skyDome?.update(this.clock.elapsedTime)
+      // Water wave layers scroll with Time (water2.fx WaterVS :315-318).
+      const waterMat = this.waterMesh?.material as THREE.ShaderMaterial | undefined
+      if (waterMat?.uniforms?.time) {
+        waterMat.uniforms.time.value = this.clock.elapsedTime
+      }
       if (this.animator && this.animPlaying) {
         this.animTime += dt * this.animationSpeed
         this.animator.update(this.animTime)
@@ -1048,6 +1053,25 @@ export class UnitViewer {
       const waterGeo = new THREE.PlaneGeometry(width, height)
       waterGeo.rotateX(-Math.PI / 2)
       waterGeo.translate(width / 2, scmap.water.elevation, height / 2)
+
+      // The four scrolling wave normal maps (water2.fx layers).
+      const waves = await Promise.all(
+        scmap.water.waveNormals.map(async (w) => ({
+          texture: await loadLayer(w.path.replace(/^\//, '').toLowerCase()),
+          movement: new THREE.Vector2(w.movementX, w.movementY),
+          repeat: w.repeat,
+        })),
+      )
+      // Baked water texture = UtilitySamplerC (R flatness, G depth, B mask,
+      // A 1-foam) — embedded in the scmap like the splat masks.
+      const waterMapTex = embedded(scmap.waterMapDds)
+      // Sky cubemap for texCUBE(SkySampler, reflect(view, N)).
+      const skyPath = scmap.water.texPathCubemap.replace(/^\//, '').toLowerCase()
+      const skyCube = vfs.exists(skyPath)
+        ? ddsToCubeTexture(await vfs.read(skyPath), this.s3tcSupported)
+        : null
+      if (!skyCube) console.warn(`water sky cube not found: ${skyPath}`)
+
       const waterMat = createWaterMaterial({
         heightTex,
         heightScale: scmap.heightScale,
@@ -1060,8 +1084,16 @@ export class UnitViewer {
         colorLerpMin: scmap.water.colorLerpMin,
         colorLerpMax: scmap.water.colorLerpMax,
         surfaceColor: new THREE.Color(...scmap.water.surfaceColor),
-        sunDirection: new THREE.Vector3(...scmap.lighting.sunDirection).normalize(),
-        sunColor: new THREE.Color(...scmap.lighting.sunColor),
+        fresnelBias: scmap.water.fresnelBias,
+        fresnelPower: scmap.water.fresnelPower,
+        skyReflectionAmount: scmap.water.skyReflection,
+        sunShininess: scmap.water.sunShininess,
+        // The water block carries its OWN sun (water2.fx SunDirection).
+        sunDirection: new THREE.Vector3(...scmap.water.sunDirection).normalize(),
+        sunColor: new THREE.Color(...scmap.water.sunColor),
+        waterMap: waterMapTex,
+        waves,
+        skyCube: skyCube ?? dummy,
       })
       this.waterMesh = new THREE.Mesh(waterGeo, waterMat)
       // Water draws AFTER the decal patches (both are blended; the decals
