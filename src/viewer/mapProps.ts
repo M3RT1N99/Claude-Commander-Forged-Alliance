@@ -61,6 +61,8 @@ interface PropVariant {
   alphaRef: number
   /** SrcAlpha/InvSrcAlpha blending (VertexNormal technique, mesh.fx:3936). */
   blend: boolean
+  /** Tree sway (UndulatingNormalMappedVS, mesh.fx:646). */
+  undulate?: boolean
 }
 
 /**
@@ -76,8 +78,16 @@ interface PropVariant {
 function variantFor(shaderName: string): PropVariant {
   const resolved = LEGACY_SHADER[shaderName] ?? shaderName
   switch (resolved) {
-    case 'NormalMappedAlpha':
     case 'UndulatingNormalMappedAlpha':
+      return {
+        defines: { NORMALMAPPED: true, PHONG: true, ALPHATEST: true, UNDULATE: true },
+        alphaRef: 0x80 / 255,
+        blend: false,
+        undulate: true,
+      }
+    case 'NormalMappedAlpha':
+    // Bloating (2 blueprints) pulses the mesh in BloatingNormalMappedVS —
+    // still static here.
     case 'BloatingNormalMappedAlpha':
       return {
         defines: { NORMALMAPPED: true, PHONG: true, ALPHATEST: true },
@@ -100,6 +110,7 @@ export class MapProps {
   readonly group = new THREE.Group()
   readonly stats: MapPropsStats = { instances: 0, blueprints: 0, missing: [] }
   private readonly disposables: { dispose(): void }[] = []
+  private readonly timeUniforms: { value: number }[] = []
 
   static async load(
     props: ScmapProp[],
@@ -236,6 +247,8 @@ export class MapProps {
               lodCutoff: { value: lod.cutoff },
               lodNear: { value: near },
               alphaRef: { value: variant.alphaRef },
+              time: { value: 0 },
+              windDirection: { value: new THREE.Vector3(0.707, 0.0, 0.707) }, // mesh.fx:68
             },
             transparent: variant.blend,
             // Every prop technique writes RGB only (Write_RGB) — keep the
@@ -258,6 +271,7 @@ export class MapProps {
           mesh.frustumCulled = false
           out.group.add(mesh)
           out.disposables.push(geometry, material)
+          if (variant.undulate) out.timeUniforms.push(material.uniforms.time as { value: number })
           near = lod.cutoff
         }
         out.stats.blueprints++
@@ -276,6 +290,11 @@ export class MapProps {
       )
     }
     return out
+  }
+
+  /** Drive the tree sway (mesh.fx `time`, seconds). */
+  update(elapsedSeconds: number): void {
+    for (const u of this.timeUniforms) u.value = elapsedSeconds
   }
 
   dispose(): void {

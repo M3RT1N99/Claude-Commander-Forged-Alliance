@@ -5,6 +5,8 @@ import * as THREE from 'three'
 import UNIT_VS from './shaders/unit.vert.glsl?raw'
 import UNIT_FS from './shaders/unit.frag.glsl?raw'
 import UNIT_SERAPHIM_FS from './shaders/unitSeraphim.frag.glsl?raw'
+import UNIT_AEON_FS from './shaders/unitAeon.frag.glsl?raw'
+import UNIT_INSECT_FS from './shaders/unitInsect.frag.glsl?raw'
 import WRECKAGE_VS from './shaders/wreckage.vert.glsl?raw'
 import WRECKAGE_FS from './shaders/wreckage.frag.glsl?raw'
 import BUILD_UEF_FS from './shaders/buildUef.frag.glsl?raw'
@@ -57,6 +59,8 @@ export function createUnitMaterial(
   lighting: MapLighting = VIEWER_LIGHT,
   /** Map env cube for the mesh.fx environmentSampler (2 * env * spec.r). */
   envCube: THREE.Texture | null = null,
+  /** Cybran 'Insect' aniso lookup (/textures/engine/insectlookup.dds). */
+  insectLookup: THREE.Texture | null = null,
 ): THREE.ShaderMaterial {
   const white = new THREE.DataTexture(new Uint8Array([255, 255, 255, 0]), 1, 1)
   white.needsUpdate = true
@@ -68,12 +72,25 @@ export function createUnitMaterial(
   }
   if (envCube) defines.ENVCUBE = true
 
+  // Shader per the blueprint's LOD ShaderName: 'Aeon' -> AeonPS (:2567),
+  // 'Insect' -> NormalMappedInsectPS (technique :5080), 'Seraphim' ->
+  // UnitFalloffPS, everything else NormalMappedPS ('Unit').
+  const fragmentShader =
+    shader === 'Seraphim' && textures.lookup
+      ? UNIT_SERAPHIM_FS
+      : shader === 'Aeon'
+        ? UNIT_AEON_FS
+        : shader === 'Insect' && insectLookup
+          ? UNIT_INSECT_FS
+          : UNIT_FS
+
   return new THREE.ShaderMaterial({
     vertexShader: UNIT_VS,
-    fragmentShader: shader === 'Seraphim' && textures.lookup ? UNIT_SERAPHIM_FS : UNIT_FS,
+    fragmentShader,
     defines,
     uniforms: {
       environmentMap: { value: envCube },
+      insectMap: { value: insectLookup ?? white },
       lookupMap: { value: textures.lookup ?? white },
       boneMatrices: { value: skinMatrices.length > 0 ? skinMatrices : [new THREE.Matrix4()] },
       albedoMap: { value: textures.albedo },

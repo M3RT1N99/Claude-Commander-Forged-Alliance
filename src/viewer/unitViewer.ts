@@ -67,6 +67,8 @@ export class UnitViewer {
   private envCube: THREE.Texture | null = null
   /** Named env cubes from the scmap list ('<aeon>', '<seraphim>', …). */
   private readonly envCubesByName = new Map<string, THREE.Texture>()
+  /** Cybran 'Insect' aniso lookup (/textures/engine/insectlookup.dds). */
+  private insectLookup: THREE.Texture | null = null
   private animator: UnitAnimator | null = null
   private animPlaying = false
   private animTime = 0
@@ -128,6 +130,7 @@ export class UnitViewer {
         terrainMat.uniforms.time.value = this.clock.elapsedTime
       }
       this.skyDome?.update(this.clock.elapsedTime)
+      this.mapProps?.update(this.clock.elapsedTime)
       // Water wave layers scroll with Time (water2.fx WaterVS :315-318).
       const waterMat = this.waterMesh?.material as THREE.ShaderMaterial | undefined
       if (waterMat?.uniforms?.time) {
@@ -374,7 +377,8 @@ export class UnitViewer {
       animator.skinMatrices,
       shader,
       this.mapLighting ?? undefined,
-      this.envCube,
+      shader === 'Aeon' ? this.envCubeFor('Aeon') : this.envCube,
+      this.insectLookup,
     )
     const mesh = new THREE.Mesh(geometry, material)
     mesh.frustumCulled = false
@@ -1181,6 +1185,15 @@ export class UnitViewer {
       if (e.name !== '<default>' && vfs.exists(p)) {
         this.envCubesByName.set(e.name, ddsToCubeTexture(await vfs.read(p), this.s3tcSupported))
       }
+    }
+    // The Cybran 'Insect' unit shader needs its aniso lookup (Cfile:1194790).
+    if (!this.insectLookup && vfs.exists('textures/engine/insectlookup.dds')) {
+      this.insectLookup = ddsToTexture(
+        await vfs.read('textures/engine/insectlookup.dds'),
+        this.s3tcSupported,
+      )
+      this.insectLookup.wrapS = THREE.ClampToEdgeWrapping
+      this.insectLookup.wrapT = THREE.ClampToEdgeWrapping
     }
 
     // Map props (trees, rocks) — one InstancedMesh per blueprint, lit with

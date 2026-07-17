@@ -6,6 +6,14 @@ attribute vec3 scmTangent;
 attribute vec3 scmBinormal;
 attribute vec2 scmUv1;
 
+#ifdef UNDULATE
+// UndulatingNormalMappedVS (mesh.fx:646-668): trees sway with
+// weight = 0.003 * local height, phase from the instance's world position
+// along windDirection (fx default 0.707, 0, 0.707).
+uniform float time;
+uniform vec3 windDirection;
+#endif
+
 varying vec2 vUv0;
 varying vec2 vUv1;
 varying vec3 vNormal;
@@ -31,6 +39,12 @@ void main() {
   vBinormal = nm * scmBinormal;
 
   vec4 worldPos = world * vec4(position, 1.0);
+#ifdef UNDULATE
+  float weight = 0.003 * position.y;
+  float sinSq = sin(0.05 * time - dot(windDirection, world[3].xyz));
+  sinSq *= sinSq;
+  worldPos.xyz += weight * sinSq * windDirection;
+#endif
   vWorldPos = worldPos.xyz;
   gl_Position = projectionMatrix * viewMatrix * worldPos;
 }
