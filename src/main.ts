@@ -35,6 +35,7 @@ import { GameUi } from './ui/gameUi'
 import { BuildPreview } from './ui/buildPreview'
 import type { ScmapData } from './formats/scmap'
 import { createUefBuildMaterials, type UnitTextures } from './viewer/unitMaterial'
+import { OrderLineSystem, type OrderLineEntry } from './viewer/orderLines'
 
 const $ = <T extends HTMLElement>(sel: string): T => {
   const el = document.querySelector<T>(sel)
@@ -477,6 +478,7 @@ function loadProjectileAssets(bpId: string): Promise<ProjectileAssets | null> {
 let particles: ParticleSystem | null = null
 let trails: TrailSystem | null = null
 let beams: BeamSystem | null = null
+let orderLines: OrderLineSystem | null = null
 let gameAudio: GameAudio | null = null
 const emitterRuntimes = new Map<number, EmitterRuntime>()
 const emitterBpData = new Map<string, EmitterBpData>()
@@ -831,6 +833,28 @@ async function startSandbox(mapFolder: string): Promise<void> {
     trails = new TrailSystem((mesh) => viewer.addHelper(mesh))
     beams?.dispose()
     beams = new BeamSystem((mesh) => viewer.addHelper(mesh))
+    // The command graph (order lines + waypoints, UICommandGraph): textures
+    // and colors from commandgraphparams.lua, drawn for the selection.
+    orderLines?.dispose()
+    orderLines = new OrderLineSystem((o) => viewer.addHelper(o))
+    {
+      const ol = orderLines
+      void (async () => {
+        const base = 'textures/ui/common/game'
+        const [line, arrow, move, attack, repair] = await Promise.all([
+          loadFirstTexture([`${base}/orderline/orderline_generic.dds`]),
+          loadFirstTexture([`${base}/orderline/orderline_arrow04.dds`]),
+          loadFirstTexture([`${base}/waypoints/move_btn_up.dds`]),
+          loadFirstTexture([`${base}/waypoints/attack_btn_up.dds`]),
+          loadFirstTexture([`${base}/waypoints/repair_btn_up.dds`]),
+        ])
+        const wps = new Map<string, THREE.Texture>()
+        if (move) wps.set('move_btn_up', move)
+        if (attack) wps.set('attack_btn_up', attack)
+        if (repair) wps.set('repair_btn_up', repair)
+        ol.setTextures(line, arrow, wps)
+      })()
+    }
     emitterRuntimes.clear()
     lastEmitterTick = -1
     // Die Naht, über die Befehle der UI in die Sim gehen. Ohne sie KNALLT jeder
@@ -1755,6 +1779,10 @@ function luaSimUpdate(): void {
   }
   const lerpAlpha = Math.min((performance.now() - lastLerpWall) / 100, 1)
 
+  // The command graph: order lines + waypoints for the SELECTED units'
+  // active orders (UICommandGraph; params from commandgraphparams.lua).
+  const orderEntries: OrderLineEntry[] = []
+
   for (const u of luaUnits) {
     const s = luaSim.state(u.id)
     if (!s) continue
@@ -1777,6 +1805,14 @@ function luaSimUpdate(): void {
     }
     u.mesh.position.set(x, y, z)
     u.mesh.rotation.set(0, heading, 0)
+    if (u.selected && s.order) {
+      orderEntries.push({
+        unitId: u.id,
+        type: s.order.t,
+        from: { x, y, z },
+        to: { x: s.order.x, y: viewer.heightAt(s.order.x, s.order.z), z: s.order.z },
+      })
+    }
     u.ring.visible = u.selected
     if (u.selected) {
       // Die Ellipse aus dem Blueprint (siehe ringExtents), am Heading gedreht,
@@ -1831,6 +1867,8 @@ function luaSimUpdate(): void {
       }
     }
   }
+
+  orderLines?.update(orderEntries)
 }
 
 /**
@@ -1968,6 +2006,12 @@ if (import.meta.env.DEV) {
   // Einen Move-Befehl absetzen (Bewegungs-/Interpolations-Abnahmen per CDP).
   ;(window as unknown as Record<string, unknown>).__cfaMove = (id: number, x: number, z: number) => {
     luaSim?.move(id, x, z)
+    return 'ok'
+  }
+  // Select a unit like a click would (selection-dependent visuals via CDP).
+  ;(window as unknown as Record<string, unknown>).__cfaSelect = (id: number) => {
+    for (const u of luaUnits) u.selected = u.id === id
+    gameUi?.select([id])
     return 'ok'
   }
 }

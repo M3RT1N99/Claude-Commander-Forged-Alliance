@@ -28,6 +28,8 @@ export interface LuaUnitSnapshot {
   fraction: number
   /** Erstellungs-Tick — die Build-Shader zählen ihr Alter darüber (material.x). */
   born: number
+  /** The unit's active order (command graph): type + target position. */
+  order?: { t: 'Move' | 'Attack' | 'Repair' | 'BuildMobile'; x: number; z: number }
   /** Die Armee der Unit (1-basiert) — unitsOfFocusArmy filtert danach. */
   army: number
   /**

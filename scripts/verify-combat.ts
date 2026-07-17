@@ -386,6 +386,19 @@ console.log('\n== Befehls-Dispatch: Stop, Move-bricht-Bau, Attack ==')
     gestorben = host.eval(`local b = __units[${beute}] return b == nil or b.__dead == true`) === true
   }
   check(zielGesetzt, 'Die Waffe nimmt das BEFEHLSZIEL (CAttackTargetTask → Zielerfassung)')
+  // The command graph feed: the snapshot carries the active order (type +
+  // target position) so the renderer can draw the order line + waypoint
+  // (UICommandGraph, params from commandgraphparams.lua).
+  {
+    const rows = host.pull<{ id: number; order?: { t: string; x: number; z: number } }[]>(
+      '__readAllUnitsJson()',
+    )
+    const j = rows.find((r) => r.id === jaeger)
+    check(
+      j?.order?.t === 'Attack' && typeof j.order.x === 'number',
+      `Snapshot trägt die Attack-Order für den Befehls-Graphen (${JSON.stringify(j?.order)})`,
+    )
+  }
   const lage = host.pull<{ jx: number; jhp: number; bhp: number; goal: boolean }>(`(function()
     local j = __units[${jaeger}]
     local b = __units[${beute}]

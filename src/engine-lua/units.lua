@@ -203,10 +203,36 @@ end
 -- EIN Zustandsabbild einer Unit. Frueher gab es zwei — __readUnit ohne
 -- fraction/moving, __readAllUnits ohne mesh. Zwei Abbilder derselben Sache
 -- laufen garantiert auseinander; wer dann welches liest, entscheidet der Zufall.
+-- The unit's active order for the command graph (UICommandGraph draws
+-- order lines + waypoint markers per UNITCOMMAND_*, params from
+-- commandgraphparams.lua). We carry ONE order per unit — the current
+-- task; shift-queues are a documented gap.
+local function activeOrder(id, u)
+  local target = __attackOrders and __attackOrders[id]
+  if target then
+    local t = __units[target]
+    if t and t.__pos then return 'Attack', t.__pos[1], t.__pos[3] end
+  end
+  for _, task in pairs(__buildTasks or {}) do
+    if task.builder == id then
+      local t = __units[task.target]
+      if t and t.__pos then
+        -- BuildMobile and Repair share the engineering colors; the repair
+        -- waypoint texture is the BuildMobile one (commandgraphparams:140-144).
+        return (task.order == 'Repair') and 'Repair' or 'BuildMobile', t.__pos[1], t.__pos[3]
+      end
+    end
+  end
+  if u.__goal then return 'Move', u.__goal[1], u.__goal[2] end
+  return nil
+end
+
 local function readRow(id, u)
   local p = u.__pos or { 0, 0, 0 }
   local moving = (u.__goal ~= nil and u.__goal ~= false)
+  local ot, ox, oz = activeOrder(id, u)
   return {
+    orderType = ot, orderX = ox, orderZ = oz,
     id = id,
     name = (u.__bp and u.__bp.BlueprintId) or '?',
     x = p[1], y = p[2], z = p[3],
@@ -270,6 +296,10 @@ function __readAllUnitsJson()
       .. ',"moving":' .. tostring(r.moving)
       .. ',"fraction":' .. jnum(r.fraction)
       .. ',"born":' .. jnum(r.born)
+      .. (r.orderType
+        and (',"order":{"t":' .. jstr(r.orderType)
+          .. ',"x":' .. jnum(r.orderX) .. ',"z":' .. jnum(r.orderZ) .. '}')
+        or '')
       .. ',"army":' .. jnum(r.army)
       .. ',"idle":' .. tostring(r.idle)
       .. ',"buildQueue":[' .. table.concat(q, ',') .. ']'
