@@ -149,17 +149,29 @@ export async function worldClick(
     if (!cm.name) return null
     const [sx, sz] = footprintOf(host, cm.name)
     const pos = snapToGrid(hit.x, hit.z, sx, sz, elevation)
-    // Nur der erste Bauer der Selektion setzt die Baustelle; die übrigen helfen
-    // (Assist) — das kommt, sobald die Sim Assist kennt. Bis dahin baut einer.
+    // The first builder of the selection places the site; every other
+    // selected unit with RULEUCC_Repair joins the SAME site through the
+    // repair/build task — the engine's BuildAssist result (dispatch 0x09;
+    // the follow-the-builder guard part stays a documented gap).
     const builder = selection[0]!
-    await sim.build(builder.id, cm.name, pos, builder.army, opts.queue)
+    const siteId = await sim.build(builder.id, cm.name, pos, builder.army, opts.queue)
+    let helpers = 0
+    if (siteId > 0) {
+      for (const u of selection) {
+        if (u.id !== builder.id && u.canRepair) {
+          sim.repair(u.id, siteId)
+          helpers++
+        }
+      }
+    }
     onCommandIssued(host, {
       CommandType: 'BuildMobile',
       Blueprint: cm.name,
       Position: pos,
       Clear: !opts.queue,
     })
-    return `Bau: ${cm.name} auf ${pos.x.toFixed(1)}, ${pos.z.toFixed(1)}`
+    const wer = helpers > 0 ? ` (+${helpers} Assist)` : ''
+    return `Bau: ${cm.name} auf ${pos.x.toFixed(1)}, ${pos.z.toFixed(1)}${wer}`
   }
 
   // Ohne Bau-Modus hängt der Standardbefehl an den COMMAND-CAPS der Einheit:

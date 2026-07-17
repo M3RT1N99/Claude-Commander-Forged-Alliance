@@ -261,6 +261,29 @@ const rally = simHost.eval(`
 `) as string
 check(rally === '140,150', `Ihr Sammelpunkt steht auf dem Klick: ${rally}`)
 
+// Multi-builder click: the first selected builder places the site, every
+// other selected unit with RULEUCC_Repair joins the same site (BuildAssist
+// result via the repair/build task).
+console.log('\n== Bau-Klick mit ZWEI Bauern: der zweite hilft ==')
+{
+  const acu2 = spawnLuaUnit(simHost, 'uel0001', { x: 96, y: 20, z: 100 }, 1)
+  mirror()
+  check(
+    Number(uiHost.eval(`return __uiSelectByIds({ ${acu}, ${acu2} })`)) === 2,
+    'Beide Bauer sind ausgewählt',
+  )
+  uiHost.eval(`import('/lua/ui/game/commandmode.lua').StartCommandMode('build', { name = 'ueb0101' })`)
+  const assistMsg = await worldClick(uiHost, sim, { x: 92.4, z: 92.1 }, () => 20)
+  check(
+    assistMsg !== null && assistMsg.includes('(+1 Assist)'),
+    `worldClick → ${String(assistMsg)}`,
+  )
+  check(
+    simHost.eval(`return __builderBusy(${acu}) and __builderBusy(${acu2})`) === true,
+    'BEIDE Bauer haben einen Bau-Task auf der Baustelle',
+  )
+}
+
 // A click on an ENEMY unit issues Attack (dispatch 0x0A) instead of Move —
 // the picked target travels as enemyTargetId, exactly like CUIWorldView
 // hands the picked entity to the command dispatch.

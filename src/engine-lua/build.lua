@@ -315,12 +315,19 @@ function __buildApply()
       t.__fraction = f
       t.__health = t:GetMaxHealth() * f
       if f >= 1 then
+        -- With several builders on one site every task finishes here, but
+        -- the TARGET gets OnStopBeingBuilt exactly once — the engine guards
+        -- with the helper's mBeingBuilt flag (Cfile:815003). Every builder
+        -- still gets its own OnStopBuild (its task ends).
+        local wasBeingBuilt = t.__beingBuilt
         t.__beingBuilt = false
         __econSetComplete(army, task.target, true)
-        -- Reihenfolge wie in der Engine: erst ist die Unit fertig, dann erfaehrt
-        -- der Bauer davon. FactoryUnit.OnStopBuild rollt die Einheit vom Hof
-        -- (defaultunits.lua:515-526) — sie muss dafuer schon leben.
-        pcall(function() t:OnStopBeingBuilt(b, task.order) end)
+        -- Engine order: the unit is complete first, then the builder learns
+        -- about it. FactoryUnit.OnStopBuild rolls the unit off the factory
+        -- (defaultunits.lua:515-526) — it must already be alive for that.
+        if wasBeingBuilt then
+          pcall(function() t:OnStopBeingBuilt(b, task.order) end)
+        end
         b.UnitBeingBuilt = t
         pcall(function() b:OnStopBuild(t, task.order) end)
         n = n + 1
