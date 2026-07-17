@@ -137,6 +137,77 @@ local function acquireTarget(w, u)
 end
 
 -- ---------------------------------------------------------------------
+-- Turret aiming — CAimManipulator::CheckTracking/Track (weapons.md par. 2c,
+-- CAimManipulator.cpp:1239-1327/1386). Per tick the turret slews toward the
+-- target direction (slew = TurretYawSpeed * DEG2RAD * 0.1, arc-clamped to
+-- center ± half range) and the weapon may only FIRE while both axes are
+-- within FiringTolerance (weapon->mCanFire = onTarget). Angles live in the
+-- UNIT frame relative to the rest pose; the renderer applies them to the
+-- yaw/pitch bones. Idle turrets keep their pose (structures never reset,
+-- weapon.lua:94 SetResetPoseTime 9999999; the mobile reset timer is a
+-- documented gap).
+-- ---------------------------------------------------------------------
+local function normalizeAngle(a)
+  while a > math.pi do a = a - 2 * math.pi end
+  while a < -math.pi do a = a + 2 * math.pi end
+  return a
+end
+
+local function aimAxis(current, wanted, center, range, slew)
+  -- Arc clamp (2c): c = clamp(normalize(desired - center), -half, +half);
+  -- laneDelta = (c + center) - current, then slew-clamped.
+  local delta
+  if range and range < math.pi then
+    local c = normalizeAngle(wanted - center)
+    if c > range then c = range elseif c < -range then c = -range end
+    delta = normalizeAngle((c + center) - current)
+  else
+    delta = normalizeAngle(wanted - current)
+  end
+  local step = delta
+  if slew and slew > 0 then
+    if step > slew then step = slew elseif step < -slew then step = -slew end
+  end
+  return normalizeAngle(current + step), normalizeAngle(current + step - wanted)
+end
+
+local function aimTick(w, u)
+  local aim = w.__aim
+  if not aim or aim.__destroyed then return end
+  local t = w.__target
+  local tp = nil
+  if t and not t.__dead and not t.__destroyQueued then
+    tp = __unitCollision(t)
+  elseif w.__targetGround then
+    tp = w.__targetGround
+  end
+  if not tp then
+    aim.__onTarget = false
+    return
+  end
+  local bp = w.__bp or {}
+  local p = u.__pos or { 0, 0, 0 }
+  local dx, dy, dz = tp[1] - p[1], tp[2] - (p[2] or 0), tp[3] - p[3]
+  -- Desired yaw in the UNIT frame (world bearing minus unit heading).
+  local wantedYaw = normalizeAngle(math.atan(dx, dz) - (u.__heading or 0))
+  local dxz = math.sqrt(dx * dx + dz * dz)
+  local wantedPitch = math.atan(dy, dxz)
+
+  local tol = (bp.FiringTolerance or 0.01) * 0.017453292
+  local yaw, yawErr = aimAxis(aim.__yaw or 0, wantedYaw,
+    aim.__yawCenter or 0, aim.__yawRange, aim.__yawSlew)
+  aim.__yaw = yaw
+  local onTarget = math.abs(yawErr) <= tol
+  if aim.__pitchBone then
+    local pitch, pitchErr = aimAxis(aim.__pitch or 0, wantedPitch,
+      aim.__pitchCenter or 0, aim.__pitchRange, aim.__pitchSlew)
+    aim.__pitch = pitch
+    if not bp.YawOnlyOnTarget and math.abs(pitchErr) > tol then onTarget = false end
+  end
+  aim.__onTarget = onTarget
+end
+
+-- ---------------------------------------------------------------------
 -- Feuertakt — CFireWeaponTask::Dispatch (Cfile:983912-983959)
 --
 --   if (mFireClock) --mFireClock;
@@ -156,6 +227,9 @@ local function fireTick(w, u)
   if bp.ManualFire then return end
   if (w.__fireClock or 0) > 0 then return end
   if (u.__fireState or 0) == 1 then return end -- HoldFire
+  -- The fire gate (weapon->mCanFire, CAimManipulator::Track): a turreted
+  -- weapon only fires while its aim is within FiringTolerance.
+  if w.__aim and not w.__aim.__destroyed and not w.__aim.__onTarget then return end
   if not w.__target and not w.__targetGround then return end
   if u.__beingBuilt then return end
 
@@ -333,6 +407,8 @@ function __weaponTick()
               local ok, err = pcall(function() acquireTarget(w, u) end)
               if not ok then WARN('Zielerfassung: ' .. tostring(err)) end
             end
+            local okA, errA = pcall(function() aimTick(w, u) end)
+            if not okA then WARN('Turret aim: ' .. tostring(errA)) end
             local ok, err = pcall(function() fireTick(w, u) end)
             if not ok then WARN('Feuertakt: ' .. tostring(err)) end
           end

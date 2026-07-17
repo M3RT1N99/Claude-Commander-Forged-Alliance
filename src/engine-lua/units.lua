@@ -230,12 +230,31 @@ local function activeOrder(id, u)
   return nil
 end
 
+-- Turret bone angles for the renderer (CAimManipulator state, advanced in
+-- weapons.lua aimTick): yaw/pitch relative to the rest pose per aim bone.
+local function readTurrets(u)
+  local out = nil
+  for _, w in ipairs(u.__weapons or {}) do
+    local aim = w.__aim
+    if aim and not aim.__destroyed and aim.__yawBone
+      and (math.abs(aim.__yaw or 0) > 0.0001 or math.abs(aim.__pitch or 0) > 0.0001) then
+      out = out or {}
+      out[#out + 1] = {
+        b = aim.__yawBone, y = aim.__yaw or 0,
+        pb = aim.__pitchBone, p = aim.__pitch or 0,
+      }
+    end
+  end
+  return out
+end
+
 local function readRow(id, u)
   local p = u.__pos or { 0, 0, 0 }
   local moving = (u.__goal ~= nil and u.__goal ~= false)
   local ot, ox, oz = activeOrder(id, u)
   return {
     orderType = ot, orderX = ox, orderZ = oz,
+    turrets = readTurrets(u),
     id = id,
     name = (u.__bp and u.__bp.BlueprintId) or '?',
     x = p[1], y = p[2], z = p[3],
@@ -303,6 +322,16 @@ function __readAllUnitsJson()
         and (',"order":{"t":' .. jstr(r.orderType)
           .. ',"x":' .. jnum(r.orderX) .. ',"z":' .. jnum(r.orderZ) .. '}')
         or '')
+      .. (function()
+        if not r.turrets then return '' end
+        local ts = {}
+        for ti, t in ipairs(r.turrets) do
+          ts[ti] = '{"b":' .. jstr(t.b) .. ',"y":' .. jnum(t.y)
+            .. (t.pb and (',"pb":' .. jstr(t.pb) .. ',"p":' .. jnum(t.p)) or '')
+            .. '}'
+        end
+        return ',"turrets":[' .. table.concat(ts, ',') .. ']'
+      end)()
       .. ',"army":' .. jnum(r.army)
       .. ',"idle":' .. tostring(r.idle)
       .. ',"buildQueue":[' .. table.concat(q, ',') .. ']'

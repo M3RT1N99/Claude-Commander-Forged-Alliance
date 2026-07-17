@@ -30,6 +30,8 @@ export interface LuaUnitSnapshot {
   born: number
   /** The unit's active order (command graph): type + target position. */
   order?: { t: 'Move' | 'Attack' | 'Repair' | 'BuildMobile'; x: number; z: number }
+  /** Turret aim state per weapon (yaw/pitch bones, radians vs. rest pose). */
+  turrets?: { b: string; y: number; pb?: string; p?: number }[]
   /** Die Armee der Unit (1-basiert) — unitsOfFocusArmy filtert danach. */
   army: number
   /**

@@ -1839,6 +1839,24 @@ function luaSimUpdate(): void {
       u.ring.scale.set(e.x, 1, e.z)
     }
 
+    // TURRET AIMING: the sim's CAimManipulator state (yaw/pitch per aim
+    // bone) turns the turret bones in the render skeleton.
+    if (s.turrets && s.turrets.length > 0) {
+      const overrides: { boneIndex: number; yaw: number; pitch: number }[] = []
+      for (const t of s.turrets) {
+        const yi = u.scene.boneNames.findIndex((n) => n.toLowerCase() === t.b.toLowerCase())
+        if (yi >= 0) overrides.push({ boneIndex: yi, yaw: t.y, pitch: 0 })
+        if (t.pb && t.p) {
+          const pi = u.scene.boneNames.findIndex((n) => n.toLowerCase() === t.pb!.toLowerCase())
+          if (pi >= 0 && pi !== yi) overrides.push({ boneIndex: pi, yaw: 0, pitch: t.p })
+          else if (pi === yi && overrides.length > 0) overrides[overrides.length - 1]!.pitch = t.p
+        }
+      }
+      u.scene.animator.setAimOverrides(overrides)
+    } else {
+      u.scene.animator.setAimOverrides([])
+    }
+
     // BAUSTELLE: die Build-Technique lebt von drei Uniforms — Baufortschritt
     // (material.y), Unit-Alter und Weltzeit in Sekunden (mesh.fx `time`).
     // Bei Fertigstellung kommt das normale Unit-Material zurück.

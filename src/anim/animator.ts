@@ -28,6 +28,16 @@ export class UnitAnimator {
   private anim: ScaAnim | null = null
   /** SCM-Bone-Index → SCA-Bone-Index (-1 = nicht animiert) */
   private animBoneMap: Int32Array | null = null
+  /**
+   * Turret aim overrides (bone index -> extra local rotation): the sim's
+   * CAimManipulator state. Yaw turns around the bone's local Y, pitch
+   * around its local X (standard FA turret rigging).
+   */
+  private readonly aimOverrides = new Map<number, { yaw: number; pitch: number }>()
+  private lastTime = 0
+  private readonly tmpAim = new Quaternion()
+  private readonly axisY = new Vector3(0, 1, 0)
+  private readonly axisX = new Vector3(1, 0, 0)
 
   private readonly tmpLocal = new Matrix4()
   private readonly tmpQ = new Quaternion()
@@ -80,8 +90,30 @@ export class UnitAnimator {
     return this.anim?.duration ?? 0
   }
 
+  /**
+   * Replace the aim overrides and re-pose immediately (idle units get no
+   * per-frame update, so the turret must move on the spot).
+   */
+  setAimOverrides(list: { boneIndex: number; yaw: number; pitch: number }[]): void {
+    let changed = list.length !== this.aimOverrides.size
+    if (!changed) {
+      for (const o of list) {
+        const cur = this.aimOverrides.get(o.boneIndex)
+        if (!cur || cur.yaw !== o.yaw || cur.pitch !== o.pitch) {
+          changed = true
+          break
+        }
+      }
+    }
+    if (!changed) return
+    this.aimOverrides.clear()
+    for (const o of list) this.aimOverrides.set(o.boneIndex, { yaw: o.yaw, pitch: o.pitch })
+    this.update(this.lastTime)
+  }
+
   /** Berechnet die Skin-Matrizen für Zeitpunkt t (Sekunden, looped). */
   update(timeSec: number): void {
+    this.lastTime = timeSec
     const anim = this.anim
 
     let f0 = 0
@@ -114,6 +146,18 @@ export class UnitAnimator {
       } else {
         this.localPos[i]!.copy(this.bindPos[i]!)
         this.localRot[i]!.copy(this.bindRot[i]!)
+      }
+
+      const aim = this.aimOverrides.get(i)
+      if (aim) {
+        if (aim.yaw !== 0) {
+          this.tmpAim.setFromAxisAngle(this.axisY, aim.yaw)
+          this.localRot[i]!.multiply(this.tmpAim)
+        }
+        if (aim.pitch !== 0) {
+          this.tmpAim.setFromAxisAngle(this.axisX, aim.pitch)
+          this.localRot[i]!.multiply(this.tmpAim)
+        }
       }
 
       this.tmpLocal.compose(this.localPos[i]!, this.localRot[i]!, this.one)

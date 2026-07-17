@@ -335,7 +335,41 @@ function CreateSlider(unit, bone) return newManipulator('slider', unit, bone) en
 function CreateAnimator(unit) return newManipulator('animator', unit) end
 function CreateBuilderArmController(unit, bone) return newManipulator('builderarm', unit, bone) end
 function CreateThrustController(unit, bone) return newManipulator('thrust', unit, bone) end
-function CreateAimController(unit, bone) return newManipulator('aim', unit, bone) end
+
+-- SetFiringArc(yawMin, yawMax, yawSpeed, pitchMin, pitchMax, pitchSpeed) —
+-- weapon.lua:150 hands center±halfRange in DEGREES; the engine stores the
+-- centered arc (CAimManipulator: mMinHeading = arc center, mMaxHeading =
+-- half range) and converts speeds to rad/tick with kSlewScale
+-- (slew = deg/s * DEG2RAD * 0.1, CAimManipulator.cpp:1197-1206).
+function ManipMeta:SetFiringArc(yawMin, yawMax, yawSpeed, pitchMin, pitchMax, pitchSpeed)
+  local d2r = 0.017453292
+  self.__yawCenter = (yawMin + yawMax) * 0.5 * d2r
+  self.__yawRange = math.abs(yawMax - yawMin) * 0.5 * d2r
+  self.__yawSlew = (yawSpeed or 0) * d2r * 0.1
+  self.__pitchCenter = (pitchMin + pitchMax) * 0.5 * d2r
+  self.__pitchRange = math.abs(pitchMax - pitchMin) * 0.5 * d2r
+  self.__pitchSlew = (pitchSpeed or 0) * d2r * 0.1
+  return self
+end
+
+--- CreateAimController(weapon, label, yawBone, [pitchBone], [muzzleBone]) —
+--- the REAL signature (weapon.lua:63). The manipulator carries the turret
+--- state the aim tick advances (weapons.lua __aimTick): current yaw/pitch
+--- relative to the rest pose and the on-target flag that gates the fire
+--- task (weapon->mCanFire, CAimManipulator::Track, weapons.md par. 2c).
+function CreateAimController(weapon, label, yawBone, pitchBone, muzzleBone)
+  local m = newManipulator('aim', weapon and weapon.__unit or nil, yawBone)
+  m.__weapon = weapon
+  m.__label = label
+  m.__yawBone = yawBone
+  m.__pitchBone = pitchBone
+  m.__muzzleBone = muzzleBone
+  m.__yaw = 0
+  m.__pitch = 0
+  m.__onTarget = false
+  if weapon then weapon.__aim = m end
+  return m
+end
 
 -- CollisionDetector: Engine-Objekt, das Bones auf Bodenkontakt ueberwacht
 -- (unit.lua:2660 CreateCollisionDetector(self) -> :WatchBone(bone); landet im

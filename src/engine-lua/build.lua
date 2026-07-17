@@ -58,12 +58,12 @@ function __abortBuildTasks(builderId)
         end
         pcall(function() b:OnFailedToBuild() end)
       end
-      -- Only a NEVER-STARTED site vanishes on abort: in the engine the
-      -- structure does not exist before OnStartBuild ran (the build task
-      -- creates it on arrival) — we spawn it at click time, so remove it
-      -- here to match. A STARTED site stays, keeps its progress, and dies
+      -- Only a site whose build NEVER began vanishes on abort: in the
+      -- engine the structure does not exist before the task reached it —
+      -- we spawn it at click time, so remove the placeholder to match. A
+      -- begun site (__engineBorn) stays, keeps its progress, and dies
       -- through the decay path (Unit::OnTick, Cfile:952824-952840).
-      if t and not task.started and (t.__fraction or 1) <= 0 then t:Destroy() end
+      if t and not t.__engineBorn and (t.__fraction or 1) <= 0 then t:Destroy() end
       __econClearBuildRequest((b and b.__army) or 1, tid)
       __buildTasks[tid] = nil
     end
@@ -79,7 +79,9 @@ end
 --- unit.lua:551 destroys the unit.
 function __decayTick()
   for id, u in pairs(__units) do
-    if u.__beingBuilt and not u.__dead and not u.__destroyQueued
+    -- __engineBorn: our click-time placeholder does not exist in the engine
+    -- until OnStartBuild ran (startTask) — only from then on it decays.
+    if u.__beingBuilt and u.__engineBorn and not u.__dead and not u.__destroyQueued
       and (__gameTick - (u.__spawnTick or 0)) > 1 then
       local e = (u.__bp and u.__bp.Economy) or {}
       local maxVal = math.max(e.BuildCostEnergy or 0, e.BuildCostMass or 0, e.BuildTime or 0)
@@ -284,6 +286,16 @@ function __buildCollect()
         task.blocked = true
         __econClearBuildRequest(army, tid)
       else
+        -- The build REALLY begins: builder in range, progress will flow. In
+        -- the engine the structure only comes into being here (the build
+        -- task creates it on arrival) — our click-time spawn is a
+        -- placeholder. The decay clock (Unit::OnTick, mCreationTick,
+        -- Cfile:952821-952823) starts NOW; without this gate a fresh 0%
+        -- site died of decay during the builder's approach.
+        if not t.__engineBorn then
+          t.__engineBorn = true
+          t.__spawnTick = __gameTick or 0
+        end
         local bRate = (b.__bp and b.__bp.Economy and b.__bp.Economy.BuildRate) or 0
         local te = (t.__bp and t.__bp.Economy) or {}
         local bt = te.BuildTime or 1

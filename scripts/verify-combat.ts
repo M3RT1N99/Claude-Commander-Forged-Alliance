@@ -254,8 +254,10 @@ console.log('\n== CollisionBeam: der Dauerstrahl des Cybran-T2-Turms ==')
 {
   await game.giveUnit(host, 'urb2301')
   const turm = spawnLuaUnit(host, 'urb2301', { x: 300, y: 20, z: 100 }, 1)
-  const opfer = spawnLuaUnit(host, 'uel0201', { x: 300, y: 20, z: 112 }, 2)
-  check(turm > 0 && opfer > 0, `Turm ${turm} (Cybran T2 PD) und Opfer ${opfer}, 12 Meter`)
+  // The victim stands SIDEWAYS (+X): the turret must slew ~90 degrees
+  // before the fire gate (weapon->mCanFire) lets the beam start.
+  const opfer = spawnLuaUnit(host, 'uel0201', { x: 312, y: 20, z: 100 }, 2)
+  check(turm > 0 && opfer > 0, `Turm ${turm} (Cybran T2 PD) und Opfer ${opfer}, 12 m seitlich`)
   const beams = Number(host.eval('return #__collisionBeams'))
   check(beams >= 1, `${beams} CollisionBeam-Entity(s) beim Waffen-OnCreate erzeugt`)
   let beamAn = false
@@ -275,6 +277,20 @@ console.log('\n== CollisionBeam: der Dauerstrahl des Cybran-T2-Turms ==')
   }
   check(beamAn, 'Der Beam wurde beim Feuern Enable()t (PlayFxBeamStart)')
   check(schaden, 'Der Dauerstrahl macht Schaden (OnImpact → DoDamage)')
+  // Turret aiming (CAimManipulator): the yaw must be ~90° toward +X and
+  // on-target — without the slew the fire gate would never have opened.
+  const aim = host.pull<{ yaw: number; on: boolean } | null>(`(function()
+    for _, w in ipairs(__units[${turm}].__weapons or {}) do
+      if w.__aim then
+        return string.format('{"yaw":%.4f,"on":%s}', w.__aim.__yaw or 0, tostring(w.__aim.__onTarget == true))
+      end
+    end
+    return 'null'
+  end)()`)
+  check(
+    aim !== null && aim.on && Math.abs(aim.yaw - Math.PI / 2) < 0.15,
+    `Der Turm hat auf das Ziel gedreht (yaw ${aim ? aim.yaw.toFixed(3) : '—'} ≈ π/2, onTarget=${aim?.on})`,
+  )
   // Der SICHTBARE Strahl: CreateBeamEmitter + AttachBeamToEntity hängen den
   // Beam-Emitter an die CollisionBeam-Entity — die Meldung trägt beide Enden.
   const fx = host.pull<{ bp: string; x2?: number }[]>('__readAllEmittersJson()')
