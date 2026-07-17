@@ -26,12 +26,14 @@ Der Weg zur echten UI: [PLAN-UI.md](PLAN-UI.md); der 1:1-Gesamtfahrplan:
 - **Kein echtes Hauptmenü als Standard-Weg.** Das Front-End bootet
   (verify-frontend), aber die Sandbox startet über den Web-Launcher;
   `LaunchSinglePlayerSession`/Lobby fehlen.
-- **Render-Inventur offen (H/M-Liste):** Terrain ohne
-  Stratum-Normals/Decals (H4), Wasser statisch (H6), Schatten (H7),
-  Glow/Bloom-Pass (H2), Skybox (M9), Cybran/Aeon-Spezialshader (M5).
-  ERLEDIGT seit der Inventur: scmap-Schwanz vollständig geparst (ad3c8e4),
-  Karten-Props als Instanz-LOD-Ketten (H5), DDS-Cubemaps + Env-Reflexion
-  (5287a98), Baustellen-Look (H3), Beat-Interpolation (M6), Icon-Tint (M1).
+- **Render-Inventur offen (H/M-Liste):** Wasser statisch (H6, water2.fx),
+  Schatten (H7), Glow/Bloom-Pass (H2), Cybran/Aeon-Spezialshader (M5),
+  Normals-Decals (brauchen Normal-RT). ERLEDIGT seit der Inventur:
+  scmap-Schwanz vollständig geparst (ad3c8e4), Karten-Props als
+  Instanz-LOD-Ketten (H5), DDS-Cubemaps + Env-Reflexion (5287a98),
+  Terrain-Shader-Varianten + Stratum-Normals + Skirt (H4), Albedo-Decals
+  als Instanz-Patches, Sky-Dome mit Planeten + Cirrus (M9),
+  Baustellen-Look (H3), Beat-Interpolation (M6), Icon-Tint (M1).
   Props offen: Vertex-Schwanken (UndulatingNormalMappedVS), Prop-Sim
   (RECLAIMABLE/BlockPath); EnvCubes offen: `<aeon>`/`<seraphim>`-Einträge
   gehören zu den Fraktions-Shadern.
