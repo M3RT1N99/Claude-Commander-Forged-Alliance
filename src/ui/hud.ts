@@ -209,24 +209,58 @@ export class Hud {
 
   private readonly stratPool: HTMLImageElement[] = []
   private readonly stratIconCache = new Map<string, string | 'pending'>()
+  /** Army index -> icon color (ARGB hex from the armiesTable, see below). */
+  private armyColors = new Map<number, string>()
 
   /**
-   * Strategisches Icon, UNGEFÄRBT.
-   *
-   * Hier stand ein Canvas-'multiply'-Tinting mit einer erfundenen Farbtabelle
-   * ({1:'#2a6dbb', 2:'#e23c2c'}). Im Original kommen die Armeefarben aus
-   * /lua/gamecolors.lua (über GetArmiesTable). Eine zweite erfundene Farbe
-   * ersetzt keine erste.
+   * The REAL army icon colors: gamecolors.lua ArmyColors, published per army
+   * as `iconColor` by cfunc_GetArmiesTableL (Cfile:1267023-1267111) — the
+   * engine tints the strategic icons with exactly this color. (An invented
+   * color table lived here once and was removed; now the values come from
+   * the session's armiesTable.)
    */
-  private strategicIcon(name: string, state: 'rest' | 'selected'): string | null {
-    const key = `${name}|${state}`
+  setArmyColors(colors: Map<number, string>): void {
+    this.armyColors = colors
+    this.stratIconCache.clear()
+  }
+
+  private strategicIcon(name: string, state: 'rest' | 'selected', army: number): string | null {
+    const key = `${name}|${state}|${army}`
     const cached = this.stratIconCache.get(key)
     if (cached && cached !== 'pending') return cached
     if (cached === 'pending') return null
     this.stratIconCache.set(key, 'pending')
     void this.skin(`/game/strategicicons/${name}_${state}.dds`).then((base) => {
-      if (!base) this.stratIconCache.delete(key)
-      else this.stratIconCache.set(key, base)
+      if (!base) {
+        this.stratIconCache.delete(key)
+        return
+      }
+      const argb = this.armyColors.get(army)
+      if (!argb || argb.length < 8) {
+        this.stratIconCache.set(key, base)
+        return
+      }
+      // Tint: multiply the icon with the army color, keep the icon's alpha.
+      const img = new Image()
+      img.onload = () => {
+        const c = document.createElement('canvas')
+        c.width = img.width
+        c.height = img.height
+        const ctx = c.getContext('2d')
+        if (!ctx) {
+          this.stratIconCache.set(key, base)
+          return
+        }
+        ctx.drawImage(img, 0, 0)
+        ctx.globalCompositeOperation = 'multiply'
+        ctx.fillStyle = `#${argb.slice(2)}`
+        ctx.fillRect(0, 0, c.width, c.height)
+        ctx.globalCompositeOperation = 'destination-in'
+        ctx.drawImage(img, 0, 0)
+        this.stratIconCache.set(key, c.toDataURL())
+      }
+      img.onerror = () => this.stratIconCache.set(key, base)
+      img.src = base
     })
     return null
   }
@@ -256,7 +290,7 @@ export class Hud {
         img.style.display = 'none'
         continue
       }
-      const url = this.strategicIcon(u.strategicIcon, u.selected ? 'selected' : 'rest')
+      const url = this.strategicIcon(u.strategicIcon, u.selected ? 'selected' : 'rest', u.army)
       if (!url) {
         img.style.display = 'none'
         continue

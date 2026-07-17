@@ -805,6 +805,9 @@ async function startSandbox(mapFolder: string): Promise<void> {
     const session: SessionInfo = { ...SANDBOX_SESSION, map: mapFolder }
     gameUi = await GameUi.create(vfs, await loadGameFonts(), log, 'game', conVarChanged, session)
     gameUi.attachEvents()
+    // Strategic icons are tinted with the army's iconColor from the
+    // armiesTable (gamecolors.lua ArmyColors, Cfile:1267023-1267111).
+    hud?.setArmyColors(gameUi.armyIconColors())
     // Die Audio-Ausgabe: die XACT-Banks aus <FA>/sounds/ — StartSound in der
     // UI-VM landet als PCM im Lautsprecher (StopSound beendet über die
     // Handle-ID, z. B. die Menümusik beim Sitzungsstart).
@@ -1805,6 +1808,10 @@ function luaSimUpdate(): void {
     }
     u.mesh.position.set(x, y, z)
     u.mesh.rotation.set(0, heading, 0)
+    // The army comes from the sim (spawn-time value in addLuaUnitToScene was
+    // always 1) — without this, an enemy under the cursor never triggered
+    // Attack and its icon carried the wrong tint.
+    u.army = s.army
     if (u.selected && s.order) {
       orderEntries.push({
         unitId: u.id,

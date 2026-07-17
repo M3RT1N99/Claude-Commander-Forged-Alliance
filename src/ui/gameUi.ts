@@ -341,6 +341,23 @@ export class GameUi {
   }
 
   /**
+   * The armies' icon colors (ARGB hex) from the armiesTable — the field
+   * cfunc_GetArmiesTableL publishes per army (Cfile:1267023-1267111),
+   * sourced from /lua/gamecolors.lua ArmyColors. Strategic icons are
+   * tinted with exactly this color.
+   */
+  armyIconColors(): Map<number, string> {
+    const rows = this.host.pull<[number, string][]>(`(function()
+      local parts = {}
+      for i, a in ipairs(GetArmiesTable().armiesTable) do
+        parts[#parts + 1] = '[' .. i .. ',"' .. tostring(a.iconColor) .. '"]'
+      end
+      return '[' .. table.concat(parts, ',') .. ']'
+    end)()`)
+    return new Map(rows)
+  }
+
+  /**
    * Die Weltansichten, die die Original-Lua gebaut hat — mit Lage und Größe.
    *
    * Im Original sind es echte Controls (CUIWorldView): die Hauptansicht
