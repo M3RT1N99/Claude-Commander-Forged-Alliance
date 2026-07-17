@@ -133,6 +133,34 @@ console.log('\n== Die Speed-Cap-Kaskade (sub_699760 @0x699760, Cfile:942291-9423
   host.eval(`__units[${kid}]:GetNavigator():AbortMove()`)
 }
 
+// Occupancy at arrival (movement-path.md §6: no pushing — a standing unit
+// blocks its cell, the arriving one stops on the next free ogrid cell).
+// Without this, factory products stacked on the same roll-off point.
+console.log('\n== Belegte Ankunftszelle: keine Stapel ==')
+{
+  const a = spawnLuaUnit(host, 'uel0001', { x: 300, y: 20, z: 300 }, 1)
+  const b = spawnLuaUnit(host, 'uel0001', { x: 310, y: 20, z: 300 }, 1)
+  host.eval(`__units[${a}]:GetNavigator():SetGoal({ 305, 20, 320 })`)
+  host.eval(`__units[${b}]:GetNavigator():SetGoal({ 305, 20, 320 })`)
+  for (let t = 0; t < 200; t++) beat()
+  const dist = num(
+    host,
+    `(function()
+      local pa = __units[${a}].__pos
+      local pb = __units[${b}].__pos
+      local dx, dz = pa[1] - pb[1], pa[3] - pb[3]
+      return math.sqrt(dx * dx + dz * dz)
+    end)()`,
+  )
+  const stehen = host.eval(
+    `return __units[${a}].__goal == false and __units[${b}].__goal == false`,
+  )
+  check(
+    stehen === true && dist >= 0.9,
+    `Beide stehen, ${dist.toFixed(2)} m auseinander (Occupancy statt Stapel)`,
+  )
+}
+
 if (warnings.length > 0) {
   console.log(`\n${warnings.length} WARN (erste 3):`)
   for (const w of warnings.slice(0, 3)) console.log(`  ${w.slice(0, 110)}`)

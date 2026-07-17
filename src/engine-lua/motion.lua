@@ -72,6 +72,53 @@ local function motionParams(u)
   }
 end
 
+-- Dynamic unit blocking at the arrival cell. The engine NEVER pushes units
+-- apart (movement-path.md §6: overlap is avoided through occupancy bits +
+-- predictive steering, mIsBeingPushed only comes from AddImpulse); a cell
+-- holding a standing unit simply is not enterable (COORDS_CanMoveAt
+-- @0x720F70 — unrecovered in faf-re; the documented rebuild treats living,
+-- non-attached units in the cell as blockers). Without this every factory
+-- product parked on the SAME roll-off point (scene debug: 32/33 stacked).
+local function footprintRadius(u)
+  local fp = (u.__bp and u.__bp.Footprint) or {}
+  local s = math.max(fp.SizeX or 0, fp.SizeZ or 0)
+  if s <= 0 then s = 1 end
+  return s * 0.5
+end
+
+local function blockedAt(u, x, z)
+  local myR = footprintRadius(u)
+  for _, other in pairs(__units) do
+    if other ~= u and not other.__dead and not other.__destroyQueued
+      and not other.__goal and (other.__bp and other.__bp.Physics
+        and other.__bp.Physics.MotionType ~= 'RULEUMT_None' or false) then
+      local op = other.__pos
+      if op then
+        local r = myR + footprintRadius(other)
+        local ddx, ddz = op[1] - x, op[3] - z
+        if ddx * ddx + ddz * ddz < r * r then return true end
+      end
+    end
+  end
+  return false
+end
+
+-- First free ogrid cell around the target (1 m grid — the same raster
+-- COORDS_GridSnap uses), scanned ring by ring, deterministic.
+local function freeSpotNear(u, x, z)
+  for ring = 1, 8 do
+    for ix = -ring, ring do
+      for iz = -ring, ring do
+        if math.max(math.abs(ix), math.abs(iz)) == ring then
+          local cx, cz = x + ix, z + iz
+          if not blockedAt(u, cx, cz) then return cx, cz end
+        end
+      end
+    end
+  end
+  return x, z
+end
+
 -- Entity::AdvanceCoords — advance every unit with a goal by one tick.
 function __advanceMotion()
   for id, u in pairs(__units) do
@@ -113,13 +160,26 @@ function __advanceMotion()
       if m.maxSpeed <= 0 then
         u.__goal = false
         u.__speed = 0
-      -- Nah genug: diesen Tick exakt auf dem Ziel ankommen.
+      -- Nah genug: diesen Tick exakt auf dem Ziel ankommen — außer eine
+      -- STEHENDE Unit belegt die Zelle: dann zur nächsten freien Zelle
+      -- weiterfahren (Occupancy statt Pushing, movement-path.md §6).
       elseif dist <= math.max(speed, 0.05) then
-        p[1] = goal[1]
-        p[3] = goal[2]
-        p[2] = GetSurfaceHeight(p[1], p[3])
-        u.__goal = false
-        u.__speed = 0
+        if blockedAt(u, goal[1], goal[2]) then
+          local nx, nz = freeSpotNear(u, goal[1], goal[2])
+          if nx ~= goal[1] or nz ~= goal[2] then
+            u.__goal = { nx, nz }
+          else
+            -- No free cell in reach: stop where we are.
+            u.__goal = false
+            u.__speed = 0
+          end
+        else
+          p[1] = goal[1]
+          p[3] = goal[2]
+          p[2] = GetSurfaceHeight(p[1], p[3])
+          u.__goal = false
+          u.__speed = 0
+        end
       else
         -- Heading/Forward VOM TICK-ANFANG: die Cap-Kaskade der Engine rechnet
         -- gegen die Ausrichtung VOR der Drehung (CAiPathSpline::Generate).
