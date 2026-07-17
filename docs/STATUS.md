@@ -26,17 +26,18 @@ Der Weg zur echten UI: [PLAN-UI.md](PLAN-UI.md); der 1:1-Gesamtfahrplan:
 - **Kein echtes Hauptmenü als Standard-Weg.** Das Front-End bootet
   (verify-frontend), aber die Sandbox startet über den Web-Launcher;
   `LaunchSinglePlayerSession`/Lobby fehlen.
-- **Render-Inventur offen (H/M-Liste):** Wasser statisch (H6, water2.fx),
-  Schatten (H7), Glow/Bloom-Pass (H2), Cybran/Aeon-Spezialshader (M5),
-  Normals-Decals (brauchen Normal-RT). ERLEDIGT seit der Inventur:
+- **Render-Inventur offen (H/M-Liste):** Schatten (H7),
+  Cybran/Aeon-Unit-Spezialshader (M5), Normals-Decals (brauchen
+  Normal-RT), Refraktions-/Reflexions-RT des Wassers (benannte Näherung),
+  Undulating-Baum-Schwanken, Prop-Sim (RECLAIMABLE/BlockPath),
+  Planeten-Glow-Pass (Write_A). ERLEDIGT seit der Inventur:
   scmap-Schwanz vollständig geparst (ad3c8e4), Karten-Props als
   Instanz-LOD-Ketten (H5), DDS-Cubemaps + Env-Reflexion (5287a98),
   Terrain-Shader-Varianten + Stratum-Normals + Skirt (H4), Albedo-Decals
-  als Instanz-Patches, Sky-Dome mit Planeten + Cirrus (M9),
+  als Instanz-Patches, Sky-Dome mit Planeten + Cirrus (M9), Wasser voll
+  nach HighFidelityPS (H6, 95a36b0), Build-Shader ALLER vier Fraktionen
+  (c370942), Glow/Bloom-Pass nach CBloomRenderer (H2, ef1f088),
   Baustellen-Look (H3), Beat-Interpolation (M6), Icon-Tint (M1).
-  Props offen: Vertex-Schwanken (UndulatingNormalMappedVS), Prop-Sim
-  (RECLAIMABLE/BlockPath); EnvCubes offen: `<aeon>`/`<seraphim>`-Einträge
-  gehören zu den Fraktions-Shadern.
 - **Sound-Settings stellen nichts ein** (Nutzer-Fund): SetVolume/GetVolume
   fehlen; GameAudio hat keine xgs-Kategorie-Gains (Forschung läuft).
 - **Tastatur-Folgefunde:** `InternalCreateEdit` fehlt (Chat-/Konsolen-EINGABE),
