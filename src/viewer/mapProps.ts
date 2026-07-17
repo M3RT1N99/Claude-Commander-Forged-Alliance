@@ -238,6 +238,13 @@ export class MapProps {
               alphaRef: { value: variant.alphaRef },
             },
             transparent: variant.blend,
+            // Every prop technique writes RGB only (Write_RGB) — keep the
+            // frame ALPHA (the glow buffer input) untouched.
+            blending: THREE.CustomBlending,
+            blendSrc: variant.blend ? THREE.SrcAlphaFactor : THREE.OneFactor,
+            blendDst: variant.blend ? THREE.OneMinusSrcAlphaFactor : THREE.ZeroFactor,
+            blendSrcAlpha: THREE.ZeroFactor,
+            blendDstAlpha: THREE.OneFactor,
             // Foliage cross planes are visible from both sides — like the
             // unit path we render SCM double-sided.
             side: THREE.DoubleSide,

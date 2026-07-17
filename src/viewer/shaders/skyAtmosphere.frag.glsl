@@ -20,5 +20,5 @@ void main() {
   float tv = clamp((vElevation - horizonBegin) / (horizonEnd - horizonBegin), 0.0, 1.0);
   float t = texture2D(horizonLookup, vec2(th, 0.25)).a
           * texture2D(horizonLookup, vec2(tv, 0.75)).a;
-  gl_FragColor = vec4(mix(horizonColor, skyColor, 1.0 - t), 1.0);
+  gl_FragColor = vec4(mix(horizonColor, skyColor, 1.0 - t), 0.0); // no glow
 }

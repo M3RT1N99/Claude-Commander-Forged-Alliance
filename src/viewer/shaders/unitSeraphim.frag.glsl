@@ -48,5 +48,6 @@
     light = light + (1.0 - light) * shadowFillColor;
 
     vec3 color = diffuse.rgb * light + environment + phongAdditive + fallOff.rgb * diffuse.a;
-    gl_FragColor = vec4(color, 1.0);
+    // Frame alpha = glow amount (spec.b + glowMinimum)
+    gl_FragColor = vec4(color, specular.b + 0.01);
   }

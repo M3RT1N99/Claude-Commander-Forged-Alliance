@@ -195,5 +195,15 @@
       albedo.rgb = mix(albedo.rgb, water.rgb, water.a);
     }
 
-    gl_FragColor = vec4(albedo.rgb, 1.0);
+#ifdef XP
+    gl_FragColor = vec4(albedo.rgb, 0.0); // TerrainAlbedoXP returns alpha 0
+#else
+#ifdef GLOW
+    // TerrainGlowPS (:804): the scrolled stratum1 alpha is the glow
+    float glowOut = texture2D(stratum1Albedo, world / stratumTile[1] + glowOffset).a;
+    gl_FragColor = vec4(albedo.rgb, glowOut * m0.y + 0.01);
+#else
+    gl_FragColor = vec4(albedo.rgb, 0.01 + specular * specularColor.w);
+#endif
+#endif
   }

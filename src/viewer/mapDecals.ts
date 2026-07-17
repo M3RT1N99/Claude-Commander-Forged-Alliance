@@ -162,8 +162,14 @@ export class MapDecals {
           cutOffLOD: { value: cutOff },
         },
         // technique TDecals (:1249-1251): SrcAlpha/InvSrcAlpha, depth test
-        // LessEqual without write, decal bias.
+        // LessEqual without write, decal bias — RGB only, the frame alpha
+        // (glow buffer) stays untouched.
         transparent: true,
+        blending: THREE.CustomBlending,
+        blendSrc: THREE.SrcAlphaFactor,
+        blendDst: THREE.OneMinusSrcAlphaFactor,
+        blendSrcAlpha: THREE.ZeroFactor,
+        blendDstAlpha: THREE.OneFactor,
         depthWrite: false,
         polygonOffset: true,
         polygonOffsetFactor: -1,

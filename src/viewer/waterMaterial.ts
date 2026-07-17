@@ -49,6 +49,9 @@ export function createWaterMaterial(o: WaterMaterialOptions): THREE.ShaderMateri
     blending: THREE.CustomBlending,
     blendSrc: THREE.OneFactor,
     blendDst: THREE.OneMinusSrcAlphaFactor,
+    // Write_RGB (water2.fx:506): the frame alpha (glow buffer) stays.
+    blendSrcAlpha: THREE.ZeroFactor,
+    blendDstAlpha: THREE.OneFactor,
     depthWrite: false,
     uniforms: {
       heightTex: { value: o.heightTex },

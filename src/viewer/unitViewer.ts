@@ -16,6 +16,7 @@ import type { ScaAnim } from '../formats/sca'
 import { MapProps } from './mapProps'
 import { MapDecals } from './mapDecals'
 import { SkyDome } from './skyDome'
+import { BloomPipeline } from './bloom'
 
 /** Eine in die Szene gesetzte Einheit (Sandbox-Modus). */
 export class SceneUnit {
@@ -60,6 +61,8 @@ export class UnitViewer {
   private mapProps: MapProps | null = null
   private mapDecals: MapDecals | null = null
   private skyDome: SkyDome | null = null
+  /** Glow/bloom chain (CBloomRenderer::DoBloom @0x7F5160). */
+  private bloom: BloomPipeline | null = null
   /** Map '<default>' env cube — mesh.fx environmentSampler (Cfile:1189598). */
   private envCube: THREE.Texture | null = null
   /** Named env cubes from the scmap list ('<aeon>', '<seraphim>', …). */
@@ -89,7 +92,10 @@ export class UnitViewer {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
     this.s3tcSupported = this.renderer.extensions.has('WEBGL_compressed_texture_s3tc')
 
-    this.scene.background = new THREE.Color(0x10141c)
+    // Clear with ALPHA 0 — the frame alpha is the glow buffer input
+    // (frame.fx CopyGlowingPS); a background color of alpha 1 would make
+    // the whole backdrop bloom.
+    this.renderer.setClearColor(0x10141c, 0)
     this.scene.fog = new THREE.Fog(0x10141c, 60, 220)
 
     this.camera = new THREE.PerspectiveCamera(45, 1, 0.05, 500)
@@ -169,22 +175,39 @@ export class UnitViewer {
     const height = this.canvas.clientHeight
     const dpr = this.renderer.getPixelRatio()
 
+    // Frame RT for the glow chain: the scene renders here (its ALPHA is
+    // the glow amount), then BloomPipeline.composite blits + adds onto
+    // the canvas (frame.fx TFrame / TFrameAdd).
+    const size = this.renderer.getDrawingBufferSize(new THREE.Vector2())
+    if (!this.bloom) {
+      this.bloom = new BloomPipeline(size.x, size.y)
+    } else if (this.bloom.target.width !== size.x || this.bloom.target.height !== size.y) {
+      this.bloom.setSize(size.x, size.y)
+    }
+
     // Keine WorldView (Unit-Viewer, Karten-Viewer): die ganze Fläche.
     if (this.worldViewRects.length === 0) {
+      this.renderer.setRenderTarget(this.bloom.target)
       this.renderer.setScissorTest(false)
-      this.renderer.setViewport(0, 0, width, height)
+      this.renderer.setViewport(0, 0, size.x, size.y)
       this.renderer.render(this.scene, this.camera)
+      this.renderer.setRenderTarget(null)
+      this.renderer.setViewport(0, 0, width, height)
+      this.bloom.composite(this.renderer)
       return
     }
 
+    this.renderer.setRenderTarget(this.bloom.target)
     this.renderer.setScissorTest(true)
     this.renderer.clear()
     for (const view of this.worldViewRects) {
-      const w = Math.max(1, Math.round(view.width))
-      const h = Math.max(1, Math.round(view.height))
-      const x = Math.round(view.left)
+      // Render-target viewports count in DEVICE pixels — scale the CSS
+      // rects by the pixel ratio.
+      const w = Math.max(1, Math.round(view.width * dpr))
+      const h = Math.max(1, Math.round(view.height * dpr))
+      const x = Math.round(view.left * dpr)
       // WebGL zählt von UNTEN, die UI von oben.
-      const y = Math.round(height - view.top - view.height)
+      const y = Math.round((height - view.top - view.height) * dpr)
       this.renderer.setViewport(x, y, w, h)
       this.renderer.setScissor(x, y, w, h)
 
@@ -197,7 +220,9 @@ export class UnitViewer {
       }
     }
     this.renderer.setScissorTest(false)
-    void dpr
+    this.renderer.setRenderTarget(null)
+    this.renderer.setViewport(0, 0, width, height)
+    this.bloom.composite(this.renderer)
   }
 
   /** Draufsicht auf die ganze Karte, in das Seitenverhältnis des Controls gepasst. */

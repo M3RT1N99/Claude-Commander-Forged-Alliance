@@ -141,6 +141,12 @@ export function createUefBuildMaterials(
       time: { value: 0 },
     },
     transparent: true, // AlphaBlend_SrcAlpha_InvSrcAlpha (mesh.fx:5640/5669)
+    // Write_RGB — the frame alpha (glow buffer) stays untouched.
+    blending: THREE.CustomBlending,
+    blendSrc: THREE.SrcAlphaFactor,
+    blendDst: THREE.OneMinusSrcAlphaFactor,
+    blendSrcAlpha: THREE.ZeroFactor,
+    blendDstAlpha: THREE.OneFactor,
     side: THREE.DoubleSide,
   })
   const overlay = new THREE.ShaderMaterial({
@@ -154,6 +160,11 @@ export function createUefBuildMaterials(
       unitAge: { value: 0 },
     },
     transparent: true,
+    blending: THREE.CustomBlending,
+    blendSrc: THREE.SrcAlphaFactor,
+    blendDst: THREE.OneMinusSrcAlphaFactor,
+    blendSrcAlpha: THREE.ZeroFactor,
+    blendDstAlpha: THREE.OneFactor,
     depthWrite: false,
     side: THREE.DoubleSide,
   })
@@ -226,7 +237,13 @@ export function createFactionBuildMaterials(
       fragmentShader: BUILD_AEON_FS,
       defines: { ...defines, AEON_SCALE: true },
       uniforms: { ...shared },
-      side: THREE.DoubleSide, // pass P0 is opaque (AlphaBlend_Disable)
+      // pass P0 is opaque, Write_RGB (mesh.fx:5362) — keep frame alpha
+      blending: THREE.CustomBlending,
+      blendSrc: THREE.OneFactor,
+      blendDst: THREE.ZeroFactor,
+      blendSrcAlpha: THREE.ZeroFactor,
+      blendDstAlpha: THREE.OneFactor,
+      side: THREE.DoubleSide,
     })
     const overlay = new THREE.ShaderMaterial({
       vertexShader: BUILD_FACTION_VS,
@@ -234,6 +251,11 @@ export function createFactionBuildMaterials(
       defines: { ...defines, AEON_SCALE: true },
       uniforms: { ...shared },
       transparent: true,
+      blending: THREE.CustomBlending,
+      blendSrc: THREE.SrcAlphaFactor,
+      blendDst: THREE.OneMinusSrcAlphaFactor,
+      blendSrcAlpha: THREE.ZeroFactor,
+      blendDstAlpha: THREE.OneFactor,
       depthWrite: false,
       side: THREE.DoubleSide,
     })
@@ -246,7 +268,12 @@ export function createFactionBuildMaterials(
       fragmentShader: BUILD_CYBRAN_FS,
       defines: { ...defines },
       uniforms: { ...shared, insectMap: { value: insectLookup ?? white } },
-      transparent: true, // AlphaBlend_SrcAlpha (mesh.fx:5502)
+      transparent: true, // AlphaBlend_SrcAlpha Write_RGB (mesh.fx:5502)
+      blending: THREE.CustomBlending,
+      blendSrc: THREE.SrcAlphaFactor,
+      blendDst: THREE.OneMinusSrcAlphaFactor,
+      blendSrcAlpha: THREE.ZeroFactor,
+      blendDstAlpha: THREE.OneFactor,
       side: THREE.DoubleSide,
     })
     const overlay = new THREE.ShaderMaterial({
@@ -266,7 +293,12 @@ export function createFactionBuildMaterials(
     fragmentShader: BUILD_SERAPHIM_FS,
     defines: { ...defines, SERAPHIM_SCALE: true },
     uniforms: { ...shared, lookupMap: { value: falloffLookup ?? white } },
-    transparent: true, // AlphaBlend_SrcAlpha (mesh.fx:5592)
+    transparent: true, // AlphaBlend_SrcAlpha Write_RGB (mesh.fx:5592)
+    blending: THREE.CustomBlending,
+    blendSrc: THREE.SrcAlphaFactor,
+    blendDst: THREE.OneMinusSrcAlphaFactor,
+    blendSrcAlpha: THREE.ZeroFactor,
+    blendDstAlpha: THREE.OneFactor,
     side: THREE.DoubleSide,
   })
   return { base, overlay: null }

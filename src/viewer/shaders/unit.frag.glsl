@@ -85,5 +85,6 @@
     float emissive = glowMultiplier * specular.b;
 
     vec3 color = albedo.rgb * (emissive + light + phongMultiplicative) + phongAdditive;
-    gl_FragColor = vec4(color, 1.0);
+    // Frame alpha = glow amount (mesh.fx:2202: spec.b + glowMinimum)
+    gl_FragColor = vec4(color, specular.b + 0.01);
   }
