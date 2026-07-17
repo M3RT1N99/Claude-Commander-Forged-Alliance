@@ -6,7 +6,7 @@ import type { GameVfs } from '../vfs/vfs'
 import { createUnitMaterial, createWreckageMaterial, type UnitTextures, type MapLighting } from './unitMaterial'
 import { createTerrainMaterial } from './terrainMaterial'
 import { createWaterMaterial } from './waterMaterial'
-import { ddsToTexture } from './textures'
+import { ddsToTexture, ddsToCubeTexture } from './textures'
 import { parseDds } from '../formats/dds'
 import { bgraToRgba, decodeDxt } from '../formats/dxt'
 import { UnitAnimator } from '../anim/animator'
@@ -53,6 +53,8 @@ export class UnitViewer {
   private current: THREE.Mesh | null = null
   private waterMesh: THREE.Mesh | null = null
   private mapProps: MapProps | null = null
+  /** Map '<default>' env cube — mesh.fx environmentSampler (Cfile:1189598). */
+  private envCube: THREE.Texture | null = null
   private animator: UnitAnimator | null = null
   private animPlaying = false
   private animTime = 0
@@ -233,6 +235,10 @@ export class UnitViewer {
       this.mapProps.dispose()
       this.mapProps = null
     }
+    if (this.envCube) {
+      this.envCube.dispose()
+      this.envCube = null
+    }
   }
 
   /** SCM → BufferGeometry mit allen Attributen des Unit-Shaders (UV1,
@@ -304,6 +310,7 @@ export class UnitViewer {
       animator.skinMatrices,
       shader,
       this.mapLighting ?? undefined,
+      this.envCube,
     )
     const mesh = new THREE.Mesh(geometry, material)
     mesh.frustumCulled = false
@@ -960,9 +967,31 @@ export class UnitViewer {
       this.scene.add(this.waterMesh)
     }
 
+    // The map's environment cube — Moho::MeshEnvironment resolves the
+    // '<default>' entry of the scmap envCubes list (engine default
+    // /textures/environment/defaultenvcube.dds, Cfile:1189598). It feeds
+    // the environmentSampler term of unit and prop materials.
+    const envEntry =
+      scmap.envCubes.find((e) => e.name === '<default>') ?? scmap.envCubes[0]
+    const envPath = (envEntry?.path ?? '/textures/environment/defaultenvcube.dds')
+      .replace(/^\//, '')
+      .toLowerCase()
+    if (vfs.exists(envPath)) {
+      this.envCube = ddsToCubeTexture(await vfs.read(envPath), this.s3tcSupported)
+    } else {
+      console.warn(`env cube not found: ${envPath}`)
+      this.envCube = null
+    }
+
     // Map props (trees, rocks) — one InstancedMesh per blueprint, lit with
     // the same scmap values as terrain and units (render-details.md par. 2).
-    this.mapProps = await MapProps.load(scmap.props, vfs, this.mapLighting, this.s3tcSupported)
+    this.mapProps = await MapProps.load(
+      scmap.props,
+      vfs,
+      this.mapLighting,
+      this.s3tcSupported,
+      this.envCube,
+    )
     this.scene.add(this.mapProps.group)
     if (this.mapProps.stats.instances > 0) {
       console.log(

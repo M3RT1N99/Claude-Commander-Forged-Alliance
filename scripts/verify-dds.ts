@@ -70,6 +70,43 @@ check(opaque > 0, `${opaque} von ${px.length / 4} Pixeln sind sichtbar (1-Bit-Al
 // 3 % zu dunkel — die Sorte Fehler, die man nie sieht und nie wieder findet.
 check(maxChannel === 255, `hellster Kanal = ${maxChannel} (Bit-Replikation: 31 → 255, nicht 248)`)
 
+// --- Cubemaps (EnvCube_*/SkyCube_*): 6 faces, each with its mip chain ------
+// They back the mesh.fx environmentSampler (Moho::MeshEnvironment, default
+// /textures/environment/defaultenvcube.dds, Cfile:1189598).
+console.log('\n== DDS-Cubemaps: 6 Faces je Datei ==')
+{
+  let cubes = 0
+  let bad = 0
+  for (const p of ddsPaths) {
+    const img = await (async () => {
+      try {
+        return parseDds(await game.read(p))
+      } catch {
+        return null
+      }
+    })()
+    if (!img?.cubeFaces) continue
+    cubes++
+    if (img.cubeFaces.length !== 6) bad++
+    for (const face of img.cubeFaces) {
+      const m0 = face[0]!
+      if (m0.width !== img.width || m0.height !== img.height) bad++
+    }
+  }
+  check(cubes >= 80 && bad === 0, `${cubes} Cubemaps geparst, ${bad} fehlerhaft (erwartet: 86 im Spiel)`)
+
+  const envPath = 'textures/environment/defaultenvcube.dds'
+  check(game.exists(envPath), `Engine-Default vorhanden: ${envPath} (Cfile:1189598)`)
+  const env = parseDds(await game.read(envPath))
+  check(
+    env.cubeFaces !== null && env.cubeFaces.length === 6 && env.format === 'DXT1',
+    `DefaultEnvCube: 6 Faces, ${env.width}×${env.height} ${env.format}`,
+  )
+  // A 2D texture must NOT come back as a cube.
+  const flat = parseDds(await game.read(iconPath))
+  check(flat.cubeFaces === null, 'eine 2D-Textur bleibt 2D (cubeFaces = null)')
+}
+
 await game.close()
 console.log(failures === 0 ? '\nDDS BESTANDEN' : `\n${failures} CHECK(S) FEHLGESCHLAGEN`)
 process.exit(failures === 0 ? 0 : 1)

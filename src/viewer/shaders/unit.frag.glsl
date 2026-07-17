@@ -12,14 +12,19 @@
 //   - Phong: NormalMappedPhongCoeff(0.6,0.8,0.9) * pow(phong,2) * spec.g
 //     (mesh.fx:97 + 2194) — exakt, nicht "huebsch".
 //   - Farbe: albedo * (emissive + licht + envReflexion) + phongAdditive
-// Environment-Reflexion (texCUBE, mesh.fx:2186) braucht DDS-Cubemap-Support
-// und ist bis dahin 0 — KEIN erfundener Ersatz.
+//   - Environment-Reflexion (texCUBE, mesh.fx:2186/2195): 2 * env * spec.r
+//     aus der Karten-EnvCube ('<default>'-Eintrag; Engine-Default
+//     /textures/environment/defaultenvcube.dds, Cfile:1189598). Ohne
+//     geladene Cubemap (ENVCUBE-Define fehlt) bleibt der Term 0.
 
   precision highp float;
 
   uniform sampler2D albedoMap;
   uniform sampler2D normalsMap;
   uniform sampler2D specTeamMap;
+#ifdef ENVCUBE
+  uniform samplerCube environmentMap;
+#endif
   uniform vec3 teamColor;
   uniform vec3 sunDirection;   // Richtung ZUR Sonne, Weltkoordinaten
   uniform vec3 sunDiffuse;     // scmap SunColor
@@ -68,9 +73,14 @@
     float phongAmount = clamp(dot(reflect(-sunDirection, normal), viewDir), 0.0, 1.0);
     vec3 phongAdditive = vec3(0.6, 0.80, 0.90) * pow(phongAmount, 2.0) * specular.g;
 
-    // Environment-Reflexion: texCUBE(environmentSampler, reflect(-view, n)) —
-    // bis zum Cubemap-Support ehrlich 0 (mesh.fx:2186/2196).
+    // mesh.fx:2186/2195: environment = texCUBE(environmentSampler,
+    // reflect(-viewDirection, n)); phongMultiplicative = 2 * env * spec.r.
+#ifdef ENVCUBE
+    vec3 phongMultiplicative =
+      2.0 * textureCube(environmentMap, reflect(-viewDir, normal)).rgb * specular.r;
+#else
     vec3 phongMultiplicative = vec3(0.0);
+#endif
 
     float emissive = glowMultiplier * specular.b;
 

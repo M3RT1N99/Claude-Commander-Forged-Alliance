@@ -106,6 +106,8 @@ export class MapProps {
     vfs: GameVfs,
     lighting: MapLighting,
     s3tcSupported: boolean,
+    /** Map '<default>' env cube for the NormalMappedPS environment term. */
+    envCube: THREE.Texture | null = null,
   ): Promise<MapProps> {
     const out = new MapProps()
     if (props.length === 0) return out
@@ -208,6 +210,7 @@ export class MapProps {
           geometry.setIndex(new THREE.BufferAttribute(model.indices, 1))
 
           const variant = variantFor(lod.shader)
+          if (envCube && variant.defines.PHONG) variant.defines.ENVCUBE = true
           const [albedo, normals, specTeam] = await Promise.all([
             loadTex(lod.albedo),
             variant.defines.NORMALMAPPED ? loadTex(lod.normals) : Promise.resolve(null),
@@ -220,6 +223,7 @@ export class MapProps {
             fragmentShader: PROP_FS,
             defines: variant.defines,
             uniforms: {
+              environmentMap: { value: envCube },
               albedoMap: { value: albedo ?? grey },
               normalsMap: { value: normals ?? flatNormal },
               specTeamMap: { value: specTeam ?? blackSpec },

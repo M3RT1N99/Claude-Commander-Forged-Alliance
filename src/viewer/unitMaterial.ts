@@ -48,17 +48,25 @@ export function createUnitMaterial(
   skinMatrices: THREE.Matrix4[],
   shader = 'Unit',
   lighting: MapLighting = VIEWER_LIGHT,
+  /** Map env cube for the mesh.fx environmentSampler (2 * env * spec.r). */
+  envCube: THREE.Texture | null = null,
 ): THREE.ShaderMaterial {
   const white = new THREE.DataTexture(new Uint8Array([255, 255, 255, 0]), 1, 1)
   white.needsUpdate = true
   const flatNormal = new THREE.DataTexture(new Uint8Array([128, 128, 255, 128]), 1, 1)
   flatNormal.needsUpdate = true
 
+  const defines: Record<string, number | boolean> = {
+    MAX_BONES: Math.max(skinMatrices.length, 1),
+  }
+  if (envCube) defines.ENVCUBE = true
+
   return new THREE.ShaderMaterial({
     vertexShader: UNIT_VS,
     fragmentShader: shader === 'Seraphim' && textures.lookup ? UNIT_SERAPHIM_FS : UNIT_FS,
-    defines: { MAX_BONES: Math.max(skinMatrices.length, 1) },
+    defines,
     uniforms: {
+      environmentMap: { value: envCube },
       lookupMap: { value: textures.lookup ?? white },
       boneMatrices: { value: skinMatrices.length > 0 ? skinMatrices : [new THREE.Matrix4()] },
       albedoMap: { value: textures.albedo },

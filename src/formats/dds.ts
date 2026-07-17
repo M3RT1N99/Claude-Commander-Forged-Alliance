@@ -30,10 +30,18 @@ export interface DdsImage {
   height: number
   format: DdsFormat
   mips: DdsMip[]
+  /**
+   * Cubemap faces (+X,-X,+Y,-Y,+Z,-Z), each with its full mip chain —
+   * present when caps2 carries DDSCAPS2_CUBEMAP (86 cubemaps in the game,
+   * the EnvCube/SkyCube files in textures.scd). `mips` mirrors the first
+   * face so 2D consumers keep working.
+   */
+  cubeFaces: DdsMip[][] | null
 }
 
 const DDS_MAGIC = 0x20534444 // 'DDS '
 const DDPF_FOURCC = 0x4
+const DDSCAPS2_CUBEMAP = 0x200
 
 function fourCc(view: DataView, offset: number): string {
   return String.fromCharCode(
@@ -145,24 +153,43 @@ export function parseDds(data: Uint8Array): DdsImage {
     }
   }
 
-  const mips: DdsMip[] = []
-  let offset = 128
-  let w = width
-  let h = height
-  for (let i = 0; i < mipmapCount; i++) {
-    const pixels = w * h
-    const size = raw ? pixels * raw.bytesPerPixel : mipSize(format, w, h)
-    if (offset + size > data.byteLength) break
-    const slice = data.subarray(offset, offset + size)
-    // 32-Bit-BGRA liegt schon richtig; alles andere wird aufgeweitet.
-    const bytes =
-      raw && raw.bytesPerPixel !== 4 ? expandToBgra(slice, pixels, raw) : slice
-    mips.push({ data: bytes, width: w, height: h })
-    offset += size
-    w = Math.max(1, w >> 1)
-    h = Math.max(1, h >> 1)
+  // Read one mip chain starting at `offset`; returns the mips and chain end.
+  const readChain = (offset: number): { mips: DdsMip[]; end: number } => {
+    const mips: DdsMip[] = []
+    let w = width
+    let h = height
+    for (let i = 0; i < mipmapCount; i++) {
+      const pixels = w * h
+      const size = raw ? pixels * raw.bytesPerPixel : mipSize(format, w, h)
+      if (offset + size > data.byteLength) break
+      const slice = data.subarray(offset, offset + size)
+      // 32-Bit-BGRA liegt schon richtig; alles andere wird aufgeweitet.
+      const bytes = raw && raw.bytesPerPixel !== 4 ? expandToBgra(slice, pixels, raw) : slice
+      mips.push({ data: bytes, width: w, height: h })
+      offset += size
+      w = Math.max(1, w >> 1)
+      h = Math.max(1, h >> 1)
+    }
+    return { mips, end: offset }
   }
+
+  const caps2 = view.getUint32(112, true)
+  if (caps2 & DDSCAPS2_CUBEMAP) {
+    // Cubemap: 6 faces back to back, each with its full mip chain
+    // (D3D order +X,-X,+Y,-Y,+Z,-Z).
+    const cubeFaces: DdsMip[][] = []
+    let offset = 128
+    for (let f = 0; f < 6; f++) {
+      const { mips, end } = readChain(offset)
+      if (mips.length === 0) throw new Error(`DDS: cubemap face ${f} has no mip data`)
+      cubeFaces.push(mips)
+      offset = end
+    }
+    return { width, height, format, mips: cubeFaces[0]!, cubeFaces }
+  }
+
+  const { mips } = readChain(128)
   if (mips.length === 0) throw new Error('DDS: keine Mip-Daten')
 
-  return { width, height, format, mips }
+  return { width, height, format, mips, cubeFaces: null }
 }

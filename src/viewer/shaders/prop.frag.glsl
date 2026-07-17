@@ -27,6 +27,9 @@ uniform sampler2D normalsMap;
 #ifdef PHONG
 uniform sampler2D specTeamMap;
 uniform float glowMultiplier; // mesh.fx:56 = 2.0
+#ifdef ENVCUBE
+uniform samplerCube environmentMap; // map '<default>' env cube (Cfile:1189598)
+#endif
 #endif
 uniform vec3 sunDirection;
 uniform vec3 sunDiffuse;      // scmap SunColor
@@ -87,7 +90,14 @@ void main() {
   float phongAmount = clamp(dot(reflect(-sunDirection, normal), viewDir), 0.0, 1.0);
   vec3 phongAdditive = vec3(0.6, 0.8, 0.9) * pow(phongAmount, 2.0) * specular.g;
   float emissive = glowMultiplier * specular.b;
-  vec3 color = albedo.rgb * (emissive + light) + phongAdditive;
+  // mesh.fx:2186/2195 — 2 * texCUBE(environmentSampler, reflect) * spec.r
+#ifdef ENVCUBE
+  vec3 phongMultiplicative =
+    2.0 * textureCube(environmentMap, reflect(-viewDir, normal)).rgb * specular.r;
+#else
+  vec3 phongMultiplicative = vec3(0.0);
+#endif
+  vec3 color = albedo.rgb * (emissive + light + phongMultiplicative) + phongAdditive;
 #else
   vec3 color = albedo.rgb * light;
 #endif
