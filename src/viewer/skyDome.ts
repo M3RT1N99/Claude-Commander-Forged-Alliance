@@ -7,6 +7,7 @@ import ATMOSPHERE_FS from './shaders/skyAtmosphere.frag.glsl?raw'
 import CIRRUS_FS from './shaders/skyCirrus.frag.glsl?raw'
 import PLANET_VS from './shaders/skyPlanet.vert.glsl?raw'
 import PLANET_FS from './shaders/skyPlanet.frag.glsl?raw'
+import PLANET_GLOW_FS from './shaders/skyPlanetGlow.frag.glsl?raw'
 
 /**
  * The map sky (M9) — SCMAP v60 skybox block driving the sky.fx passes:
@@ -184,6 +185,34 @@ export class SkyDome {
       planets.renderOrder = -11
       out.group.add(planets)
       out.disposables.push(quad, planetMat)
+
+      // Pass P1 (DecalGlowPS :243, Write_A): the glow atlas feeds the
+      // frame alpha (bloom) — RGB stays via the blend factors.
+      const glowAtlas = await loadTex(sky.glow, true)
+      if (glowAtlas) {
+        const glowMat = new THREE.ShaderMaterial({
+          vertexShader: PLANET_VS,
+          fragmentShader: PLANET_GLOW_FS,
+          uniforms: {
+            planetGlowAtlas: { value: glowAtlas },
+            decalGlowMultiplier: { value: sky.decalGlowMultiplier },
+          },
+          transparent: true,
+          blending: THREE.CustomBlending,
+          blendSrc: THREE.ZeroFactor,
+          blendDst: THREE.OneFactor,
+          blendSrcAlpha: THREE.OneFactor,
+          blendDstAlpha: THREE.ZeroFactor,
+          depthTest: false,
+          depthWrite: false,
+          side: THREE.DoubleSide,
+        })
+        const glowMesh = new THREE.Mesh(quad, glowMat)
+        glowMesh.frustumCulled = false
+        glowMesh.renderOrder = -10.5
+        out.group.add(glowMesh)
+        out.disposables.push(glowMat)
+      }
     }
 
     // --- Cirrus pass ------------------------------------------------------
