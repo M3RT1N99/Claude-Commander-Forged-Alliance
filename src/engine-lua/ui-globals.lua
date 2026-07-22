@@ -743,6 +743,69 @@ function __uiSetArmies(armies, focusArmy)
   __uiFocusArmy = focusArmy or 1
 end
 
+-- === Alliances (UI mirror) ===
+-- The sim's per-army sets (ArmyVariableData: allies/enemies/neutrals,
+-- Cfile:772178/790221) reach the UI VM via serialization
+-- (SSTIArmyVariableData, Cfile:551270); here the session fill writes the
+-- same state. Every army is ally of itself (ctor, Cfile:1017297).
+__uiAlliances = {}
+
+local function __uiAllianceRow(a)
+  local row = __uiAlliances[a]
+  if not row then
+    row = { allies = { [a] = true }, enemies = {}, neutrals = {} }
+    __uiAlliances[a] = row
+  end
+  return row
+end
+
+--- Resolve an army argument like user ARMY_FromLuaState
+--- (Cfile:1358407-1358490): 1-based index or case-insensitive name.
+local function __uiResolveArmy(x)
+  if type(x) == 'number' then
+    if x <= 0 then error(string.format('Invalid army %d. (Use a 1-based index)', x)) end
+    if not __uiArmies[x] then error(string.format('Invalid army %d', x)) end
+    return x
+  end
+  if type(x) == 'string' then
+    local lx = string.lower(x)
+    for i, a in pairs(__uiArmies) do
+      if a.name and string.lower(a.name) == lx then return i end
+    end
+    error('Unknown army: ' .. x)
+  end
+  error('Unexpected type for army object')
+end
+
+function __uiSetAlliance(a, b, state)
+  for _, pair in pairs({ { a, b }, { b, a } }) do
+    local row = __uiAllianceRow(pair[1])
+    row.allies[pair[2]] = nil
+    row.enemies[pair[2]] = nil
+    row.neutrals[pair[2]] = nil
+    if state == 'Ally' then row.allies[pair[2]] = true
+    elseif state == 'Enemy' then row.enemies[pair[2]] = true
+    else row.neutrals[pair[2]] = true end
+  end
+end
+
+--- IsAlly/IsEnemy/IsNeutral (scr_UserInits, Cfile:1361954-1362085):
+--- without a session the engine returns no value (Cfile:1361983).
+function IsAlly(a, b)
+  if table.getn(__uiArmies) == 0 then return end
+  return __uiAllianceRow(__uiResolveArmy(a)).allies[__uiResolveArmy(b)] == true
+end
+
+function IsEnemy(a, b)
+  if table.getn(__uiArmies) == 0 then return end
+  return __uiAllianceRow(__uiResolveArmy(a)).enemies[__uiResolveArmy(b)] == true
+end
+
+function IsNeutral(a, b)
+  if table.getn(__uiArmies) == 0 then return end
+  return __uiAllianceRow(__uiResolveArmy(a)).neutrals[__uiResolveArmy(b)] == true
+end
+
 function GetArmiesTable()
   return {
     armiesTable = __uiArmies,

@@ -37,10 +37,17 @@ export interface SessionInfo {
   options?: Record<string, unknown>
 }
 
-/** A one-army skirmish — the sandbox default. */
+/**
+ * A two-army skirmish — the sandbox default. Army 2 hosts the selftest
+ * enemies; without a session row the original ARMY_FromLuaState would
+ * reject it ("Invalid army 2", Cfile:1358434).
+ */
 export const SANDBOX_SESSION: SessionInfo = {
   type: 'skirmish',
-  armies: [{ name: 'ARMY_1', index: 1, faction: 1, human: true }],
+  armies: [
+    { name: 'ARMY_1', index: 1, faction: 1, human: true },
+    { name: 'ARMY_2', index: 2, faction: 3, human: false },
+  ],
 }
 
 /**
@@ -77,5 +84,14 @@ ${armySetup}
     host.eval(`__createBrain(${a.index}, ''):SetArmyStat('FactionIndex', ${a.faction})`)
     host.eval(`__brains[${a.index}].__faction = ${a.faction}`)
     host.eval(`__econSetArmyName('${a.name}', ${a.index})`)
+  }
+
+  // Skirmish default the original Lua sets up: every pair of distinct
+  // non-civilian armies starts as enemies (scenarioutilities.lua:495);
+  // self-ally comes from the army row itself (Cfile:1017297).
+  for (const a of info.armies) {
+    for (const b of info.armies) {
+      if (a.index < b.index) host.eval(`SetAlliance(${a.index}, ${b.index}, 'Enemy')`)
+    }
   }
 }

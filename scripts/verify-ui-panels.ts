@@ -150,7 +150,10 @@ check(
 // Dieselbe Session, die auch die Sim bekommt (SANDBOX_SESSION) — EIN Weg für
 // Browser und Test (applySession in src/lua/uiEngine.ts).
 applySession(host, { ...SANDBOX_SESSION, map: 'SCMP_009' })
-check(Number(host.eval('return GetArmiesTable().numArmies')) === 1, 'GetArmiesTable(): 1 Armee')
+check(
+  Number(host.eval('return GetArmiesTable().numArmies')) === 2,
+  'GetArmiesTable(): 2 armies (ARMY_1 + the selftest enemy ARMY_2)',
+)
 check(Number(host.eval('return GetArmiesTable().focusArmy')) === 1, 'focusArmy = 1 (1-basiert wie die Engine)')
 // faction ist 0-BASIERT: gamemain.lua:109 rechnet `faction + 1` in factions.lua.
 check(
@@ -737,6 +740,23 @@ host.eval('RestartSession()')
   check(host.eval('return SessionCanRestart()') === true, 'SessionCanRestart = true mit Naht')
   host.eval('RestartSession()')
   check(restarted, 'RestartSession loest den Neustart aus')
+}
+
+// === IsAlly/IsEnemy/IsNeutral (scr_UserInits, Cfile:1361954-1362085) ===
+// The UI mirror of the sim's alliance sets; chat.lua:561 ('allies'
+// recipients) and diplomacy.lua:273 depend on these.
+console.log('\n== Alliances in the UI VM ==')
+{
+  check(host.eval('return IsAlly(1, 1)') === true, 'IsAlly(1,1): self-ally (Cfile:1017297)')
+  check(host.eval('return IsEnemy(1, 2)') === true, 'IsEnemy(1,2): skirmish default')
+  check(
+    host.eval(`return IsEnemy('ARMY_1', 'army_2')`) === true,
+    'army names resolve case-insensitively (ARMY_FromLuaState, Cfile:1358456)',
+  )
+  const bad = host.eval(
+    `local ok, err = pcall(IsAlly, 99, 1) return (not ok) and tostring(err) or 'NO ERROR'`,
+  ) as string
+  check(String(bad).includes('Invalid army'), `invalid index errors loudly (${bad})`)
 }
 
 host.close()

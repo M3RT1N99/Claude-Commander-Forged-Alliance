@@ -251,6 +251,14 @@ export function applySession(host: LuaHost, info: SessionInfo, playerName = 'Com
   // (Cfile:1330618: `mLocalCmdSrc + 1`; 255 → 0 „can't issue commands").
   host.call('__uiSessionSetCommandSources', playerName, 1)
   host.call('__uiSessionSetFocusArmy', info.armies.find((a) => a.human)?.index ?? 1)
+  // Alliance mirror: the same skirmish default the sim sets up
+  // (scenarioutilities.lua:495 — distinct non-civilian pairs are enemies);
+  // the engine syncs this via SSTIArmyVariableData (Cfile:551270).
+  for (const a of info.armies) {
+    for (const b of info.armies) {
+      if (a.index < b.index) host.call('__uiSetAlliance', a.index, b.index, 'Enemy')
+    }
+  }
 }
 
 /**

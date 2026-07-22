@@ -103,8 +103,61 @@ function IsProjectile(e) return type(e) == 'table' and e.__isProj == true end
 function IsProp(e) return type(e) == 'table' and e.__isProp == true end
 -- CollisionBeam-Entities tragen ihre zwei virtuellen Knochen (__beamBones).
 function IsCollisionBeam(e) return type(e) == 'table' and e.__beamBones ~= nil end
-function IsAlly(a, b) return a == b end
-function IsEnemy(a, b) return a ~= b end
+-- === Alliances (CArmyImpl) ===
+-- Each army carries three sets (allies/enemies/neutrals, BVIntSets in
+-- ArmyVariableData); IsAlly(a,b) tests b's bit in a's allies set
+-- (Moho::IArmy::IsAlly, Cfile:772178-772186). Every army is ally of
+-- itself from birth (ctor adds its own index, Cfile:1017297).
+__alliances = {}
+
+local function __allianceRow(a)
+  local row = __alliances[a]
+  if not row then
+    row = { allies = { [a] = true }, enemies = {}, neutrals = {} }
+    __alliances[a] = row
+  end
+  return row
+end
+
+local function __resolveArmy(x)
+  if type(x) == 'number' then
+    if x <= 0 then error(string.format('Invalid army %d. (Use a 1-based index)', x)) end
+    return x
+  end
+  error('Unexpected type for army object')
+end
+
+local function __setAllianceOneWay(a, b, state)
+  -- CArmyImpl::SetAlliance (Cfile:1016642-1016680): set the bit in exactly
+  -- one of the three sets, clear it in the other two.
+  local row = __allianceRow(a)
+  row.allies[b] = nil
+  row.enemies[b] = nil
+  row.neutrals[b] = nil
+  if state == 'Ally' then row.allies[b] = true
+  elseif state == 'Enemy' then row.enemies[b] = true
+  elseif state == 'Neutral' then row.neutrals[b] = true
+  else error('SetAlliance: unknown state ' .. tostring(state)) end
+end
+
+--- SetAlliance(army1, army2, <Neutral|Enemy|Ally>) — BOTH directions
+--- (cfunc_SetAllianceL, Cfile:1025315-1025360).
+function SetAlliance(a, b, state)
+  a = __resolveArmy(a)
+  b = __resolveArmy(b)
+  __setAllianceOneWay(a, b, state)
+  __setAllianceOneWay(b, a, state)
+end
+
+--- SetAllianceOneWay(army1, army2, state) — only army1's view
+--- (Cfile:1025391-1025420).
+function SetAllianceOneWay(a, b, state)
+  __setAllianceOneWay(__resolveArmy(a), __resolveArmy(b), state)
+end
+
+function IsAlly(a, b) return __allianceRow(__resolveArmy(a)).allies[__resolveArmy(b)] == true end
+function IsEnemy(a, b) return __allianceRow(__resolveArmy(a)).enemies[__resolveArmy(b)] == true end
+function IsNeutral(a, b) return __allianceRow(__resolveArmy(a)).neutrals[__resolveArmy(b)] == true end
 
 -- === Random (Cfile:758FB0) ===
 -- Ohne Argument ein Float [0,1), sonst wie math.random. config.lua:43 setzt

@@ -359,6 +359,20 @@ console.log('\n== Befehls-Dispatch: Stop, Move-bricht-Bau, Attack ==')
     `Repair nimmt den Bau wieder auf (${fDecayed.toFixed(4)} → ${fRepariert.toFixed(4)})`,
   )
 
+  // ALLIANCES (CArmyImpl): self-ally from birth (Cfile:1017297), skirmish
+  // default Enemy between distinct armies (scenarioutilities.lua:495),
+  // SetAlliance is symmetric and exclusive (Cfile:1016642-1016680).
+  check(host.eval(`return IsAlly(1, 1)`) === true, 'IsAlly(1,1): every army allies itself')
+  check(host.eval(`return IsEnemy(1, 2)`) === true, 'IsEnemy(1,2): skirmish default')
+  check(host.eval(`return IsAlly(1, 2)`) === false, 'IsAlly(1,2) is false by default')
+  host.eval(`SetAlliance(1, 2, 'Ally')`)
+  check(
+    host.eval(`return IsAlly(1, 2) and IsAlly(2, 1) and not IsEnemy(1, 2)`) === true,
+    'SetAlliance(Ally) flips both directions and clears Enemy',
+  )
+  host.eval(`SetAlliance(1, 2, 'Enemy')`)
+  check(host.eval(`return IsEnemy(1, 2)`) === true, 'SetAlliance(Enemy) restores hostility')
+
   // HP REPAIR of a FINISHED unit: the same CBuildTaskHelper — Materialize
   // only raises health (AdjustHealth, Cfile:953468) at BuildRate/BuildTime
   // per second; FractionComplete stays 1 (Cfile:953455-953466).
