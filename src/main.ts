@@ -1433,11 +1433,18 @@ btnPickDir.addEventListener('click', async () => {
 
 btnResume.addEventListener('click', async () => {
   const handle = await loadDirHandle()
-  if (!handle) return
+  if (!handle) {
+    log('FEHLER: gemerktes Verzeichnis nicht mehr lesbar — bitte neu wählen')
+    return
+  }
+  // Chrome's permission prompt offers "Allow on every visit" — once the
+  // user picks that, the next reload connects without any click.
   const perm = await handle.requestPermission({ mode: 'read' })
   if (perm === 'granted') {
     btnResume.hidden = true
     await connect(new FsaGameSource(handle))
+  } else {
+    log('Zugriff abgelehnt — bitte das Verzeichnis neu wählen')
   }
 })
 
@@ -2151,12 +2158,23 @@ async function init(): Promise<void> {
 
   const stored = await loadDirHandle()
   if (stored) {
+    // The handle survives reloads in IndexedDB; whether the BROWSER still
+    // grants access decides how much the user has to do:
+    //  - 'granted' (Chrome remembers the permission, e.g. "Allow on every
+    //    visit" in the prompt): connect fully automatically.
+    //  - 'prompt': the File System Access API requires ONE user gesture
+    //    (requestPermission) — so reconnecting becomes the PRIMARY button
+    //    and the picker moves to second place; no folder dialog needed.
     const perm = await stored.queryPermission({ mode: 'read' })
     if (perm === 'granted') {
+      log(`Gemerktes Spielverzeichnis: ${stored.name} — verbinde…`)
       await connect(new FsaGameSource(stored))
     } else {
       btnResume.hidden = false
-      btnResume.textContent = `Erneut verbinden: ${stored.name}`
+      btnResume.classList.add('primary')
+      btnResume.textContent = `Weiter mit »${stored.name}«`
+      btnPickDir.classList.remove('primary')
+      btnPickDir.textContent = 'Anderes Verzeichnis wählen…'
     }
   }
 }

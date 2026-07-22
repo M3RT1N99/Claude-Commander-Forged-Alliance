@@ -175,6 +175,13 @@ function openDb(): Promise<IDBDatabase> {
 }
 
 export async function saveDirHandle(handle: FileSystemDirectoryHandle): Promise<void> {
+  // Ask the browser to protect our storage from eviction — without this a
+  // storage-pressure cleanup can silently drop the saved handle.
+  try {
+    await navigator.storage?.persist?.()
+  } catch {
+    // persistence is best-effort
+  }
   const db = await openDb()
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction(STORE, 'readwrite')
