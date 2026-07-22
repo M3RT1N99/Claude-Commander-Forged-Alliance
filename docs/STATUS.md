@@ -26,11 +26,12 @@ Der Weg zur echten UI: [PLAN-UI.md](PLAN-UI.md); der 1:1-Gesamtfahrplan:
 - **Kein echtes Hauptmenü als Standard-Weg.** Das Front-End bootet
   (verify-frontend), aber die Sandbox startet über den Web-Launcher;
   `LaunchSinglePlayerSession`/Lobby fehlen.
-- **Render-Inventur offen (H/M-Liste):** Schatten (H7),
-  Cybran/Aeon-Unit-Spezialshader (M5), Normals-Decals (brauchen
+- **Render-Inventur offen (H/M-Liste):** Normals-Decals (brauchen
   Normal-RT), Refraktions-/Reflexions-RT des Wassers (benannte Näherung),
-  Undulating-Baum-Schwanken, Prop-Sim (RECLAIMABLE/BlockPath),
-  Planeten-Glow-Pass (Write_A). ERLEDIGT seit der Inventur:
+  Prop-Sim (RECLAIMABLE/BlockPath), Planeten-Glow-Pass (Write_A),
+  Bloating-Props (2 BPs statisch), Baustellen-Depth (SeraphimBuildDepth).
+  NEU ERLEDIGT: Schatten (H7) mit ComputeShadowPCF + Depth-Pass,
+  Aeon/Insect-Unit-Shader (M5), Undulating-Baum-Schwanken. ERLEDIGT seit der Inventur:
   scmap-Schwanz vollständig geparst (ad3c8e4), Karten-Props als
   Instanz-LOD-Ketten (H5), DDS-Cubemaps + Env-Reflexion (5287a98),
   Terrain-Shader-Varianten + Stratum-Normals + Skirt (H4), Albedo-Decals
