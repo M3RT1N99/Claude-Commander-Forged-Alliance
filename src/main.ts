@@ -1251,7 +1251,9 @@ function zielUnter(clientX: number, clientY: number): { enemy?: number; repair?:
   if (!u) return {}
   if (u.army !== 1) return { enemy: u.id }
   const s = luaSim.state(u.id)
-  if (s && s.fraction < 1) return { repair: u.id }
+  // Repair target: unfinished (resume construction) OR finished but
+  // damaged (HP repair — same CBuildTaskHelper, Cfile:815445).
+  if (s && (s.fraction < 1 || s.health < s.maxHealth)) return { repair: u.id }
   return {}
 }
 

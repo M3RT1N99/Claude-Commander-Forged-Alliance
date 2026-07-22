@@ -274,7 +274,9 @@ function __buildCollect()
       -- Wartet noch in der Warteschlange: kostet nichts, tut nichts.
       task.blocked = true
       __econClearBuildRequest(army, tid)
-    elseif b and t and (t.__fraction or 1) < 1 then
+    elseif b and t
+      and ((t.__fraction or 1) < 1
+        or (task.order == 'Repair' and (t.__health or 0) < t:GetMaxHealth())) then
       -- Reichweiten-Gate (Economy.MaxBuildDistance)
       local mbd = (b.__bp and b.__bp.Economy and b.__bp.Economy.MaxBuildDistance) or 0
       local bp = b.__pos or { 0, 0, 0 }
@@ -286,13 +288,17 @@ function __buildCollect()
         task.blocked = true
         __econClearBuildRequest(army, tid)
       else
+        -- HP repair of a FINISHED unit runs the same helper, but only
+        -- health rises (Materialize -> AdjustHealth, Cfile:953468); the
+        -- decay clock applies to construction sites only (Cfile:952808).
+        local repairOnly = (t.__fraction or 1) >= 1
         -- The build REALLY begins: builder in range, progress will flow. In
         -- the engine the structure only comes into being here (the build
         -- task creates it on arrival) — our click-time spawn is a
         -- placeholder. The decay clock (Unit::OnTick, mCreationTick,
         -- Cfile:952821-952823) starts NOW; without this gate a fresh 0%
         -- site died of decay during the builder's approach.
-        if not t.__engineBorn then
+        if not repairOnly and not t.__engineBorn then
           t.__engineBorn = true
           t.__spawnTick = __gameTick or 0
         end
@@ -300,10 +306,19 @@ function __buildCollect()
         local te = (t.__bp and t.__bp.Economy) or {}
         local bt = te.BuildTime or 1
         if bt < 1 then bt = 1 end
+        -- delta = BuildRate / BuildTime per second (Cfile:815339+815342),
+        -- clamped to what is left (fraction or health fraction).
         local step = (bRate / bt) * 0.1
-        local rest = 1 - (t.__fraction or 0)
+        local rest
+        if repairOnly then
+          rest = 1 - (t.__health or 0) / t:GetMaxHealth()
+        else
+          rest = 1 - (t.__fraction or 0)
+        end
         if step > rest then step = rest end
         task.step = step
+        -- HP repair pays the FULL build cost rate in both resources
+        -- (unit.lua:712-726: GetBuildCosts of the focus blueprint).
         __econSetBuildRequest(army, tid, (te.BuildCostMass or 0) * step, (te.BuildCostEnergy or 0) * step)
       end
     else
@@ -320,7 +335,24 @@ function __buildApply()
     local b = __units[task.builder]
     local t = __units[task.target]
     local army = (b and b.__army) or 1
-    if b and t and task.step > 0 then
+    if b and t and task.step > 0 and (t.__fraction or 1) >= 1 and task.order == 'Repair' then
+      -- HP repair of a finished unit: Materialize only raises health
+      -- (AdjustHealth, Cfile:953468); FractionComplete stays 1
+      -- (Cfile:953455-953466) and OnStopBeingBuilt never re-fires
+      -- (Cfile:953470-953476). Done when health == max (Cfile:815498):
+      -- only the builder's OnStopBuild fires (unit.lua:1704).
+      local rate = __econBuildRate(army, tid)
+      local maxH = t:GetMaxHealth()
+      local h = (t.__health or 0) + maxH * task.step * rate
+      if h > maxH then h = maxH end
+      t.__health = h
+      if h >= maxH then
+        b.UnitBeingBuilt = t
+        pcall(function() b:OnStopBuild(t, task.order) end)
+        n = n + 1
+        done[n] = tid
+      end
+    elseif b and t and task.step > 0 then
       local rate = __econBuildRate(army, tid)
       local f = (t.__fraction or 0) + task.step * rate
       if f > 1 then f = 1 end

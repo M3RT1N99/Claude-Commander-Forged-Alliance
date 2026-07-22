@@ -359,6 +359,36 @@ console.log('\n== Befehls-Dispatch: Stop, Move-bricht-Bau, Attack ==')
     `Repair nimmt den Bau wieder auf (${fDecayed.toFixed(4)} → ${fRepariert.toFixed(4)})`,
   )
 
+  // HP REPAIR of a FINISHED unit: the same CBuildTaskHelper — Materialize
+  // only raises health (AdjustHealth, Cfile:953468) at BuildRate/BuildTime
+  // per second; FractionComplete stays 1 (Cfile:953455-953466).
+  host.eval(
+    `__units[${site}].__fraction = 1 __units[${site}].__beingBuilt = false ` +
+      `__units[${site}].__health = __units[${site}]:GetMaxHealth() * 0.5`,
+  )
+  host.eval(`__dispatchRepair(${acu}, ${site})`)
+  for (let t = 0; t < 60; t++) beat(engine)
+  const hpMid = Number(
+    host.eval(`return __units[${site}].__health / __units[${site}]:GetMaxHealth()`),
+  )
+  const frMid = Number(host.eval(`return __units[${site}].__fraction`))
+  check(hpMid > 0.5, `HP repair heals a finished unit (50% -> ${(hpMid * 100).toFixed(1)}%)`)
+  check(frMid === 1, 'FractionComplete stays 1 during HP repair (Cfile:953455-953466)')
+  for (let t = 0; t < 400; t++) beat(engine)
+  const hpFull = Number(
+    host.eval(`return __units[${site}].__health / __units[${site}]:GetMaxHealth()`),
+  )
+  check(hpFull >= 1, `HP repair completes to full health (${(hpFull * 100).toFixed(1)}%)`)
+  check(
+    host.eval(`return __builderBusy(${acu})`) === false,
+    'the repair task ends at full health (TaskTick -1, Cfile:817856)',
+  )
+  host.eval(`__dispatchRepair(${acu}, ${site})`)
+  check(
+    host.eval(`return __builderBusy(${acu})`) === false,
+    'repair on a full-HP finished unit is a no-op (Cfile:817856-817875)',
+  )
+
   // A STARTED site aborted at ~0% stays (no instant delete) and dies through
   // OnDecayed → Destroy (unit.lua:551) once its health falls to 0.
   const acu2 = spawnLuaUnit(host, 'uel0001', { x: 500, y: 20, z: 500 }, 1)

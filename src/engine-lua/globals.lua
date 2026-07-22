@@ -754,18 +754,18 @@ function __dispatchAttack(unitId, targetId)
   __attackOrders[unitId] = targetId
 end
 
---- Repair (dispatch 0x14, CUnitRepairTask): on an UNFINISHED structure the
---- repair task resumes construction — it is the same build task (approach
---- within MaxBuildDistance, economy-paid progress), issued with order
---- 'Repair'. Repairing FINISHED but damaged units (health-only rebuild with
---- RepairConsume* costs) is a documented gap and rejected loudly.
+--- Repair (dispatch 0x14, CUnitRepairTask): the SAME CBuildTaskHelper as
+--- construction (ctor Cfile:817427, UpdateWorkProgress 0x5F5BF0) — on an
+--- UNFINISHED target it resumes construction; on a FINISHED damaged target
+--- Materialize only raises health (AdjustHealth, Cfile:953468) at the same
+--- rate and FULL build cost per second (unit.lua:712-726). A full-HP
+--- finished target ends the task immediately (TaskTick -1, Cfile:817856).
 function __dispatchRepair(unitId, targetId)
   local u = __units[unitId]
   local t = __units[targetId]
   if not u or not t then return end
-  if (t.__fraction or 1) >= 1 then
-    WARN('Repair on a finished unit is not built yet (health-only repair)')
-    return
+  if (t.__fraction or 1) >= 1 and (t.__health or 0) >= t:GetMaxHealth() then
+    return -- nothing to repair (Cfile:817856-817875)
   end
   __attackOrders[unitId] = nil
   u:GetNavigator():AbortMove()
