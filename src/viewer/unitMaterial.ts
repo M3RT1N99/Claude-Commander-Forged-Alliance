@@ -19,6 +19,7 @@ import BUILD_CYBRAN_FS from './shaders/buildCybran.frag.glsl?raw'
 import BUILD_CYBRAN_OVERLAY_VS from './shaders/buildCybranOverlay.vert.glsl?raw'
 import BUILD_CYBRAN_OVERLAY_FS from './shaders/buildCybranOverlay.frag.glsl?raw'
 import BUILD_SERAPHIM_FS from './shaders/buildSeraphim.frag.glsl?raw'
+import type { ShadowUniforms } from './shadow'
 
 export interface UnitTextures {
   albedo: THREE.Texture
@@ -61,6 +62,8 @@ export function createUnitMaterial(
   envCube: THREE.Texture | null = null,
   /** Cybran 'Insect' aniso lookup (/textures/engine/insectlookup.dds). */
   insectLookup: THREE.Texture | null = null,
+  /** Shared shadow uniforms (ShadowRenderer.uniforms). */
+  shadow: ShadowUniforms | null = null,
 ): THREE.ShaderMaterial {
   const white = new THREE.DataTexture(new Uint8Array([255, 255, 255, 0]), 1, 1)
   white.needsUpdate = true
@@ -89,6 +92,7 @@ export function createUnitMaterial(
     fragmentShader,
     defines,
     uniforms: {
+      ...(shadow ?? {}),
       environmentMap: { value: envCube },
       insectMap: { value: insectLookup ?? white },
       lookupMap: { value: textures.lookup ?? white },

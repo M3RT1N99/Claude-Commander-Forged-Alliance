@@ -4,6 +4,7 @@ import * as THREE from 'three'
 // Vite loads ?raw as a string — like the .lua files in this project.
 import vertexShader from './shaders/terrain.vert.glsl?raw'
 import fragmentShader from './shaders/terrain.frag.glsl?raw'
+import type { ShadowUniforms } from './shadow'
 
 export interface TerrainLayerTextures {
   lower: THREE.Texture
@@ -27,6 +28,8 @@ export interface TerrainNormalTextures {
 export interface TerrainMaterialOptions {
   /** scmap terrainShader string: 'TTerrain' | 'TTerrainXP' | 'TTerrainGlow'. */
   terrainShader: string
+  /** Shared shadow uniforms (ShadowRenderer.uniforms). */
+  shadow: ShadowUniforms
   heightTex: THREE.Texture
   heightScale: number
   hmWidth: number // heightmap samples in x (mapWidth + 1)
@@ -71,6 +74,7 @@ export function createTerrainMaterial(o: TerrainMaterialOptions): THREE.ShaderMa
     fragmentShader,
     defines,
     uniforms: {
+      ...o.shadow,
       heightTex: { value: o.heightTex },
       heightScale: { value: o.heightScale },
       // Sample texel centers instead of edges

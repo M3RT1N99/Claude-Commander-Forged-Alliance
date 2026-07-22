@@ -33,6 +33,8 @@ uniform vec4 specularColor;
 uniform float lightingMultiplier;
 uniform float cutOffLOD; // distance beyond which the decal is not drawn
 
+#include <cfaShadow>
+
 varying vec2 vUv;
 varying vec2 vUvMap;
 varying vec3 vWorldPos;
@@ -68,7 +70,7 @@ void main() {
   vec3 spec = pow(clamp(dot(r, sunDirection), 0.0, 1.0), 80.0)
     * specAmount * specularColor.a * specularColor.rgb;
   float dotSunNormal = max(dot(sunDirection, normal), 0.0);
-  vec3 light = sunColor * dotSunNormal + sunAmbience;
+  vec3 light = sunColor * dotSunNormal * cfaComputeShadow(vWorldPos) + sunAmbience;
   light = lightingMultiplier * light + shadowFillColor * (1.0 - light);
   albedo.rgb = light * (albedo.rgb + spec);
 #else
@@ -82,7 +84,8 @@ void main() {
   vec3 refl = sunDirection - 2.0 * sunDotNormal * normal;
   float spec = pow(clamp(dot(refl, viewDir), 0.0, 1.0), 80.0)
     * specularColor.x * specAmount;
-  vec3 light = sunColor * clamp(sunDotNormal, 0.0, 1.0) + sunAmbience + spec;
+  vec3 light =
+    sunColor * clamp(sunDotNormal, 0.0, 1.0) * cfaComputeShadow(vWorldPos) + sunAmbience + spec;
   light = lightingMultiplier * light + shadowFillColor * (1.0 - light);
   albedo.rgb = light * albedo.rgb;
 #endif

@@ -84,6 +84,8 @@
   uniform float time; // seconds — drives the stratum1 UV scroll
 #endif
 
+#include <cfaShadow>
+
   varying vec2 vUvMap;
   varying vec3 vWorldPos;
 
@@ -163,6 +165,8 @@
     albedo.rgb = mix(albedo.rgb, upper.rgb, upper.a);
 
     vec3 viewDir = normalize(vWorldPos - cameraPosition);
+    // ComputeShadowPCF term (TerrainAlbedoXP :760 / CalculateLighting :373)
+    float shadowTerm = cfaComputeShadow(vWorldPos);
 #ifdef XP
     // TerrainAlbedoXP (:753-763): spec = pow(sat(dot(reflect(view,N),Sun)),80)
     // * albedo.a * SpecularColor.a * SpecularColor.rgb; color = light*(a+spec)
@@ -170,7 +174,7 @@
     vec3 specular = pow(clamp(dot(r, sunDirection), 0.0, 1.0), 80.0)
       * albedo.aaa * specularColor.a * specularColor.rgb;
     float dotSunNormal = max(dot(sunDirection, normal), 0.0);
-    vec3 light = sunColor * dotSunNormal + sunAmbience;
+    vec3 light = sunColor * dotSunNormal * shadowTerm + sunAmbience;
     light = lightingMultiplier * light + shadowFillColor * (1.0 - light);
     albedo.rgb = light * (albedo.rgb + specular);
 #else
@@ -180,7 +184,7 @@
     vec3 r = sunDirection - 2.0 * sunDotNormal * normal;
     float specular = pow(clamp(dot(r, viewDir), 0.0, 1.0), 80.0)
       * specularColor.x * (1.0 - albedo.w);
-    vec3 light = sunColor * clamp(sunDotNormal, 0.0, 1.0) + sunAmbience + specular;
+    vec3 light = sunColor * clamp(sunDotNormal, 0.0, 1.0) * shadowTerm + sunAmbience + specular;
     light = lightingMultiplier * light + shadowFillColor * (1.0 - light);
     albedo.rgb = light * albedo.rgb;
 #endif

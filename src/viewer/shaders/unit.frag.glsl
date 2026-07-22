@@ -33,6 +33,8 @@
   uniform float lightMultiplier; // scmap LightingMultiplier
   uniform float glowMultiplier;  // mesh.fx:56 = 2.0
 
+#include <cfaShadow>
+
   varying vec2 vUv0;
   varying vec2 vUv1;
   varying vec3 vNormal;
@@ -64,7 +66,7 @@
     // Shadow-Map-Pass: dunkle Bereiche werden proportional mit ShadowFill
     // aufgefuellt — so passen Einheiten und Terrain zusammen.
     float dotLightNormal = dot(sunDirection, normal);
-    vec3 light = sunDiffuse * clamp(dotLightNormal, 0.0, 1.0) + sunAmbient;
+    vec3 light = sunDiffuse * clamp(dotLightNormal, 0.0, 1.0) * cfaComputeShadow(vWorldPos) + sunAmbient;
     light = lightMultiplier * light + (vec3(1.0) - light) * shadowFill;
 
     // mesh.fx:2193-2194: phong = sat(dot(reflect(sun, n), -view)); Additiv =

@@ -8,6 +8,10 @@ import { ddsToTexture } from './textures'
 import type { MapLighting } from './unitMaterial'
 import PROP_VS from './shaders/prop.vert.glsl?raw'
 import PROP_FS from './shaders/prop.frag.glsl?raw'
+import DEPTH_PROP_VS from './shaders/depthProp.vert.glsl?raw'
+import DEPTH_FS from './shaders/depth.frag.glsl?raw'
+import DEPTH_CLIP_FS from './shaders/depthClip.frag.glsl?raw'
+import type { ShadowUniforms } from './shadow'
 
 /**
  * Map props (trees, rocks, map wrecks) — render-details.md par. 2: the SCMAP
@@ -109,6 +113,8 @@ function variantFor(shaderName: string): PropVariant {
 export class MapProps {
   readonly group = new THREE.Group()
   readonly stats: MapPropsStats = { instances: 0, blueprints: 0, missing: [] }
+  /** LOD0 meshes + their depth variants for the shadow pass. */
+  readonly casters: { mesh: THREE.Mesh; depthMaterial: THREE.Material }[] = []
   private readonly disposables: { dispose(): void }[] = []
   private readonly timeUniforms: { value: number }[] = []
 
@@ -119,6 +125,8 @@ export class MapProps {
     s3tcSupported: boolean,
     /** Map '<default>' env cube for the NormalMappedPS environment term. */
     envCube: THREE.Texture | null = null,
+    /** Shared shadow uniforms (ShadowRenderer.uniforms). */
+    shadow: ShadowUniforms | null = null,
   ): Promise<MapProps> {
     const out = new MapProps()
     if (props.length === 0) return out
@@ -234,6 +242,7 @@ export class MapProps {
             fragmentShader: PROP_FS,
             defines: variant.defines,
             uniforms: {
+              ...(shadow ?? {}),
               environmentMap: { value: envCube },
               albedoMap: { value: albedo ?? grey },
               normalsMap: { value: normals ?? flatNormal },
@@ -272,6 +281,18 @@ export class MapProps {
           out.group.add(mesh)
           out.disposables.push(geometry, material)
           if (variant.undulate) out.timeUniforms.push(material.uniforms.time as { value: number })
+          // Only the LOD0 mesh casts (depthTechnique 'DepthClip'); the far
+          // LODs would double-shadow the same instances.
+          if (lod === lods[0]) {
+            const depthMaterial = new THREE.ShaderMaterial({
+              vertexShader: DEPTH_PROP_VS,
+              fragmentShader: variant.defines.ALPHATEST ? DEPTH_CLIP_FS : DEPTH_FS,
+              uniforms: { albedoMap: { value: albedo ?? grey } },
+              side: THREE.DoubleSide,
+            })
+            out.disposables.push(depthMaterial)
+            out.casters.push({ mesh, depthMaterial })
+          }
           near = lod.cutoff
         }
         out.stats.blueprints++

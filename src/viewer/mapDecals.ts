@@ -4,6 +4,7 @@ import type { GameVfs } from '../vfs/vfs'
 import { ddsToTexture } from './textures'
 import DECAL_VS from './shaders/decal.vert.glsl?raw'
 import DECAL_FS from './shaders/decal.frag.glsl?raw'
+import type { ShadowUniforms } from './shadow'
 
 /**
  * Map albedo decals (type 1) — render-details.md par. 3. The original
@@ -42,6 +43,8 @@ export interface DecalSceneUniforms {
   waterElevation: number
   depthToG: number
   xpShader: boolean
+  /** Shared shadow uniforms (ShadowRenderer.uniforms). */
+  shadow: ShadowUniforms
   lighting: {
     sunDirection: THREE.Vector3
     sunColor: THREE.Color
@@ -140,6 +143,7 @@ export class MapDecals {
         fragmentShader: DECAL_FS,
         defines,
         uniforms: {
+          ...u.shadow,
           decalAlbedo: { value: albedoTex },
           decalSpec: { value: specTex ?? dummy },
           heightTex: { value: u.heightTex },

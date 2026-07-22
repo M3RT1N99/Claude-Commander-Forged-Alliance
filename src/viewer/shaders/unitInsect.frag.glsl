@@ -20,6 +20,8 @@ uniform vec3 shadowFill;
 uniform float lightMultiplier;
 uniform float glowMultiplier; // mesh.fx:56 = 2.0
 
+#include <cfaShadow>
+
 varying vec2 vUv0;
 varying vec2 vUv1;
 varying vec3 vNormal;
@@ -54,7 +56,8 @@ void main() {
     (anisoAmount.rgb * specular.g + 0.5 * specular.r * env) * (1.0 - specular.a);
 
   // doubled sun term
-  vec3 light = 2.0 * sunDiffuse * clamp(dotLightNormal, 0.0, 1.0) + sunAmbient;
+  vec3 light =
+    2.0 * sunDiffuse * clamp(dotLightNormal, 0.0, 1.0) * cfaComputeShadow(vWorldPos) + sunAmbient;
   light = lightMultiplier * light + (vec3(1.0) - light) * shadowFill;
 
   float emissive = glowMultiplier * specular.b;

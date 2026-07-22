@@ -17,6 +17,9 @@ import { MapProps } from './mapProps'
 import { MapDecals } from './mapDecals'
 import { SkyDome } from './skyDome'
 import { BloomPipeline } from './bloom'
+import { ShadowRenderer } from './shadow'
+import DEPTH_UNIT_VS from './shaders/depthUnit.vert.glsl?raw'
+import DEPTH_FS from './shaders/depth.frag.glsl?raw'
 
 /** Eine in die Szene gesetzte Einheit (Sandbox-Modus). */
 export class SceneUnit {
@@ -63,6 +66,8 @@ export class UnitViewer {
   private skyDome: SkyDome | null = null
   /** Glow/bloom chain (CBloomRenderer::DoBloom @0x7F5160). */
   private bloom: BloomPipeline | null = null
+  /** Shadow pass (H7): depth from the sun, ComputeShadowPCF receivers. */
+  readonly shadow = new ShadowRenderer()
   /** Map '<default>' env cube — mesh.fx environmentSampler (Cfile:1189598). */
   private envCube: THREE.Texture | null = null
   /** Named env cubes from the scmap list ('<aeon>', '<seraphim>', …). */
@@ -181,6 +186,9 @@ export class UnitViewer {
     // Frame RT for the glow chain: the scene renders here (its ALPHA is
     // the glow amount), then BloomPipeline.composite blits + adds onto
     // the canvas (frame.fx TFrame / TFrameAdd).
+    // Shadow depth prepass (light camera, layer-1 casters).
+    this.shadow.render(this.renderer, this.scene)
+
     const size = this.renderer.getDrawingBufferSize(new THREE.Vector2())
     if (!this.bloom) {
       this.bloom = new BloomPipeline(size.x, size.y)
@@ -306,6 +314,7 @@ export class UnitViewer {
     }
     for (const t of this.envCubesByName.values()) t.dispose()
     this.envCubesByName.clear()
+    this.shadow.reset()
   }
 
   /** SCM → BufferGeometry mit allen Attributen des Unit-Shaders (UV1,
@@ -379,10 +388,23 @@ export class UnitViewer {
       this.mapLighting ?? undefined,
       shader === 'Aeon' ? this.envCubeFor('Aeon') : this.envCube,
       this.insectLookup,
+      this.shadow.uniforms,
     )
     const mesh = new THREE.Mesh(geometry, material)
     mesh.frustumCulled = false
     this.scene.add(mesh)
+    // Units cast (depthTechnique 'Depth') — the depth variant shares the
+    // bone matrix array, so animation reaches the shadow map.
+    this.shadow.register(
+      mesh,
+      new THREE.ShaderMaterial({
+        vertexShader: DEPTH_UNIT_VS,
+        fragmentShader: DEPTH_FS,
+        defines: { MAX_BONES: Math.max(animator.skinMatrices.length, 1) },
+        uniforms: { boneMatrices: { value: animator.skinMatrices } },
+        side: THREE.DoubleSide,
+      }),
+    )
 
     const unit = new SceneUnit(mesh, animator, model.bones.map((b) => b.name))
     this.units.push(unit)
@@ -943,6 +965,19 @@ export class UnitViewer {
     const hmW = width + 1
     const hmH = height + 1
 
+    // Shadow pass: ortho light camera along the map sun. The frustum
+    // covers the highest terrain plus unit headroom.
+    let maxHeightRaw = 0
+    for (let i = 0; i < scmap.heightmap.length; i++) {
+      if (scmap.heightmap[i]! > maxHeightRaw) maxHeightRaw = scmap.heightmap[i]!
+    }
+    this.shadow.setupForMap(
+      width,
+      height,
+      new THREE.Vector3(...scmap.lighting.sunDirection).normalize(),
+      maxHeightRaw * scmap.heightScale + 50,
+    )
+
     // Heightmap → Float-Textur (Roh-Werte; Skalierung im Shader)
     const heightData = new Float32Array(scmap.heightmap.length)
     for (let i = 0; i < scmap.heightmap.length; i++) heightData[i] = scmap.heightmap[i]!
@@ -1008,6 +1043,7 @@ export class UnitViewer {
 
     const material = createTerrainMaterial({
       terrainShader: scmap.terrainShader,
+      shadow: this.shadow.uniforms,
       heightTex,
       heightScale: scmap.heightScale,
       hmWidth: hmW,
@@ -1066,6 +1102,7 @@ export class UnitViewer {
         waterElevation: scmap.water.elevation,
         depthToG,
         xpShader: scmap.terrainShader === 'TTerrainXP',
+        shadow: this.shadow.uniforms,
         lighting: {
           sunDirection: new THREE.Vector3(...scmap.lighting.sunDirection).normalize(),
           sunColor: new THREE.Color(...scmap.lighting.sunColor),
@@ -1204,8 +1241,10 @@ export class UnitViewer {
       this.mapLighting,
       this.s3tcSupported,
       this.envCube,
+      this.shadow.uniforms,
     )
     this.scene.add(this.mapProps.group)
+    for (const c of this.mapProps.casters) this.shadow.register(c.mesh, c.depthMaterial)
     if (this.mapProps.stats.instances > 0) {
       console.log(
         `map props: ${this.mapProps.stats.instances} instances, ` +

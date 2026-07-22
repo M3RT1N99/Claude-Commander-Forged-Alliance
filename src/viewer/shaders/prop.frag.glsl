@@ -42,6 +42,8 @@ uniform float lodNear;        // previous LOD's cutoff; this LOD draws beyond it
 uniform float alphaRef;       // AlphaFunc Greater reference (0-1)
 #endif
 
+#include <cfaShadow>
+
 varying vec2 vUv0;
 varying vec2 vUv1;
 varying vec3 vNormal;
@@ -80,7 +82,14 @@ void main() {
   // ComputeLight (mesh.fx:552-560), shadow attenuation 1 until the
   // shadow-map pass exists.
   float dotLightNormal = dot(sunDirection, normal);
-  vec3 light = sunDiffuse * clamp(dotLightNormal, 0.0, 1.0) + sunAmbient;
+  // NormalMappedTerrainPS passes shadow = 1 (:2381); the other prop
+  // techniques run ComputeShadow.
+#if defined(NORMALMAPPED) && !defined(PHONG)
+  float shadowTerm = 1.0;
+#else
+  float shadowTerm = cfaComputeShadow(vWorldPos);
+#endif
+  vec3 light = sunDiffuse * clamp(dotLightNormal, 0.0, 1.0) * shadowTerm + sunAmbient;
   light = lightMultiplier * light + (vec3(1.0) - light) * shadowFill;
 
 #ifdef PHONG

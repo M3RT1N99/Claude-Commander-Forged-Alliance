@@ -18,6 +18,8 @@ uniform vec3 shadowFill;
 uniform float lightMultiplier;
 uniform float glowMultiplier; // mesh.fx:56 = 2.0
 
+#include <cfaShadow>
+
 varying vec2 vUv0;
 varying vec2 vUv1;
 varying vec3 vNormal;
@@ -50,7 +52,8 @@ void main() {
 #endif
 
   // :2587-2589 — the Aeon light is dimmed to 0.6
-  vec3 light = sunDiffuse * clamp(dot(sunDirection, normal), 0.0, 1.0) + sunAmbient;
+  vec3 light =
+    sunDiffuse * clamp(dot(sunDirection, normal), 0.0, 1.0) * cfaComputeShadow(vWorldPos) + sunAmbient;
   light = 0.6 * lightMultiplier * light + (vec3(1.0) - light) * shadowFill;
 
   float emissive = glowMultiplier * specular.b;
