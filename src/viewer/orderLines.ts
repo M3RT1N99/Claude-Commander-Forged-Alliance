@@ -18,6 +18,8 @@ import * as THREE from 'three'
 
 export interface OrderLineEntry {
   unitId: number
+  /** Segment index within the unit's command queue (0 = active order). */
+  seg?: number
   type: 'Move' | 'Attack' | 'Repair' | 'BuildMobile'
   from: { x: number; y: number; z: number }
   to: { x: number; y: number; z: number }
@@ -75,19 +77,22 @@ export class OrderLineSystem {
     for (const [k, v] of waypoints) this.waypointTex.set(k, v)
   }
 
-  /** Redraw the graph for the currently selected units' orders. */
+  /** Redraw the graph for the currently selected units' order queues —
+   *  one drawn segment per queued command (UICommandGraph draws the whole
+   *  queue as a polyline). */
   update(entries: OrderLineEntry[]): void {
     const seen = new Set<number>()
     for (const e of entries) {
-      seen.add(e.unitId)
-      let d = this.drawn.get(e.unitId)
+      const key = e.unitId * 4096 + (e.seg ?? 0)
+      seen.add(key)
+      let d = this.drawn.get(key)
       if (d && d.type !== e.type) {
-        this.remove(e.unitId)
+        this.remove(key)
         d = undefined
       }
       if (!d) {
         d = this.create(e.type)
-        this.drawn.set(e.unitId, d)
+        this.drawn.set(key, d)
       }
       this.layout(d, e)
     }

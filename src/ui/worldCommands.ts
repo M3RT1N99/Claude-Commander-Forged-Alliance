@@ -33,11 +33,12 @@ export interface CommandMode {
 }
 
 export interface WorldCommandSim {
-  move(id: number, x: number, z: number): void
+  /** queue=true (held Shift) appends instead of replacing (Cfile:1240965). */
+  move(id: number, x: number, z: number, queue?: boolean): void
   /** Attack (CAttackTargetTask): Unit `id` greift die Ziel-Unit an. */
-  attack(id: number, targetId: number): void
+  attack(id: number, targetId: number, queue?: boolean): void
   /** Repair (dispatch 0x14): resume building the unfinished target. */
-  repair(id: number, targetId: number): void
+  repair(id: number, targetId: number, queue?: boolean): void
   /**
    * Der SAMMELPUNKT einer Fabrik (IssueFactoryRallyPoint, Cfile:1008266). Er ist
    * kein Bewegungsbefehl: die Fabrik bleibt stehen, nur ihre frischen Einheiten
@@ -134,7 +135,7 @@ export async function worldClick(
     if (opts.enemyTargetId === undefined) return 'Attack auf Boden: noch kein Weg (CFireAtTask fehlt)'
     let n = 0
     for (const u of selection) {
-      sim.attack(u.id, opts.enemyTargetId)
+      sim.attack(u.id, opts.enemyTargetId, opts.queue)
       n++
     }
     onCommandIssued(host, {
@@ -159,7 +160,7 @@ export async function worldClick(
     if (siteId > 0) {
       for (const u of selection) {
         if (u.id !== builder.id && u.canRepair) {
-          sim.repair(u.id, siteId)
+          sim.repair(u.id, siteId, opts.queue)
           helpers++
         }
       }
@@ -187,7 +188,7 @@ export async function worldClick(
   if (opts.enemyTargetId !== undefined) {
     let n = 0
     for (const u of selection) {
-      sim.attack(u.id, opts.enemyTargetId)
+      sim.attack(u.id, opts.enemyTargetId, opts.queue)
       n++
     }
     onCommandIssued(host, {
@@ -203,7 +204,7 @@ export async function worldClick(
     let n = 0
     for (const u of selection) {
       if (u.canRepair && u.id !== opts.repairTargetId) {
-        sim.repair(u.id, opts.repairTargetId)
+        sim.repair(u.id, opts.repairTargetId, opts.queue)
         n++
       }
     }
@@ -220,7 +221,7 @@ export async function worldClick(
   let rallied = 0
   for (const u of selection) {
     if (u.canMove) {
-      sim.move(u.id, hit.x, hit.z)
+      sim.move(u.id, hit.x, hit.z, opts.queue)
       moved++
     } else if (u.isFactory) {
       sim.setRallyPoint(u.id, hit.x, y, hit.z)

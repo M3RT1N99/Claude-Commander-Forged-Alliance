@@ -30,6 +30,8 @@ export interface LuaUnitSnapshot {
   born: number
   /** The unit's active order (command graph): type + target position. */
   order?: { t: 'Move' | 'Attack' | 'Repair' | 'BuildMobile'; x: number; z: number }
+  /** The full command queue, head first (CUnitCommandQueue). */
+  orders?: { t: 'Move' | 'Attack' | 'Repair' | 'BuildMobile'; x: number; z: number }[]
   /** Turret aim state per weapon (yaw/pitch bones, radians vs. rest pose). */
   turrets?: { b: string; y: number; pb?: string; p?: number }[]
   /** Die Armee der Unit (1-basiert) — unitsOfFocusArmy filtert danach. */
@@ -389,19 +391,19 @@ export class LuaSimClient {
     await done
   }
 
-  move(id: number, x: number, z: number): void {
-    this.worker.postMessage({ type: 'move', id, x, z })
+  move(id: number, x: number, z: number, queue = false): void {
+    this.worker.postMessage({ type: 'move', id, x, z, queue })
   }
   stop(id: number): void {
     this.worker.postMessage({ type: 'stop', id })
   }
   /** Attack-Befehl (CAttackTargetTask): Unit `id` greift `targetId` an. */
-  attack(id: number, targetId: number): void {
-    this.worker.postMessage({ type: 'attack', id, targetId })
+  attack(id: number, targetId: number, queue = false): void {
+    this.worker.postMessage({ type: 'attack', id, targetId, queue })
   }
   /** Repair (dispatch 0x14): resume building the unfinished `targetId`. */
-  repair(id: number, targetId: number): void {
-    this.worker.postMessage({ type: 'repair', id, targetId })
+  repair(id: number, targetId: number, queue = false): void {
+    this.worker.postMessage({ type: 'repair', id, targetId, queue })
   }
 
   /**

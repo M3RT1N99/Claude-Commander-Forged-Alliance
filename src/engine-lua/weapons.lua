@@ -388,6 +388,9 @@ end
 --- Salven-FSM der Lua Coroutinen benutzt: OnFire setzt den Zustand, und der
 --- Thread-Scheduler laeuft ihn im selben Beat weiter.
 function __weaponTick()
+  -- Command queue head advance FIRST (TaskTick pops finished commands and
+  -- starts the next, sim-core.md:211-252), then the attack orders.
+  __ordersTick()
   -- Attack-Orders ZUERST (CAttackTargetTask laeuft vor den Waffen-Tasks):
   -- sie steuern die Bewegung in Reichweite, die Zielerfassung unten
   -- bevorzugt dann das Befehlsziel.

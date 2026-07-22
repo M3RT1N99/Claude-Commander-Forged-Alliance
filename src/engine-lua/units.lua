@@ -208,8 +208,7 @@ end
 -- laufen garantiert auseinander; wer dann welches liest, entscheidet der Zufall.
 -- The unit's active order for the command graph (UICommandGraph draws
 -- order lines + waypoint markers per UNITCOMMAND_*, params from
--- commandgraphparams.lua). We carry ONE order per unit — the current
--- task; shift-queues are a documented gap.
+-- commandgraphparams.lua).
 local function activeOrder(id, u)
   local target = __attackOrders and __attackOrders[id]
   if target then
@@ -228,6 +227,30 @@ local function activeOrder(id, u)
   end
   if u.__goal then return 'Move', u.__goal[1], u.__goal[2] end
   return nil
+end
+
+-- The FULL order list for the command graph: the active order first, then
+-- the queued commands (__orders FIFO) with entity targets resolved to
+-- their CURRENT position — the original graph tracks entity targets live
+-- (DirtyCommandGraph re-tesselation).
+local function orderList(id, u)
+  local out = nil
+  local ot, ox, oz = activeOrder(id, u)
+  if ot then out = { { t = ot, x = ox, z = oz } } end
+  for _, cmd in ipairs((__orders and __orders[id]) or {}) do
+    local x, z
+    if cmd.type == 'Move' then
+      x, z = cmd.x, cmd.z
+    else
+      local t = __units[cmd.target]
+      if t and t.__pos then x, z = t.__pos[1], t.__pos[3] end
+    end
+    if x then
+      out = out or {}
+      out[#out + 1] = { t = cmd.type, x = x, z = z }
+    end
+  end
+  return out
 end
 
 -- Turret bone angles for the renderer (CAimManipulator state, advanced in
@@ -251,9 +274,8 @@ end
 local function readRow(id, u)
   local p = u.__pos or { 0, 0, 0 }
   local moving = (u.__goal ~= nil and u.__goal ~= false)
-  local ot, ox, oz = activeOrder(id, u)
   return {
-    orderType = ot, orderX = ox, orderZ = oz,
+    orders = orderList(id, u),
     turrets = readTurrets(u),
     id = id,
     name = (u.__bp and u.__bp.BlueprintId) or '?',
@@ -318,10 +340,16 @@ function __readAllUnitsJson()
       .. ',"moving":' .. tostring(r.moving)
       .. ',"fraction":' .. jnum(r.fraction)
       .. ',"born":' .. jnum(r.born)
-      .. (r.orderType
-        and (',"order":{"t":' .. jstr(r.orderType)
-          .. ',"x":' .. jnum(r.orderX) .. ',"z":' .. jnum(r.orderZ) .. '}')
-        or '')
+      .. (function()
+        -- The whole command queue (head first) for the command graph;
+        -- 'order' stays as the head alias for existing consumers.
+        if not r.orders then return '' end
+        local os = {}
+        for oi, o in ipairs(r.orders) do
+          os[oi] = '{"t":' .. jstr(o.t) .. ',"x":' .. jnum(o.x) .. ',"z":' .. jnum(o.z) .. '}'
+        end
+        return ',"order":' .. os[1] .. ',"orders":[' .. table.concat(os, ',') .. ']'
+      end)()
       .. (function()
         if not r.turrets then return '' end
         local ts = {}

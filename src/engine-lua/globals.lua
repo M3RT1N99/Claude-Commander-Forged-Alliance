@@ -776,35 +776,137 @@ end
 -- Fahrziel jeden Beat aufs Bau-Ziel zurueck.
 __attackOrders = {}
 
+-- === Command queue (CUnitCommandQueue) ===
+-- UNIT_IssueCommand (Cfile:1007498-1007610): clear=true wipes the queue
+-- FIRST (ClearCommandQueue) and aborts the running task, then appends;
+-- clear=false only APPENDS — a plain insert does NOT interrupt the running
+-- order (UCQS_CommandInserted only updates speed, sim-core.md:255-258).
+-- Queue cap 500 (Cfile:1007566). The dispatcher consumes only the queue
+-- head and pops it on completion (TaskTick, sim-core.md:211-252).
+-- Engineer BUILD orders keep their own proven chain in build.lua (its
+-- per-builder queue IS the shift-build path); a mixed shift train of
+-- moves and builds is a documented gap.
+__orders = {}      -- unitId -> FIFO of pending commands
+__orderActive = {} -- unitId -> command currently driving the unit
+
+local function __abortActive(unitId)
+  local u = __units[unitId]
+  if not u then return end
+  __abortBuildTasks(unitId)
+  __attackOrders[unitId] = nil
+  u:GetNavigator():AbortMove()
+end
+
+--- Start one command through the existing single-order mechanisms.
+local function __startOrder(unitId, cmd)
+  local u = __units[unitId]
+  if not u then return false end
+  if cmd.type == 'Move' then
+    u:GetNavigator():SetGoal({ cmd.x, 0, cmd.z })
+    return true
+  elseif cmd.type == 'Attack' then
+    local t = __units[cmd.target]
+    if not t or t.__destroyed then return false end
+    __attackOrders[unitId] = cmd.target
+    return true
+  elseif cmd.type == 'Repair' then
+    local t = __units[cmd.target]
+    if not t or t.__destroyed then return false end
+    if (t.__fraction or 1) >= 1 and (t.__health or 0) >= t:GetMaxHealth() then
+      return false -- nothing to repair (TaskTick -1, Cfile:817856-817875)
+    end
+    __issueBuildTask(unitId, cmd.target, 'Repair', true)
+    return true
+  end
+  return false
+end
+
+--- Pop the queue head and start it; skips commands that fail to start.
+function __ordersAdvance(unitId)
+  local q = __orders[unitId]
+  if not q then return end
+  while q[1] do
+    local cmd = table.remove(q, 1)
+    if __startOrder(unitId, cmd) then
+      __orderActive[unitId] = cmd
+      return
+    end
+  end
+  __orderActive[unitId] = nil
+end
+
+--- The queue insert (UNIT_IssueCommand, Cfile:1007575-1007589).
+function __issueOrder(unitId, cmd, clear)
+  if clear == nil then clear = true end -- IssueUnitCommand default (Cfile:1265640)
+  local u = __units[unitId]
+  if not u then return end
+  local q = __orders[unitId]
+  if not q then
+    q = {}
+    __orders[unitId] = q
+  end
+  if clear then
+    __abortActive(unitId)
+    for i = #q, 1, -1 do q[i] = nil end
+    __orderActive[unitId] = nil
+  elseif #q >= 500 then
+    return -- queue cap (Cfile:1007566-1007569)
+  end
+  q[#q + 1] = cmd
+  -- The engine starts the head on the next TaskTick; with nothing active
+  -- we start it now (same beat).
+  if not __orderActive[unitId] then __ordersAdvance(unitId) end
+end
+
+--- Per-beat completion detection: pop the head when its work is done and
+--- start the next queued command (TaskTick RemoveFirstCommandFromQueue).
+function __ordersTick()
+  for unitId, cmd in pairs(__orderActive) do
+    local u = __units[unitId]
+    if not u or u.__destroyed then
+      __orders[unitId] = nil
+      __orderActive[unitId] = nil
+    else
+      local done = false
+      if cmd.type == 'Move' then
+        done = not u.__goal -- motion.lua sets __goal = false on arrival
+      elseif cmd.type == 'Attack' then
+        done = __attackOrders[unitId] == nil -- __attackTick clears dead targets
+      elseif cmd.type == 'Repair' then
+        done = not __builderBusy(unitId)
+      end
+      if done then
+        __orderActive[unitId] = nil
+        __ordersAdvance(unitId)
+      end
+    end
+  end
+end
+
 --- Stop (Dispatch 0x01): Bau-Tasks (mit Abbruch-Hooks), Attack-Order,
---- Bewegungsziel und Dreh-Ziel — alles weg.
+--- Bewegungsziel, Dreh-Ziel UND die Befehls-Queue — alles weg.
 function __dispatchStop(unitId)
   local u = __units[unitId]
   if not u then return end
+  __orders[unitId] = nil
+  __orderActive[unitId] = nil
   __abortBuildTasks(unitId)
   __attackOrders[unitId] = nil
   u:GetNavigator():AbortMove()
   u.__faceGoal = false
 end
 
---- Move (Dispatch 0x02): ersetzt Bau und Attack, dann Navigator-Ziel.
-function __dispatchMove(unitId, x, z)
-  local u = __units[unitId]
-  if not u then return end
-  __abortBuildTasks(unitId)
-  __attackOrders[unitId] = nil
-  u:GetNavigator():SetGoal({ x, 0, z })
+--- Move (Dispatch 0x02): with clear it replaces build and attack, with
+--- clear=false (Shift) it queues behind the running order.
+function __dispatchMove(unitId, x, z, clear)
+  __issueOrder(unitId, { type = 'Move', x = x, z = z }, clear)
 end
 
 --- Attack (Dispatch 0x0A, CAttackTargetTask): die Order merken — der
 --- Task-Tick faehrt in Waffenreichweite und die Zielerfassung bevorzugt
 --- das Befehlsziel (weapons.lua).
-function __dispatchAttack(unitId, targetId)
-  local u = __units[unitId]
-  local t = __units[targetId]
-  if not u or not t then return end
-  __abortBuildTasks(unitId)
-  __attackOrders[unitId] = targetId
+function __dispatchAttack(unitId, targetId, clear)
+  __issueOrder(unitId, { type = 'Attack', target = targetId }, clear)
 end
 
 --- Repair (dispatch 0x14, CUnitRepairTask): the SAME CBuildTaskHelper as
@@ -813,16 +915,8 @@ end
 --- Materialize only raises health (AdjustHealth, Cfile:953468) at the same
 --- rate and FULL build cost per second (unit.lua:712-726). A full-HP
 --- finished target ends the task immediately (TaskTick -1, Cfile:817856).
-function __dispatchRepair(unitId, targetId)
-  local u = __units[unitId]
-  local t = __units[targetId]
-  if not u or not t then return end
-  if (t.__fraction or 1) >= 1 and (t.__health or 0) >= t:GetMaxHealth() then
-    return -- nothing to repair (Cfile:817856-817875)
-  end
-  __attackOrders[unitId] = nil
-  u:GetNavigator():AbortMove()
-  __issueBuildTask(unitId, targetId, 'Repair', true)
+function __dispatchRepair(unitId, targetId, clear)
+  __issueOrder(unitId, { type = 'Repair', target = targetId }, clear)
 end
 
 -- The distance the attack task closes to: the largest FIRING range

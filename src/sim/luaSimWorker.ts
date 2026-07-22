@@ -44,13 +44,13 @@ interface Vec3 {
 type InMsg =
   | { type: 'boot'; files: Map<string, Uint8Array>; terrain: HeightfieldData }
   | { type: 'spawn'; reqId: number; id: string; scriptPath: string; scriptBytes: Uint8Array | null; bpBytes: Uint8Array | null; bones: SimBone[]; pos: Vec3; army: number }
-  | { type: 'move'; id: number; x: number; z: number }
+  | { type: 'move'; id: number; x: number; z: number; queue?: boolean }
   | { type: 'stop'; id: number }
   // Attack (Dispatch 0x0A, CAttackTargetTask): in Waffenreichweite fahren,
   // Waffen aufs Befehlsziel.
-  | { type: 'attack'; id: number; targetId: number }
+  | { type: 'attack'; id: number; targetId: number; queue?: boolean }
   // Repair (dispatch 0x14): resume building an unfinished structure.
-  | { type: 'repair'; id: number; targetId: number }
+  | { type: 'repair'; id: number; targetId: number; queue?: boolean }
   // Der Sammelpunkt einer Fabrik (IssueFactoryRallyPoint, Cfile:1008266) — KEIN
   // Bewegungsbefehl: die Fabrik bleibt stehen.
   | { type: 'rally'; id: number; x: number; y: number; z: number }
@@ -185,15 +185,16 @@ ctx.onmessage = async (e: MessageEvent<InMsg>): Promise<void> => {
     // Der Befehls-Dispatch (IAiCommandDispatchImpl::DispatchTask @0x608EF0):
     // ein Move ERSETZT die Arbeit — laufender Bau bricht mit der vollen
     // Abbruch-Kette ab (Cfile:814989), erst dann kommt das Navigator-Ziel.
-    host.eval(`__dispatchMove(${msg.id}, ${msg.x}, ${msg.z})`)
+    // Shift (queue) appends instead: clear = NOT shift (Cfile:1240965).
+    host.eval(`__dispatchMove(${msg.id}, ${msg.x}, ${msg.z}, ${msg.queue ? 'false' : 'true'})`)
   } else if (msg.type === 'rally') {
     host.eval(`local u=__units[${msg.id}]; if u then u:SetRallyPoint({ ${msg.x}, ${msg.y}, ${msg.z} }) end`)
   } else if (msg.type === 'stop') {
     host.eval(`__dispatchStop(${msg.id})`)
   } else if (msg.type === 'attack') {
-    host.eval(`__dispatchAttack(${msg.id}, ${msg.targetId})`)
+    host.eval(`__dispatchAttack(${msg.id}, ${msg.targetId}, ${msg.queue ? 'false' : 'true'})`)
   } else if (msg.type === 'repair') {
-    host.eval(`__dispatchRepair(${msg.id}, ${msg.targetId})`)
+    host.eval(`__dispatchRepair(${msg.id}, ${msg.targetId}, ${msg.queue ? 'false' : 'true'})`)
   }
 }
 

@@ -373,6 +373,45 @@ console.log('\n== Befehls-Dispatch: Stop, Move-bricht-Bau, Attack ==')
   host.eval(`SetAlliance(1, 2, 'Enemy')`)
   check(host.eval(`return IsEnemy(1, 2)`) === true, 'SetAlliance(Enemy) restores hostility')
 
+  // COMMAND QUEUE (CUnitCommandQueue): Shift appends (clear = NOT shift,
+  // Cfile:1240965); an append does NOT interrupt the running order
+  // (UCQS_CommandInserted, sim-core.md:255-258); head completion starts
+  // the next queued command (TaskTick pops, sim-core.md:211-252); a
+  // non-shift order wipes the queue first (ClearCommandQueue then
+  // AddCommandToQueue, Cfile:1007575-1007589).
+  const runner = spawnLuaUnit(host, 'uel0001', { x: 100, y: 20, z: 100 }, 1)
+  host.eval(`__dispatchMove(${runner}, 108, 100)`)
+  host.eval(`__dispatchMove(${runner}, 108, 108, false)`) // Shift append
+  check(
+    host.eval(`return __orderActive[${runner}].type`) === 'Move',
+    'the head move starts immediately',
+  )
+  check(
+    Number(host.eval(`return #(__orders[${runner}] or {})`)) === 1,
+    'the shift-queued move waits behind the head',
+  )
+  const snapOrders = host.eval(
+    `local u = __units[${runner}] return __readAllUnitsJson()`,
+  ) as string
+  check(
+    String(snapOrders).includes('"orders":[{"t":"Move"'),
+    'the snapshot carries the full order queue for the command graph',
+  )
+  for (let t = 0; t < 300; t++) beat(engine)
+  const rp = host.eval(`local p = __units[${runner}].__pos return p[1] .. ',' .. p[3]`) as string
+  const [rx, rz] = String(rp).split(',').map(Number)
+  check(
+    Math.abs(rx! - 108) < 3 && Math.abs(rz! - 108) < 3,
+    `after the head completes the unit continues to the queued waypoint (${rx!.toFixed(1)}, ${rz!.toFixed(1)})`,
+  )
+  host.eval(`__dispatchMove(${runner}, 120, 100)`)
+  host.eval(`__dispatchMove(${runner}, 130, 100, false)`)
+  host.eval(`__dispatchMove(${runner}, 100, 100)`) // no shift -> wipe
+  check(
+    Number(host.eval(`return #(__orders[${runner}] or {})`)) === 0,
+    'a non-shift order wipes the queue (ClearCommandQueue, Cfile:1007575)',
+  )
+
   // HP REPAIR of a FINISHED unit: the same CBuildTaskHelper — Materialize
   // only raises health (AdjustHealth, Cfile:953468) at BuildRate/BuildTime
   // per second; FractionComplete stays 1 (Cfile:953455-953466).

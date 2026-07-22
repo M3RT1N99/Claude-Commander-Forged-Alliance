@@ -1838,12 +1838,24 @@ function luaSimUpdate(): void {
     // always 1) — without this, an enemy under the cursor never triggered
     // Attack and its icon carried the wrong tint.
     u.army = s.army
-    if (u.selected && s.order) {
-      orderEntries.push({
-        unitId: u.id,
-        type: s.order.t,
-        from: { x, y, z },
-        to: { x: s.order.x, y: viewer.heightAt(s.order.x, s.order.z), z: s.order.z },
+    if (u.selected && s.orders) {
+      // The whole command queue as a polyline: unit -> wp1 -> wp2 ...
+      // (the original graph draws every queued command, Cfile:1248392ff).
+      let px = x
+      let py = y
+      let pz = z
+      s.orders.forEach((o, i) => {
+        const ty = viewer.heightAt(o.x, o.z)
+        orderEntries.push({
+          unitId: u.id,
+          seg: i,
+          type: o.t,
+          from: { x: px, y: py, z: pz },
+          to: { x: o.x, y: ty, z: o.z },
+        })
+        px = o.x
+        py = ty
+        pz = o.z
       })
     }
     u.ring.visible = u.selected
