@@ -1240,9 +1240,24 @@ end
 -- Renderer ihn abholen kann. Erfunden wird nichts: Position, Mesh und Textur
 -- kommen aus der Lua.
 __uiBlips = {}
+-- Push sink to the renderer (flat args — wasmoon-friendly); false until
+-- the browser connects, then the queue path below stays for headless runs.
+__uiBlipSink = false
 
 function AddCommandFeedbackBlip(spec, duration)
-  __uiBlips[table.getn(__uiBlips) + 1] = { spec = spec, duration = duration }
+  if __uiBlipSink then
+    local p = spec.Position or {}
+    __uiBlipSink(
+      spec.MeshName or '',
+      spec.BlueprintID or '',
+      spec.TextureName or '',
+      spec.ShaderName or 'CommandFeedback',
+      spec.UniformScale or 1,
+      p[1] or 0, p[2] or 0, p[3] or 0,
+      duration or 0.7)
+  else
+    __uiBlips[table.getn(__uiBlips) + 1] = { spec = spec, duration = duration }
+  end
 end
 
 -- Der Renderer holt die aufgelaufenen Blips ab (und leert die Liste).

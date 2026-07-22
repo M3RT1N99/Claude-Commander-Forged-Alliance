@@ -40,6 +40,7 @@ import {
   type UnitTextures,
 } from './viewer/unitMaterial'
 import { OrderLineSystem, type OrderLineEntry } from './viewer/orderLines'
+import { CommandFeedbackSystem, type BlipAssets } from './viewer/commandFeedback'
 
 const $ = <T extends HTMLElement>(sel: string): T => {
   const el = document.querySelector<T>(sel)
@@ -483,6 +484,8 @@ let particles: ParticleSystem | null = null
 let trails: TrailSystem | null = null
 let beams: BeamSystem | null = null
 let orderLines: OrderLineSystem | null = null
+let commandFeedback: CommandFeedbackSystem | null = null
+const blipAssetCache = new Map<string, Promise<BlipAssets | null>>()
 let gameAudio: GameAudio | null = null
 const emitterRuntimes = new Map<number, EmitterRuntime>()
 const emitterBpData = new Map<string, EmitterBpData>()
@@ -863,6 +866,66 @@ async function startSandbox(mapFolder: string): Promise<void> {
     // and colors from commandgraphparams.lua, drawn for the selection.
     orderLines?.dispose()
     orderLines = new OrderLineSystem((o) => viewer.addHelper(o))
+    // Click-feedback blips (commandmode.lua:128-176 picks mesh/texture/
+    // shader per command; the engine port lives in commandFeedback.ts).
+    commandFeedback?.dispose()
+    commandFeedback = new CommandFeedbackSystem(
+      (o) => viewer.addHelper(o),
+      (meshPath, texPath) => {
+        const key = `${meshPath}|${texPath}`
+        let p = blipAssetCache.get(key)
+        if (!p) {
+          p = (async (): Promise<BlipAssets | null> => {
+            if (!vfs) return null
+            const mp = meshPath.replace(/^\//, '').toLowerCase()
+            if (!vfs.exists(mp)) {
+              log(`command blip mesh missing: ${mp}`)
+              return null
+            }
+            const model = parseScm(await vfs.read(mp))
+            const geometry = new THREE.BufferGeometry()
+            geometry.setAttribute('position', new THREE.BufferAttribute(model.positions, 3))
+            geometry.setAttribute('normal', new THREE.BufferAttribute(model.normals, 3))
+            geometry.setAttribute('uv', new THREE.BufferAttribute(model.uv0, 2))
+            geometry.setIndex(new THREE.BufferAttribute(model.indices, 1))
+            const texture = await loadFirstTexture([texPath.replace(/^\//, '').toLowerCase()])
+            return { geometry, texture }
+          })()
+          blipAssetCache.set(key, p)
+        }
+        return p
+      },
+    )
+    {
+      const cf = commandFeedback
+      gameUi.connectCommandFeedback(
+        (meshName, blueprintId, textureName, shaderName, uniformScale, x, y, z, duration) => {
+          // BlueprintID branch (Cfile:1281792-1830): LOD0 mesh of the unit
+          // blueprint, scale OVERRIDDEN by Display.UniformScale.
+          void (async () => {
+            let meshPath = meshName
+            let texPath = textureName
+            let scale = uniformScale
+            if (!meshPath && blueprintId && vfs) {
+              const id = blueprintId.toLowerCase()
+              try {
+                const bp = parseBlueprint(await vfs.readText(`units/${id}/${id}_unit.bp`))
+                const paths = resolveUnitPaths(id, bp, (p) => vfs!.exists(p))
+                if (!paths) return
+                meshPath = paths.mesh
+                texPath = texPath || paths.albedo[paths.albedo.length - 1]!
+                const us = bpGet(bp, 'Display.UniformScale')
+                if (typeof us === 'number' && us > 0) scale = us
+              } catch {
+                return
+              }
+            }
+            if (!meshPath) return
+            await cf.spawn({ meshPath, texPath, shaderName, scale, x, y, z, duration })
+          })()
+        },
+      )
+    }
     {
       const ol = orderLines
       void (async () => {
@@ -1942,6 +2005,7 @@ function luaSimUpdate(): void {
   }
 
   orderLines?.update(orderEntries)
+  commandFeedback?.update(performance.now() / 1000)
 }
 
 /**

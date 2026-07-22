@@ -590,6 +590,26 @@ export class GameUi {
     this.host.setGlobal('__uiAudioStopSink', (id: number) => stop(id))
   }
 
+  /**
+   * Click-feedback blips (AddCommandFeedbackBlip, commandmode.lua:133) —
+   * the renderer receives the flat spec and spawns the short-lived mesh.
+   */
+  connectCommandFeedback(
+    sink: (
+      meshName: string,
+      blueprintId: string,
+      textureName: string,
+      shaderName: string,
+      uniformScale: number,
+      x: number,
+      y: number,
+      z: number,
+      duration: number,
+    ) => void,
+  ): void {
+    this.host.setGlobal('__uiBlipSink', sink)
+  }
+
   attachEvents(target: Window = window): void {
     const consume = (type: string) => (e: MouseEvent | WheelEvent) => {
       if (this.handleMouse(type, e)) {
