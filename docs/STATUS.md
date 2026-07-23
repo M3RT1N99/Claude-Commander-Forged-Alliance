@@ -45,10 +45,12 @@ Der Weg zur echten UI: [PLAN-UI.md](PLAN-UI.md); der 1:1-Gesamtfahrplan:
   `StartCommandMode`-Konsolenbefehl fehlt (Hotkeys wie Shift-P/Patrol laufen
   in die WARN-Liste), `IsAlly` in der UI-VM fehlt ('allies'-Chat).
 - **Command dispatch, remaining gaps:** Stop / Move-cancels-build / Attack
-  on units are 1:1 now (dispatch table @0x608EF0, abort chain
-  Cfile:814989); still open: attack-ground (CFireAtTask), shift-queueing
-  of orders, Patrol, Guard/Assist (resume builds), Reclaim/Repair/Capture,
-  and the command markers (UICommandGraph).
+  (units AND ground, AITARGET_Ground) / Repair (incl. HP repair) /
+  shift-queueing (CUnitCommandQueue) / Guard-Assist (queue sharing, build
+  assist, follow) / SetFireState are 1:1 now (dispatch table @0x608EF0);
+  still open: Patrol, Reclaim/Capture, point guard, capture-on-enemy,
+  guard enemy chase (GetBestEnemy), ground-attack ring rotation in the
+  queue, and the command markers (UICommandGraph — order lines exist).
 - **Sim-Funde:** Einheiten stapeln sich am Roll-off (keine Separation),
   Mex-Stall (Produktion × LimitingRate, Cfile:953938), Türme drehen nicht
   (Turret-Aiming), Audio-Loops/Variationen.
@@ -58,7 +60,9 @@ Der Weg zur echten UI: [PLAN-UI.md](PLAN-UI.md); der 1:1-Gesamtfahrplan:
   statt über `ScenarioUtilities.lua` (keine Armee-Gruppen, keine Props).
 - **Das Blueprint wird zweimal gelesen** — TS-Parser (Modelle/Knochen) und
   echte `LoadBlueprints()`-Pipeline. Zwei Wahrheiten.
-- **Nur ein Bauer pro Baustelle** — Assist fehlt.
+- **Assist läuft** (multi-builder placement + Guard auf Bauer/Fabrik);
+  ein Guard auf einen REKLAMIERENDEN Bauer assistiert noch nicht
+  (Reclaim fehlt ganz).
 - **Ökonomie-Lua-API teils No-Op:** `SetProductionPerSecond*`,
   `SetConsumptionPerSecond*`, `SetBuildRate` schreiben noch nichts in die
   Engine-Ökonomie (Werte kommen nur aus dem Blueprint).
