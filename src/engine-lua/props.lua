@@ -1,17 +1,17 @@
 -- =====================================================================
--- PROPS — Wracks, Felsen, Bäume. Alles, was herumsteht und reklamierbar ist.
+-- PROPS — wrecks, rocks, trees. Everything that stands around and can be reclaimed.
 --
--- Ein WRACK ist kein Engine-Ding: `Unit:CreateWreckage` (unit.lua:1076) und
--- `CreateWreckageProp` (unit.lua:1090) sind reine LUA. Die Engine liefert nur
--- `CreateProp(location, prop_blueprint_id)` (Cfile:1015366) und die eine
--- Prop-Bindung `AddBoundedProp` (Cfile:1015752). Alles andere —
--- SetReclaimValues, SetPropCollision, SetMaxReclaimValues — steht in
--- /lua/sim/prop.lua und /lua/wreckage.lua.
+-- A WRECK is not an engine object: `Unit:CreateWreckage` (unit.lua:1076) and
+-- `CreateWreckageProp` (unit.lua:1090) are pure LUA. The engine supplies only
+-- `CreateProp(location, prop_blueprint_id)` (Cfile:1015366) and the single
+-- prop binding `AddBoundedProp` (Cfile:1015752). Everything else —
+-- SetReclaimValues, SetPropCollision, SetMaxReclaimValues — is in
+-- /lua/sim/prop.lua and /lua/wreckage.lua.
 --
--- Die Klasse eines Props kommt aus dem Blueprint (func_FindBlueprintScriptModule,
--- Cfile:914189): props/defaultwreckage/defaultwreckage_prop.bp:16-17 sagt
--- ausdruecklich `ScriptClass = 'Wreckage'`, `ScriptModule = '/lua/wreckage.lua'`.
--- Ohne Blueprint-Felder gilt der Default: /lua/sim/prop.lua, Klasse "Prop".
+-- A prop's class comes from the blueprint (func_FindBlueprintScriptModule,
+-- Cfile:914189): props/defaultwreckage/defaultwreckage_prop.bp:16-17 explicitly
+-- specifies `ScriptClass = 'Wreckage'`, `ScriptModule = '/lua/wreckage.lua'`.
+-- Without blueprint fields, the default applies: /lua/sim/prop.lua, class "Prop".
 --
 -- STANDARD-LUA 5.4.
 -- =====================================================================
@@ -52,10 +52,10 @@ function CreateProp(location, bpId)
   p.__isProp = true
   p.__bp = bp
   p.__id = id
-  p.__army = -1 -- Props gehoeren niemandem (die Zivilarmee ist -1)
+  p.__army = -1 -- Props belong to nobody (the civilian army is -1).
   p.__pos = pos
   p.__heading = 0
-  -- Die Erstellungszeit: der Wreckage-Shader variiert sein Noise darueber
+  -- Creation time: the wreckage shader varies its noise with it
   -- (mesh.fx WreckageVS: material.x = creation time, PS: frac(0.01*depth.y)).
   p.__spawnTick = __gameTick or 0
   p.__bones = { names = {}, xform = {}, index = {} }
@@ -78,9 +78,9 @@ function CreatePropHPR(bpId, x, y, z, heading, pitch, roll)
   return p
 end
 
---- TryCopyPose(from, to, stealAnimation) (unit.lua:1135 kopiert die Pose der
---- sterbenden Unit auf ihr Wrack). Ohne Animations-System uebernehmen wir
---- Position und Ausrichtung — mehr gibt es bei uns nicht zu kopieren.
+--- TryCopyPose(from, to, stealAnimation) (unit.lua:1135 copies the dying unit's
+--- pose to its wreck). Without an animation system, copy position and heading —
+--- there is nothing more to copy here.
 function TryCopyPose(from, to, stealAnimation)
   if not from or not to then return end
   local p = from.__pos or { 0, 0, 0 }
@@ -88,18 +88,18 @@ function TryCopyPose(from, to, stealAnimation)
   to.__heading = from.__heading or 0
 end
 
---- GetTerrainTypeOffset(x, z) — der Hoehenversatz des Terrain-Typs
---- (unit.lua:1100 setzt das Wrack damit auf den Boden).
+--- GetTerrainTypeOffset(x, z) — the terrain-type height offset
+--- (unit.lua:1100 uses it to place the wreck on the ground).
 function GetTerrainTypeOffset(x, z)
   return 0
 end
 
---- Der Zustand aller Props als JSON (der Renderer zeichnet die Wracks).
---- meshBp  = was prop:SetMesh bekam (unit.lua:1129: Display.MeshBlueprintWrecked)
---- assoc   = die Unit hinter dem Wrack (unit.lua:1137: prop.AssociatedBP) —
----           der Renderer laedt darueber SCM + Albedo/Normals der Unit
---- scale   = prop:SetScale (unit.lua:1111: Display.UniformScale der Unit)
---- spawn   = Erstellungs-Tick (mesh.fx: der Wreckage-Shader braucht die Zeit)
+--- The state of all props as JSON (the renderer draws the wrecks).
+--- meshBp  = what prop:SetMesh received (unit.lua:1129: Display.MeshBlueprintWrecked)
+--- assoc   = the unit behind the wreck (unit.lua:1137: prop.AssociatedBP) —
+---           the renderer uses it to load the unit's SCM + albedo/normals
+--- scale   = prop:SetScale (unit.lua:1111: Display.UniformScale of the unit)
+--- spawn   = creation tick (mesh.fx: the wreckage shader needs the time)
 function __readAllPropsJson()
   local parts = {}
   local n = 0
@@ -119,9 +119,9 @@ function __readAllPropsJson()
   return '[' .. table.concat(parts, ',') .. ']'
 end
 
---- Ein Mesh-Blueprint als JSON — der Renderer holt sich damit die
---- Wrack-Varianten (ShaderName 'Wreckage', SpecularName wreckage_noise.dds),
---- die lua/system/blueprints.lua:187 (ExtractWreckageBlueprint) erzeugt hat.
+--- A mesh blueprint as JSON — the renderer uses it to get wreckage variants
+--- (ShaderName 'Wreckage', SpecularName wreckage_noise.dds) created by
+--- lua/system/blueprints.lua:187 (ExtractWreckageBlueprint).
 function __meshBpJson(bpId)
   local bp = __registered.Mesh[bpId]
   if not bp then return 'null' end

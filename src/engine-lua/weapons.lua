@@ -102,13 +102,27 @@ local function acquireTarget(w, u)
   -- sobald das Befehlsziel im Suchradius steht, feuert die Waffe darauf.
   local forcedId = __attackOrders[u.__id]
   if forcedId then
-    local ft = __units[forcedId]
-    if ft and canTarget(w, u, ft) then
-      local p, q = u.__pos, ft.__pos
-      local dx, dz = q[1] - p[1], q[3] - p[3]
-      if dx * dx + dz * dz <= radius * radius then
-        __weaponSetTarget(w, ft, nil)
-        return
+    if type(forcedId) == 'table' then
+      -- Ground attack order: the position IS the target (AITARGET_Ground).
+      -- CannotAttackGround weapons never take it (fire gate Cfile:983950,
+      -- weapons.md:70) and keep searching freely.
+      if not bp.CannotAttackGround then
+        local p = u.__pos
+        local dx, dz = forcedId[1] - p[1], forcedId[3] - p[3]
+        if dx * dx + dz * dz <= radius * radius then
+          __weaponSetTarget(w, nil, forcedId)
+          return
+        end
+      end
+    else
+      local ft = __units[forcedId]
+      if ft and canTarget(w, u, ft) then
+        local p, q = u.__pos, ft.__pos
+        local dx, dz = q[1] - p[1], q[3] - p[3]
+        if dx * dx + dz * dz <= radius * radius then
+          __weaponSetTarget(w, ft, nil)
+          return
+        end
       end
     end
   end
@@ -242,6 +256,18 @@ local function fireTick(w, u)
       return
     end
     local p, q = u.__pos, t.__pos
+    local dx, dz = q[1] - p[1], q[3] - p[3]
+    local d2 = dx * dx + dz * dz
+    local maxR = w.__maxRadius or bp.MaxRadius or 0
+    local minR = w.__minRadius or bp.MinRadius or 0
+    if d2 > maxR * maxR then return end
+    if minR > 0 and d2 < minR * minR then return end
+  elseif w.__targetGround then
+    -- The fire clock's ground gate (weapons.md:70): CannotAttackGround
+    -- weapons never fire at an AITARGET_Ground target; same range window
+    -- as entity targets otherwise.
+    if bp.CannotAttackGround then return end
+    local p, q = u.__pos, w.__targetGround
     local dx, dz = q[1] - p[1], q[3] - p[3]
     local d2 = dx * dx + dz * dz
     local maxR = w.__maxRadius or bp.MaxRadius or 0
@@ -391,6 +417,9 @@ function __weaponTick()
   -- Command queue head advance FIRST (TaskTick pops finished commands and
   -- starts the next, sim-core.md:211-252), then the attack orders.
   __ordersTick()
+  -- Guard orders (CUnitGuardTask): queue sharing, builder assist and the
+  -- follow behavior run per beat like the engine's TaskTick.
+  __guardTick()
   -- Attack-Orders ZUERST (CAttackTargetTask laeuft vor den Waffen-Tasks):
   -- sie steuern die Bewegung in Reichweite, die Zielerfassung unten
   -- bevorzugt dann das Befehlsziel.

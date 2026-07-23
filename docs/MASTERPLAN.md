@@ -1,334 +1,338 @@
-# Masterplan: Supreme Commander FA vollständig nachbauen
+# Master Plan: Complete reconstruction of Supreme Commander FA
 
-Ziel: **Das komplette Spiel 1:1 im Browser** — alle Einheiten, Waffen,
-Fabriken, KI, Karten, Kampagne, Multiplayer, Mods. Original-Verhalten,
--Werte und -Look; neu ist nur die Architektur (TypeScript/WebGL statt
-C++/DirectX9).
+Goal: **the complete game 1:1 in the browser** — every unit, weapon, factory,
+AI, map, campaign, multiplayer mode, and mod. Original behavior, values, and
+look; only the architecture is new (TypeScript/WebGL instead of C++/DirectX9).
 
-Grundlage: Tiefenrecherche in der rekonstruierten Engine (faf-re), der
-Original-Lua-Schicht und den Spieldaten (2026-07-13, 10 parallele Analysen
-+ eigene Messungen). **Jede Zahl hier ist belegt** — Vermutungen sind als
-solche markiert.
+Basis: in-depth research into the reconstructed engine (faf-re), the original
+Lua layer, and the game data (2026-07-13, 10 parallel analyses + independent
+measurements). **Every number here is substantiated** — assumptions are marked
+as such.
 
 ---
 
-## 1. Befund: Wo steckt das Spiel?
+## 1. Finding: where is the game?
 
-Die Moho-Engine ist ein Framework; die Spiel-Logik liegt zum großen Teil in
-**Lua**. Gemessen:
+The Moho engine is a framework; most game logic lives in **Lua**. Measured:
 
-| Schicht | Umfang | Inhalt |
+| Layer | Scope | Contents |
 | --- | --- | --- |
-| Engine C++ (faf-re) | ~600.000 Zeilen | sim 169k, unit 89k, ai 85k, render 44k, entity 44k, resource 33k, audio 27k, net 27k, particles 20k, effects 12k, script 11k, task 8k, terrain 8k, projectile 6k, collision 5k, command 5k, path 4k, vision 1k |
-| Gameplay-Lua | **183.202 LOC** | AI 83.723 · UI+MAUI 46.255 · Sim-Kern 28.658 · Unit-Skripte 13.473 · Projektile/Effekte/Props 6.309 · Kampagnen-Framework 4.784 (+28.718 LOC Map-Skripte) |
-| Effekt-Blueprints | **2724** (effects.scd) | 2437 Emitter · 184 Trails · 103 Beams |
-| Engine↔Lua-API | **~490 Methoden + ~410 Globals + 183 Callbacks**; **nur Sim: 339 + 204 ≈ 543 Bindings** | 36 Basisklassen `moho.*_methods`, davon ~15 sim-relevant |
+| Engine C++ (faf-re) | ~600,000 lines | sim 169k, unit 89k, ai 85k, render 44k, entity 44k, resource 33k, audio 27k, net 27k, particles 20k, effects 12k, script 11k, task 8k, terrain 8k, projectile 6k, collision 5k, command 5k, path 4k, vision 1k |
+| Gameplay Lua | **183,202 LOC** | AI 83,723 · UI+MAUI 46,255 · Sim core 28,658 · Unit scripts 13,473 · Projectiles/effects/props 6,309 · Campaign framework 4,784 (+28,718 LOC map scripts) |
+| Effect blueprints | **2724** (effects.scd) | 2437 emitters · 184 trails · 103 beams |
+| Engine↔Lua API | **~490 methods + ~410 globals + 183 callbacks**; **Sim only: 339 + 204 ≈ 543 bindings** | 36 base classes `moho.*_methods`, ~15 of them Sim-relevant |
 
-**Konsequenz:** Gameplay-Lua von Hand nach TypeScript zu übersetzen hieße,
-183k Zeilen originaler Spiellogik neu zu schreiben — nie exakt, und
-Mods/Kampagne blieben unmöglich (Mods sind Lua-Monkeypatching und führen
-**fremden Lua-Code** aus).
+**Consequence:** manually translating gameplay Lua to TypeScript would mean
+rewriting 183k lines of original game logic — never exactly. Mods and campaigns
+would remain impossible (mods monkey-patch Lua and execute **third-party Lua
+code**).
 
 ---
 
-## 2. Architektur-Entscheidung: Original-Lua ausführen
+## 2. Architecture decision: execute original Lua
 
-> **Wir führen die Original-Lua-Skripte in einem eingebetteten VM aus und
-> implementieren die Engine-API (`moho.*`) in TypeScript.**
+> **We execute the original Lua scripts in an embedded VM and implement the
+> engine API (`moho.*`) in TypeScript.**
 
-### 2.1 Welcher VM? (empirisch geklärt)
+### 2.1 Which VM? (empirically settled)
 
-FA nutzt **Lua 5.0.1 (PUC-Rio) mit GPG-gepatchtem Lexer** (Versions-String in
-`bin/main.exe`; Engine bindet LuaPlus 5.0 build 1081).
+FA uses **Lua 5.0.1 (PUC-Rio) with a GPG-patched lexer** (version string in
+`bin/main.exe`; the engine binds LuaPlus 5.0 build 1081).
 
-**Eigene Messungen:**
+**Independent measurements:**
 
-| Test | Ergebnis | Konsequenz |
+| Test | Result | Consequence |
 | --- | --- | --- |
-| Transpiler + Lua 5.4 (wasmoon): **alle 1316 Original-Skripte parsen** (`scripts/verify-lua.ts`) | ✅ Syntax lösbar | Transpiler funktioniert |
-| `tostring(10/2)` in 5.4 | `"5.0"` (Original: `"5"`) | ❌ Integer-Subtyp verfälscht Strings/IDs |
-| `math.type(3)` in 5.4 | `integer` | ❌ 5.0 kennt nur Doubles |
-| `arg`-Tabelle in Vararg-Funktion (5.4) | `nil` (106 Fundstellen im Spiel) | ❌ bricht zur Laufzeit |
+| Transpiler + Lua 5.4 (wasmoon): **all 1316 original scripts parse** (`scripts/verify-lua.ts`) | ✅ Syntax can be handled | Transpiler works |
+| `tostring(10/2)` in 5.4 | `"5.0"` (original: `"5"`) | ❌ Integer subtype corrupts strings/IDs |
+| `math.type(3)` in 5.4 | `integer` | ❌ 5.0 knows only doubles |
+| `arg` table in a vararg function (5.4) | `nil` (106 occurrences in the game) | ❌ fails at runtime |
 
-→ **Syntax ≠ Semantik.** wasmoon/5.4 taugt zum Prototyping, nicht für 1:1.
+→ **Syntax ≠ semantics.** wasmoon/5.4 is suitable for prototyping, not for 1:1.
 
-**Zwei-Gleise-Strategie:**
+**Two-track strategy:**
 
-- **Gleis A (Ziel, Fidelity):** **Lua 5.0.1 mit den GPG-Lexer-Patches selbst
-  nach WASM bauen** (Emscripten). Patches sind bekannt und aus den Daten
-  rekonstruiert: `#`-Kommentar, `!=`, `!`, `continue`, LuaPlus-Tabellen-
-  Größenhinweise `{&1&4}`. Ergebnis: **kein Transpiler nötig, exakte
-  5.0-Semantik** (keine Integer, `arg`, `table.getn`, `for k,v in t`).
-- **Gleis B (Brücke, sofort nutzbar):** vorhandener Lexer-Transpiler
-  ([src/lua/transpile.ts](../src/lua/transpile.ts)) + wasmoon + Compat-Shims —
-  um die `moho`-API und den Boot-Pfad *jetzt* zu entwickeln. Bekannte
-  Abweichungen dokumentiert; wird mit Gleis A ersetzt.
+- **Track A (target, Fidelity):** **build Lua 5.0.1 with the GPG lexer patches
+  ourselves for WASM** (Emscripten). The patches are known and reconstructed
+  from the data: `#` comment, `!=`, `!`, `continue`, LuaPlus table size hints
+  `{&1&4}`. Result: **no transpiler required, exact 5.0 semantics** (no
+  integers, `arg`, `table.getn`, `for k,v in t`).
+- **Track B (bridge, usable now):** the existing lexer transpiler
+  ([src/lua/transpile.ts](../src/lua/transpile.ts)) + wasmoon + compatibility
+  shims — to develop the `moho` API and boot path *now*. Known deviations are
+  documented; it will be replaced by Track A.
 
-**Determinismus-Bonus des Einbettens:** Alle Clients führen denselben
-VM-Build aus → identische Tabellen-Iterationsreihenfolge. Ein TS-Nachbau
-müsste diese Reihenfolge künstlich reproduzieren, sonst driftet Lockstep.
+**Determinism benefit of embedding:** every client executes the same VM build
+→ identical table-iteration order. A TS reimplementation would need to
+artificially reproduce that order or lockstep would drift.
 
-### 2.2 Was bleibt TypeScript?
+### 2.2 What remains TypeScript?
 
-Die Engine-Seite: Tick-Loop, Bewegung/Pathfinding, Kollision, Intel-Grids,
-Wirtschaft, Renderer, Netz. Lua bekommt die 543 Sim-Bindings + Callbacks.
+The engine side: tick loop, movement/pathfinding, collision, intel grids,
+economy, renderer, network. Lua receives the 543 Sim bindings + callbacks.
 
 ---
 
-## 3. Systemspezifikationen (recherchiert, für die Implementierung)
+## 3. System specifications (researched, for implementation)
 
-### 3.1 Sim-Kern
-- **Tickrate fix 10 Hz** (`GetSimTicksPerSecond` pusht konstant 10.0).
-- **Beat ≠ Tick**: Beats laufen immer (Netz, Checksum), Ticks nur wenn nicht
-  pausiert/GameOver.
-- **Tick-Reihenfolge** (`Sim::AdvanceBeat`): Ressourcen-Akkus leeren → pro
-  Armee `OnTick` (Eco-Cache, Stats, Navigator-/Steering-Stages) → **TaskStageA
-  (Befehls-Dispatch + alle Unit-Tasks)** → TaskStageB → Blips → Recon →
-  Effekte → Formationen → Kill-Cleanup → Transform-Commit → Checksum.
-- **Befehle laufen nie direkt**: ein Dauer-Task liest den Queue-Kopf und
-  pusht einen `CCommandTask` auf den Task-Stack. Rückgabewerte steuern das
-  Scheduling (−1 = fertig, 0 = sofort nochmal, N = N−1 Ticks warten).
-- **Wirtschaft = Request/Grant**: Verbraucher hängt `CEconRequest`
-  (Bedarf pro Tick) in die Armee-Liste; Engine trägt `mGranted` ein;
-  Bau/Reparatur nutzen die Ratio (Stall = Verlangsamung), Capture/Teleport
-  warten auf volle Deckung.
-  - Bau: `time = BuildTime / buildRate`; `energy_rate = BuildCostEnergy/time`;
-    Fortschritt/Tick = `(buildRate / BuildTime) * 0.1 * ResourceConsumed`.
-  - **Assist ist additiv**: effektive Rate = Σ buildRate der Helfer.
-  - **Verteilung jetzt aus dem Binary** (`func_ArmyProcessEconomy` @ 0x771B50,
-    in faf-re Stub) → [research/economy-binary.md](research/economy-binary.md):
-    **zweistufig** — Verbraucher, die *beide* Ressourcen brauchen, laufen mit
-    Ratio `r1 = min(1, min available/totalDemand)`; wer *nur eine* braucht,
-    bekommt aus dem Rest eine eigene Ratio `r2` auf der Nicht-Engpass-Ressource.
-    `mGranted` je Verbraucher; `LimitingRate = granted/requested` skaliert den
-    Fortschritt *pro Bauwerk*. Unser aktueller Ein-Faktor-Stall ist zu simpel.
-  - **Command→Task-Dispatch** (`DispatchTask` @ 0x608EF0) → 40 Befehlstypen
+### 3.1 Sim core
+- **Fixed tick rate: 10 Hz** (`GetSimTicksPerSecond` always pushes 10.0).
+- **Beat ≠ tick**: beats always run (network, checksum); ticks run only when
+  not paused/GameOver.
+- **Tick order** (`Sim::AdvanceBeat`): clear resource accumulators → per army
+  `OnTick` (eco cache, stats, navigator/steering stages) → **TaskStageA
+  (command dispatch + all unit tasks)** → TaskStageB → blips → recon → effects
+  → formations → kill cleanup → transform commit → checksum.
+- **Commands never run directly**: a persistent task reads the queue head and
+  pushes a `CCommandTask` onto the task stack. Return values control scheduling
+  (−1 = complete, 0 = immediately again, N = wait N−1 ticks).
+- **Economy = request/grant**: a consumer adds `CEconRequest` (demand per tick)
+  to the army list; the engine writes `mGranted`; construction/repair use the
+  ratio (stall = slowdown), while Capture/Teleport wait for full coverage.
+  - Construction: `time = BuildTime / buildRate`; `energy_rate = BuildCostEnergy/time`;
+    progress/tick = `(buildRate / BuildTime) * 0.1 * ResourceConsumed`.
+  - **Assist is additive**: effective rate = Σ buildRate of helpers.
+  - **Distribution now from the binary** (`func_ArmyProcessEconomy` @ 0x771B50,
+    a stub in faf-re) → [research/economy-binary.md](research/economy-binary.md):
+    **two-stage** — consumers needing *both* resources run with ratio
+    `r1 = min(1, min available/totalDemand)`; consumers needing *only one*
+    receive their own ratio `r2` from the remaining non-bottleneck resource.
+    `mGranted` is per consumer; `LimitingRate = granted/requested` scales
+    progress *per structure*. The current one-factor stall is too simple.
+  - **Command→task dispatch** (`DispatchTask` @ 0x608EF0) → 40 command types
     ([research/command-dispatch-binary.md](research/command-dispatch-binary.md)).
-  - **Bau-Task-Ablauf** komplett ([research/build-task-binary.md](research/build-task-binary.md)):
-    `delta = (buildRate/BuildTime) * resourceConsumed * 0.1`, HP wächst linear
-    mit dem Fortschritt, Fertigstellung → `OnStopBeingBuilt` (Lua) + Adjacency-
-    Scan; `resourceConsumed` = `LimitingRate` aus der Econ-Verteilung (beide
-    Systeme greifen ineinander).
+  - **Construction-task flow** complete
+    ([research/build-task-binary.md](research/build-task-binary.md)):
+    `delta = (buildRate/BuildTime) * resourceConsumed * 0.1`, HP grows linearly
+    with progress, completion → `OnStopBeingBuilt` (Lua) + adjacency scan;
+    `resourceConsumed` = `LimitingRate` from economy distribution (both systems
+    interact).
   - Reclaim: `Ticks = max(BuildCostEnergy, BuildCostMass) / buildRate`.
   - Capture: `Ticks = max(1, ((BuildTime/buildRate)/2 * CaptureTimeMultiplier) * 10)`,
-    Fortschritt += Anzahl Captors.
-  - **Veterancy ist kill-basiert** (Default-Schwellen 25/100/250/500/1000):
-    MaxHealth ×1.1…×1.5 (REPLACE aus bp-Basis), Regen +2…+10.
-- **Decomp-Lücken (ehrlich):** Econ-Verteilungsroutine, der große
-  `DispatchQueuedCommand`-Switch und die Build-Task-State-Machines sind
-  **nicht** rekonstruiert → aus Lua + Aufrufern ableiten und **verifizieren**.
+    progress += number of captors.
+  - **Veterancy is kill-based** (default thresholds 25/100/250/500/1000):
+    MaxHealth ×1.1…×1.5 (REPLACE from bp base), regen +2…+10.
+- **Decomp gaps (honestly):** the economy-distribution routine, the large
+  `DispatchQueuedCommand` switch, and the build-task state machines are **not**
+  reconstructed → derive them from Lua + callers and **verify** them.
 
-### 3.2 Waffen (Engine + Lua geteilt)
-- Kern-Lua liegt in **mohodata.scd** (`sim/weapon.lua`, `sim/defaultweapons.lua`,
+### 3.2 Weapons (shared between engine + Lua)
+- Core Lua is in **mohodata.scd** (`sim/weapon.lua`, `sim/defaultweapons.lua`,
   `sim/DefaultDamage.lua`, `sim/CollisionBeam.lua`, `sim/DefaultProjectiles.lua`).
-- **Feuertakt Engine-seitig, tick-quantisiert**: `fireClock = (int)(10 / RateOfFire)`
-  → RateOfFire 3 ⇒ 3 Ticks = 0,30 s (effektiv 3,33/s), **nicht** 0,333 s.
-- Engine ruft nur `weapon:OnFire()`; die **Salven-Zustandsmaschine** (Idle →
-  RackSalvoCharge → FireReady → Firing → Reload, + Pack/Unpack) liegt in Lua.
-- **Reichweite rein 2D (XZ)** gegen MaxRadius²/MinRadius², separat
-  `|Δy| ≤ MaxHeightDiff` und HeadingArc.
-- `TrackingRadius` ist ein **Multiplikator** von MaxRadius.
-- Türme: `TurretYaw/PitchSpeed` [°/s] → `slew = speed * DEG2RAD * 0.1` je Tick;
-  `FiringTolerance` [°] pro Achse.
-- Projektile: Gravitation **(0, −4.9, 0)**; Defaults UseGravity=1, Lifetime=15,
-  LeadTarget=1, TrackTarget=0; `MuzzleVelocity` überschreibt InitialSpeed
-  (mit Gauss-Jitter + Nahbereichsdämpfung).
-- **Schaden — jetzt direkt aus dem Binary rekonstruiert** (IDA; in faf-re ist
-  `SIM_Damage` nur ein Stub) → [research/damage-binary.md](research/damage-binary.md):
-  - **Kein Distanz-Falloff** (belegt): voller Betrag an jede Entity im Radius.
-  - Formel: `effektiv = amount * ArmorMult(damageType) / (1 + Handicap)`
-    — **Division**, nicht `*(1-Handicap)` wie zuvor angenommen.
-  - Kategorie **`NOSPLASHDAMAGE`** ist immun gegen Flächenschaden.
-  - Schild-Absorption wird **vor** dem Einzelschaden abgezogen.
-  - Selbstschaden: Projektil wird auf seinen Launcher aufgelöst.
-  - Health-Abzug/Tod passiert in **Lua** (`Unit.lua:OnDamage`), nicht in der Engine.
-- Overkill: `overkillRatio > 1` ⇒ **kein Wrack**; Wrack-Masse =
+- **Fire cadence is engine-side and tick-quantized**:
+  `fireClock = (int)(10 / RateOfFire)` → RateOfFire 3 ⇒ 3 ticks = 0.30 s
+  (effective 3.33/s), **not** 0.333 s.
+- The engine calls only `weapon:OnFire()`; the **salvo state machine** (Idle →
+  RackSalvoCharge → FireReady → Firing → Reload, + Pack/Unpack) lives in Lua.
+- **Range is purely 2D (XZ)** against MaxRadius²/MinRadius², with separate
+  `|Δy| ≤ MaxHeightDiff` and HeadingArc checks.
+- `TrackingRadius` is a **multiplier** of MaxRadius.
+- Turrets: `TurretYaw/PitchSpeed` [°/s] → `slew = speed * DEG2RAD * 0.1` per
+  tick; `FiringTolerance` [°] per axis.
+- Projectiles: gravity **(0, −4.9, 0)**; defaults UseGravity=1, Lifetime=15,
+  LeadTarget=1, TrackTarget=0; `MuzzleVelocity` overrides InitialSpeed (with
+  Gaussian jitter + short-range attenuation).
+- **Damage — now reconstructed directly from the binary** (IDA; `SIM_Damage`
+  is only a stub in faf-re) → [research/damage-binary.md](research/damage-binary.md):
+  - **No distance falloff** (proven): full amount to every entity in the radius.
+  - Formula: `effektiv = amount * ArmorMult(damageType) / (1 + Handicap)`
+    — **division**, not `*(1-Handicap)` as previously assumed.
+  - Category **`NOSPLASHDAMAGE`** is immune to area damage.
+  - Shield absorption is deducted **before** individual damage.
+  - Self-damage: the projectile is resolved onto its launcher.
+  - Health loss/death happens in **Lua** (`Unit.lua:OnDamage`), not in the engine.
+- Overkill: `overkillRatio > 1` ⇒ **no wreck**; wreck mass =
   `BuildCostMass * Wreckage.MassMult * (1-overkill) * FractionComplete`.
-- Schilde: Absorption = `min(shieldHP, amount*ArmorMult*(1-Handicap))`,
-  Overspill via `PassOverkillDamage`; Regen startet nach `ShieldRegenStartTime`,
-  jeder Treffer setzt ihn zurück.
-- Beams: kein Projektil; `CollisionCheckInterval = BeamCollisionDelay * 10` Ticks.
-- **Lücke:** `SIM_Damage` ist im Decomp ein Stub → Schadensausbringung aus
-  Lua + Blueprint-Rechnung verifizieren.
+- Shields: absorption = `min(shieldHP, amount*ArmorMult*(1-Handicap))`,
+  overspill via `PassOverkillDamage`; regen starts after `ShieldRegenStartTime`,
+  and every hit resets it.
+- Beams: no projectile; `CollisionCheckInterval = BeamCollisionDelay * 10` ticks.
+- **Gap:** `SIM_Damage` is a stub in the Decomp → verify damage application
+  from Lua + blueprint calculation.
 
-### 3.3 Bewegung, Pfade, Kollision
-- Einheiten: `MaxSpeed*0.1` = m/Tick; `MaxAcceleration*0.01` = m/Tick²;
-  `TurnRate [°/s] * 0.0017453` = rad/Tick.
-- **Passierbarkeits-Grid**: 1 Zelle = 1 Weltmeter (= Heightmap-Raster);
-  Bitmaske `{LAND=1, SEABED=2, SUB=4, WATER=8, AIR=16, ORBIT=32}` aus
-  Footprint (MaxSlope, Min/MaxWaterDepth, Size) + Heightmap + TerrainType +
-  Struktur-Occupancy.
-- **Slope ist kein Winkel**: max. absolute Höhendifferenz benachbarter Samples
-  > `MaxSlope` (Standard **0.75**) ⇒ nicht befahrbar.
-- Footprints global in `mohodata.scd:lua/footprints.lua` (20 Einträge).
-- **Pathfinding**: hierarchisches A* (Cluster 1/8/32/128), pro Footprint-Typ
-  eine ClusterMap, inkrementelles Update mit Frame-Budget; A* läuft in einer
-  Armee-Queue; Heuristik = Octile × 1.01.
-- **Repath** bei: Zielabstand > Schwelle, Layerwechsel, 30 Ticks ohne
-  Positionsänderung; 3 Fehlschläge ⇒ Eskalation.
-- **Ausweichen ist vorhersagebasiert** (keine Boids): Nachbarn im Radius,
-  Spline-Vorwärtssimulation alle 3 Ticks, 2D-OBB-Überlappungstest.
-  **Kein physikalisches Schieben** — nur Occupancy + Reservierung + Steering.
-- Layer-Höhe: Land = Terrain (SnapToGround mittelt 4 Footprint-Ecken),
-  Water = Wasserspiegel, Sub = Spiegel + (negatives) Elevation, Air = + Elevation.
-- Schiffe: kein echter Tiefgang (Footprint-MinWaterDepth), Kurvenradius
-  begrenzt die Geschwindigkeit; Bots (RotateOnSpot) fahren erst ab
-  Heading-Alignment > 0.98 an.
-- Luft: **kein Pathfinding** (direkt zum Ziel), Dämpfung + Bank/Lift-Faktoren.
-- Formationen: `lua/formations.lua` (Offsets je Kategorie/Reihe), Slots werden
-  auf freie Zellen gesnappt, Formationsgeschwindigkeit geregelt.
+### 3.3 Movement, paths, collision
+- Units: `MaxSpeed*0.1` = m/tick; `MaxAcceleration*0.01` = m/tick²;
+  `TurnRate [°/s] * 0.0017453` = rad/tick.
+- **Passability grid**: 1 cell = 1 world meter (= heightmap grid); bitmask
+  `{LAND=1, SEABED=2, SUB=4, WATER=8, AIR=16, ORBIT=32}` from footprint
+  (MaxSlope, Min/MaxWaterDepth, Size) + heightmap + TerrainType + structure
+  occupancy.
+- **Slope is not an angle**: maximum absolute height difference between
+  adjacent samples > `MaxSlope` (default **0.75**) ⇒ impassable.
+- Footprints are global in `mohodata.scd:lua/footprints.lua` (20 entries).
+- **Pathfinding**: hierarchical A* (clusters 1/8/32/128), one ClusterMap per
+  footprint type, incremental updates with a frame budget; A* runs in one army
+  queue; heuristic = Octile × 1.01.
+- **Repath** when: target distance > threshold, layer change, or 30 ticks
+  without position change; 3 failures ⇒ escalation.
+- **Avoidance is prediction-based** (not boids): neighbors within radius,
+  spline forward simulation every 3 ticks, 2D OBB-overlap test. **No physical
+  pushing** — only occupancy + reservation + steering.
+- Layer height: land = terrain (SnapToGround averages 4 footprint corners),
+  water = water level, sub = level + (negative) elevation, air = + elevation.
+- Ships: no true draft (footprint MinWaterDepth); curve radius limits speed;
+  bots (RotateOnSpot) begin moving only once heading alignment > 0.98.
+- Air: **no pathfinding** (direct to target), damping + bank/lift factors.
+- Formations: `lua/formations.lua` (offsets per category/row), slots snap to
+  free cells, formation speed is regulated.
 
-### 3.4 Intel (Radar/Sonar/Omni/Sicht)
-- **Grids**: Vision 2 m/Zelle, alle anderen (Water, Radar, Sonar, Omni,
-  Counter-Intel) 4 m/Zelle.
-- `CIntelGrid` ist ein **int8-Zähler** (AddCircle +1 / SubtractCircle −1);
-  sichtbar = Zelle ≠ 0. Radius→Zellen per **Ganzzahldivision**.
-- Vision-Grid existiert nur bei FoW=on; ohne FoW ist alles sofort sichtbar.
-- Handle-Update nur wenn Bewegung ≥ `radius*0.333` **oder** > 30 Ticks alt.
-- Recon-Scheduling: **eine Armee pro Tick** (`tick % armyCount`).
+### 3.4 Intel (radar/sonar/omni/vision)
+- **Grids**: vision 2 m/cell; all others (Water, Radar, Sonar, Omni,
+  Counter-Intel) 4 m/cell.
+- `CIntelGrid` is an **int8 counter** (AddCircle +1 / SubtractCircle −1);
+  visible = cell ≠ 0. Radius→cells uses **integer division**.
+- The vision grid exists only when FoW=on; without FoW everything is visible.
+- Update a handle only when movement ≥ `radius*0.333` **or** it is > 30 ticks old.
+- Recon scheduling: **one army per tick** (`tick % armyCount`).
 - Flags: Radar/Sonar/Omni/LOSNow/LOSEver/KnownFake/MaybeDead;
-  **LOSEver + KnownFake sind sticky**.
-- **Ghost-Gebäude**: nicht mehr gesehene *unbewegliche* Units mit LOSEver
-  bleiben als eingefrorener Blip (letzter bekannter Stand).
-- **Jammer**: `Intel.JammerBlips` Fake-Blips mit zufälligem Offset im
-  `JamRadius`; entlarvt durch Omni/LOS/Quellverlust.
-- Client-FoW: zwei Grids je Armee — *Explored* (jemals gesehen) und *Fog*
-  (aktuell sichtbar).
+  **LOSEver + KnownFake are sticky**.
+- **Ghost buildings**: no-longer-seen *stationary* units with LOSEver remain as
+  frozen blips (last known state).
+- **Jammer**: `Intel.JammerBlips` are fake blips with a random offset in
+  `JamRadius`; exposed by Omni/LOS/loss of source.
+- Client FoW: two grids per army — *Explored* (ever seen) and *Fog*
+  (currently visible).
 
-### 3.5 Effekte & Audio
-- Emitter-Blueprints sind **Lua-DSL** (`EmitterBlueprint{…}`), 21 Kurven je
-  Emitter; **Kurven-Auswertung**: linear interpolieren von y **und** z, dann
-  `(rand()-0.5)*z + y` (z = Streubreite!). Zeiteinheit = Sim-Ticks.
-- **Partikel-Physik steckt im Vertex-Shader** (`effects/particle.fx`):
-  ohne Drag `pos = P0 + V·t + 0.5·A·t²`; mit Drag exponentiell. Farbe =
-  Partikeltextur × Ramp (U = t/lifetime).
-- BlendModes: 0=Alpha, 3=Add (häufigster), … ; 747 Partikeltexturen.
-- Trails = Ribbons; Beams eigene Blueprints.
-- Effekt-Templates: `lua/EffectTemplates.lua` (~586 Tabellen).
-- **Audio = XACT**: `.xwb` (WBND) + `.xsb` (SDBK) — Header verifiziert.
+### 3.5 Effects & audio
+- Emitter blueprints are a **Lua DSL** (`EmitterBlueprint{…}`), with 21 curves
+  per emitter; **curve evaluation**: linearly interpolate y **and** z, then
+  `(rand()-0.5)*z + y` (z = spread width). Time unit = Sim ticks.
+- **Particle physics is in the vertex shader** (`effects/particle.fx`):
+  without drag `pos = P0 + V·t + 0.5·A·t²`; with drag, exponential. Color =
+  particle texture × ramp (U = t/lifetime).
+- BlendModes: 0=Alpha, 3=Add (most common), … ; 747 particle textures.
+- Trails = ribbons; beams have their own blueprints.
+- Effect templates: `lua/EffectTemplates.lua` (~586 tables).
+- **Audio = XACT**: `.xwb` (WBND) + `.xsb` (SDBK) — header verified.
 
-### 3.6 Rendering (offene Features)
-- **SCMAP-Schwanz jetzt vollständig dekodiert** (über 60/60 Karten bis EOF
-  verifiziert): nach WaterMap folgen Foam/Flatness/DepthBias-Masken,
-  TerrainType, (v60) Skybox, **Props-Liste** (bis **46.971 Props/Karte** ⇒
-  Instancing zwingend).
-- **39 von 60 Karten nutzen `TTerrain`** (nur 4 Strata, andere Licht-Formel) —
-  wir rendern derzeit alle als TTerrainXP. Muss nach `terrainShader` verzweigen.
-- Original-Terrain-Normale kommt aus einem **Deferred-Buffer** (Basis-Pass
-  schreibt Geometrie- und Stratum-Normalen, `frame.fx` baut die TBN).
-- Wasser: Fresnel = prozedurale 128×128-Lookup (`d·bias + (1−d·bias)(1−NdotV)^power`);
-  WaterMap-Kanäle: **R=Flatness, G=Tiefe, B=Alphamaske, A=1−Foam**.
-- Skycube-DDS = echte Cubemaps (DXT1 512², 6 Faces, keine Mips).
-- Decals: Typ-Enum (1=Albedo, 2=Normals, …); Matrix = translate(−pos)·Ry·Rx·Rz·scale(1/s).
-- LOD-Auswahl: erste LOD mit `cutoff ≤ 0` **oder** `distance ≤ cutoff`.
-- Legacy-Shader-Aliase: `TMeshAlpha→NormalMappedAlpha`, `TMeshGlow→…`, `Team→Unit`
-  (Props nutzen die alten Namen).
+### 3.6 Rendering (open features)
+- **SCMAP tail now fully decoded** (verified through EOF for 60/60 maps):
+  Foam/Flatness/DepthBias masks, TerrainType, (v60) Skybox, and the **props
+  list** follow WaterMap (up to **46,971 props/map** ⇒ instancing is mandatory).
+- **39 of 60 maps use `TTerrain`** (only 4 strata, a different lighting
+  formula) — all are currently rendered as TTerrainXP. Must branch by
+  `terrainShader`.
+- The original terrain normal comes from a **deferred buffer** (the base pass
+  writes geometry and stratum normals; `frame.fx` builds the TBN).
+- Water: Fresnel = procedural 128×128 lookup
+  (`d·bias + (1−d·bias)(1−NdotV)^power`); WaterMap channels:
+  **R=Flatness, G=depth, B=alpha mask, A=1−Foam**.
+- Skycube DDS = real cubemaps (DXT1 512², 6 faces, no mips).
+- Decals: type enum (1=Albedo, 2=Normals, …); matrix =
+  translate(−pos)·Ry·Rx·Rz·scale(1/s).
+- LOD selection: first LOD with `cutoff ≤ 0` **or** `distance ≤ cutoff`.
+- Legacy shader aliases: `TMeshAlpha→NormalMappedAlpha`, `TMeshGlow→…`,
+  `Team→Unit` (props use the old names).
 
-### 3.7 UI (Original-Struktur)
-- **Container-Modell fehlt uns komplett**: `gamemain.lua:CreateUI()` baut über
-  `borders.SetupBorderControl` vier Container — `controlClusterGroup` (unteres
-  150-px-Band), `statusClusterGroup` (oberes Band), `mapGroup`, `windowGroup`.
-  Alle Panels hängen daran. **Voraussetzung für originalgetreue Positionen.**
-- **Baumenü** (`construction.lua`, 79 KB) ist das größte fehlende Element:
-  3 Haupt-Tabs, 5 Sub-Tabs, 50-px-Icon-Grid, Bau-Queue, Infinite/Pause.
-- Orders: Original hat **12 Slots** (wir: 6) + 9 Toggle-Caps.
-- Cursors, Command-Feedback (Blips/Orderlines/Rally), Hotkeys
-  (`keymap/defaultKeyMap.lua`) sind vollständig datengetrieben.
+### 3.7 UI (original structure)
+- **The container model is entirely missing**: `gamemain.lua:CreateUI()` builds
+  four containers through `borders.SetupBorderControl` —
+  `controlClusterGroup` (lower 150 px band), `statusClusterGroup` (upper band),
+  `mapGroup`, `windowGroup`. Every panel attaches to them. **Prerequisite for
+  original-accurate positions.**
+- **Build menu** (`construction.lua`, 79 KB) is the largest missing element:
+  3 main tabs, 5 sub-tabs, a 50 px icon grid, build queue, Infinite/Pause.
+- Orders: the original has **12 slots** (we have 6) + 9 toggle caps.
+- Cursors, command feedback (blips/orderlines/rally), and hotkeys
+  (`keymap/defaultKeyMap.lua`) are completely data-driven.
 
-### 3.8 Netz, Replay, Save
-- **Lockstep überträgt nur Befehle**: 24 Opcodes; Wire-Format
-  `[u8 type][u16 size][payload]`; **kein Host-Relay** (Broadcast an alle,
-  vollvermaschtes P2P).
-- Desync-Erkennung: MD5 über Economy + dirty Entities + **kompletten
-  MT19937-RNG-State** je Beat; 128-Beat-Ring.
-- **Replay = mitgeschriebener Wire-Stream** (Bytes 1:1 wieder einspeisen).
-- Session-Start über `SWldSessionInfo` (Karte, LaunchInfo, RNG-Seed) —
-  identisch für MP, SP, Replay, Load.
+### 3.8 Network, replay, save
+- **Lockstep transfers commands only**: 24 opcodes; wire format
+  `[u8 type][u16 size][payload]`; **no host relay** (broadcast to all, full-mesh
+  P2P).
+- Desync detection: MD5 over economy + dirty entities + the **complete
+  MT19937 RNG state** per beat; 128-beat ring.
+- **Replay = recorded wire stream** (feed bytes back in 1:1).
+- Session start through `SWldSessionInfo` (map, LaunchInfo, RNG seed) —
+  identical for MP, SP, replay, and load.
 
-### 3.9 Spiel-Rahmen
-- Skirmish = **Single-Player-Hosting** über dieselbe Lobby (Protokoll „None").
-- Sim-Init: `__blueprints` → `simInit.lua` → `ScenarioInfo` → `SetupSession()`
-  (lädt `_save.lua` + `_script.lua`) → Armeen/Brains → `BeginSession()`
+### 3.9 Game shell
+- Skirmish = **single-player hosting** through the same lobby (protocol “None”).
+- Sim init: `__blueprints` → `simInit.lua` → `ScenarioInfo` → `SetupSession()`
+  (loads `_save.lua` + `_script.lua`) → armies/Brains → `BeginSession()`
   (`OnPopulate`/`OnStart`).
-- Map-Skript für Skirmish ist **minimal**; die Army-/ACU-Erzeugung steckt in
+- The map script for skirmish is **minimal**; army/ACU creation is in
   `mohodata:lua/sim/ScenarioUtilities.lua`.
-- **Victory**: `lua/victory.lua` — demoralization (=Assassination, Default),
-  domination, eradication, sandbox; Poll alle 3 s, 15 s stabile Lage.
-- Optionen/Prefs/Keybindings: alles Lua-Tabellen (`Game.prefs`).
+- **Victory**: `lua/victory.lua` — demoralization (=Assassination, default),
+  domination, eradication, sandbox; poll every 3 s, 15 s stable state.
+- Options/prefs/keybindings: all Lua tables (`Game.prefs`).
 
 ---
 
-## 4. Phasenplan
+## 4. Phase plan
 
-Jede Phase endet mit: Typecheck, `verify*.ts` gegen Originaldaten,
-Verhaltens-/Screenshot-Test, Commit.
+Every phase ends with: type check, `verify*.ts` against original data,
+behavior/screenshot test, commit.
 
-### Phase A — Lua-Fundament ✅ Meilenstein erreicht
-1. ✅ **FA-Lua-Transpiler** — 1316/1316 Skripte parsen (`scripts/verify-lua.ts`).
-   Dialekt-Eigenheiten gelöst: `#`-Kommentar, `!=`, `continue`→goto,
-   `arg`-Vararg→`table.pack`, generic-for→`__foriter`-Dispatcher,
-   Zahl-an-Keyword (`0then`), `{&1&4}`, BOM, ungültige Escapes.
-2. ✅ **A1** Host bootet `import.lua` + `class.lua` (`verify-luaboot.ts`).
-3. ✅ **A2** Original-`LoadBlueprints()`-Pipeline lädt echtes Blueprint
+### Phase A — Lua foundation ✅ milestone achieved
+1. ✅ **FA Lua transpiler** — 1316/1316 scripts parse (`scripts/verify-lua.ts`).
+   Dialect features resolved: `#` comment, `!=`, `continue`→goto,
+   `arg` vararg→`table.pack`, generic-for→`__foriter` dispatcher,
+   number-before-keyword (`0then`), `{&1&4}`, BOM, invalid escapes.
+2. ✅ **A1** Host boots `import.lua` + `class.lua` (`verify-luaboot.ts`).
+3. ✅ **A2** Original `LoadBlueprints()` pipeline loads real blueprints
    (`verify-blueprints.ts`).
-4. ✅ **A3** echte `Unit.lua` (142 KB) + `defaultunits.lua` (33 Klassen)
-   laden mit voller Import-Kaskade (`verify-units.ts`).
-5. ✅ **A4 Meilenstein**: Unit über Original-`Unit.lua` instanziiert,
-   `OnCreate` läuft durch, liest Original-Blueprint-Werte
-   (`verify-unit-create.ts`). moho-API v1 (105 Unit- + 72 Entity-Methoden).
-6. **offen — Gleis A**: Lua 5.0.1 + GPG-Patches nach WASM (exakte Semantik,
-   ersetzt Transpiler); moho-Stubs schrittweise durch echte Sim-Anbindung.
+4. ✅ **A3** Real `Unit.lua` (142 KB) + `defaultunits.lua` (33 classes) load
+   with the complete import cascade (`verify-units.ts`).
+5. ✅ **A4 milestone**: a unit is instantiated through original `Unit.lua`,
+   `OnCreate` runs, and original blueprint values are read
+   (`verify-unit-create.ts`). moho API v1 (105 Unit + 72 Entity methods).
+6. **Open — Track A**: Lua 5.0.1 + GPG patches to WASM (exact semantics,
+   replaces transpiler); progressively replace moho stubs with real Sim binding.
 
-### Phase B — Kampf
-5. Waffen-API + `defaultweapons.lua`-Zustandsmaschine, Fire-Clock
-   (tick-quantisiert), Aiming/Slew, Zielerfassung.
-6. Projektile (ballistisch/gelenkt/Beam), Kollision, `Damage`/`DamageArea`/
-   `DamageRing` (kein Falloff!), Armor-Multiplikatoren, Overkill/Wracks.
-7. Schilde (Absorption/Regen/Overspill).
-8. **Meilenstein**: DPS/Reichweiten stimmen mit der Blueprint-Rechnung überein.
+### Phase B — Combat
+5. Weapons API + `defaultweapons.lua` state machine, fire clock
+   (tick-quantized), aiming/slew, target acquisition.
+6. Projectiles (ballistic/guided/beam), collision, `Damage`/`DamageArea`/
+   `DamageRing` (no falloff!), armor multipliers, overkill/wrecks.
+7. Shields (absorption/regen/overspill).
+8. **Milestone**: DPS/ranges match the blueprint calculation.
 
-### Phase C — Aufbau
-9. Task/Command-System (Queue-Semantik inkl. Patrol-Rotation), Engineering.
-10. Passierbarkeits-Grid + hierarchisches A* + Steering/Avoidance + Formationen.
-11. Fabriken, Bau-Queue, Assist (additiv), Reclaim, Repair, Capture, Upgrades;
-    **UI**: Container-Modell + Baumenü + Build-Platzierung + Command-Feedback.
-12. **Meilenstein**: kompletter Aufbau ACU → T2 spielbar.
+### Phase C — Construction
+9. Task/command system (queue semantics including Patrol rotation), engineering.
+10. Passability grid + hierarchical A* + steering/avoidance + formations.
+11. Factories, build queue, Assist (additive), Reclaim, Repair, Capture,
+    upgrades; **UI**: container model + build menu + build placement + command
+    feedback.
+12. **Milestone**: complete ACU → T2 construction is playable.
 
-### Phase D — Welt & Intel
-13. Intel-Grids (Zähler-Semantik!), Blips, Ghosts, Jammer, FoW (Sim + Render).
-14. Props (Instancing), Decals, TTerrain-Variante, Wasser voll (Fresnel-LUT,
-    Cubemap), Partikel-System (Kurven + particle.fx-Port), Bau-/Wrack-Shader.
-15. **Meilenstein**: Karte + Effekte sehen aus wie im Original.
+### Phase D — World & Intel
+13. Intel grids (counter semantics!), blips, ghosts, jammer, FoW (Sim + render).
+14. Props (instancing), decals, TTerrain variant, complete water (Fresnel LUT,
+    cubemap), particle system (curves + particle.fx port), construction/wreck
+    shader.
+15. **Milestone**: map + effects look like the original.
 
-### Phase E — Vollständigkeit
-16. Luft/Marine (Layer-Physik, Transporte, U-Boote).
-17. Audio (XACT-Parser → WebAudio).
-18. Restliche UI (Score, Avatare, Chat, Tabs, Tooltips, Cursors, Hotkeys),
-    Lobby/Menü, Optionen, **Victory Conditions**, Spielende.
+### Phase E — Completeness
+16. Air/navy (layer physics, transports, submarines).
+17. Audio (XACT parser → WebAudio).
+18. Remaining UI (score, avatars, chat, tabs, tooltips, cursors, hotkeys),
+    lobby/menu, options, **victory conditions**, game end.
 
-### Phase F — Gegner, Netz, Kampagne
-19. **KI**: AiBrain/Platoon-Bindings (57+47 Methoden) → Original-KI-Lua (83k LOC) läuft.
-20. Lockstep (deterministische Trig!), Command-Stream, MD5-Checksummen, Replays.
-21. Save/Load, Kampagne (ScenarioFramework, Objectives, 6 FA-Missionen).
-22. **Meilenstein**: 1:1 spielbar — Skirmish vs. KI, Multiplayer, Kampagne, Mods.
+### Phase F — Opponents, network, campaign
+19. **AI**: AiBrain/Platoon bindings (57+47 methods) → original AI Lua
+    (83k LOC) runs.
+20. Lockstep (deterministic trig!), command stream, MD5 checksums, replays.
+21. Save/load, campaign (ScenarioFramework, Objectives, 6 FA missions).
+22. **Milestone**: playable 1:1 — skirmish vs. AI, multiplayer, campaign, mods.
 
 ---
 
-## 5. Querschnitt
-- **Determinismus**: eigener Seed-PRNG (MT19937 wie Original), Trig-Tabellen
-  statt `Math.sin`, keine unsortierte Iteration; Regressionstest „2 Läufe
-  bit-identisch" bleibt Pflicht.
-- **Performance**: 1000-Unit-Benchmark ab Phase B (Lua-Callback-Overhead ist
-  das Hauptrisiko); Sim in Web Worker; Instancing für Props/Units.
-- **Verifikation**: `verify.ts` (Daten), `verify-lua.ts` (Skripte), künftig
-  `verify-sim.ts` (Blueprint-Rechnung vs. Sim: DPS, Bauzeit, Reichweite).
+## 5. Cross-cutting
+- **Determinism**: dedicated seeded PRNG (MT19937 as in the original), trig
+  tables instead of `Math.sin`, no unsorted iteration; the “2 runs
+  bit-identical” regression test remains mandatory.
+- **Performance**: 1000-unit benchmark from Phase B (Lua callback overhead is
+  the main risk); Sim in a Web Worker; instancing for props/units.
+- **Verification**: `verify.ts` (data), `verify-lua.ts` (scripts), and later
+  `verify-sim.ts` (blueprint calculation vs. Sim: DPS, build time, range).
 
-## 6. Risiken (ehrlich)
-| Risiko | Status / Gegenmaßnahme |
+## 6. Risks (honestly)
+| Risk | Status / Mitigation |
 | --- | --- |
-| Lua-Semantik (5.4 ≠ 5.0) | **Bestätigt gemessen** → Gleis A (eigener 5.0-Build) |
-| Lua-Performance bei 1000+ Units | offen → früher Benchmark, Hot Paths in TS |
-| Decomp-Lücken | **geschlossen: alle vier per IDA-MCP aus der FAF-Binary rekonstruiert** — SIM_Damage ([damage-binary.md](research/damage-binary.md)), Econ-Verteilung ([economy-binary.md](research/economy-binary.md)), Command-Dispatch ([command-dispatch-binary.md](research/command-dispatch-binary.md)), Bau-Tasks ([build-task-binary.md](research/build-task-binary.md)). Weitere Details bei Bedarf direkt aus der IDB. |
-| Props/Partikel-Menge (46k Props, tausende Partikel) | Instancing + GPU-Partikel (Physik im Shader wie im Original) |
-| XACT-Audioformat | Parser nötig; Referenz: Open-Source-XACT-Implementierungen |
-| Rechtliches | unverändert: keine Assets/Code im Repo, BYO-Game ([LEGAL.md](LEGAL.md)) |
+| Lua semantics (5.4 ≠ 5.0) | **Confirmed by measurement** → Track A (own 5.0 build) |
+| Lua performance with 1000+ units | open → early benchmark, hot paths in TS |
+| Decomp gaps | **closed: all four reconstructed from the FAF binary through IDA MCP** — SIM_Damage ([damage-binary.md](research/damage-binary.md)), economy distribution ([economy-binary.md](research/economy-binary.md)), command dispatch ([command-dispatch-binary.md](research/command-dispatch-binary.md)), construction tasks ([build-task-binary.md](research/build-task-binary.md)). Obtain further details directly from the IDB as needed. |
+| Props/particle volume (46k props, thousands of particles) | instancing + GPU particles (physics in the shader as in the original) |
+| XACT audio format | parser required; reference: open-source XACT implementations |
+| Legal | unchanged: no assets/code in the repo, BYO game ([LEGAL.md](LEGAL.md)) |

@@ -783,7 +783,13 @@ function __mauiDispatch(control, event)
   event.Control = control
   local c = control
   while c do
-    if c:HandleEvent(event) then return true end
+    -- xpcall with debug.traceback, then rethrow: the engine logs HandleEvent
+    -- errors per control (RunScript) — we keep that single log line on the TS
+    -- side but enrich it with the Lua call stack, because a bare
+    -- "lazyvar.lua:92: ..." message names the victim, never the caller.
+    local ok, res = xpcall(function() return c:HandleEvent(event) end, debug.traceback)
+    if not ok then error(res, 0) end
+    if res then return true end
     c = c.__parent or nil
   end
   return false

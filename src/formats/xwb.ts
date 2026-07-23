@@ -1,11 +1,11 @@
 /**
- * Parser für XACT Wave Banks (.xwb, Magic 'WBND') von SupCom:FA.
+ * Parser for XACT Wave Banks (.xwb, magic 'WBND') from SupCom:FA.
  *
- * Layout hex-verifiziert (docs/research/effects-audio.md §4) und gegen ALLE
- * 100 .xwb der Installation gemessen (78 in sounds/ + 22 in sounds/Voice/*):
- * durchgehend dwVersion 43 / dwHeaderVersion 42 (XACT 3.0), Meta-Elementgröße
- * 24, ENTRYNAMES-Segment leer, keine Seek-Tables, CompactFormat 0 — und JEDE
- * der 4349 Waves ist PCM16 (formatTag 0, bitsPerSample-Bit gesetzt).
+ * Layout hex-verified (docs/research/effects-audio.md §4) and measured against
+ * ALL 100 .xwb files in the installation (78 in sounds/ + 22 in sounds/Voice/*):
+ * consistently dwVersion 43 / dwHeaderVersion 42 (XACT 3.0), metadata element
+ * size 24, empty ENTRYNAMES segment, no seek tables, CompactFormat 0 — and EACH
+ * of the 4,349 waves is PCM16 (formatTag 0, bitsPerSample bit set).
  *
  *   Header:
  *     0x00  char[4]  'WBND'
@@ -13,51 +13,51 @@
  *     0x08  u32      dwHeaderVersion  (42)
  *     0x0C  Segment[5] { u32 offset; u32 length; }
  *           [0] BANKDATA  [1] ENTRYMETADATA  [2] SEEKTABLES
- *           [3] ENTRYNAMES (in FA immer leer — Namen kommen aus der .xsb)
+ *           [3] ENTRYNAMES (always empty in FA — names come from the .xsb)
  *           [4] ENTRYWAVEDATA
  *
  *   BANKDATA:
- *     +0x00 u32      dwFlags   (0x00080000; | 0x1 = Streaming-Bank, 33 Stück)
+ *     +0x00 u32      dwFlags   (0x00080000; | 0x1 = streaming bank, 33 files)
  *     +0x04 u32      dwEntryCount
- *     +0x08 char[64] szBankName   — der Name, über den die .xsb auflöst!
- *                    (XAS_Weapons.xwb heißt innen 'XAS_Weapon' — Datei- und
- *                    Bankname dürfen also NICHT gleichgesetzt werden)
+ *     +0x08 char[64] szBankName   — the name resolved by the .xsb!
+ *                    (XAS_Weapons.xwb is internally named 'XAS_Weapon' — file
+ *                    and bank names must therefore NOT be treated as equal)
  *     +0x48 u32      dwEntryMetaDataElementSize (24)
  *     +0x4C u32      dwEntryNameElementSize     (64, ungenutzt)
  *     +0x50 u32      dwAlignment  (4 in-memory, 2048 Streaming)
- *     +0x54 u32      CompactFormat (0 — Compact-Banks sind nicht implementiert)
+ *     +0x54 u32      CompactFormat (0 — compact banks are not implemented)
  *     +0x58 FILETIME BuildTime
  *
- *   ENTRYMETADATA, 24 Bytes je Wave:
- *     u32 dwFlagsAndDuration   — Flags[3:0] (in FA immer 0), Duration[31:4]
+ *   ENTRYMETADATA, 24 bytes per wave:
+ *     u32 dwFlagsAndDuration   — Flags[3:0] (always 0 in FA), Duration[31:4]
  *                                in SAMPLES (gemessen: Duration * blockAlign
- *                                == PlayRegion.dwLength bei allen 4349 Waves)
+ *                                == PlayRegion.dwLength for all 4,349 waves)
  *     u32 Format (MINIWAVEFORMAT): tag[1:0] (0=PCM), channels[4:2],
  *                                samplesPerSec[22:5], blockAlign[30:23],
  *                                bitsPerSample[31] (0=8, 1=16 Bit)
- *     u32 PlayRegion.dwOffset   — relativ zum ENTRYWAVEDATA-Segment
+ *     u32 PlayRegion.dwOffset   — relative to the ENTRYWAVEDATA segment
  *     u32 PlayRegion.dwLength
  *     u32 LoopRegion.dwStartSample / u32 LoopRegion.dwTotalSamples
- *                                (in FA überall 0 — Loops steuert die .xsb)
+ *                                (always 0 in FA — the .xsb controls loops)
  */
 
 export interface XwbEntry {
-  /** Dauer in Samples (dwFlagsAndDuration >> 4). */
+  /** Duration in samples (dwFlagsAndDuration >> 4). */
   duration: number
-  /** MINIWAVEFORMAT-Tag: 0 = PCM (in FA immer 0). */
+  /** MINIWAVEFORMAT tag: 0 = PCM (always 0 in FA). */
   formatTag: number
   channels: number
   sampleRate: number
   blockAlign: number
   bitsPerSample: number
-  /** Absoluter Byte-Offset der PCM-Daten in der .xwb-Datei. */
+  /** Absolute byte offset of PCM data in the .xwb file. */
   offset: number
-  /** Länge der PCM-Daten in Bytes. */
+  /** Length of PCM data in bytes. */
   length: number
 }
 
 export interface XwbBank {
-  /** Interner Bankname aus BANKDATA — die .xsb referenziert DIESEN Namen. */
+  /** Internal bank name from BANKDATA — the .xsb references THIS name. */
   bankName: string
   /** dwFlags-Bit 0: Streaming-Bank (Alignment 2048, z. B. Music, *Stream). */
   streaming: boolean
@@ -74,12 +74,12 @@ export function parseXwb(bytes: Uint8Array): XwbBank {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
 
   const magic = new TextDecoder('ascii').decode(bytes.subarray(0, 4))
-  if (magic !== 'WBND') throw new Error(`XWB: falsches Magic "${magic}" (erwartet WBND)`)
+  if (magic !== 'WBND') throw new Error(`XWB: invalid magic "${magic}" (expected WBND)`)
   const version = view.getUint32(4, true)
   const headerVersion = view.getUint32(8, true)
   if (version !== 43 || headerVersion !== 42) {
-    // Alle 100 FA-Banks sind 43/42; andere Versionen haben andere Layouts.
-    throw new Error(`XWB: Version ${version}/${headerVersion} (erwartet 43/42, XACT 3.0)`)
+    // All 100 FA banks are 43/42; other versions have different layouts.
+    throw new Error(`XWB: version ${version}/${headerVersion} (expected 43/42, XACT 3.0)`)
   }
 
   // Segmenttabelle: 5 × {offset, length}
@@ -96,13 +96,13 @@ export function parseXwb(bytes: Uint8Array): XwbBank {
   const metaElemSize = view.getUint32(bankData + 0x48, true)
   const compactFormat = view.getUint32(bankData + 0x54, true)
   if (compactFormat !== 0) {
-    throw new Error(`XWB ${bankName}: CompactFormat ${compactFormat} — in FA nie beobachtet, nicht implementiert`)
+    throw new Error(`XWB ${bankName}: CompactFormat ${compactFormat} — never observed in FA and not implemented`)
   }
   if (metaElemSize < 24) {
     throw new Error(`XWB ${bankName}: EntryMetaDataElementSize ${metaElemSize} < 24`)
   }
   if (metaLength < entryCount * metaElemSize) {
-    throw new Error(`XWB ${bankName}: Metadaten-Segment zu kurz (${metaLength} B für ${entryCount} Einträge)`)
+    throw new Error(`XWB ${bankName}: metadata segment too short (${metaLength} B for ${entryCount} entries)`)
   }
 
   const entries: XwbEntry[] = []
@@ -124,7 +124,7 @@ export function parseXwb(bytes: Uint8Array): XwbBank {
       length: playLength,
     }
     if (entry.offset + entry.length > bytes.byteLength) {
-      throw new Error(`XWB ${bankName}: Wave ${i} ragt aus der Datei (${entry.offset}+${entry.length} > ${bytes.byteLength})`)
+      throw new Error(`XWB ${bankName}: wave ${i} extends beyond the file (${entry.offset}+${entry.length} > ${bytes.byteLength})`)
     }
     entries.push(entry)
   }
@@ -133,13 +133,13 @@ export function parseXwb(bytes: Uint8Array): XwbBank {
 }
 
 /**
- * Baut aus einem Wave-Eintrag eine fertige RIFF/WAVE-Datei: 44-Byte-Header
- * plus die rohen PCM-Bytes aus der Bank. FA braucht keinen Codec — alle
- * Waves sind PCM16 (gemessen über alle 100 Banks).
+ * Builds a complete RIFF/WAVE file from a wave entry: a 44-byte header plus
+ * raw PCM bytes from the bank. FA needs no codec — all waves are PCM16
+ * (measured across all 100 banks).
  */
 export function wavFromEntry(bytes: Uint8Array, entry: XwbEntry): Uint8Array {
   if (entry.formatTag !== 0) {
-    throw new Error(`XWB: Wave hat formatTag ${entry.formatTag} — nur PCM (0) wird unterstützt`)
+    throw new Error(`XWB: wave has formatTag ${entry.formatTag} — only PCM (0) is supported`)
   }
   const byteRate = entry.sampleRate * entry.blockAlign
   const out = new Uint8Array(44 + entry.length)
@@ -151,7 +151,7 @@ export function wavFromEntry(bytes: Uint8Array, entry: XwbEntry): Uint8Array {
   view.setUint32(4, 36 + entry.length, true)
   ascii(8, 'WAVE')
   ascii(12, 'fmt ')
-  view.setUint32(16, 16, true) // fmt-Chunk-Länge
+  view.setUint32(16, 16, true) // fmt chunk length
   view.setUint16(20, 1, true) // wFormatTag = PCM
   view.setUint16(22, entry.channels, true)
   view.setUint32(24, entry.sampleRate, true)

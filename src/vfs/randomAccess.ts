@@ -1,14 +1,14 @@
 /**
- * Abstraktion für wahlfreien Lesezugriff auf große Dateien (SCD-Archive bis
- * 1,3 GB), ohne sie komplett in den Speicher zu laden.
+ * Abstraction for random read access to large files (SCD archives up to
+ * 1.3 GB) without loading them entirely into memory.
  */
 export interface RandomAccessFile {
   readonly size: number
-  /** Liest [start, end) als ArrayBuffer. */
+  /** Reads [start, end) as an ArrayBuffer. */
   slice(start: number, end: number): Promise<ArrayBuffer>
 }
 
-/** Wahlfreier Zugriff auf ein Blob/File (File System Access API, <input>). */
+/** Random access to a Blob/File (File System Access API, <input>). */
 export class BlobFile implements RandomAccessFile {
   constructor(private readonly blob: Blob) {}
 
@@ -21,7 +21,7 @@ export class BlobFile implements RandomAccessFile {
   }
 }
 
-/** Wahlfreier Zugriff über HTTP-Range-Requests (Dev-Server, LAN-Streaming). */
+/** Random access through HTTP range requests (dev server, LAN streaming). */
 export class HttpRangeFile implements RandomAccessFile {
   private constructor(
     private readonly url: string,
@@ -31,18 +31,18 @@ export class HttpRangeFile implements RandomAccessFile {
   static async open(url: string, knownSize?: number): Promise<HttpRangeFile> {
     if (knownSize !== undefined) return new HttpRangeFile(url, knownSize)
     const res = await fetch(url, { method: 'HEAD' })
-    if (!res.ok) throw new Error(`HTTP ${res.status} für ${url}`)
+    if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`)
     return new HttpRangeFile(url, Number(res.headers.get('content-length') ?? 0))
   }
 
   async slice(start: number, end: number): Promise<ArrayBuffer> {
-    // Leere Slice (z. B. 0-Byte-Zip-Eintrag) — kein Request, sonst entsteht
-    // eine ungültige Range `bytes=X-(X-1)`, die der Server ablehnt.
+    // Empty slice (e.g. a zero-byte ZIP entry) — no request, otherwise an
+    // invalid `bytes=X-(X-1)` range would be rejected by the server.
     if (end <= start) return new ArrayBuffer(0)
     const res = await fetch(this.url, {
       headers: { Range: `bytes=${start}-${end - 1}` },
     })
-    if (!res.ok) throw new Error(`HTTP ${res.status} für ${this.url}`)
+    if (!res.ok) throw new Error(`HTTP ${res.status} for ${this.url}`)
     return res.arrayBuffer()
   }
 }

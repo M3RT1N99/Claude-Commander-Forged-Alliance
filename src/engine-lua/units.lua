@@ -212,6 +212,10 @@ end
 local function activeOrder(id, u)
   local target = __attackOrders and __attackOrders[id]
   if target then
+    if type(target) == 'table' then
+      -- Ground attack: the position IS the target (AITARGET_Ground).
+      return 'Attack', target[1], target[3]
+    end
     local t = __units[target]
     if t and t.__pos then return 'Attack', t.__pos[1], t.__pos[3] end
   end
@@ -241,6 +245,8 @@ local function orderList(id, u)
     local x, z
     if cmd.type == 'Move' then
       x, z = cmd.x, cmd.z
+    elseif cmd.gx then
+      x, z = cmd.gx, cmd.gz -- queued ground attack
     else
       local t = __units[cmd.target]
       if t and t.__pos then x, z = t.__pos[1], t.__pos[3] end
@@ -285,6 +291,13 @@ local function readRow(id, u)
     maxHealth = u:GetMaxHealth(),
     moving = moving,
     fraction = u.__fraction or 1,
+    -- Fire state mirror for the user side (SUnitVarDat.mFireState is part of
+    -- the per-unit sync block, ctor Cfile:772277). The sim itself never
+    -- changes it — only the SetFireState user command does.
+    fireState = u.__fireState or 0,
+    -- The guarded unit id (mUnit->mGuardedUnit, task-synced Cfile:839316) —
+    -- feeds GetGuardedEntity/GetAssistingUnitsList in the user mirror.
+    guard = u.__guardedUnit or 0,
     born = u.__spawnTick or 0,
     mesh = u.__meshBp,
     army = u.__army or 1,
@@ -339,6 +352,8 @@ function __readAllUnitsJson()
       .. ',"maxHealth":' .. jnum(r.maxHealth)
       .. ',"moving":' .. tostring(r.moving)
       .. ',"fraction":' .. jnum(r.fraction)
+      .. ',"fireState":' .. jnum(r.fireState)
+      .. ',"guard":' .. jnum(r.guard)
       .. ',"born":' .. jnum(r.born)
       .. (function()
         -- The whole command queue (head first) for the command graph;

@@ -1,24 +1,25 @@
 /**
- * TrueType-Metrik — so viel davon, wie die UI braucht.
+ * TrueType metrics — only as much as the UI needs.
  *
- * Die Engine misst Text mit der echten Schrift: `CMauiText::GetStringAdvance`
- * (Cfile:1146720) fragt den Font-Renderer nach der Breite, und die vier LazyVars
- * FontAscent/FontDescent/FontExternalLeading/TextAdvance (Cfile:1145928) sind
- * genau diese Zahlen. `text.lua:39` macht aus Ascent+Descent die Höhe, `text.lua:47`
- * aus TextAdvance die Breite — ohne echte Metrik hat kein Text-Control eine Größe.
+ * The engine measures text with the real font: `CMauiText::GetStringAdvance`
+ * (Cfile:1146720) asks the font renderer for width, and the four LazyVars
+ * FontAscent/FontDescent/FontExternalLeading/TextAdvance (Cfile:1145928) hold
+ * exactly those values. `text.lua:39` derives height from Ascent+Descent and
+ * `text.lua:47` derives width from TextAdvance — without real metrics, no text
+ * control has a size.
  *
- * Die Schriften liegen als TTF im Spielordner (`<GameDir>/fonts`, u. a. ARIAL.TTF
- * und zeroes_3.ttf); `lua/skins/skins.lua:24-26` nennt sie beim Namen ("Arial",
- * "Zeroes Three"). Also wird hier die Datei des Spiels gelesen — nicht geschätzt.
+ * The fonts are TTF files in the game directory (`<GameDir>/fonts`, including
+ * ARIAL.TTF and zeroes_3.ttf); `lua/skins/skins.lua:24-26` names them ("Arial",
+ * "Zeroes Three"). This reads the game file rather than estimating it.
  *
- * Gelesen werden nur die Tabellen, die für Breite und Höhe nötig sind:
- *   head  → unitsPerEm (die Skala aller Zahlen)
+ * Only the tables needed for width and height are read:
+ *   head  → unitsPerEm (the scale of all values)
  *   hhea  → ascender/descender/lineGap, numberOfHMetrics
- *   hmtx  → advanceWidth je Glyph
- *   cmap  → Zeichen → Glyph-Index (Format 4 und 12; alles, was die UI trifft)
- *   name  → Familienname (damit die Datei sich selbst zuordnet)
- * Kerning bleibt außen vor: die Engine rendert die UI-Schrift ohne Kerning-Paare
- * (kein `kern`-Zugriff im Text-Pfad), und Arial/Zeroes hätten hier ohnehin keins.
+ *   hmtx  → advanceWidth per glyph
+ *   cmap  → character → glyph index (formats 4 and 12; everything the UI uses)
+ *   name  → family name (so the file identifies itself)
+ * Kerning is omitted: the engine renders the UI font without kerning pairs
+ * (no `kern` access in the text path), and Arial/Zeroes would not have any here.
  */
 export interface FontMetrics {
   family: string
@@ -26,7 +27,7 @@ export interface FontMetrics {
   ascent: number
   descent: number
   lineGap: number
-  /** Breite eines Strings in Pixeln, bei der gegebenen Punktgröße. */
+  /** Width of a string in pixels at the given point size. */
   advance(text: string, size: number): number
 }
 
@@ -37,8 +38,8 @@ export function parseTtf(bytes: Uint8Array): FontMetrics {
   const i16 = (o: number): number => view.getInt16(o)
   const u32 = (o: number): number => view.getUint32(o)
 
-  // sfnt-Header: 'true'/0x00010000 (TTF) oder 'OTTO' (CFF — dann fehlt glyf,
-  // aber hmtx/cmap sind dieselben, und mehr brauchen wir nicht).
+  // sfnt header: 'true'/0x00010000 (TTF) or 'OTTO' (CFF — then glyf is absent,
+  // but hmtx/cmap are the same, and we need nothing else).
   const numTables = u16(4)
   const tables = new Map<string, number>()
   for (let i = 0; i < numTables; i++) {
@@ -48,7 +49,7 @@ export function parseTtf(bytes: Uint8Array): FontMetrics {
   }
   const need = (tag: string): number => {
     const off = tables.get(tag)
-    if (off === undefined) throw new Error(`TTF: Tabelle '${tag}' fehlt`)
+    if (off === undefined) throw new Error(`TTF: table '${tag}' is missing`)
     return off
   }
 
@@ -65,8 +66,8 @@ export function parseTtf(bytes: Uint8Array): FontMetrics {
 
   const hmtx = need('hmtx')
   const advanceOf = (glyph: number): number => {
-    // hmtx: numberOfHMetrics Paare (advance, lsb); danach nur noch lsb —
-    // alle folgenden Glyphen erben die letzte Breite (OpenType-Spezifikation).
+    // hmtx: numberOfHMetrics pairs (advance, lsb); only lsb follows —
+    // all following glyphs inherit the final width (OpenType specification).
     const i = Math.min(glyph, numberOfHMetrics - 1)
     return u16(hmtx + i * 4)
   }
@@ -74,11 +75,11 @@ export function parseTtf(bytes: Uint8Array): FontMetrics {
   const cmap = need('cmap')
   const lookup = buildCmap(view, cmap)
 
-  // Der VOLLE Name (nameID 4): "Arial", "Arial Bold", "Zeroes Three". Genau so
-  // spricht die UI ihre Schriften an — `UIUtil.bodyFont` ist "Arial", aber
-  // `unitviewDetail.lua` verlangt "Arial Bold". ARIAL.TTF und ARIALBD.TTF haben
-  // beide die FAMILIE "Arial" (nameID 1); wer danach schlüsselt, überschreibt die
-  // Metrik der Grundschrift mit der der fetten und misst ab da jeden Text falsch.
+  // The FULL name (nameID 4): "Arial", "Arial Bold", "Zeroes Three". This is
+  // exactly how the UI addresses its fonts — `UIUtil.bodyFont` is "Arial", but
+  // `unitviewDetail.lua` requires "Arial Bold". ARIAL.TTF and ARIALBD.TTF both
+  // have the FAMILY "Arial" (nameID 1); keying by it overwrites the base-font
+  // metrics with the bold font and measures all subsequent text incorrectly.
   const nameTable = tables.get('name')
   const family = readName(view, nameTable, 4) || readName(view, nameTable, 1)
 
@@ -96,7 +97,7 @@ export function parseTtf(bytes: Uint8Array): FontMetrics {
   }
 }
 
-/** cmap → Funktion Codepoint → Glyph-Index. Bevorzugt (3,10), dann (3,1), dann (0,*). */
+/** cmap → codepoint-to-glyph-index function. Prefer (3,10), then (3,1), then (0,*). */
 function buildCmap(view: DataView, cmap: number): (cp: number) => number {
   const numSubtables = view.getUint16(cmap + 2)
   let best = -1
@@ -113,7 +114,7 @@ function buildCmap(view: DataView, cmap: number): (cp: number) => number {
       best = cmap + offset
     }
   }
-  if (best < 0) throw new Error('TTF: keine cmap-Subtabelle')
+  if (best < 0) throw new Error('TTF: no cmap subtable')
 
   const format = view.getUint16(best)
   if (format === 4) {
@@ -151,19 +152,19 @@ function buildCmap(view: DataView, cmap: number): (cp: number) => number {
       return 0
     }
   }
-  throw new Error(`TTF: cmap-Format ${format} nicht gelesen`)
+  throw new Error(`TTF: cmap format ${format} was not read`)
 }
 
 /**
- * Ein Eintrag der name-Tabelle (nameID 1 = Familie, 2 = Schnitt, 4 = voller Name).
+ * An entry in the name table (nameID 1 = family, 2 = style, 4 = full name).
  *
- * Zwei Fallen, in die man garantiert tritt:
- *   - Die Kodierung hängt an der Plattform: Windows (3) und Unicode (0) speichern
- *     UTF-16BE, Macintosh (1) einen Byte-String. Wer alles außer 3 als Bytes
- *     liest, bekommt aus einem Unicode-Eintrag " A r i a l ".
- *   - Dieselbe nameID steht mehrfach drin, einmal je SPRACHE. ARIALBD.TTF führt
- *     den Schnitt u. a. als "negreta" (katalanisch). Also wird auf Englisch
- *     (langID 0x0409) bestanden, sonst nimmt man irgendeine Übersetzung.
+ * Two reliable pitfalls:
+ *   - Encoding depends on the platform: Windows (3) and Unicode (0) store
+ *     UTF-16BE, while Macintosh (1) stores a byte string. Reading everything
+ *     except 3 as bytes produces " A r i a l " from a Unicode entry.
+ *   - The same nameID appears multiple times, once per LANGUAGE. ARIALBD.TTF
+ *     lists the style as "negreta" (Catalan), among others. Therefore English
+ *     (langID 0x0409) is required; otherwise an arbitrary translation is used.
  */
 function readName(view: DataView, name: number | undefined, nameId: number): string {
   if (name === undefined) return ''
@@ -184,7 +185,7 @@ function readName(view: DataView, name: number | undefined, nameId: number): str
     } else {
       for (let o = 0; o < length; o++) s += String.fromCharCode(view.getUint8(offset + o))
     }
-    // Windows/en-US schlägt Windows/andere schlägt Unicode schlägt Mac.
+    // Windows/en-US outranks other Windows, which outranks Unicode, which outranks Mac.
     const english = language === 0x0409 || (platform !== 3 && language === 0)
     const score = (platform === 3 ? 4 : platform === 0 ? 2 : 0) + (english ? 1 : 0)
     if (s && score > bestScore) {

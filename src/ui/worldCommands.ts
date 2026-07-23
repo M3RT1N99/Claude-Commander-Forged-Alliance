@@ -37,8 +37,12 @@ export interface WorldCommandSim {
   move(id: number, x: number, z: number, queue?: boolean): void
   /** Attack (CAttackTargetTask): Unit `id` greift die Ziel-Unit an. */
   attack(id: number, targetId: number, queue?: boolean): void
+  /** Ground attack: same task with an AITARGET_Ground position target. */
+  attackGround(id: number, x: number, z: number, queue?: boolean): void
   /** Repair (dispatch 0x14): resume building the unfinished target. */
   repair(id: number, targetId: number, queue?: boolean): void
+  /** Guard/assist (dispatch 0x0F, CUnitGuardTask): follow + assist the target. */
+  guard(id: number, targetId: number, queue?: boolean): void
   /**
    * Der SAMMELPUNKT einer Fabrik (IssueFactoryRallyPoint, Cfile:1008266). Er ist
    * kein Bewegungsbefehl: die Fabrik bleibt stehen, nur ihre frischen Einheiten
@@ -118,6 +122,9 @@ export async function worldClick(
     /** An OWN UNFINISHED unit under the cursor — the default click resumes
      *  its construction via the repair task (dispatch 0x14). */
     repairTargetId?: number
+    /** An OWN HEALTHY unit under the cursor — the default click guards it
+     *  (dispatch 0x0F: assist builds, share factory queues, follow). */
+    ownTargetId?: number
   } = { queue: false },
 ): Promise<string | null> {
   // pull() liefert JSON — eine LEERE Lua-Tabelle wuerde als `{}` in JS ankommen,
@@ -129,13 +136,15 @@ export async function worldClick(
 
   // Der Attack-Button (orders.lua:151 AttackOrderBehavior) setzt den
   // Command-Mode 'order' mit RULEUCC_Attack — der nächste Klick greift an.
-  // Attack auf BODEN (ohne Ziel-Unit) ist ein eigener Task (CFireAtTask)
-  // und noch nicht gebaut — das sagt der Rückgabetext, statt still zu enden.
+  // Ohne Unit unterm Cursor ist es ein BODEN-Angriff: derselbe Dispatch
+  // (0x0A, CUnitAttackTargetTask) mit AITARGET_Ground-Position statt Entity
+  // (Cfile:812553-812563); die Order endet nie von selbst (HasTarget bleibt
+  // true für Ground, Cfile:800284).
   if (cm.mode === 'order' && cm.name === 'RULEUCC_Attack') {
-    if (opts.enemyTargetId === undefined) return 'Attack auf Boden: noch kein Weg (CFireAtTask fehlt)'
     let n = 0
     for (const u of selection) {
-      sim.attack(u.id, opts.enemyTargetId, opts.queue)
+      if (opts.enemyTargetId === undefined) sim.attackGround(u.id, hit.x, hit.z, opts.queue)
+      else sim.attack(u.id, opts.enemyTargetId, opts.queue)
       n++
     }
     onCommandIssued(host, {
@@ -143,7 +152,40 @@ export async function worldClick(
       Position: { x: hit.x, y: elevation(hit.x, hit.z), z: hit.z },
       Clear: !opts.queue,
     })
-    return `Attack (${n}) → Unit ${opts.enemyTargetId}`
+    return opts.enemyTargetId === undefined
+      ? `Attack (${n}) → Boden ${hit.x.toFixed(1)}, ${hit.z.toFixed(1)}`
+      : `Attack (${n}) → Unit ${opts.enemyTargetId}`
+  }
+
+  // The Guard button (orders.lua, RULEUCC_Guard): a click on a unit guards
+  // it (dispatch 0x0F). Guarding a POINT wraps a Move first
+  // (Cfile:830638-830650) — the point-guard task itself is a named gap, so
+  // a ground click just moves there. Guard on an ENEMY is capture in the
+  // original (sub_613A80) — capture is a gap, so only own/allied units take.
+  if (cm.mode === 'order' && cm.name === 'RULEUCC_Guard') {
+    const target = opts.ownTargetId ?? opts.repairTargetId
+    if (target !== undefined) {
+      let n = 0
+      for (const u of selection) {
+        if (u.id !== target) {
+          sim.guard(u.id, target, opts.queue)
+          n++
+        }
+      }
+      onCommandIssued(host, {
+        CommandType: 'Guard',
+        Position: { x: hit.x, y: elevation(hit.x, hit.z), z: hit.z },
+        Clear: !opts.queue,
+      })
+      return `Guard (${n}) → Unit ${target}`
+    }
+    for (const u of selection) sim.move(u.id, hit.x, hit.z, opts.queue)
+    onCommandIssued(host, {
+      CommandType: 'Guard',
+      Position: { x: hit.x, y: elevation(hit.x, hit.z), z: hit.z },
+      Clear: !opts.queue,
+    })
+    return `Guard-Punkt → Move ${hit.x.toFixed(0)}, ${hit.z.toFixed(0)}`
   }
 
   if (cm.mode === 'build' || cm.mode === 'buildanchored') {
@@ -215,6 +257,26 @@ export async function worldClick(
         Clear: !opts.queue,
       })
       return `Repair (${n}) → Unit ${opts.repairTargetId}`
+    }
+  }
+  // Click on an OWN HEALTHY unit: the engine's default is Guard/assist
+  // (dispatch 0x0F) — engineers join builds, factories share queues,
+  // everyone else follows.
+  if (opts.ownTargetId !== undefined) {
+    let n = 0
+    for (const u of selection) {
+      if (u.id !== opts.ownTargetId) {
+        sim.guard(u.id, opts.ownTargetId, opts.queue)
+        n++
+      }
+    }
+    if (n > 0) {
+      onCommandIssued(host, {
+        CommandType: 'Guard',
+        Position: { x: hit.x, y, z: hit.z },
+        Clear: !opts.queue,
+      })
+      return `Guard (${n}) → Unit ${opts.ownTargetId}`
     }
   }
   let moved = 0

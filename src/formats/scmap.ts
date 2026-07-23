@@ -1,7 +1,7 @@
 /**
- * Parser für das SCMAP-Kartenformat (Moho-Engine, FA: Version major 2,
- * minor 56-60). Layout verifiziert per Hex-Analyse der Original-Karten und
- * abgeglichen mit den Community-Parsern (ozonex FAF Map Editor, Neroxis).
+ * Parser for the SCMAP map format (Moho engine, FA: major version 2,
+ * minor versions 56-60). Layout verified by hex analysis of original maps and
+ * cross-checked against community parsers (ozonex FAF Map Editor, Neroxis).
  */
 
 export interface ScmapStratum {
@@ -111,7 +111,7 @@ export interface ScmapData {
   skyCubemap: string
   lighting: ScmapLighting
   water: ScmapWater
-  /** Lower, Stratum0-7, Upper — genau 10 Lagen (FA) */
+  /** Lower, Stratum0-7, Upper — exactly 10 layers (FA). */
   strata: ScmapStratum[]
   /** The 9 stratum normal-map layers (path + scale). */
   normalStrata: ScmapStratum[]
@@ -123,14 +123,14 @@ export interface ScmapData {
   /** Only versionMinor >= 60 (older maps use the header background/skyCubemap). */
   skybox: ScmapSkybox | null
   props: ScmapProp[]
-  /** Eingebettete DDS-Bilder */
+  /** Embedded DDS images. */
   previewDds: Uint8Array
   normalMapDds: Uint8Array | null
-  /** UtilityA: Masken Stratum 0-3 (RGBA) */
+  /** UtilityA: masks for strata 0-3 (RGBA). */
   textureMaskLowDds: Uint8Array | null
-  /** UtilityB: Masken Stratum 4-7 (RGBA) */
+  /** UtilityB: masks for strata 4-7 (RGBA). */
   textureMaskHighDds: Uint8Array | null
-  /** UtilityC: Wassertiefe u.a. */
+  /** UtilityC: water depth and more. */
   waterMapDds: Uint8Array | null
 }
 
@@ -174,7 +174,7 @@ class Reader {
     return [this.f32(), this.f32(), this.f32(), this.f32()]
   }
 
-  /** Null-terminierter String */
+  /** Null-terminated string. */
   cstr(): string {
     const start = this.pos
     while (this.pos < this.data.length && this.data[this.pos] !== 0) this.pos++
@@ -194,11 +194,11 @@ class Reader {
   }
 }
 
-/** Liest einen eingebetteten DDS-Block: u32 Länge + Daten. */
+/** Reads an embedded DDS block: u32 length + data. */
 function embeddedDds(r: Reader): Uint8Array {
   const len = r.u32()
   if (len === 0 || len > r.data.length - r.pos) {
-    throw new Error(`SCMAP: ungültige eingebettete DDS-Länge ${len} @${r.pos - 4}`)
+    throw new Error(`SCMAP: invalid embedded DDS length ${len} @${r.pos - 4}`)
   }
   return r.bytes(len)
 }
@@ -207,17 +207,17 @@ export function parseScmap(data: Uint8Array): ScmapData {
   const r = new Reader(data)
 
   const magic = r.u32()
-  if (magic !== 0x1a70614d) throw new Error('SCMAP: falsches Magic (erwartet "Map\\x1a")')
+  if (magic !== 0x1a70614d) throw new Error('SCMAP: invalid magic (expected "Map\\x1a")')
   const versionMajor = r.u32()
-  if (versionMajor !== 2) throw new Error(`SCMAP: Version major ${versionMajor} nicht unterstützt`)
+  if (versionMajor !== 2) throw new Error(`SCMAP: major version ${versionMajor} is not supported`)
   r.u32() // 0xBEEFFEED
   r.u32() // 2
-  r.f32() // width als float (redundant)
-  r.f32() // height als float (redundant)
+  r.f32() // width as float (redundant)
+  r.f32() // height as float (redundant)
   r.u32() // 0
 
-  // Preview: manche Dateien haben hier ein zusätzliches u16-Feld. Robust:
-  // Der u32 direkt vor dem "DDS "-Magic ist die Länge des Preview-Blocks.
+  // Preview: some files have an additional u16 field here. Robustly, the u32
+  // directly before the "DDS " magic is the length of the preview block.
   const probe = r.pos
   let previewDds: Uint8Array | null = null
   for (const extra of [0, 2]) {
@@ -234,17 +234,17 @@ export function parseScmap(data: Uint8Array): ScmapData {
       break
     }
   }
-  if (!previewDds) throw new Error('SCMAP: Preview-DDS nicht gefunden')
+  if (!previewDds) throw new Error('SCMAP: preview DDS not found')
 
   const versionMinor = r.u32()
   if (versionMinor < 56) {
-    throw new Error(`SCMAP: Version minor ${versionMinor} (< 56, SC1-Format) nicht unterstützt`)
+    throw new Error(`SCMAP: minor version ${versionMinor} (< 56, SC1 format) is not supported`)
   }
 
   // --- Terrain ---------------------------------------------------------------
   const width = r.u32()
   const height = r.u32()
-  const heightScale = r.f32() // praktisch immer 1/128
+  const heightScale = r.f32() // almost always 1/128
   const hmSamples = (width + 1) * (height + 1)
   const heightmapBytes = r.bytes(hmSamples * 2)
   const heightmap = new Uint16Array(hmSamples)
@@ -253,7 +253,7 @@ export function parseScmap(data: Uint8Array): ScmapData {
   }
   if (versionMinor >= 56) r.skip(1) // unknown byte
 
-  // --- Shader/Umgebung --------------------------------------------------------
+  // --- Shader/environment ------------------------------------------------------
   const terrainShader = r.cstr()
   const background = r.cstr()
   const skyCubemap = r.cstr()
@@ -275,7 +275,7 @@ export function parseScmap(data: Uint8Array): ScmapData {
   r.f32() // fogStart
   r.f32() // fogEnd
 
-  // --- Wasser -------------------------------------------------------------------
+  // --- Water -------------------------------------------------------------------
   const hasWater = r.data[r.pos] !== 0
   r.skip(1)
   const elevation = r.f32()
@@ -310,10 +310,10 @@ export function parseScmap(data: Uint8Array): ScmapData {
   // WaveGenerators
   const waveGenCount = r.u32()
   for (let i = 0; i < waveGenCount; i++) {
-    r.cstr() // Textur
+    r.cstr() // texture
     r.cstr() // Ramp
-    r.vec3() // Position
-    r.f32() // Rotation
+    r.vec3() // position
+    r.f32() // rotation
     r.vec3() // Velocity
     r.f32() // LifetimeFirst
     r.f32() // LifetimeSecond
@@ -327,10 +327,10 @@ export function parseScmap(data: Uint8Array): ScmapData {
     r.f32() // StripCount
   }
 
-  // --- Texturlagen (FA: 10 Albedo + 9 Normal) ----------------------------------
-  // Minimap-Darstellung: contourInterval + 5 gepackte Farben
+  // --- Texture layers (FA: 10 albedo + 9 normal) --------------------------------
+  // Minimap representation: contourInterval + 5 packed colors
   for (let i = 0; i < 6; i++) r.i32()
-  if (versionMinor > 56) r.f32() // unknown (nur v57+/v60)
+  if (versionMinor > 56) r.f32() // unknown (v57+/v60 only)
   const strata: ScmapStratum[] = []
   for (let i = 0; i < 10; i++) {
     const albedoPath = r.cstr()
@@ -377,19 +377,19 @@ export function parseScmap(data: Uint8Array): ScmapData {
     r.skip(n * 4)
   }
 
-  r.u32() // width (nochmal)
-  r.u32() // height (nochmal)
+  r.u32() // width (again)
+  r.u32() // height (again)
 
-  // --- Eingebettete Utility-Maps ---------------------------------------------------
-  const normalMapCount = r.u32() // immer 1
+  // --- Embedded utility maps ------------------------------------------------------
+  const normalMapCount = r.u32() // always 1
   let normalMapDds: Uint8Array | null = null
   for (let i = 0; i < normalMapCount; i++) {
     const dds = embeddedDds(r)
     if (i === 0) normalMapDds = dds
   }
-  const textureMaskLowDds = embeddedDds(r) // Stratum 0-3 (BGRA-Kanäle)
-  const textureMaskHighDds = embeddedDds(r) // Stratum 4-7 (nur v>=56)
-  const waterMapCount = r.u32() // immer 1
+  const textureMaskLowDds = embeddedDds(r) // strata 0-3 (BGRA channels)
+  const textureMaskHighDds = embeddedDds(r) // strata 4-7 (v>=56 only)
+  const waterMapCount = r.u32() // always 1
   void waterMapCount
   const waterMapDds = embeddedDds(r)
 
