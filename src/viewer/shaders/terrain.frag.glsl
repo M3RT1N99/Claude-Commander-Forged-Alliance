@@ -93,19 +93,20 @@
     return texture2D(heightTex, uvMap * hmUvScale + hmUvOffset).r * heightScale;
   }
 
-  void main() {
-    // Base normal from central differences (1 world unit per texel) — the
-    // TerrainBasisPS source, just computed instead of read from the baked
-    // normal map.
-    float hl = height(vUvMap - vec2(hmTexel.x, 0.0));
-    float hr = height(vUvMap + vec2(hmTexel.x, 0.0));
-    float hd = height(vUvMap - vec2(0.0, hmTexel.y));
-    float hu = height(vUvMap + vec2(0.0, hmTexel.y));
-    vec3 baseNormal = normalize(vec3(hl - hr, 2.0, hd - hu));
+#ifndef NORMALS_PASS
+// The deferred normal chain of the original: this pass READS the
+// screen-space buffer the NORMALS_PASS variant (+ normals decals) wrote.
+#include <cfaNormalBuffer>
+#endif
 
+  void main() {
     vec2 world = vWorldPos.xz;
 
-    // --- TerrainNormalsPS/XP: blend the stratum normal maps with RAW masks
+#ifdef NORMALS_PASS
+    // --- TerrainNormalsPS/XP (:591/:613): blend the stratum normal maps
+    // with RAW masks and write the two tangent components into RG — the
+    // screen-space normal buffer the normals decals then blend into
+    // (TDecalsNormals, Write_RG).
     vec4 mn0 = texture2D(maskA, vUvMap) * normalEnable0;
     vec4 n = texture2D(lowerNormalMap, world / lowerNormalTile) * 2.0 - 1.0;
     n = mix(n, texture2D(stratum0Normal, world / stratumNormalTile[0]) * 2.0 - 1.0, mn0.x);
@@ -120,22 +121,12 @@
     n = mix(n, texture2D(stratum7Normal, world / stratumNormalTile[7]) * 2.0 - 1.0, mn1.w);
 #endif
     n.xyz = normalize(n.xyz);
-
-    // --- frame.fx BasisPS (:279-320), bit for bit: the buffer carries only
-    // n.xy (channels = world X / world Z), the up component is rebuilt.
-    vec3 screenNormal;
-    screenNormal.x = n.x;
-    screenNormal.z = n.y;
-    screenNormal.y = sqrt(max(0.0, 1.0 - n.x * n.x - n.y * n.y));
-    vec3 h = normalize(baseNormal + vec3(0.0, 1.0, 0.0));
-    vec3 xaxis = h.x * h.xyz * vec3(-2.0, 2.0, -2.0) + vec3(1.0, 0.0, 0.0);
-    vec3 yaxis = baseNormal;
-    vec3 zaxis = h.z * h.xyz * vec3(-2.0, 2.0, -2.0) + vec3(0.0, 0.0, 1.0);
-    vec3 normal = normalize(vec3(
-      dot(screenNormal, xaxis),
-      dot(screenNormal, yaxis),
-      dot(screenNormal, zaxis)
-    ));
+    gl_FragColor = vec4(n.xy * 0.5 + 0.5, 0.0, 1.0);
+  }
+#else
+    // Normal from the buffer (stratum normals + normals decals), rotated
+    // into the terrain frame — frame.fx BasisPS via the shared chunk.
+    vec3 normal = cfaWorldNormal(vUvMap, hmTexel);
 
     // --- albedo splat (masks saturate(tex*2-1) here, unlike the normal pass)
     vec4 m0 = clamp(texture2D(maskA, vUvMap) * 2.0 - 1.0, 0.0, 1.0) * stratumEnable0;
@@ -211,3 +202,4 @@
 #endif
 #endif
   }
+#endif // NORMALS_PASS

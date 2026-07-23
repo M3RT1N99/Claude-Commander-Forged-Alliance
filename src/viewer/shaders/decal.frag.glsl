@@ -3,11 +3,11 @@
 // technique TDecals/TDecalsXP (:1245-1269): SrcAlpha/InvSrcAlpha, no depth
 // write, decal rasterizer bias.
 //
-// The original lights decals with the deferred normal buffer (stratum
-// normals + normals decals included); forward-rendering we rebuild the
-// GEOMETRY normal from the heightmap — a named approximation until a
-// normal render target exists. Without a spec texture (HAS_SPEC unset) the
-// spec amount is 0 and the mask 1, like the engine's unbound samplers.
+// Lighting reads the screen-space normal buffer (stratum normals + normals
+// decals included) like the original's SampleScreen(NormalSampler) —
+// the cfaNormalBuffer chunk rebuilds the world normal (frame.fx BasisPS).
+// Without a spec texture (HAS_SPEC unset) the spec amount is 0 and the
+// mask 1, like the engine's unbound samplers.
 precision highp float;
 
 uniform sampler2D decalAlbedo;
@@ -43,6 +43,8 @@ float height(vec2 uvMap) {
   return texture2D(heightTex, uvMap * hmUvScale + hmUvOffset).r * heightScale;
 }
 
+#include <cfaNormalBuffer>
+
 void main() {
   // The decal sampler is CLAMP (render-details.md par. 3); the instance
   // quad is exactly the decal footprint, so just guard the border.
@@ -51,13 +53,9 @@ void main() {
 
   vec4 albedo = texture2D(decalAlbedo, vUv);
 
-  // Geometry normal from the heightmap (central differences), same as the
-  // terrain shader.
-  float hl = height(vUvMap - vec2(hmTexel.x, 0.0));
-  float hr = height(vUvMap + vec2(hmTexel.x, 0.0));
-  float hd = height(vUvMap - vec2(0.0, hmTexel.y));
-  float hu = height(vUvMap + vec2(0.0, hmTexel.y));
-  vec3 normal = normalize(vec3(hl - hr, 2.0, hd - hu));
+  // DecalsPS (:1178): normal from the deferred buffer — stratum normals
+  // with the normals decals already blended in.
+  vec3 normal = cfaWorldNormal(vUvMap, hmTexel);
 
   vec3 viewDir = normalize(vWorldPos - cameraPosition);
 #ifdef XP

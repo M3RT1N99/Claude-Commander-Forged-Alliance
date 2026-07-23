@@ -18,6 +18,7 @@ import { MapDecals } from './mapDecals'
 import { SkyDome } from './skyDome'
 import { BloomPipeline } from './bloom'
 import { ShadowRenderer } from './shadow'
+import { TerrainNormalsPass } from './terrainNormals'
 import DEPTH_UNIT_VS from './shaders/depthUnit.vert.glsl?raw'
 import DEPTH_FS from './shaders/depth.frag.glsl?raw'
 
@@ -64,10 +65,18 @@ export class UnitViewer {
   private mapProps: MapProps | null = null
   private mapDecals: MapDecals | null = null
   private skyDome: SkyDome | null = null
+
+  /** Decal statistics of the loaded map (diagnosis via CDP). */
+  decalStats(): MapDecals['stats'] | null {
+    return this.mapDecals?.stats ?? null
+  }
   /** Glow/bloom chain (CBloomRenderer::DoBloom @0x7F5160). */
   private bloom: BloomPipeline | null = null
   /** Shadow pass (H7): depth from the sun, ComputeShadowPCF receivers. */
   readonly shadow = new ShadowRenderer()
+  /** Deferred normal pass (TerrainNormalsPS + TDecalsNormals into a
+   *  screen-space RT; terrain/decal lighting reads it back). */
+  private readonly terrainNormals = new TerrainNormalsPass(4, 4)
   /** Map '<default>' env cube — mesh.fx environmentSampler (Cfile:1189598). */
   private envCube: THREE.Texture | null = null
   /** Named env cubes from the scmap list ('<aeon>', '<seraphim>', …). */
@@ -196,21 +205,65 @@ export class UnitViewer {
       this.bloom.setSize(size.x, size.y)
     }
 
-    // Keine WorldView (Unit-Viewer, Karten-Viewer): die ganze Fläche.
-    if (this.worldViewRects.length === 0) {
-      this.renderer.setRenderTarget(this.bloom.target)
+    // Deferred normal prepass (TerrainNormalsPS + TDecalsNormals): same
+    // cameras/viewports as the main pass right below, one RT of the same
+    // size — gl_FragCoord lines up 1:1 for the readers.
+    if (this.terrainNormals.hasContent()) {
+      if (
+        this.terrainNormals.target.width !== size.x ||
+        this.terrainNormals.target.height !== size.y
+      ) {
+        this.terrainNormals.setSize(size.x, size.y)
+      }
+      const prevClear = this.renderer.getClearColor(new THREE.Color())
+      const prevAlpha = this.renderer.getClearAlpha()
+      // Neutral buffer: n.xy = 0 (encoded 0.5) — flat "no stratum detail".
+      this.renderer.setClearColor(new THREE.Color(0.5, 0.5, 0.0), 1)
+      this.renderer.setRenderTarget(this.terrainNormals.target)
+      // Same scissor discipline as the main pass: per-view autoClear must
+      // only wipe its own rect.
       this.renderer.setScissorTest(false)
-      this.renderer.setViewport(0, 0, size.x, size.y)
-      this.renderer.render(this.scene, this.camera)
-      this.renderer.setRenderTarget(null)
-      this.renderer.setViewport(0, 0, width, height)
-      this.bloom.composite(this.renderer)
-      return
+      this.renderer.clear()
+      if (this.worldViewRects.length > 0) this.renderer.setScissorTest(true)
+      this.forEachView(size, width, height, dpr, (cam) =>
+        this.renderer.render(this.terrainNormals.scene, cam),
+      )
+      this.renderer.setScissorTest(false)
+      this.renderer.setClearColor(prevClear, prevAlpha)
     }
 
     this.renderer.setRenderTarget(this.bloom.target)
-    this.renderer.setScissorTest(true)
-    this.renderer.clear()
+    if (this.worldViewRects.length === 0) {
+      this.renderer.setScissorTest(false)
+    } else {
+      this.renderer.setScissorTest(true)
+      this.renderer.clear()
+    }
+    this.forEachView(size, width, height, dpr, (cam) => this.renderer.render(this.scene, cam))
+    this.renderer.setScissorTest(false)
+    this.renderer.setRenderTarget(null)
+    this.renderer.setViewport(0, 0, width, height)
+    this.bloom.composite(this.renderer)
+  }
+
+  /**
+   * Run `draw` once per world view (or once full-surface without views),
+   * with viewport/scissor/camera set up — the shared loop of the normal
+   * prepass and the main pass (identical viewports keep gl_FragCoord
+   * addresses aligned between their render targets).
+   */
+  private forEachView(
+    size: THREE.Vector2,
+    width: number,
+    height: number,
+    dpr: number,
+    draw: (camera: THREE.Camera) => void,
+  ): void {
+    if (this.worldViewRects.length === 0) {
+      this.renderer.setViewport(0, 0, size.x, size.y)
+      draw(this.camera)
+      return
+    }
     for (const view of this.worldViewRects) {
       // Render-target viewports count in DEVICE pixels — scale the CSS
       // rects by the pixel ratio.
@@ -223,17 +276,13 @@ export class UnitViewer {
       this.renderer.setScissor(x, y, w, h)
 
       if (view.cartographic) {
-        this.renderer.render(this.scene, this.mapCameraFor(w, h))
+        draw(this.mapCameraFor(w, h))
       } else {
         this.camera.aspect = w / h
         this.camera.updateProjectionMatrix()
-        this.renderer.render(this.scene, this.camera)
+        draw(this.camera)
       }
     }
-    this.renderer.setScissorTest(false)
-    this.renderer.setRenderTarget(null)
-    this.renderer.setViewport(0, 0, width, height)
-    this.bloom.composite(this.renderer)
   }
 
   /** Draufsicht auf die ganze Karte, in das Seitenverhältnis des Controls gepasst. */
@@ -280,6 +329,14 @@ export class UnitViewer {
       this.current.geometry.dispose()
       ;(this.current.material as THREE.Material).dispose()
       this.current = null
+    }
+    // The normal-pass copies (terrain normals mesh; the decal normals
+    // group is disposed with mapDecals below).
+    for (const child of [...this.terrainNormals.scene.children]) {
+      this.terrainNormals.scene.remove(child)
+      if (child instanceof THREE.Mesh) {
+        ;(child.material as THREE.Material).dispose()
+      }
     }
     if (this.waterMesh) {
       this.scene.remove(this.waterMesh)
@@ -1041,9 +1098,10 @@ export class UnitViewer {
         ? await loadLayer(scmap.water.texPathWaterRamp)
         : null
 
-    const material = createTerrainMaterial({
+    const terrainOptions = {
       terrainShader: scmap.terrainShader,
       shadow: this.shadow.uniforms,
+      normalBuffer: this.terrainNormals.uniforms,
       heightTex,
       heightScale: scmap.heightScale,
       hmWidth: hmW,
@@ -1078,16 +1136,25 @@ export class UnitViewer {
         specularColor: new THREE.Vector4(...scmap.lighting.specularColor),
         lightingMultiplier: scmap.lighting.lightingMultiplier,
       },
-    })
+    }
+    const material = createTerrainMaterial(terrainOptions)
 
     const geometry = buildTerrainGrid(width, height)
     const mesh = new THREE.Mesh(geometry, material)
     this.scene.add(mesh)
     this.current = mesh
 
-    // Albedo decals (type 1, terrain.fx TDecals/TDecalsXP) — instanced
-    // terrain patches projected through the inverse DecalMatrix. Normals
-    // decals (type 2) need a normal render target and stay open.
+    // The deferred normal pass: a second mesh over the SAME grid renders
+    // the blended stratum normal into the screen-space buffer
+    // (TerrainNormalsPS); the main material reads it back.
+    const normalsMesh = new THREE.Mesh(
+      geometry,
+      createTerrainMaterial(terrainOptions, 'normals'),
+    )
+    this.terrainNormals.scene.add(normalsMesh)
+
+    // Decals: albedo (type 1, TDecals/TDecalsXP) into the frame, normals
+    // (type 2, TDecalsNormals) into the normal buffer.
     this.mapDecals = await MapDecals.load(
       scmap.decals,
       vfs,
@@ -1103,6 +1170,7 @@ export class UnitViewer {
         depthToG,
         xpShader: scmap.terrainShader === 'TTerrainXP',
         shadow: this.shadow.uniforms,
+        normalBuffer: this.terrainNormals.uniforms,
         lighting: {
           sunDirection: new THREE.Vector3(...scmap.lighting.sunDirection).normalize(),
           sunColor: new THREE.Color(...scmap.lighting.sunColor),
@@ -1115,9 +1183,11 @@ export class UnitViewer {
       this.s3tcSupported,
     )
     this.scene.add(this.mapDecals.group)
-    if (this.mapDecals.stats.instances > 0) {
+    this.terrainNormals.scene.add(this.mapDecals.normalsGroup)
+    if (this.mapDecals.stats.instances > 0 || this.mapDecals.stats.normalInstances > 0) {
       console.log(
         `map decals: ${this.mapDecals.stats.instances} albedo instances, ` +
+          `${this.mapDecals.stats.normalInstances} normal instances, ` +
           `${this.mapDecals.stats.textures} texture sets` +
           (this.mapDecals.stats.skippedTypes.size > 0
             ? `, skipped ${[...this.mapDecals.stats.skippedTypes]

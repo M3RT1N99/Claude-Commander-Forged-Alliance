@@ -930,17 +930,19 @@ async function startSandbox(mapFolder: string): Promise<void> {
       const ol = orderLines
       void (async () => {
         const base = 'textures/ui/common/game'
-        const [line, arrow, move, attack, repair] = await Promise.all([
+        const [line, arrow, move, attack, repair, patrol] = await Promise.all([
           loadFirstTexture([`${base}/orderline/orderline_generic.dds`]),
           loadFirstTexture([`${base}/orderline/orderline_arrow04.dds`]),
           loadFirstTexture([`${base}/waypoints/move_btn_up.dds`]),
           loadFirstTexture([`${base}/waypoints/attack_btn_up.dds`]),
           loadFirstTexture([`${base}/waypoints/repair_btn_up.dds`]),
+          loadFirstTexture([`${base}/waypoints/patrol_btn_up.dds`]),
         ])
         const wps = new Map<string, THREE.Texture>()
         if (move) wps.set('move_btn_up', move)
         if (attack) wps.set('attack_btn_up', attack)
         if (repair) wps.set('repair_btn_up', repair)
+        if (patrol) wps.set('patrol_btn_up', patrol)
         ol.setTextures(line, arrow, wps)
       })()
     }
@@ -1495,7 +1497,7 @@ btnPickDir.addEventListener('click', async () => {
   // API), a missing picker must fall back to the <input webkitdirectory>
   // flow instead of erroring out.
   if (typeof window.showDirectoryPicker !== 'function') {
-    log('Hinweis: Dieser Browser/Kontext hat keine File System Access API — Datei-Auswahl öffnet sich stattdessen')
+    log('Note: this browser/context has no File System Access API — opening the file picker instead')
     inputDir.click()
     return
   }
@@ -2189,6 +2191,18 @@ if (import.meta.env.DEV) {
     viewer.rotateAroundTarget(0, dyPixels)
     return 'ok'
   }
+  // Decal diagnosis: albedo/normal instance counts + skipped types (CDP).
+  ;(window as unknown as Record<string, unknown>).__cfaDecals = () => {
+    const s = viewer.decalStats()
+    if (!s) return null
+    return {
+      instances: s.instances,
+      normalInstances: s.normalInstances,
+      textures: s.textures,
+      skipped: [...s.skippedTypes.entries()],
+      missing: s.missing.length,
+    }
+  }
   // Map/prop diagnosis: parsed prop count vs. rendered instances (CDP).
   ;(window as unknown as Record<string, unknown>).__cfaMapInfo = () => ({
     props: currentScmap?.props.length ?? -1,
@@ -2227,7 +2241,7 @@ async function init(): Promise<void> {
   if (location.protocol === 'file:') {
     // Workers, WASM and the File System Access API all need an http(s)
     // origin — a double-clicked dist/index.html can never work.
-    log('FEHLER: Diese Seite läuft nicht per file:// — bitte über einen lokalen Server öffnen (npm run dev bzw. npm run preview)')
+    log('ERROR: this page cannot run from file:// — serve it locally (npm run dev or npm run preview)')
   }
 
   // typeof check, not `in`: a property that exists but is not callable (seen

@@ -5,6 +5,7 @@ import * as THREE from 'three'
 import vertexShader from './shaders/terrain.vert.glsl?raw'
 import fragmentShader from './shaders/terrain.frag.glsl?raw'
 import type { ShadowUniforms } from './shadow'
+import type { NormalBufferUniforms } from './terrainNormals'
 
 export interface TerrainLayerTextures {
   lower: THREE.Texture
@@ -30,6 +31,8 @@ export interface TerrainMaterialOptions {
   terrainShader: string
   /** Shared shadow uniforms (ShadowRenderer.uniforms). */
   shadow: ShadowUniforms
+  /** Shared screen-space normal buffer uniforms (TerrainNormalsPass). */
+  normalBuffer: NormalBufferUniforms
   heightTex: THREE.Texture
   heightScale: number
   hmWidth: number // heightmap samples in x (mapWidth + 1)
@@ -53,7 +56,10 @@ export interface TerrainMaterialOptions {
   }
 }
 
-export function createTerrainMaterial(o: TerrainMaterialOptions): THREE.ShaderMaterial {
+export function createTerrainMaterial(
+  o: TerrainMaterialOptions,
+  variant: 'main' | 'normals' = 'main',
+): THREE.ShaderMaterial {
   const dummy = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1)
   dummy.needsUpdate = true
   // Flat tangent normal (0,0 in the two used channels after *2-1).
@@ -63,9 +69,13 @@ export function createTerrainMaterial(o: TerrainMaterialOptions): THREE.ShaderMa
   // Shader variant per the scmap terrainShader string (terrain.fx):
   // TTerrainXP = 8 strata + XP lighting; TTerrain/TTerrainGlow = 4 strata +
   // CalculateLighting; TTerrainGlow additionally scrolls stratum1.
+  // The 'normals' variant is the deferred normal pass (TerrainNormalsPS/XP):
+  // it writes the blended stratum normal into the screen-space buffer the
+  // main variant reads back (frame.fx BasisPS chunk).
   const defines: Record<string, boolean> = {}
   if (o.terrainShader === 'TTerrainXP') defines.XP = true
-  if (o.terrainShader === 'TTerrainGlow') defines.GLOW = true
+  if (o.terrainShader === 'TTerrainGlow' && variant === 'main') defines.GLOW = true
+  if (variant === 'normals') defines.NORMALS_PASS = true
 
   const normalEnabled = (t: THREE.Texture | null): number => (t ? 1 : 0)
 
@@ -75,6 +85,7 @@ export function createTerrainMaterial(o: TerrainMaterialOptions): THREE.ShaderMa
     defines,
     uniforms: {
       ...o.shadow,
+      ...(variant === 'main' ? o.normalBuffer : {}),
       heightTex: { value: o.heightTex },
       heightScale: { value: o.heightScale },
       // Sample texel centers instead of edges
