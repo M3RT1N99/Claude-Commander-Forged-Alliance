@@ -36,7 +36,7 @@
 export interface ScmBone {
   name: string
   parent: number
-  /** Inverse rest pose, 16 floats */
+  /** Inverse Rest-Pose, 16 floats */
   restPoseInverse: Float32Array
   position: [number, number, number]
   rotation: [number, number, number, number]
@@ -148,7 +148,7 @@ export function parseScm(data: Uint8Array): ScmModel {
     indices[i] = view.getUint16(indexOffset + i * 2, true)
   }
 
-  // --- Info strings ----------------------------------------------------------
+  // --- Info-Strings ----------------------------------------------------------
   const info: string[] = []
   if (infoOffset > 0 && infoOffset + infoCount <= data.byteLength) {
     const raw = new TextDecoder('utf-8').decode(data.subarray(infoOffset, infoOffset + infoCount))

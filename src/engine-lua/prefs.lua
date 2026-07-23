@@ -17,7 +17,7 @@
 -- Without this, `SavePreferences()` was a no-op (`__uiSavePrefs` was never
 -- set): every setting, profile, and option vanished after reloading the page.
 --
--- This file is STANDARD LUA 5.4 (it goes raw into host.eval, not through the
+-- This file is STANDARD-LUA 5.4 (it goes raw into host.eval, not through the
 -- FA transpiler) — `#t` is the length operator here, not a comment.
 -- =====================================================================
 

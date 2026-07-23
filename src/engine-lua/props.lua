@@ -13,7 +13,7 @@
 -- specifies `ScriptClass = 'Wreckage'`, `ScriptModule = '/lua/wreckage.lua'`.
 -- Without blueprint fields, the default applies: /lua/sim/prop.lua, class "Prop".
 --
--- STANDARD LUA 5.4.
+-- STANDARD-LUA 5.4.
 -- =====================================================================
 
 __props = {}

@@ -128,7 +128,7 @@ working on the topic.**
 ```bash
 npm test                                    # all verification suites
 npx tsx --import ./scripts/register-lua.mjs scripts/verify-<x>.ts   # one suite
-npx tsc --noEmit                            # type check
+npx tsc --noEmit                            # Typecheck
 npx tsx scripts/peek-lua.ts --grep <regex>  # search original Lua/Blueprints
 ```
 

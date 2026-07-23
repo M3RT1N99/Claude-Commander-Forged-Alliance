@@ -96,7 +96,7 @@ in CLAUDE.md. Before working on one of the topics: read the relevant section.*
   the state, deviation ⇒ −1 (mixed). Values: 0 = ReturnFire, 1 = HoldFire,
   2 = HoldGround; Ctor startet mit ReturnFire (Cfile:772277).
 
-##Blueprints
+## Blueprints
 
 - **Struct Defaults:** the engine reads a `.bp` into a typed struct whose
   Ctor (`Moho::RUnitBlueprint` @0x51E480) **every field** preassigned
