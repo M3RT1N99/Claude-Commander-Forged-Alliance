@@ -111,6 +111,12 @@ function __issueBuildTask(builderId, targetId, order, clear)
   if not b or not t then return -1 end
   order = order or 'MobileBuild'
   if clear then __clearBuildQueue(builderId) end
+  -- Some callers create the placeholder before the builder is known. Bind the
+  -- site's one target callback at its first builder association, never once
+  -- per helper task (Cfile:950553-950593).
+  if t.__beingBuilt and not t.__startBeingBuilt then
+    __startBuildSite(targetId, builderId, order)
+  end
 
   local tid = __nextBuildTask
   __nextBuildTask = tid + 1
@@ -133,7 +139,6 @@ local function startTask(task, tid)
   -- FactoryUnit.RollOffUnit (defaultunits.lua:570) liest genau dieses Feld.
   b.UnitBeingBuilt = t
   pcall(function() b:OnStartBuild(t, task.order) end)
-  pcall(function() t:OnStartBeingBuilt(b, task.order) end)
 end
 
 --- Pro Beat: der Bauer geht zu seinem aktiven Auftrag und DREHT SICH ZU IHM.
@@ -234,7 +239,9 @@ function __factoryTick()
       local item = q[1]
       local p = f.__pos or { 0, 0, 0 }
       local scriptPath = '/units/' .. item.id .. '/' .. item.id .. '_script.lua'
-      local uid, err = __spawnBuildSite(scriptPath, item.id, p[1], p[2], p[3], f.__army or 1)
+      local uid, err = __spawnBuildSite(
+        scriptPath, item.id, p[1], p[2], p[3], f.__army or 1, id, 'FactoryBuild'
+      )
       if uid < 0 then
         WARN('Fabrik ' .. tostring(id) .. ' kann ' .. tostring(item.id) .. ' nicht bauen: ' .. tostring(err))
         table.remove(q, 1)

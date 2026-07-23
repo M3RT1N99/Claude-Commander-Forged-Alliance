@@ -404,6 +404,106 @@ let sandbox: SandboxController | null = null
 let hud: Hud | null = null
 let gameUi: GameUi | null = null
 
+type UiCameraBridge = (operation: string, ...args: (string | number | boolean)[]) => unknown
+
+function requireCameraNumber(value: string | number | boolean | undefined, label: string): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new Error(`Invalid UI camera ${label}`)
+  }
+  return value
+}
+
+;(globalThis as { __cfaUiCameraBridge?: UiCameraBridge }).__cfaUiCameraBridge = (operation, ...args) => {
+  const camera = args[0]
+  if (operation === 'get') {
+    if (camera !== 'WorldCamera') return undefined
+    const what = args[1]
+    if (typeof what !== 'string') throw new Error('Invalid UI camera getter')
+    return viewer.rtsCameraValue(what)
+  }
+
+  if (operation === 'set') {
+    if (camera !== 'WorldCamera') return undefined
+    const what = args[1]
+    if (typeof what !== 'string') throw new Error('Invalid UI camera setter')
+    const value = args[2]
+    const seconds = args[3] === undefined ? 0 : requireCameraNumber(args[3], 'transition duration')
+    viewer.rtsSetCameraValue(what, typeof value === 'boolean' ? value : requireCameraNumber(value, what), seconds)
+    return undefined
+  }
+
+  // Camera:MoveTo/SnapTo remains outside this verified target-box bridge. It
+  // was already a no-op before the bridge existed, so do not turn it into an
+  // unrelated UI boot failure while preserving the existing behavior.
+  if (operation === 'move') return undefined
+
+  if (camera !== 'WorldCamera') {
+    throw new Error(`UI camera bridge has no rendered camera named ${String(camera)}`)
+  }
+
+  if (operation === 'targetBox') {
+    viewer.rtsTargetBox(
+      requireCameraNumber(args[1], 'minimum X'),
+      requireCameraNumber(args[2], 'minimum Y'),
+      requireCameraNumber(args[3], 'minimum Z'),
+      requireCameraNumber(args[4], 'maximum X'),
+      requireCameraNumber(args[5], 'maximum Y'),
+      requireCameraNumber(args[6], 'maximum Z'),
+      requireCameraNumber(args[7], 'transition duration'),
+    )
+    return undefined
+  }
+
+  if (operation === 'targetEntityBox') {
+    const entityId = requireCameraNumber(args[1], 'entity id')
+    const x = requireCameraNumber(args[2], 'entity X')
+    const y = requireCameraNumber(args[3], 'entity Y')
+    const z = requireCameraNumber(args[4], 'entity Z')
+    const seconds = requireCameraNumber(args[5], 'transition duration')
+    const unit = luaUnits.find((candidate) => candidate.id === entityId)
+    if (unit) {
+      const box = new THREE.Box3().setFromObject(unit.mesh)
+      if (!box.isEmpty()) {
+        // CameraImpl::TargetEntityBox expands only X/Z by cam_EntityBoxExpand = 20
+        // before passing the mesh bounds to TargetBox (Cfile:1150097-1150133).
+        viewer.rtsTargetBox(
+          box.min.x - 20,
+          box.min.y,
+          box.min.z - 20,
+          box.max.x + 20,
+          box.max.y,
+          box.max.z + 20,
+          seconds,
+        )
+        return undefined
+      }
+    }
+    // The UI's UserUnit position is Sim data and exists before asynchronous
+    // mesh loading completes. The same single-unit box used by UIZoomTo keeps
+    // focus functional until TargetEntityBox has render bounds available.
+    viewer.rtsTargetBox(x - 20, y - 20, z - 20, x + 20, y + 20, z + 20, seconds)
+    return undefined
+  }
+
+  if (operation === 'minimapTarget') {
+    const clientX = requireCameraNumber(args[1], 'minimap X')
+    const clientY = requireCameraNumber(args[2], 'minimap Y')
+    const view = gameUi?.worldViews().find(
+      (candidate) =>
+        candidate.miniMap &&
+        clientX >= candidate.left &&
+        clientX < candidate.left + candidate.width &&
+        clientY >= candidate.top &&
+        clientY < candidate.top + candidate.height,
+    )
+    if (!view) throw new Error('Minimap input arrived without a matching rendered WorldView')
+    viewer.rtsTargetFromMinimap(clientX, clientY, view)
+    return undefined
+  }
+
+  throw new Error(`Unsupported UI camera bridge operation ${operation}`)
+}
+
 /**
  * Eine ConVar hat sich geändert (ConExecute in der UI-Lua) — die Engine erfährt
  * es. Kamera und Renderer LESEN diese Werte, genau wie die C++-Seite:
@@ -443,6 +543,7 @@ interface ProjectileAssets {
 }
 const projAssetCache = new Map<string, Promise<ProjectileAssets | null>>()
 const projMeshes = new Map<number, THREE.Mesh>()
+const projBaseScales = new Map<number, number>()
 const projPending = new Set<number>()
 
 function loadProjectileAssets(bpId: string): Promise<ProjectileAssets | null> {
@@ -612,6 +713,7 @@ function updateProjectiles(): void {
           // dann KEIN Geist in der Szene.
           if (!luaSim?.allProjectiles().some((q) => q.id === p.id)) return
           projMeshes.set(p.id, viewer.addProjectile(assets.model, assets.albedo, assets.scale))
+          projBaseScales.set(p.id, assets.scale)
         })
       }
       continue
@@ -619,10 +721,13 @@ function updateProjectiles(): void {
     mesh.position.set(p.x, p.y, p.z)
     // Die Sim liefert (w,x,y,z) — three.js will (x,y,z,w).
     mesh.quaternion.set(p.qx, p.qy, p.qz, p.qw)
+    const baseScale = projBaseScales.get(p.id) ?? 1
+    mesh.scale.set(baseScale * p.sx, baseScale * p.sy, baseScale * p.sz)
   }
   for (const [id, mesh] of projMeshes) {
     if (!seen.has(id)) {
       projMeshes.delete(id)
+      projBaseScales.delete(id)
       viewer.removeProjectile(mesh)
     }
   }
@@ -755,6 +860,9 @@ async function startSandbox(mapFolder: string): Promise<void> {
     setMode('sandbox')
     setIngame(true)
     await loadMap(mapFolder)
+    // The game WorldCamera is an RTS camera. Enable it before the original UI
+    // starts, because gamemain.lua immediately calls UIZoomTo during setup.
+    viewer.setRtsControls(true)
 
     // Läuft schon eine Sim? Dann zurücksetzen, statt eine zweite ACU auf die
     // alte Sitzung zu stapeln (mit doppeltem Startvorrat aus

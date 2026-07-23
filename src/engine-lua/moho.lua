@@ -175,12 +175,31 @@ local entity = withNoops(ENTITY_NAMES, {
   -- (die Waffe reicht ihn separat durch, PassDamageData).
   CreateProjectile = function(self, bpId, ox, oy, oz, dx, dy, dz)
     local p, q = __boneWorld(self, nil)
-    p = { p[1] + (ox or 0), p[2] + (oy or 0), p[3] + (oz or 0) }
-    if dx or dy or dz then
-      local len = math.sqrt((dx or 0) ^ 2 + (dy or 0) ^ 2 + (dz or 0) ^ 2)
-      if len > 0 then
-        q = __orientFromDir({ (dx or 0) / len, (dy or 0) / len, (dz or 0) / len })
-      end
+    local bp = __registered.Projectile[string.lower(tostring(bpId))]
+    if not bp then error('CreateProjectile: Invalid blueprint ' .. tostring(bpId), 2) end
+    local phys = bp.Physics
+    if ox == nil then
+      ox = (phys.PositionX or 0) + (Random() * 2 - 1) * (phys.PositionXRange or 0)
+      oy = (phys.PositionY or 0) + (Random() * 2 - 1) * (phys.PositionYRange or 0)
+      oz = (phys.PositionZ or 0) + (Random() * 2 - 1) * (phys.PositionZRange or 0)
+    elseif type(ox) ~= 'number' or type(oy) ~= 'number' or type(oz) ~= 'number' then
+      -- The native binder pads omitted arguments with nil, then requires all
+      -- three offset components when the first component is present.
+      error('CreateProjectile: offset components must be numbers', 2)
+    end
+    if dx == nil then
+      dx = (phys.DirectionX or 0) + (Random() * 2 - 1) * (phys.DirectionXRange or 0)
+      dy = (phys.DirectionY or 0) + (Random() * 2 - 1) * (phys.DirectionYRange or 0)
+      dz = (phys.DirectionZ or 0) + (Random() * 2 - 1) * (phys.DirectionZRange or 0)
+    elseif type(dx) ~= 'number' or type(dy) ~= 'number' or type(dz) ~= 'number' then
+      -- Position and direction are independently optional, but a supplied
+      -- direction must be a complete three-component vector (Cfile:930715).
+      error('CreateProjectile: direction components must be numbers', 2)
+    end
+    p = { p[1] + ox, p[2] + oy, p[3] + oz }
+    local len = math.sqrt(dx * dx + dy * dy + dz * dz)
+    if len > 0 then
+      q = __orientFromDir({ dx / len, dy / len, dz / len })
     end
     return __projCreate(self, bpId, p, q, nil, 0, 0, 'Normal', nil, true)
   end,
@@ -499,6 +518,12 @@ local weapon = withNoops(WEAPON_NAMES, {
   HasTarget = function(self) return self.__target ~= nil end,
   GetCurrentTarget = function(self) return self.__target end,
   SetEnabled = function(self, e) self.__enabled = e end,
+  SetFireTargetLayerCaps = function(self, caps)
+    if type(caps) ~= 'string' then
+      error('UnitWeapon:SetFireTargetLayerCaps(mask) requires a layer mask string', 2)
+    end
+    self.__fireTargetLayerCaps = caps
+  end,
 
   -- Weapon:CanFire() (Cfile:987703-987735): HasTarget && UnitWeapon::CanFire &&
   -- CheckSilo && Zielloesung verfuegbar. `mCanFire` selbst schreibt NUR der
@@ -647,10 +672,6 @@ local weapon = withNoops(WEAPON_NAMES, {
       self.__damageType or bp.DamageType or 'Normal', self.__target,
       bp.IgnoresAlly ~= false
     )
-    -- LeadTarget kommt von der WAFFE (Struct-Default 1, weapons.md:1001):
-    -- gelenkte Munition haelt dem Ziel vor (UpdateTracking @944470).
-    if proj then proj.__leadTarget = bp.LeadTarget ~= false end
-
     -- Lebensdauer (Cfile:985760ff).
     if proj and not proj.__destroyQueued then
       local life
@@ -1156,11 +1177,18 @@ local projectile = withNoops(PROJECTILE_NAMES, {
   SetVelocityAlign = function(self, on) self.__velocityAlign = on ~= false; return self end,
   SetStayUpright = function(self, on) self.__stayUpright = on ~= false; return self end,
   StayUnderwater = function(self, on) self.__stayUnderwater = on ~= false; return self end,
-  SetScaleVelocity = function(self, s) self.__scaleVel = s; return self end,
+  SetScaleVelocity = function(self, x, y, z)
+    if y == nil then
+      self.__scaleVel = { x, x, x }
+    else
+      self.__scaleVel = { x, y, z }
+    end
+    return self
+  end,
   CreateChildProjectile = function(self, bpId)
-    return __projCreate(self.__launcher, bpId, self.__pos, self.__orient, nil,
+    return __projCreate(self, bpId, self.__pos, self.__orient, nil,
       self.__damage or 0, self.__damageRadius or 0, self.__damageType or 'Normal', self.__target,
-      self.__ignoresAlly)
+      true)
   end,
 }, entity)
 

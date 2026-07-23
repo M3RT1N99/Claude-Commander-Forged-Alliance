@@ -31,6 +31,35 @@
 --- fahren — und die Sim hat sie bis eben sogar an den Klickpunkt teleportiert
 --- (motion.lua). Die Engine hat dafuer eine eigene Bindung:
 --- `IssueFactoryRallyPoint(units, pos)` (sim_SimInits, Cfile:1008266).
+local COMMAND_CAP_BITS = {
+  RULEUCC_Move = 0x1,
+  RULEUCC_Attack = 0x4,
+  RULEUCC_Guard = 0x8,
+  RULEUCC_Repair = 0x40,
+}
+
+local function blueprintCommandCapMask(bp)
+  local mask = 0
+  local caps = bp.General and bp.General.CommandCaps
+  for cap, bit in pairs(COMMAND_CAP_BITS) do
+    if caps and caps[cap] == true then mask = mask | bit end
+  end
+  return mask
+end
+
+-- The UI mirror keeps the same mutable UnitAttributes command-cap mask as the
+-- Sim. A blueprint initializes a new mirror once; subsequent synchronization
+-- or cap mutations replace this field without changing the blueprint.
+local function uiCommandCapMask(u, bp)
+  if u.__commandCapMask == nil then u.__commandCapMask = blueprintCommandCapMask(bp) end
+  return u.__commandCapMask
+end
+
+local function hasCommandCap(mask, cap)
+  local bit = COMMAND_CAP_BITS[cap]
+  return bit ~= nil and (mask & bit) == bit
+end
+
 function __uiSelectionJson()
   local sel = GetSelectedUnits()
   if not sel then return '[]' end
@@ -41,13 +70,13 @@ function __uiSelectionJson()
     -- (uel0001_unit.bp:787, und ui-globals.lua:433 liest sie genauso). Wer sie
     -- auf der obersten Ebene sucht, bekommt nil — und dann kann keine Einheit
     -- mehr laufen, weil `canMove` immer false ist. Genau so passiert.
-    local caps = (bp.General and bp.General.CommandCaps) or {}
+    local commandCapMask = uiCommandCapMask(u, bp)
     -- Und der zweite Teil: eine FABRIK hat RULEUCC_Move in ihren CommandCaps —
     -- genau deshalb setzt ein Move-Befehl auf sie im Original den SAMMELPUNKT.
     -- Wer wirklich fahren kann, entscheidet die PHYSIK: `MotionType`. Eine Unit
     -- mit RULEUMT_None hat keinen Antrieb (und in der Sim keinen Navigator).
     local immobile = bp.Physics.MotionType == 'RULEUMT_None'
-    local canMove = caps.RULEUCC_Move == true and not immobile
+    local canMove = hasCommandCap(commandCapMask, 'RULEUCC_Move') and not immobile
     -- FACTORY steht in den Categories des Blueprints (ueb0101_unit.bp) — dieselbe
     -- Liste, aus der das Kategorie-System seine Ausdruecke baut.
     local isFactory = false
@@ -57,11 +86,29 @@ function __uiSelectionJson()
     -- RULEUCC_Repair: a right-click on an own unfinished structure resumes
     -- the build through the repair task (dispatch 0x14) — only units with
     -- the cap get the order.
-    local canRepair = caps.RULEUCC_Repair == true
+    local canRepair = hasCommandCap(commandCapMask, 'RULEUCC_Repair')
+    -- IssueAttack filters by RULEUCC_Attack before creating a command
+    -- (Cfile:1009211). The attack task then requires an attacker weapon that
+    -- can accept the target (Cfile:813212). The UI has the blueprint view, so
+    -- it can reject selections with no possible weapon before crossing to Sim.
+    local canAttack = false
+    local canAttackGround = false
+    if hasCommandCap(commandCapMask, 'RULEUCC_Attack') then
+      for _, weapon in ipairs(bp.Weapon or {}) do
+        canAttack = true
+        if not weapon.CannotAttackGround then canAttackGround = true end
+      end
+    end
+    -- Entity guard is target-dependent: compatible stationary factories remain
+    -- eligible, while the caller filters point guard through canMove.
+    local canGuard = hasCommandCap(commandCapMask, 'RULEUCC_Guard')
     parts[i] = '{"id":' .. tostring(u:GetEntityId())
       .. ',"army":' .. tostring(u:GetArmy())
       .. ',"canMove":' .. tostring(canMove)
       .. ',"canRepair":' .. tostring(canRepair)
+      .. ',"canAttack":' .. tostring(canAttack)
+      .. ',"canAttackGround":' .. tostring(canAttackGround)
+      .. ',"canGuard":' .. tostring(canGuard)
       .. ',"isFactory":' .. tostring(isFactory)
       .. '}'
   end

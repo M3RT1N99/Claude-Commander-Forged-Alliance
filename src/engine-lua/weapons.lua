@@ -18,6 +18,8 @@
 -- STANDARD-LUA 5.4.
 -- =====================================================================
 
+local canTarget, canTargetGround
+
 --- Das Ziel einer Waffe setzen (Moho::UnitWeapon::SetTarget, Cfile:985364-985494).
 ---
 --- Die Callbacks haengen an der FLANKE, nicht am Aufruf:
@@ -26,6 +28,10 @@
 --- Beides auf der WAFFE. Wer OnGotTarget bei jedem Tick feuert, startet die
 --- Salven-FSM in jedem Tick neu — die Waffe kaeme nie zum Schuss.
 function __weaponSetTarget(w, target, groundPos)
+  -- The native target setters leave the current target unchanged when a new
+  -- target fails CanAttackTarget (UnitWeapon.cpp:1073-1093).
+  if target and not canTarget(w, w.__unit, target) then return false end
+  if groundPos and not canTargetGround(w, groundPos) then return false end
   local had = (w.__target ~= nil) or (w.__targetGround ~= nil)
   local has = (target ~= nil) or (groundPos ~= nil)
 
@@ -44,6 +50,7 @@ function __weaponSetTarget(w, target, groundPos)
       if not ok then WARN('OnLostTarget: ' .. tostring(err)) end
     end
   end
+  return true
 end
 
 --- DoInstaHit (Cfile:987034): eine Waffe ohne ProjectileId trifft SOFORT.
@@ -76,11 +83,45 @@ end
 -- Aufklaerung; wir nehmen alle lebenden Einheiten der Feind-Armee im Radius. Das
 -- ist eine bewusste Abweichung, kein Nachbau (combat-projectiles.md §9).
 -- ---------------------------------------------------------------------
-local function canTarget(w, u, target)
+local function layerMaskContains(mask, layer)
+  if type(mask) ~= 'string' then return false end
+  for entry in string.gmatch(mask, '[^|]+') do
+    if entry == layer then return true end
+  end
+  return false
+end
+
+canTarget = function(w, u, target)
+  if not u or not target then return false end
   if target.__destroyQueued or target.__dead then return false end
-  if target.__army == u.__army then return false end
-  if target.__beingBuilt then return false end
+  -- Commanded fire must reject allies, while a Neutral target remains valid.
+  -- Autonomous acquisition below separately limits itself to enemies.
+  if IsAlly(u.__army, target.__army) then return false end
+
+  local bp = w.__bp or {}
+  if bp.IgnoreIfDisabled and w.__enabled == false then return false end
+
+  local layer = target.__layer or target.Layer or 'Land'
+  if not layerMaskContains(w.__fireTargetLayerCaps, layer) then return false end
+
+  if bp.TargetRestrictOnlyAllow and bp.TargetRestrictOnlyAllow ~= ''
+    and not EntityCategoryContains(bp.TargetRestrictOnlyAllow, target) then
+    return false
+  end
+  if bp.TargetRestrictDisallow and bp.TargetRestrictDisallow ~= ''
+    and EntityCategoryContains(bp.TargetRestrictDisallow, target) then
+    return false
+  end
   return true
+end
+
+canTargetGround = function(w, _)
+  local bp = w.__bp or {}
+  if bp.CannotAttackGround then return false end
+  -- This simulation has no water-layer state for map positions yet. Its
+  -- current map model is therefore the native no-water branch, where every
+  -- valid ground target uses LAYER_Land (UnitWeapon.cpp:3391-3408).
+  return layerMaskContains(w.__fireTargetLayerCaps, 'Land')
 end
 
 local function acquireTarget(w, u)
@@ -106,7 +147,7 @@ local function acquireTarget(w, u)
       -- Ground attack order: the position IS the target (AITARGET_Ground).
       -- CannotAttackGround weapons never take it (fire gate Cfile:983950,
       -- weapons.md:70) and keep searching freely.
-      if not bp.CannotAttackGround then
+      if canTargetGround(w, forcedId) then
         local p = u.__pos
         local dx, dz = forcedId[1] - p[1], forcedId[3] - p[3]
         if dx * dx + dz * dz <= radius * radius then
@@ -138,7 +179,7 @@ local function acquireTarget(w, u)
 
   local best, bestDist = nil, radius * radius
   for _, other in pairs(__units) do
-    if canTarget(w, u, other) then
+    if IsEnemy(u.__army, other.__army) and canTarget(w, u, other) then
       local p, q = u.__pos, other.__pos
       local dx, dz = q[1] - p[1], q[3] - p[3]
       local d2 = dx * dx + dz * dz
@@ -251,7 +292,7 @@ local function fireTick(w, u)
   -- (TargetIsTooClose, Cfile:983942).
   local t = w.__target
   if t then
-    if t.__destroyQueued or t.__dead then
+    if not canTarget(w, u, t) then
       __weaponSetTarget(w, nil, nil)
       return
     end
@@ -266,7 +307,10 @@ local function fireTick(w, u)
     -- The fire clock's ground gate (weapons.md:70): CannotAttackGround
     -- weapons never fire at an AITARGET_Ground target; same range window
     -- as entity targets otherwise.
-    if bp.CannotAttackGround then return end
+    if not canTargetGround(w, w.__targetGround) then
+      __weaponSetTarget(w, nil, nil)
+      return
+    end
     local p, q = u.__pos, w.__targetGround
     local dx, dz = q[1] - p[1], q[3] - p[3]
     local d2 = dx * dx + dz * dz

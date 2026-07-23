@@ -67,6 +67,12 @@ export interface SelectedUnit {
   canMove: boolean
   /** RULEUCC_Repair — darf Bauten weiterbauen (repair task, dispatch 0x14). */
   canRepair: boolean
+  /** RULEUCC_Attack plus at least one attacker weapon. */
+  canAttack: boolean
+  /** At least one attacker weapon accepts a ground target. */
+  canAttackGround: boolean
+  /** RULEUCC_Guard, excluding stationary factories. */
+  canGuard: boolean
   /** Kategorie FACTORY — sie bekommt einen Sammelpunkt statt eines Move-Befehls. */
   isFactory: boolean
 }
@@ -143,10 +149,16 @@ export async function worldClick(
   if (cm.mode === 'order' && cm.name === 'RULEUCC_Attack') {
     let n = 0
     for (const u of selection) {
-      if (opts.enemyTargetId === undefined) sim.attackGround(u.id, hit.x, hit.z, opts.queue)
-      else sim.attack(u.id, opts.enemyTargetId, opts.queue)
+      if (opts.enemyTargetId === undefined) {
+        if (!u.canAttackGround) continue
+        sim.attackGround(u.id, hit.x, hit.z, opts.queue)
+      } else {
+        if (!u.canAttack) continue
+        sim.attack(u.id, opts.enemyTargetId, opts.queue)
+      }
       n++
     }
+    if (n === 0) return null
     onCommandIssued(host, {
       CommandType: 'Attack',
       Position: { x: hit.x, y: elevation(hit.x, hit.z), z: hit.z },
@@ -167,11 +179,12 @@ export async function worldClick(
     if (target !== undefined) {
       let n = 0
       for (const u of selection) {
-        if (u.id !== target) {
+        if (u.canGuard && u.id !== target) {
           sim.guard(u.id, target, opts.queue)
           n++
         }
       }
+      if (n === 0) return null
       onCommandIssued(host, {
         CommandType: 'Guard',
         Position: { x: hit.x, y: elevation(hit.x, hit.z), z: hit.z },
@@ -179,7 +192,14 @@ export async function worldClick(
       })
       return `Guard (${n}) → Unit ${target}`
     }
-    for (const u of selection) sim.move(u.id, hit.x, hit.z, opts.queue)
+    let moved = 0
+    for (const u of selection) {
+      if (u.canGuard && u.canMove) {
+        sim.move(u.id, hit.x, hit.z, opts.queue)
+        moved++
+      }
+    }
+    if (moved === 0) return null
     onCommandIssued(host, {
       CommandType: 'Guard',
       Position: { x: hit.x, y: elevation(hit.x, hit.z), z: hit.z },
@@ -230,9 +250,11 @@ export async function worldClick(
   if (opts.enemyTargetId !== undefined) {
     let n = 0
     for (const u of selection) {
+      if (!u.canAttack) continue
       sim.attack(u.id, opts.enemyTargetId, opts.queue)
       n++
     }
+    if (n === 0) return null
     onCommandIssued(host, {
       CommandType: 'Attack',
       Position: { x: hit.x, y, z: hit.z },
@@ -265,7 +287,7 @@ export async function worldClick(
   if (opts.ownTargetId !== undefined) {
     let n = 0
     for (const u of selection) {
-      if (u.id !== opts.ownTargetId) {
+      if (u.canGuard && u.id !== opts.ownTargetId) {
         sim.guard(u.id, opts.ownTargetId, opts.queue)
         n++
       }

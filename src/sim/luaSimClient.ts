@@ -66,6 +66,10 @@ export interface LuaProjectileSnapshot {
   qx: number
   qy: number
   qz: number
+  /** Runtime transform scale from Projectile::MotionTick. */
+  sx: number
+  sy: number
+  sz: number
 }
 
 /**

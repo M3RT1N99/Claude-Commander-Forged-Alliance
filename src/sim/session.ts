@@ -26,6 +26,8 @@ export interface SessionArmy {
   /** 1 = UEF, 2 = Aeon, 3 = Cybran, 4 = Seraphim. */
   faction: number
   human: boolean
+  /** 1-based command-source indices allowed to issue orders for this army. */
+  authorizedCommandSources?: number[]
   /** Start resources are NOT set here — the ACU grants them via GiveInitialResources. */
   start?: { x: number; z: number }
 }

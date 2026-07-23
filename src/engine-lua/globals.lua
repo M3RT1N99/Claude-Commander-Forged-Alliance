@@ -799,6 +799,195 @@ local function __abortActive(unitId)
   u:GetNavigator():AbortMove()
 end
 
+-- UnitAttributes::commandCapsMask is mutable. The blueprint initializes that
+-- mask once, while Unit:AddCommandCap and Unit:RemoveCommandCap subsequently
+-- modify the unit instance (faf-re Unit.cpp:8675-8813).
+local COMMAND_CAP_BITS = {
+  RULEUCC_Move = 0x1,
+  RULEUCC_Stop = 0x2,
+  RULEUCC_Attack = 0x4,
+  RULEUCC_Guard = 0x8,
+  RULEUCC_Patrol = 0x10,
+  RULEUCC_RetaliateToggle = 0x20,
+  RULEUCC_Repair = 0x40,
+  RULEUCC_Capture = 0x80,
+  RULEUCC_Transport = 0x100,
+  RULEUCC_CallTransport = 0x200,
+  RULEUCC_Nuke = 0x400,
+  RULEUCC_Tactical = 0x800,
+  RULEUCC_Teleport = 0x1000,
+  RULEUCC_Ferry = 0x2000,
+  RULEUCC_SiloBuildTactical = 0x4000,
+  RULEUCC_SiloBuildNuke = 0x8000,
+  RULEUCC_Sacrifice = 0x10000,
+  RULEUCC_Pause = 0x20000,
+  RULEUCC_Overcharge = 0x40000,
+  RULEUCC_Dive = 0x80000,
+  RULEUCC_Reclaim = 0x100000,
+  RULEUCC_SpecialAction = 0x200000,
+  RULEUCC_Dock = 0x400000,
+  RULEUCC_Script = 0x800000,
+}
+
+local function commandCapBit(cap)
+  if type(cap) == 'number' then return cap end
+  return COMMAND_CAP_BITS[cap] or 0
+end
+
+local function blueprintCommandCapMask(bp)
+  local mask = 0
+  local caps = bp and bp.General and bp.General.CommandCaps
+  for cap, bit in pairs(COMMAND_CAP_BITS) do
+    if caps and caps[cap] == true then mask = mask | bit end
+  end
+  return mask
+end
+
+-- The moho bindings mutate this state; keeping the implementation here makes
+-- command dispatch observe the exact same instance mask. The bindings are
+-- installed on the live unit instead of the blueprint-derived class so all
+-- existing derived Unit classes retain their copied method table.
+function __ensureCommandCapMask(u)
+  if not u then return 0 end
+  if u.__commandCapMask == nil then
+    u.__commandCapMask = blueprintCommandCapMask(u.__bp)
+  end
+  if not u.__commandCapBindingsInstalled then
+    u.__commandCapBindingsInstalled = true
+    u.AddCommandCap = function(self, cap)
+      local bit = commandCapBit(cap)
+      if bit ~= 0 then self.__commandCapMask = __ensureCommandCapMask(self) | bit end
+    end
+    u.RemoveCommandCap = function(self, cap)
+      local bit = commandCapBit(cap)
+      if bit ~= 0 then self.__commandCapMask = __ensureCommandCapMask(self) & ~bit end
+    end
+    u.RestoreCommandCaps = function(self)
+      self.__commandCapMask = blueprintCommandCapMask(self.__bp)
+    end
+    u.TestCommandCaps = function(self, cap)
+      local bit = commandCapBit(cap)
+      return bit ~= 0 and (__ensureCommandCapMask(self) & bit) == bit
+    end
+  end
+  return u.__commandCapMask
+end
+
+local function hasCommandCap(u, cap)
+  local bit = commandCapBit(cap)
+  return bit ~= 0 and (__ensureCommandCapMask(u) & bit) == bit
+end
+
+local function isFactory(u)
+  local bp = u and u.__bp
+  for _, category in ipairs((bp and bp.Categories) or {}) do
+    if category == 'FACTORY' then return true end
+  end
+  return false
+end
+
+local function isMobile(u)
+  local bp = u and u.__bp
+  return u and not u.__immobile and bp and bp.Physics and bp.Physics.MotionType ~= 'RULEUMT_None'
+end
+
+-- CAiAttackerImpl::CanAttackTarget leaves per-weapon layer/category checks to
+-- UnitWeapon::CanAttackTarget (weapons.lua). Dispatch only rejects orders that
+-- cannot ever execute: an invalid source, an allied/dead entity, or no weapon
+-- capable of entity/ground attack (faf-re CAiAttackerImpl.cpp:879-893).
+local function canAttackTarget(u, target)
+  if not u or u.__destroyed or u.__dead or u.__beingBuilt or not hasCommandCap(u, 'RULEUCC_Attack') then
+    return false
+  end
+  if target and (target.__destroyed or target.__dead or IsAlly(u.__army, target.__army)) then
+    return false
+  end
+  for _, weapon in ipairs(u.__weapons or {}) do
+    local bp = weapon.__bp or {}
+    if not weapon.__destroyed and (target or not bp.CannotAttackGround) then return true end
+  end
+  return false
+end
+
+local function categoryTermsMatch(terms, targetCategories)
+  if terms == nil then return false end
+  if type(terms) == 'string' or (type(terms) == 'table' and terms.__cat) then
+    return catTest(ParseEntityCategory(terms), targetCategories)
+  end
+  for _, term in ipairs(terms) do
+    if catTest(ParseEntityCategory(term), targetCategories) then return true end
+  end
+  return false
+end
+
+local function appendCategoryTerm(terms, category)
+  if category == nil then return end
+  for _, existing in ipairs(terms) do
+    if existing == category then return end
+  end
+  terms[table.getn(terms) + 1] = category
+end
+
+local function removeCategoryTerm(terms, category)
+  for i, existing in ipairs(terms) do
+    if existing == category then table.remove(terms, i); return end
+  end
+end
+
+-- CArmyImpl stores army restrictions as an inverted build-allow filter. The
+-- equivalent port state is a category deny-list; it has the same CanBuild
+-- result and is changed by the original global Lua bindings.
+__armyBuildRestrictions = {}
+function AddBuildRestriction(army, category)
+  local restrictions = __armyBuildRestrictions[army]
+  if not restrictions then restrictions = {}; __armyBuildRestrictions[army] = restrictions end
+  appendCategoryTerm(restrictions, category)
+end
+
+function RemoveBuildRestriction(army, category)
+  local restrictions = __armyBuildRestrictions[army]
+  if restrictions then removeCategoryTerm(restrictions, category) end
+end
+
+-- Unit::CanBuild checks the army filter, the builder blueprint cache, then the
+-- per-unit restriction cache in that order (faf-re Unit.cpp:12386-12398).
+local function canBuildBlueprint(u, bp)
+  if not u or not bp then return false end
+  local targetCategories = bpCategorySet(bp)
+  if categoryTermsMatch(__armyBuildRestrictions[u.__army], targetCategories) then return false end
+  local builderCategories = u.__bp and u.__bp.Economy and u.__bp.Economy.BuildableCategory
+  if not categoryTermsMatch(builderCategories, targetCategories) then return false end
+  return not categoryTermsMatch(u.__buildRestrictions, targetCategories)
+end
+
+local function factoryBuildCategoriesIntersect(a, b)
+  local aCategories = a.__bp and a.__bp.Economy and a.__bp.Economy.BuildableCategory
+  local bCategories = b.__bp and b.__bp.Economy and b.__bp.Economy.BuildableCategory
+  if not aCategories or not bCategories then return false end
+  for _, bp in pairs((__registered and __registered.Unit) or {}) do
+    local targetCategories = bpCategorySet(bp)
+    if categoryTermsMatch(aCategories, targetCategories) and categoryTermsMatch(bCategories, targetCategories) then
+      return true
+    end
+  end
+  return false
+end
+
+-- Sim::ValidateUnitCommand applies Guard rules after it resolves the target
+-- (faf-re Sim.cpp:5580-5611). Entity guard can be valid for an immobile
+-- factory; point guard requires a mobile source.
+local function canGuardTarget(u, target)
+  if not u or u.__destroyed or u.__dead or not hasCommandCap(u, 'RULEUCC_Guard') then return false end
+  if not target then return isMobile(u) end
+  if target.__destroyed or target.__dead or target == u then return false end
+  if not isMobile(u) and not isMobile(target) and isFactory(u) and isFactory(target)
+    and not factoryBuildCategoriesIntersect(u, target) then
+    return false
+  end
+  if isFactory(u) and not isFactory(target) then return false end
+  return target.__guardedUnit ~= u.__id
+end
+
 --- Start one command through the existing single-order mechanisms.
 local function __startOrder(unitId, cmd)
   local u = __units[unitId]
@@ -812,11 +1001,12 @@ local function __startOrder(unitId, cmd)
       -- CAiTarget::HasTarget returns true for Ground (Cfile:800284) and
       -- NoTarget stays false without an entity (Cfile:800519) — the order
       -- never completes on its own (task sleeps in TASKSTATE_Complete).
+      if not canAttackTarget(u, nil) then return false end
       __attackOrders[unitId] = { cmd.gx, GetSurfaceHeight(cmd.gx, cmd.gz), cmd.gz }
       return true
     end
     local t = __units[cmd.target]
-    if not t or t.__destroyed then return false end
+    if not canAttackTarget(u, t) then return false end
     __attackOrders[unitId] = cmd.target
     return true
   elseif cmd.type == 'Repair' then
@@ -922,7 +1112,11 @@ end
 --- Task-Tick faehrt in Waffenreichweite und die Zielerfassung bevorzugt
 --- das Befehlsziel (weapons.lua).
 function __dispatchAttack(unitId, targetId, clear)
-  __issueOrder(unitId, { type = 'Attack', target = targetId }, clear)
+  local u = __units[unitId]
+  local target = __units[targetId]
+  if canAttackTarget(u, target) then
+    __issueOrder(unitId, { type = 'Attack', target = targetId }, clear)
+  end
 end
 
 --- Ground attack (dispatch 0x0A with a position target): the CAiTarget
@@ -934,7 +1128,10 @@ end
 --- order runs until replaced (queue ring rotation with follow-up commands
 --- is a named gap).
 function __dispatchAttackGround(unitId, x, z, clear)
-  __issueOrder(unitId, { type = 'Attack', gx = x, gz = z }, clear)
+  local u = __units[unitId]
+  if canAttackTarget(u, nil) then
+    __issueOrder(unitId, { type = 'Attack', gx = x, gz = z }, clear)
+  end
 end
 
 --- Repair (dispatch 0x14, CUnitRepairTask): the SAME CBuildTaskHelper as
@@ -1033,7 +1230,7 @@ end
 function __guardStart(unitId, targetId)
   local u = __units[unitId]
   local t = __units[targetId]
-  if not u or not t or t.__destroyed or targetId == unitId then return false end
+  if not canGuardTarget(u, t) then return false end
   __guardOrders[unitId] = { target = targetId, mode = guardMode(u, t), clock = 0 }
   u.__guardedUnit = targetId
   return true
@@ -1057,14 +1254,22 @@ local function guardProcess(unitId, u, g, t)
     if own and own[1] then return end
     local q = t.__buildQueue
     if not q then return end
-    local from = nil
-    if q[1] and (q[1].count or 1) > 1 then from = 1
-    elseif q[2] then from = 2 end
+    local from, bpId = nil, nil
+    -- CUnitGuardTask scans every eligible BuildFactory command and only
+    -- removes/decrements one after Unit::CanBuild has accepted its blueprint
+    -- (Cfile:837988-838049; faf-re CUnitGuardTask.cpp:1018-1047).
+    for i, queued in ipairs(q) do
+      local count = queued.count or 1
+      if i > 1 or count > 1 then
+        local candidateId = queued.id
+        local bp = __registered and __registered.Unit and __registered.Unit[string.lower(candidateId)]
+        if canBuildBlueprint(u, bp) then
+          from, bpId = i, candidateId
+          break
+        end
+      end
+    end
     if not from then return end
-    local bpId = q[from].id
-    -- CanBuild check (Cfile:838020): the puller must be able to build it.
-    local bp = __registered and __registered.Unit and __registered.Unit[string.lower(bpId)]
-    if not bp then return end
     if (q[from].count or 1) > 1 then
       q[from].count = q[from].count - 1
     else
@@ -1158,7 +1363,11 @@ end
 --- guard state machine per beat. Guarding yourself is refused like a
 --- missing target (dispatch falls back to Stop, Cfile:830638-830650).
 function __dispatchGuard(unitId, targetId, clear)
-  __issueOrder(unitId, { type = 'Guard', target = targetId }, clear)
+  local u = __units[unitId]
+  local target = __units[targetId]
+  if canGuardTarget(u, target) then
+    __issueOrder(unitId, { type = 'Guard', target = targetId }, clear)
+  end
 end
 
 -- FlattenMapRect(x, z, w, h, y): Gebaeude planieren ihr Baufeld

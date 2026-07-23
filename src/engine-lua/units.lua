@@ -62,6 +62,9 @@ function __createWeapons(u, bp)
     w.__index = i
     w.__army = u.__army
     w.__enabled = true
+    -- UnitWeapon starts with no valid target layers. Weapon.OnCreate selects
+    -- the blueprint mask for the unit's current layer.
+    w.__fireTargetLayerCaps = 'None'
     u.__weapons[i] = w
 
     -- Und dann ruft die Engine OnCreate — genau wie auf der Unit selbst.
@@ -99,6 +102,11 @@ function __spawnUnit(scriptPath, bpId, x, y, z, army, complete)
   u.__army = army
   u.__brain = __getBrain(army)
   u.__pos = { x, y, z }
+  -- The native unit supplies this legacy field before Weapon.OnCreate, which
+  -- uses it to select FireTargetLayerCapsTable[unit.Layer]. Air blueprints
+  -- begin in the Air layer; all other motion types start in this model's
+  -- existing Land layer until layer transitions are simulated.
+  u.Layer = ((bp.Physics or {}).MotionType == 'RULEUMT_Air') and 'Air' or 'Land'
   -- Das Skelett aus dem Modell (siehe __setBones). Es muss VOR OnCreate stehen:
   -- die Waffen pruefen ihre Turm-Knochen beim Aufbau (weapon.lua:67).
   u.__bones = __unitBones[string.lower(bpId)] or { names = {}, xform = {}, index = {} }
@@ -171,7 +179,7 @@ end
 -- Baustelle: wie __spawnUnit, aber UNFERTIG (FractionComplete 0, Health 0,
 -- IsBeingBuilt) — ohne OnStopBeingBuilt. Produktion/Unterhalt bleiben inaktiv
 -- bis zur Fertigstellung.
-function __spawnBuildSite(scriptPath, bpId, x, y, z, army)
+function __spawnBuildSite(scriptPath, bpId, x, y, z, army, builderId, order)
   local id, err = __spawnUnit(scriptPath, bpId, x, y, z, army, false)
   if id < 0 then return id, err end
   local u = __units[id]
@@ -179,7 +187,19 @@ function __spawnBuildSite(scriptPath, bpId, x, y, z, army)
   u.__health = 0
   u.__beingBuilt = true
   __econSetComplete(army, id, false)
+  if builderId then __startBuildSite(id, builderId, order) end
   return id, err
+end
+
+--- Unit::Materialize calls the target callback once when the construction site
+--- is created (Cfile:950553-950593). Later helpers receive only OnStartBuild.
+function __startBuildSite(id, builderId, order)
+  local u = __units[id]
+  local builder = __units[builderId]
+  if not u or not builder or u.__startBeingBuilt then return false end
+  u.__startBeingBuilt = true
+  pcall(function() u:OnStartBeingBuilt(builder, order or 'MobileBuild') end)
+  return true
 end
 
 -- Fertigstellung einer Baustelle: die Engine setzt den Zustand und ruft dann

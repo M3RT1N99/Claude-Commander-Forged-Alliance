@@ -84,27 +84,59 @@ function __uiCameraMove(name, pos, hpr, zoom, seconds)
   __uiCameraBridge('move', name, pos, hpr, zoom, seconds)
 end
 
+-- CameraImpl::TargetBox takes an axis-aligned 3D box. Keep the bridge scalar:
+-- Wasmoon passes JS arrays/objects as userdata rather than Lua tables.
+function __uiCameraTargetBox(name, minX, minY, minZ, maxX, maxY, maxZ, seconds)
+  if not __uiCameraBridge then return end
+  __uiCameraBridge('targetBox', name, minX, minY, minZ, maxX, maxY, maxZ, seconds or 0)
+end
+
+function __uiCameraTargetEntity(name, entityId, x, y, z, seconds)
+  if not __uiCameraBridge then return end
+  __uiCameraBridge('targetEntityBox', name, entityId, x, y, z, seconds or 0)
+end
+
 --- "UIZoomTo(units,[seconds])" (Cfile:1292715): die Hauptkamera faehrt auf die
 --- Mitte der gegebenen Einheiten. gamemain.OnFirstUpdate zoomt so beim Start
 --- auf die ACU; die Avatar-Icons springen damit zu ihrer Einheit.
 function UIZoomTo(units, seconds)
-  local n, cx, cy, cz = 0, 0, 0, 0
+  local n, minX, minZ = 0, math.huge, math.huge
+  local maxX, maxZ, sumY = -math.huge, -math.huge, 0
   for _, u in ipairs(units or {}) do
     local p = u.GetPosition and u:GetPosition()
     if p then
-      cx, cy, cz = cx + (p[1] or 0), cy + (p[2] or 0), cz + (p[3] or 0)
+      local x, y, z = p[1] or 0, p[2] or 0, p[3] or 0
+      minX, minZ = math.min(minX, x), math.min(minZ, z)
+      maxX, maxZ = math.max(maxX, x), math.max(maxZ, z)
+      sumY = sumY + y
       n = n + 1
     end
   end
   if n == 0 then return end
-  __uiCameraMove('WorldCamera', { cx / n, cy / n, cz / n }, nil, nil, seconds)
+  -- cfunc_UIZoomToL (Cfile:1292815-1292844): square the X/Z extent around
+  -- the average height and expand every side by cam_EntityBoxExpand (20).
+  local half = math.max(maxX - minX, maxZ - minZ) * 0.5
+  local avgY = sumY / n
+  __uiCameraTargetBox(
+    'WorldCamera',
+    minX - 20, avgY - half - 20, minZ - 20,
+    maxX + 20, avgY + half + 20, maxZ + 20,
+    seconds
+  )
 end
 
 --- avatars.lua:42 springt damit per Klick zum naechsten leerlaufenden Ingenieur.
 function UISelectAndZoomTo(unit, seconds)
   if not unit then return end
   SelectUnits({ unit })
-  UIZoomTo({ unit }, seconds)
+  -- The native binding selects first, then CameraImpl::TargetEntityBox on the
+  -- concrete WorldCamera (Cfile:1292638-1292679), not UIZoomTo's point box.
+  local p = unit:GetPosition()
+  __uiCameraTargetEntity(
+    'WorldCamera', unit:GetEntityId(),
+    p[1] or p.x or 0, p[2] or p.y or 0, p[3] or p.z or 0,
+    seconds
+  )
 end
 
 -- GetCursor() (Cfile:1274426) — das aktuelle Cursor-Objekt. uimain.lua:23 setzt
@@ -827,6 +859,7 @@ function IsNeutral(a, b)
 end
 
 function GetArmiesTable()
+  if not __uiScenarioInfo then error('No session started.', 2) end
   return {
     armiesTable = __uiArmies,
     focusArmy = __uiFocusArmy,
@@ -835,10 +868,15 @@ function GetArmiesTable()
 end
 
 function GetFocusArmy()
+  if not __uiScenarioInfo then error('No session started.', 2) end
   return __uiFocusArmy
 end
 
 function SetFocusArmy(index)
+  if not __uiScenarioInfo then error('No session started.', 2) end
+  if index ~= -1 and (type(index) ~= 'number' or index < 1 or not __uiArmies[index]) then
+    error('Invalid army index.', 2)
+  end
   __uiFocusArmy = index
 end
 
@@ -900,7 +938,7 @@ function __uiSessionAddArmy(index, name, nickname, faction, human)
     civilian = false,
     human = human == true,
     outOfGame = false,
-    authorizedCommandSources = { 1 },
+    authorizedCommandSources = {},
   }
   __uiScenarioInfo.ArmySetup[name] = {
     ArmyIndex = index,
@@ -920,6 +958,15 @@ function __uiSessionSetCommandSources(name, localIndex)
   __uiLocalCommandSource = localIndex or 0
 end
 
+function __uiSessionAuthorizeCommandSource(armyIndex, sourceIndex)
+  local army = __uiArmies[armyIndex]
+  if not army then error('Invalid army ' .. tostring(armyIndex), 2) end
+  if type(sourceIndex) ~= 'number' or sourceIndex < 1 then
+    error('Invalid command source ' .. tostring(sourceIndex), 2)
+  end
+  table.insert(army.authorizedCommandSources, sourceIndex)
+end
+
 --- Welche Armee der Spieler sieht (1-basiert; -1 = Beobachter).
 function __uiSessionSetFocusArmy(index)
   __uiFocusArmy = index or 1
@@ -930,10 +977,12 @@ function __uiSessionSetOption(key, value)
 end
 
 function SessionGetScenarioInfo()
-  return __uiScenarioInfo or nil
+  if not __uiScenarioInfo then error('SessionGetScenarioInfo(): no active session.', 2) end
+  return __uiScenarioInfo
 end
 
 function SessionIsPaused()
+  if not __uiScenarioInfo then error('SessionIsPaused(): no active session.', 2) end
   return __uiSessionPaused == true
 end
 
@@ -988,7 +1037,8 @@ end
 __uiRestartSink = false
 
 function SessionCanRestart()
-  return __uiScenarioInfo ~= false and __uiRestartSink ~= false
+  if not __uiScenarioInfo then error('SessionCanRestart(): no active session.', 2) end
+  return __uiRestartSink ~= false
 end
 
 function RestartSession()
@@ -1134,10 +1184,12 @@ function FlushEvents() end
 
 --- "Return true iff the active session is a replay session." — wir spielen live.
 function SessionIsReplay()
+  if not __uiScenarioInfo then error('no active session.', 2) end
   return false
 end
 
 function SessionIsMultiplayer()
+  if not __uiScenarioInfo then error('no active session.', 2) end
   return table.getn(__uiCommandSources) > 1
 end
 
