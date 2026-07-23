@@ -24,9 +24,9 @@ export interface LuaUnitSnapshot {
   health: number
   maxHealth: number
   moving: boolean
-  /** Baufortschritt (1 = fertig). __readAllUnits schickt es, es wurde nur nie gelesen. */
+  /** Construction progress (1 = finished). __readAllUnits sends it, it just never got read. */
   fraction: number
-  /** Erstellungs-Tick — die Build-Shader zählen ihr Alter darüber (material.x). */
+  /** Build tick — the build shaders count their age above (material.x). */
   born: number
   /** The unit's active order (command graph): type + target position. */
   order?: { t: 'Move' | 'Attack' | 'Repair' | 'BuildMobile'; x: number; z: number }
@@ -34,7 +34,7 @@ export interface LuaUnitSnapshot {
   orders?: { t: 'Move' | 'Attack' | 'Repair' | 'BuildMobile'; x: number; z: number }[]
   /** Turret aim state per weapon (yaw/pitch bones, radians vs. rest pose). */
   turrets?: { b: string; y: number; pb?: string; p?: number }[]
-  /** Die Armee der Unit (1-basiert) — unitsOfFocusArmy filtert danach. */
+  /** The unit's army (1-based) — unitsOfFocusArmy filters by this. */
   army: number
   /**
    * Leerlauf im Sinn der Engine (Idle-Sets am UserArmy, Cfile:1352334): kein
@@ -42,7 +42,7 @@ export interface LuaUnitSnapshot {
    * `!moving` — ein bauender Ingenieur steht still und ist trotzdem nicht idle.
    */
   idle: boolean
-  /** Bau-Warteschlange einer Fabrik: { id, count } — leer bei allen anderen. */
+  /** Factory build queue: { id, count } — empty for all others. */
   buildQueue?: { id: string; count: number }[]
 }
 
@@ -71,7 +71,7 @@ export interface LuaProjectileSnapshot {
  */
 export interface LuaEmitterSnapshot {
   id: number
-  /** Emitter-Blueprint-Pfad, z. B. '/effects/emitters/..._emit.bp'. */
+  /** Emitter blueprint path, e.g. E.g. '/effects/emitters/..._emit.bp'. */
   bp: string
   x: number
   y: number
@@ -84,7 +84,7 @@ export interface LuaEmitterSnapshot {
   qz: number
   /** ScaleEmitter-Faktor (Default 1). */
   scale: number
-  /** Sim-Tick der Entstehung — Startpunkt für Kurven/Lebensdauer. */
+  /** Sim-Tick of Emergence — Starting point for curves/lifespan. */
   born: number
   enabled: boolean
   ox?: number
@@ -105,34 +105,34 @@ export interface LuaEmitterSnapshot {
  */
 export interface LuaPropSnapshot {
   id: number
-  /** Prop-Blueprint-Pfad, z. B. '/props/defaultwreckage/defaultwreckage_prop.bp'. */
+  /** Prop blueprint path, e.g. E.g. '/props/defaultwreckage/defaultwreckage_prop.bp'. */
   bp: string
   x: number
   y: number
   z: number
   heading: number
-  /** prop:SetScale — beim Wrack der UniformScale der Unit (unit.lua:1111). */
+  /** prop:SetScale — on the unit's UniformScale wreck (unit.lua:1111). */
   scale: number
-  /** Sim-Tick der Entstehung (der Wreckage-Shader variiert sein Noise damit). */
+  /** Sim-Tick of creation (the wreckage shader varies its noise with it). */
   spawn: number
-  /** Mesh-Blueprint aus prop:SetMesh, z. B. '/units/uel0201/uel0201_mesh_wreck'. */
+  /** Mesh blueprint from prop:SetMesh, e.g. E.g. '/units/uel0201/uel0201_mesh_wreck'. */
   meshBp?: string
-  /** Die Unit hinter dem Wrack (unit.lua:1137) — liefert SCM + Texturen. */
+  /** The unit behind the wreck (unit.lua:1137) — provides SCM + textures. */
   assoc?: string
 }
 
-/** Was die Sim braucht, um eine Unit dieses Typs zu erzeugen. */
+/** What the sim needs to create a unit of this type. */
 interface UnitPayload {
   scriptPath: string
   scriptBytes: Uint8Array | null
   bpBytes: Uint8Array | null
-  /** Knochennamen aus der SCM — die Engine hat das Skelett auch in der Sim. */
+  /** Bone names from the SCM — the engine also has the skeleton in the sim. */
   bones: SimBone[]
 }
 
 interface StatesMsg {
   type: 'states'
-  /** Der Sim-Tick des Beats — die Spielzeit-Uhr der UI zaehlt damit. */
+  /** The beat's sim tick — the UI's playing time clock counts with it. */
   tick: number
   units: LuaUnitSnapshot[]
   projectiles: LuaProjectileSnapshot[]
@@ -153,11 +153,11 @@ type OutMsg =
 export class LuaSimClient {
   private readonly statesById = new Map<number, LuaUnitSnapshot>()
   private economy: EcoSnapshot | null = null
-  /** Die fliegenden Projektile des letzten Beats — der Renderer zeichnet sie. */
+  /** The flying projectiles of the last beat — the renderer draws them. */
   private projectileStates: LuaProjectileSnapshot[] = []
-  /** Die lebenden Emitter des letzten Beats — Futter fürs Partikelsystem. */
+  /** The living emitters of the last beat — fodder for the particle system. */
   private emitterStates: LuaEmitterSnapshot[] = []
-  /** Die Props des letzten Beats (Wracks) — der Renderer zeichnet sie. */
+  /** The props of the last beat (wrecks) — the renderer draws them. */
   private propStates: LuaPropSnapshot[] = []
   /** Letzter gemeldeter Sim-Tick (Spielzeit = Tick / 10). */
   gameTick = 0
@@ -185,33 +185,33 @@ export class LuaSimClient {
     terrain: HeightfieldData,
     log: (level: string, msg: string) => void,
   ): Promise<LuaSimClient> {
-    // ALLE lua/-Dateien, auch lua/ui/. Die UI des Originals ist Lua (maui) und
-    // soll ausgeführt werden, nicht in TS/HTML nachgebaut — sie hier
-    // auszuschließen hat genau das verhindert. Der Sim-Host lädt ohnehin nur,
-    // was importiert wird; das Vorladen kostet nur den VFS-Lesevorgang.
-    // EIN Archiv-Zugriff pro zusammenhängendem Block statt zwei pro Datei
-    // (vfs.readMany): `lua/**` liegt in lua.scd (7 MB) und mohodata.scd — am
-    // Stück gelesen kostet das nichts.
-    // lua/** UND schook/**: schook.scd ist der PATCH-HOOK-LAYER von FA —
-    // doscript hängt zu jedem Modul die gleichnamige Datei aus /schook an
+    // ALL lua/ files, including lua/ui/. The original UI is Lua (maui) and
+    // should be executed, not recreated in TS/HTML — here
+    // Excluding them prevented exactly that. The sim host only loads anyway
+    // what is imported; preloading only costs the VFS read.
+    // ONE archive access per contiguous block instead of two per file
+    // (vfs.readMany): `lua/**` is located in lua.scd (7 MB) and mohodata.scd — on
+    // It doesn't cost anything to read the piece.
+    // lua/** AND schook/**: schook.scd is the PATCH HOOK LAYER from FA —
+    // doscript appends the file of the same name from /schook to each module
     // (boot.lua runHooks; bin/SupComDataPath.lua: hook = {'/schook'}).
-    // Ohne diese Dateien fehlen der Sim u. a. SimUnitEnhancements/
+    // Without these files the Sim will be missing, among other things. SimUnitEnhancements/
     // RemoveAllUnitEnhancements (schook/lua/SimSync.lua) — unit.lua:1287
-    // ruft das in JEDEM OnDestroy.
+    // calls this in EVERY OnDestroy.
     const files = await vfs.readMany(
       vfs.find((p) => (p.startsWith('lua/') || p.startsWith('schook/')) && p.endsWith('.lua')),
     )
 
-    // Dazu ALLE PROJEKTILE (`projectiles/<id>/<id>_proj.bp` + `_script.lua`).
+    // Plus ALL PROJECTILES (`projectiles/<id>/<id>_proj.bp` + `_script.lua`).
     //
-    // Sie müssen vor dem ersten Schuss in der Sim liegen: eine Waffe feuert
-    // MITTEN im Tick (defaultweapons.lua ruft `unit:CreateProjectile(
-    // bp.ProjectileId, ...)`, uel0201_unit.bp:225 zeigt auf
-    // `/projectiles/TDFGauss01/TDFGauss01_proj.bp`) — dort ist kein Platz für
-    // einen asynchronen Nachschlag im Hauptthread. Die Engine macht es genauso:
-    // sie lädt beim Start ALLE Blueprints (Blueprints.lua über DiskFindFiles).
-    // Kosten: 289 Blueprints + 288 Skripte = 652 KB, ein Archiv-Zugriff.
-    // Dazu die PROPS (`props/**.bp`) — daraus entstehen die Wracks
+    // You must lie in the sim before the first shot: a gun fires
+    // IN THE MIDDLE of the tick (defaultweapons.lua calls `unit:CreateProjectile(
+    // bp.ProjectileId, ...)`, uel0201_unit.bp:225 points to
+    // `/projectiles/TDFGauss01/TDFGauss01_proj.bp`) — there is no room for
+    // an asynchronous lookup on the main thread. The engine does it the same way:
+    // it loads ALL blueprints at startup (Blueprints.lua via DiskFindFiles).
+    // Cost: 289 blueprints + 288 scripts = 652 KB, one archive access.
+    // Plus the PROPS (`props/**.bp`) - this is where the wrecks come from
     // (unit.lua:1105 CreateProp(pos, bp.Wreckage.Blueprint)).
     const projPaths = vfs.find(
       (p) =>
@@ -310,16 +310,16 @@ export class LuaSimClient {
           payload.bones = toSimBones(parseScm(await this.vfs.read(paths.mesh)))
         }
       } catch {
-        // Kein Modell (z. B. Effekt-Einheiten): dann hat die Unit eben keine
-        // Knochen. Das ist eine Tatsache über die Unit, keine Lücke der Engine —
-        // ValidateBone liefert dann korrekt false.
+        // No model (e.g. effect units): then the unit doesn't have one
+        // Bone. This is a fact about the unit, not a flaw in the engine —
+        // ValidateBone then correctly returns false.
       }
     }
     this.payloadCache.set(id, payload)
     return payload
   }
 
-  /** Spawnt eine Unit über ihre Original-Klasse im Worker; liefert die Unit-ID. */
+  /** Spawns a unit via its original class in the worker; provides the unit ID. */
   async spawn(id: string, pos: { x: number; y: number; z: number }, army = 1): Promise<number> {
     const p = await this.unitPayload(id)
     const reqId = this.nextReq++
@@ -330,11 +330,11 @@ export class LuaSimClient {
   }
 
   /**
-   * Bau-Befehl: Baustelle setzen und dem Bauer den Auftrag geben. Liefert die ID
-   * der Baustelle.
+   * Construction command: Set the construction site and give the order to the farmer. Returns the ID
+   * the construction site.
    *
-   * Die Engine tut genau das: `Sim::CreateUnit(params, beingBuilt = 1)` und
-   * danach `OnStartBuild(target, 'MobileBuild')` auf dem Bauer. Der Fortschritt
+   * The engine does exactly that: `Sim::CreateUnit(params, beingBuilt = 1)` and
+   * then `OnStartBuild(target, 'MobileBuild')` auf dem Bauer. Der Fortschritt
    * entsteht dann von selbst im Beat (`buildRate/BuildTime · ResourceConsumed ·
    * 0.1`, CBuildTaskHelper::UpdateWorkProgress @0x5f5f2c) — hier wird NICHTS
    * nachgerechnet.
@@ -344,7 +344,7 @@ export class LuaSimClient {
     id: string,
     pos: { x: number; y: number; z: number },
     army = 1,
-    /** Shift gehalten? Dann hängt der Auftrag an die Bau-Reihe an. */
+    /** Shift held? The order is then attached to the construction series. */
     queue = false,
   ): Promise<number> {
     const p = await this.unitPayload(id)
@@ -356,10 +356,10 @@ export class LuaSimClient {
   }
 
   /**
-   * Fabrik-Auftrag: `count` Einheiten in die Warteschlange der Fabrik. Das ist,
-   * was `IssueBlueprintCommand("UNITCOMMAND_BuildFactory", id, count)` in der
-   * Engine auslöst (construction.lua:884). Die Fabrik arbeitet sie im Beat ab —
-   * über die Original-`FactoryUnit` (defaultunits.lua:422).
+   * Factory Order: `count` units in the factory queue. That is,
+   * what `IssueBlueprintCommand("UNITCOMMAND_BuildFactory", id, count)` in the
+   * Engine triggers (construction.lua:884). The factory works them to the beat -
+   * via the original `FactoryUnit` (defaultunits.lua:422).
    */
   async factoryBuild(factoryId: number, id: string, count: number): Promise<void> {
     const p = await this.unitPayload(id)
@@ -367,19 +367,19 @@ export class LuaSimClient {
   }
 
   /**
-   * Einen Eintrag der Fabrik-Warteschlange ändern — das Sim-Ende von
+   * Change a factory queue entry — the sim end of
    * Increase/DecreaseBuildCountInQueue (Moho::ISSUE_IncreaseCommandCount
-   * Cfile:1257266 / DecreaseCommandCount Cfile:1257378). `delta` < 0 nimmt
-   * weg; fällt der Zähler auf 0, verschwindet der Eintrag.
+   * Cfile:1257266 / DecreaseCommandCount Cfile:1257378). `delta` < 0 takes
+   * away; If the counter falls to 0, the entry disappears.
    */
   adjustBuildQueue(factoryId: number, index: number, delta: number): void {
     this.worker.postMessage({ type: 'adjustQueue', factoryId, index, delta })
   }
 
   /**
-   * Setzt die Sitzung zurück: frischer Lua-Host, frische Engine, neues Gelände.
-   * Ohne das stapeln sich beim zweiten Sandbox-Start ACUs — und mit ihnen der
-   * doppelte Startvorrat aus GiveInitialResources.
+   * Resets the session: fresh Lua host, fresh engine, new terrain.
+   * Without this, ACUs will stack up on the second sandbox start - and with them the
+   * double starting supply from GiveInitialResources.
    */
   async reset(terrain: HeightfieldData): Promise<void> {
     const done = new Promise<void>((res) => {
@@ -397,7 +397,7 @@ export class LuaSimClient {
   stop(id: number): void {
     this.worker.postMessage({ type: 'stop', id })
   }
-  /** Attack-Befehl (CAttackTargetTask): Unit `id` greift `targetId` an. */
+  /** Attack command (CAttackTargetTask): Unit `id` attacks `targetId`. */
   attack(id: number, targetId: number, queue = false): void {
     this.worker.postMessage({ type: 'attack', id, targetId, queue })
   }
@@ -407,38 +407,38 @@ export class LuaSimClient {
   }
 
   /**
-   * Der Sammelpunkt einer Fabrik (IssueFactoryRallyPoint, Cfile:1008266). Die
-   * Fabrik BEWEGT sich nicht — ihre frischen Einheiten fahren dorthin
-   * (defaultunits.lua:578 CalculateRollOffPoint liest GetRallyPoint).
+   * The rally point of a factory (IssueFactoryRallyPoint, Cfile:1008266). The
+   * Factory doesn't MOVE — its fresh units go there
+   * (defaultunits.lua:578 CalculateRollOffPoint reads GetRallyPoint).
    */
   setRallyPoint(id: number, x: number, y: number, z: number): void {
     this.worker.postMessage({ type: 'rally', id, x, y, z })
   }
 
   /**
-   * Die Welt anhalten/weiterlaufen lassen — was SessionRequestPause/SessionResume
-   * in der Engine tun (CWldSession::RequestPause). Der Pause-Reiter der
-   * Original-UI (tabs.lua:425/428) landet hier.
+   * Pause/continue running the world — what SessionRequestPause/SessionResume
+   * do in the engine (CWldSession::RequestPause). The pause rider
+   * Original UI (tabs.lua:425/428) ends up here.
    */
   setPaused(paused: boolean): void {
     this.worker.postMessage({ type: 'pause', paused })
   }
 
-  /** Letzter bekannter Zustand einer Unit (aus dem Worker-Beat). */
+  /** Last known state of a unit (from the worker beat). */
   state(id: number): LuaUnitSnapshot | undefined {
     return this.statesById.get(id)
   }
-  /** Alle bekannten Unit-Zustände (letzter Beat). */
+  /** All known unit states (last beat). */
   allStates(): LuaUnitSnapshot[] {
     return [...this.statesById.values()]
   }
 
-  /** Die fliegenden Projektile des letzten Beats (leer, wenn keiner schießt). */
+  /** The flying projectiles from the last beat (empty if no one shoots). */
   allProjectiles(): LuaProjectileSnapshot[] {
     return this.projectileStates
   }
 
-  /** Die lebenden Emitter des letzten Beats (Mündungsfeuer, Trails, …). */
+  /** The living emitters of the last beat (muzzle flashes, trails, …). */
   allEmitters(): LuaEmitterSnapshot[] {
     return this.emitterStates
   }
@@ -461,7 +461,7 @@ export class LuaSimClient {
     return p
   }
 
-  /** Die Props des letzten Beats (Wracks, Felsen, Bäume). */
+  /** The props of the last beat (wrecks, rocks, trees). */
   allProps(): LuaPropSnapshot[] {
     return this.propStates
   }
@@ -476,9 +476,9 @@ export class LuaSimClient {
   }
 
   /**
-   * Ein Mesh-Blueprint aus der Sim (z. B. die Wrack-Variante
-   * '/units/uel0201/uel0201_mesh_wreck' aus ExtractWreckageBlueprint,
-   * lua/system/blueprints.lua:187). null, wenn es keines gibt. Gecacht.
+   * A mesh blueprint from the sim (e.g. the wreck variant
+   * '/units/uel0201/uel0201_mesh_wreck' from ExtractWreckageBlueprint,
+   * lua/system/blueprints.lua:187). null if there is none. Cached.
    */
   meshBlueprint(bp: string): Promise<unknown> {
     let p = this.meshBpCache.get(bp)

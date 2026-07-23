@@ -41,29 +41,29 @@ const host = await LuaHost.create(game.luaFiles, (level, msg) => {
 const engine = installEngine(host)
 setTerrainSource(host, () => 20)
 
-console.log('\n== Blueprints: Projektile und Wracks ==')
+console.log('\n== Blueprints: Projectiles and Wreckage ==')
 const nProj = game.loadProjectiles(host)
 const nProps = game.loadProps(host)
-check(nProj > 250, `${nProj} Projektil-Blueprints über die echte Pipeline`)
+check(nProj > 250, `${nProj} projectile blueprints via the real pipeline`)
 check(nProps >= 1, `${nProps} Prop-Blueprint(s) (DefaultWreckage)`)
 
-// Die BlueprintId ist der volle kleingeschriebene PFAD mit .bp
-// (SetBackwardsCompatId, Blueprints.lua:104-107) — genau der String, der in
-// Weapon.ProjectileId steht.
+// The BlueprintId is the full lowercase PATH with .bp
+// (SetBackwardsCompatId, Blueprints.lua:104-107) — exactly the string contained in
+// Weapon.ProjectileId is written.
 const gauss = '/projectiles/tdfgauss01/tdfgauss01_proj.bp'
 check(
   host.eval(`return __registered.Projectile['${gauss}'] ~= nil`) === true,
-  'TDFGauss01 ist registriert (BlueprintId = kleingeschriebener Pfad)',
+  'TDFGauss01 is registered (BlueprintId = lowercase path)',
 )
 check(
   Number(host.eval(`return __registered.Projectile['${gauss}'].Physics.InitialSpeed`)) === 12,
-  'InitialSpeed = 12 (aus der .bp, nicht geraten)',
+  'InitialSpeed ​​= 12 (from the .bp, not guessed)',
 )
-// Struct-Defaults der Engine (RProjectileBlueprintPhysics-Ctor, Cfile:653667):
-// die .bp von TDFGauss01 hat kein UseGravity und kein Lifetime.
+// Struct defaults of the engine (RProjectileBlueprintPhysics-Ctor, Cfile:653667):
+// the .bp of TDFGauss01 has no UseGravity and no Lifetime.
 check(
   host.eval(`return __registered.Projectile['${gauss}'].Physics.UseGravity`) === true,
-  'UseGravity = true kommt aus dem Struct-Default (die .bp sagt nichts dazu)',
+  'UseGravity = true comes from the struct default (the .bp says nothing about it)',
 )
 check(
   Number(host.eval(`return __registered.Projectile['${gauss}'].Physics.Lifetime`)) === 15,
@@ -74,9 +74,9 @@ console.log('\n== Zwei Panzer, zwei Armeen ==')
 for (const id of ['uel0201']) await game.giveUnit(host, id)
 const a = spawnLuaUnit(host, 'uel0201', { x: 100, y: 20, z: 100 }, 1)
 const b = spawnLuaUnit(host, 'uel0201', { x: 100, y: 20, z: 115 }, 2)
-check(a > 0 && b > 0, `Panzer ${a} (Armee 1) und ${b} (Armee 2), 15 Meter auseinander`)
+check(a > 0 && b > 0, `Tanks ${a} (Army 1) and ${b} (Army 2), 15 meters apart`)
 
-// Das Skelett ist da — und die Mündung sitzt NICHT im Ursprung der Unit.
+// The skeleton is there — and the muzzle is NOT in the origin of the unit.
 const muzzle = host.eval(`
   local u = __units[${a}]
   local p = u:GetPosition('Turret_Muzzle')
@@ -84,11 +84,11 @@ const muzzle = host.eval(`
 `) as string
 check(
   muzzle !== '100.00 20.00 100.00',
-  `Mündungsknochen 'Turret_Muzzle' hat eine eigene Weltpose: ${muzzle}`,
+  `Muzzle bone 'Turret_Muzzle' has its own world pose: ${muzzle}`,
 )
 
-console.log('\n== Die Waffe findet ihr Ziel (CAcquireTargetTask) ==')
-// TargetCheckInterval 0.5 -> alle 5 Ticks; MaxRadius 18 > 15 Meter Abstand.
+console.log('\n== The weapon finds its target (CAcquireTargetTask) ==')
+// TargetCheckInterval 0.5 -> every 5 ticks; MaxRadius 18 > 15 meters distance.
 let gotTarget = -1
 for (let t = 0; t < 10 && gotTarget < 0; t++) {
   beat(engine)
@@ -96,45 +96,45 @@ for (let t = 0; t < 10 && gotTarget < 0; t++) {
     gotTarget = t
   }
 }
-check(gotTarget >= 0, `Die Waffe hat nach ${gotTarget + 1} Beats ein Ziel (TargetCheckInterval 0.5)`)
+check(gotTarget >= 0, `The weapon has a target according to ${gotTarget + 1} Beats (TargetCheckInterval 0.5)`)
 check(
   host.eval(`return __units[${a}]:GetWeapon(1):GetCurrentTarget():GetEntityId() == ${b}`) === true,
-  'und zwar den Panzer der FEIND-Armee',
+  'namely the tank of the ENEMY army',
 )
 
-console.log('\n== Der Schuss (OnFire → RackSalvoFiringState → CreateProjectile) ==')
+console.log('\n== The shot (OnFire → RackSalvoFiringState → CreateProjectile) ==')
 let projSeen = 0
 for (let t = 0; t < 12 && projSeen === 0; t++) {
   beat(engine)
   projSeen = Number(host.eval('local n = 0 for _ in pairs(__projectiles) do n = n + 1 end return n'))
 }
-check(projSeen > 0, `${projSeen} Projektil(e) in der Luft`)
+check(projSeen > 0, `${projSeen} projectile(s) in the air`)
 const projClass = host.eval(`
   for _, p in pairs(__projectiles) do
     return tostring(p.__bp.BlueprintId)
   end
   return 'keins'
 `) as string
-check(projClass === gauss, `Es ist ein TDFGauss01 — der Blueprint der Waffe (${projClass})`)
+check(projClass === gauss, `It is a TDFGauss01 — the weapon's blueprint (${projClass})`)
 check(
   Number(host.eval(`
     for _, p in pairs(__projectiles) do return p.DamageData.DamageAmount end
     return -1
   `)) === 24,
-  'Es trägt DamageAmount 24 (weapon.lua:325 PassDamageData → uel0201_unit.bp:211)',
+  'It carries DamageAmount 24 (weapon.lua:325 PassDamageData → uel0201_unit.bp:211)',
 )
 
-console.log('\n== Der Treffer: 24 Schaden pro Kugel ==')
+console.log('\n== The hit: 24 damage per bullet ==')
 const maxHp = Number(host.eval(`return __units[${b}]:GetMaxHealth()`))
 let hp = maxHp
 for (let t = 0; t < 20 && hp === maxHp; t++) {
   beat(engine)
   hp = Number(host.eval(`return __units[${b}] and __units[${b}]:GetHealth() or 0`))
 }
-check(hp === maxHp - 24, `Das Ziel verliert genau 24 HP (${maxHp} → ${hp})`)
+check(hp === maxHp - 24, `The target loses exactly 24 HP (${maxHp} → ${hp})`)
 
-console.log('\n== Bis zum Tod: OnKilled, DeathThread, Wrack ==')
-// MaxHealth 260 / 24 = 11 Treffer. Bei RateOfFire 1 (alle 10 Ticks) plus
+console.log('\n== Until Death: OnKilled, DeathThread, Wreck ==')
+// MaxHealth 260 / 24 = 11 hits. At RateOfFire 1 (every 10 ticks) plus
 // Flugzeit reichen 150 Beats mit Reserve.
 let killed = false
 let killedAt = -1
@@ -145,25 +145,25 @@ for (let t = 0; t < 200 && !killed; t++) {
     killedAt = t
   }
 }
-check(killed, `Der Panzer stirbt (nach ${killedAt + 1} weiteren Beats, ${maxHp} HP / 24 Schaden)`)
+check(killed, `The tank dies (after ${killedAt + 1} further beats, ${maxHp} HP / 24 damage)`)
 
-// Der Todes-Thread laeuft als Coroutine weiter: Explosion, Wrack, Destroy.
+// The death thread continues as a coroutine: explosion, wreck, destroy.
 for (let t = 0; t < 60; t++) beat(engine)
 const props = Number(host.eval('local n = 0 for _ in pairs(__props) do n = n + 1 end return n'))
-check(props >= 1, `${props} Wrack-Prop auf dem Feld (Unit:CreateWreckage → CreateProp)`)
+check(props >= 1, `${props} Wreck prop on the field (Unit:CreateWreckage → CreateProp)`)
 const wreck = host.eval(`
   for _, p in pairs(__props) do return tostring(p.__bp.BlueprintId) end
   return 'keins'
 `) as string
 check(
   wreck.indexOf('wreckage') >= 0,
-  `Es ist das DefaultWreckage-Prop aus dem Blueprint der Unit (${wreck})`,
+  `It is the DefaultWreckage prop from the unit's blueprint (${wreck})`,
 )
 
-// Der SICHTWEG des Wracks (H8): __readAllPropsJson liefert dem Renderer alles,
-// was er zum Zeichnen braucht — das Wrack-Mesh aus ExtractWreckageBlueprint
-// (lua/system/blueprints.lua:187, laeuft in unserer echten LoadBlueprints-
-// Kette), die Unit dahinter (SCM + Texturen), Massstab und Erstellungs-Tick.
+// The VIEW PATH of the wreck (H8): __readAllPropsJson provides the renderer with everything
+// what he needs to draw — the wreck mesh from ExtractWreckageBlueprint
+// (lua/system/blueprints.lua:187, runs in our real LoadBlueprints
+// chain), the unit behind it (SCM + textures), scale and creation tick.
 {
   const snap = JSON.parse(String(host.eval('return __readAllPropsJson()'))) as {
     meshBp?: string
@@ -174,29 +174,29 @@ check(
   const w = snap[0]
   check(
     w?.meshBp === '/units/uel0201/uel0201_mesh_wreck',
-    `Snapshot meshBp = ${w?.meshBp} (SetMesh mit Display.MeshBlueprintWrecked, unit.lua:1129)`,
+    `Snapshot meshBp = ${w?.meshBp} (SetMesh with Display.MeshBlueprintWrecked, unit.lua:1129)`,
   )
   check(w?.assoc === 'uel0201', `Snapshot assoc = ${w?.assoc} (prop.AssociatedBP, unit.lua:1137)`)
   const uniScale = Number(host.eval(`return __registered.Unit['uel0201'].Display.UniformScale`))
   check(
     typeof w?.scale === 'number' && Math.abs(w.scale - uniScale) < 1e-9,
-    `Snapshot scale = ${w?.scale} = UniformScale des Panzers (${uniScale}, unit.lua:1111)`,
+    `Snapshot scale = ${w?.scale} = UniformScale of the tank (${uniScale}, unit.lua:1111)`,
   )
-  check(typeof w?.spawn === 'number' && w.spawn > 0, `Snapshot spawn = ${w?.spawn} (Erstellungs-Tick)`)
+  check(typeof w?.spawn === 'number' && w.spawn > 0, `Snapshot spawn = ${w?.spawn} (creation tick)`)
   const meshBp = JSON.parse(String(host.eval(`return __meshBpJson('/units/uel0201/uel0201_mesh_wreck')`))) as {
     LODs?: { ShaderName?: string; SpecularName?: string }[]
   }
   check(
     meshBp?.LODs?.[0]?.ShaderName === 'Wreckage' &&
       meshBp?.LODs?.[0]?.SpecularName === '/env/common/props/wreckage_noise.dds',
-    `Wrack-Mesh-BP: Shader ${meshBp?.LODs?.[0]?.ShaderName}, Noise ${meshBp?.LODs?.[0]?.SpecularName} (blueprints.lua:200-201)`,
+    `Wreck Mesh BP: Shader ${meshBp?.LODs?.[0]?.ShaderName}, Noise ${meshBp?.LODs?.[0]?.SpecularName} (blueprints.lua:200-201)`,
   )
 }
 
-console.log('\n== SimCallback: der Sim-Empfänger dispatcht über simcallbacks.lua ==')
+console.log('\n== SimCallback: the Sim receiver dispatches via simcallbacks.lua ==')
 // Moho::Sim::LuaSimCallback (Cfile:1076180-1076287): DoCallback(name, args,
-// units) — unbekannte Namen enden im error('No callback named …',
-// simcallbacks.lua:18), den der Empfänger als WARN loggt (gpg::Warnf-Weg).
+// units) — unknown names end in error('No callback named …',
+// simcallbacks.lua:18), which the receiver logs as WARN (gpg::Warnf path).
 {
   const before = warnings.length
   host.eval(`__simCallback('GibtEsNicht', { probe = true }, {})`)
@@ -204,52 +204,52 @@ console.log('\n== SimCallback: der Sim-Empfänger dispatcht über simcallbacks.l
   check(warned, 'unbekannter Callback → WARN "No callback named" (simcallbacks.lua:18)')
   check(
     host.eval(`return type(import('/lua/simcallbacks.lua').DoCallback) == 'function'`) === true,
-    'DoCallback existiert im echten simcallbacks.lua-Modul',
+    'DoCallback exists in the real simcallbacks.lua module',
   )
 }
 
-console.log('\n== Gelenkte Munition: die Zealot-Rakete dreht auf ein seitliches Ziel ==')
+console.log('\n== Guided ammunition: the Zealot missile turns towards a side target ==')
 // AAAZealotMissile01: TrackTarget=true, TurnRate=180, MaxSpeed=50, Accel=6
-// (das Blueprint aus projectiles.scd). UpdateTracking (@944367) dreht die
-// Nase pro Tick höchstens TurnRate·0.1° Richtung Ziel; ohne Tracking flöge
-// die Rakete geradeaus am Ziel vorbei.
+// (the blueprint from projectiles.scd). UpdateTracking (@944367) rotates the
+// Nose per tick at most TurnRate·0.1° towards target; flew without tracking
+// the rocket goes straight past the target.
 {
-  // DIFFERENZ-BEWEIS: die Rakete startet nach +Z, das Ziel steht 18° seitlich
-  // (10 m in +X, 30 m voraus). Geradeaus (Tracking aus) verfehlt sie um 10 m —
-  // mit UpdateTracking dreht die Nase ein und trifft. Der Abschusswinkel ist
-  // realistisch: im Spiel zielt die WAFFE vor dem Abschuss grob aufs Ziel.
+  // DIFFERENCE PROOF: the rocket launches to +Z, the target is 18° to the side
+  // (10 m in +X, 30 m ahead). Straight ahead (tracking out) misses it by 10 m —
+  // with UpdateTracking the nose turns in and hits. The launch angle is
+  // realistic: in the game the WEAPON aims roughly at the target before firing.
   const schuetzeId = spawnLuaUnit(host, 'uel0201', { x: 200, y: 20, z: 90 }, 1)
   const zielId = spawnLuaUnit(host, 'uel0201', { x: 210, y: 20, z: 130 }, 2)
   const fliege = (tracking: boolean): string =>
     host.eval(`
-      local schuetze = __units[${schuetzeId}]
-      local ziel = __units[${zielId}]
+      local protector = __units[${schuetzeId}]
+      local target = __units[${zielId}]
       local p = __projCreate(
-        schuetze, '/projectiles/aaazealotmissile01/aaazealotmissile01_proj.bp',
-        { 200, 22, 100 }, __orientFromDir({ 0, 0, 1 }), 30, 100, 0, 'Normal', ziel, true
+        shooter, '/projectiles/aaazealotmissile01/aaazealotmissile01_proj.bp',
+        { 200, 22, 100 }, __orientFromDir({ 0, 0, 1 }), 30, 100, 0, 'Normal', target, true
       )
       p.__leadTarget = true
       p.__trackTarget = ${tracking}
-      local ergebnis = 'kein Einschlag'
+      local result = 'no impact'
       for _ = 1, 100 do
         __projectileTick()
-        if p.__impactType then ergebnis = tostring(p.__impactType) end
+        if p.__impactType then result = tostring(p.__impactType) end
         __flushDeletions()
         if p.__destroyed then break end
       end
-      return ergebnis
+      return result
     `) as string
   const mit = fliege(true)
   const ohne = fliege(false)
-  check(mit === 'Unit', `MIT Tracking trifft die Rakete (Einschlag: ${mit})`)
-  check(ohne !== 'Unit', `OHNE Tracking fliegt sie vorbei (Einschlag: ${ohne}) — der Unterschied IST UpdateTracking`)
+  check(mit === 'Unit', `WITH tracking the rocket hits (impact: ${mit})`)
+  check(ohne !== 'Unit', `WITHOUT tracking it flies by (impact: ${ohne}) - the difference IS UpdateTracking`)
 }
 
-console.log('\n== CollisionBeam: der Dauerstrahl des Cybran-T2-Turms ==')
-// urb2301 führt eine CDFParticleCannonWeapon (DefaultBeamWeapon,
-// defaultweapons.lua:785): statt eines Projektils wird pro Mündung eine
-// CollisionBeam-Entity erzeugt (OnCreate :802-816) und beim Feuern Enable()t.
-// Der Sim-Tick castet den Strahl (MotionTick @911386) und OnImpact macht den
+console.log('\n== CollisionBeam: the continuous beam of the Cybran T2 tower ==')
+// urb2301 runs a CDFParticleCannonWeapon (DefaultBeamWeapon,
+// defaultweapons.lua:785): instead of one projectile, there is one per muzzle
+// CollisionBeam entity created (OnCreate :802-816) and Enable()t when firing.
+// The Sim-Tick casts the beam (MotionTick @911386) and OnImpact does it
 // Schaden (CollisionBeam.lua:186-215).
 {
   await game.giveUnit(host, 'urb2301')
@@ -257,7 +257,7 @@ console.log('\n== CollisionBeam: der Dauerstrahl des Cybran-T2-Turms ==')
   // The victim stands SIDEWAYS (+X): the turret must slew ~90 degrees
   // before the fire gate (weapon->mCanFire) lets the beam start.
   const opfer = spawnLuaUnit(host, 'uel0201', { x: 312, y: 20, z: 100 }, 2)
-  check(turm > 0 && opfer > 0, `Turm ${turm} (Cybran T2 PD) und Opfer ${opfer}, 12 m seitlich`)
+  check(turm > 0 && opfer > 0, `Tower ${turm} (Cybran T2 PD) and victim ${opfer}, 12 m to the side`)
   const beams = Number(host.eval('return #__collisionBeams'))
   check(beams >= 1, `${beams} CollisionBeam-Entity(s) beim Waffen-OnCreate erzeugt`)
   let beamAn = false
@@ -275,8 +275,8 @@ console.log('\n== CollisionBeam: der Dauerstrahl des Cybran-T2-Turms ==')
       break
     }
   }
-  check(beamAn, 'Der Beam wurde beim Feuern Enable()t (PlayFxBeamStart)')
-  check(schaden, 'Der Dauerstrahl macht Schaden (OnImpact → DoDamage)')
+  check(beamAn, 'The beam was Enable()t (PlayFxBeamStart) when firing')
+  check(schaden, 'The continuous beam does damage (OnImpact → DoDamage)')
   // Turret aiming (CAimManipulator): the yaw must be ~90° toward +X and
   // on-target — without the slew the fire gate would never have opened.
   const aim = host.pull<{ yaw: number; on: boolean } | null>(`(function()
@@ -289,21 +289,21 @@ console.log('\n== CollisionBeam: der Dauerstrahl des Cybran-T2-Turms ==')
   end)()`)
   check(
     aim !== null && aim.on && Math.abs(aim.yaw - Math.PI / 2) < 0.15,
-    `Der Turm hat auf das Ziel gedreht (yaw ${aim ? aim.yaw.toFixed(3) : '—'} ≈ π/2, onTarget=${aim?.on})`,
+    `The turret has turned towards the target (yaw ${aim ? aim.yaw.toFixed(3) : '—'} ≈ π/2, onTarget=${aim?.on})`,
   )
-  // Der SICHTBARE Strahl: CreateBeamEmitter + AttachBeamToEntity hängen den
-  // Beam-Emitter an die CollisionBeam-Entity — die Meldung trägt beide Enden.
+  // The VISIBLE beam: CreateBeamEmitter + AttachBeamToEntity hang the
+  // Beam emitter to the CollisionBeam entity — the message carries both ends.
   const fx = host.pull<{ bp: string; x2?: number }[]>('__readAllEmittersJson()')
   const beamFx = fx.filter((e) => e.x2 !== undefined)
-  check(beamFx.length >= 1, `${beamFx.length} Beam-Effekt(e) mit beiden Enden in der Emitter-Meldung`)
+  check(beamFx.length >= 1, `${beamFx.length} Beam effect(s) with both ends in the emitter message`)
 }
 
-console.log('\n== Befehls-Dispatch: Stop, Move-bricht-Bau, Attack ==')
-// Die Dispatch-Tabelle (IAiCommandDispatchImpl::DispatchTask @0x608EF0): ein
-// neuer Befehl ERSETZT die Arbeit; der Bau-Abbruch faehrt die Kette aus
+console.log('\n== Command dispatch: stop, move-break-build, attack ==')
+// The dispatch table (IAiCommandDispatchImpl::DispatchTask @0x608EF0): a
+// new command REPLACES the work; the construction demolition extends the chain
 // CBuildTaskHelper::OnStopBuild(completed=0) (Cfile:814989-815022).
 {
-  // Ein Ingenieur (ACU) beginnt einen Bau und wird WEGGESCHICKT.
+  // An engineer (ACU) starts a construction and is SENT AWAY.
   await game.giveUnit(host, 'uel0001')
   await game.giveUnit(host, 'ueb0101')
   const acu = spawnLuaUnit(host, 'uel0001', { x: 300, y: 20, z: 300 }, 1)
@@ -316,27 +316,27 @@ console.log('\n== Befehls-Dispatch: Stop, Move-bricht-Bau, Attack ==')
   host.eval(`SetArmyEconomy(1, 4000, 100000)`)
   for (let t = 0; t < 40; t++) beat(engine)
   const frBeforeMove = Number(host.eval(`return __units[${site}].__fraction`))
-  check(frBeforeMove > 0, `Der Bau läuft (fraction ${frBeforeMove.toFixed(3)})`)
+  check(frBeforeMove > 0, `Construction is underway (fraction ${frBeforeMove.toFixed(3)})`)
 
   host.eval(`__dispatchMove(${acu}, 260, 300)`)
   check(
     host.eval(`return __builderBusy(${acu})`) === false,
-    'Move bricht den Bau-Task ab (Abbruch-Kette Cfile:814989)',
+    'Move aborts the build task (abort chain Cfile:814989)',
   )
   const frAfterMove = Number(host.eval(`return __units[${site}].__fraction`))
   check(
     frAfterMove >= frBeforeMove && frAfterMove < 1,
-    `Die Baustelle bleibt mit ihrem Fortschritt stehen (${frAfterMove.toFixed(3)})`,
+    `The construction site stops progressing (${frAfterMove.toFixed(3)})`,
   )
   for (let t = 0; t < 30; t++) beat(engine)
   const nachher = host.eval(`local p = __units[${acu}].__pos return p[1]`) as number
-  check(nachher < 299, `Der Bauer fährt wirklich weg (x ${Number(nachher).toFixed(1)} < 300)`)
+  check(nachher < 299, `The farmer really leaves (x ${Number(nachher).toFixed(1)} < 300)`)
 
-  // STOP haelt die Fahrt an.
+  // STOP stops the journey.
   host.eval(`__dispatchStop(${acu})`)
   check(
     host.eval(`return __units[${acu}].__goal == false and __builderBusy(${acu}) == false`) === true,
-    'Stop killt Fahrziel und Bau-Tasks (Dispatch 0x01)',
+    'Stop kills destination and construction tasks (Dispatch 0x01)',
   )
 
   // SITE DECAY (Unit::OnTick, Cfile:952824-952840): the abandoned site
@@ -346,7 +346,7 @@ console.log('\n== Befehls-Dispatch: Stop, Move-bricht-Bau, Attack ==')
   const fDecayed = Number(host.eval(`return __units[${site}].__fraction`))
   check(
     fDecayed < fVerlassen,
-    `Die verlassene Baustelle zerfällt (${fVerlassen.toFixed(4)} → ${fDecayed.toFixed(4)})`,
+    `The abandoned construction site is falling apart (${fVerlassen.toFixed(4)} → ${fDecayed.toFixed(4)})`,
   )
 
   // REPAIR (dispatch 0x14): the right-click default on an own unfinished
@@ -356,7 +356,7 @@ console.log('\n== Befehls-Dispatch: Stop, Move-bricht-Bau, Attack ==')
   const fRepariert = Number(host.eval(`return __units[${site}].__fraction`))
   check(
     fRepariert > fDecayed,
-    `Repair nimmt den Bau wieder auf (${fDecayed.toFixed(4)} → ${fRepariert.toFixed(4)})`,
+    `Repair resumes construction (${fDecayed.toFixed(4)} → ${fRepariert.toFixed(4)})`,
   )
 
   // ALLIANCES (CArmyImpl): self-ally from birth (Cfile:1017297), skirmish
@@ -455,18 +455,18 @@ console.log('\n== Befehls-Dispatch: Stop, Move-bricht-Bau, Attack ==')
   host.eval(`__dispatchStop(${acu2})`)
   check(
     host.eval(`return __units[${site2}] ~= nil`) === true,
-    'Die BEGONNENE 0%-Baustelle bleibt beim Abbruch stehen',
+    'The STARTED 0% construction site remains standing when it is demolished',
   )
   // One paid build step (~0.33%) decays at 0.1/max(2100, …) per tick —
   // about 70 ticks until health reaches 0.
   for (let t = 0; t < 120; t++) beat(engine)
   check(
     host.eval(`return __units[${site2}] == nil or __units[${site2}].__dead == true`) === true,
-    'Sie stirbt über den Decay-Weg (OnDecayed → Destroy, unit.lua:551)',
+    'She dies via the decay path (OnDecayed → Destroy, unit.lua:551)',
   )
 
-  // ATTACK: ein Panzer ausserhalb seiner MaxRadius (18) faehrt heran, die
-  // Waffe nimmt das BEFEHLSZIEL, und das Ziel stirbt.
+  // ATTACK: a tank outside its MaxRadius (18) approaches
+  // Weapon takes the COMMAND TARGET and the target dies.
   const jaeger = spawnLuaUnit(host, 'uel0201', { x: 400, y: 20, z: 300 }, 1)
   const beute = spawnLuaUnit(host, 'uel0201', { x: 440, y: 20, z: 300 }, 2)
   host.eval(`__dispatchAttack(${jaeger}, ${beute})`)
@@ -484,7 +484,7 @@ console.log('\n== Befehls-Dispatch: Stop, Move-bricht-Bau, Attack ==')
     }
     gestorben = host.eval(`local b = __units[${beute}] return b == nil or b.__dead == true`) === true
   }
-  check(zielGesetzt, 'Die Waffe nimmt das BEFEHLSZIEL (CAttackTargetTask → Zielerfassung)')
+  check(zielGesetzt, 'The weapon takes the COMMAND TARGET (CAttackTargetTask → Target acquisition)')
   // The command graph feed: the snapshot carries the active order (type +
   // target position) so the renderer can draw the order line + waypoint
   // (UICommandGraph, params from commandgraphparams.lua).
@@ -495,7 +495,7 @@ console.log('\n== Befehls-Dispatch: Stop, Move-bricht-Bau, Attack ==')
     const j = rows.find((r) => r.id === jaeger)
     check(
       j?.order?.t === 'Attack' && typeof j.order.x === 'number',
-      `Snapshot trägt die Attack-Order für den Befehls-Graphen (${JSON.stringify(j?.order)})`,
+      `Snapshot carries the attack order for the command graph (${JSON.stringify(j?.order)})`,
     )
   }
   const lage = host.pull<{ jx: number; jhp: number; bhp: number; goal: boolean }>(`(function()
@@ -507,15 +507,15 @@ console.log('\n== Befehls-Dispatch: Stop, Move-bricht-Bau, Attack ==')
   end)()`)
   check(
     gestorben,
-    `Attack über die Distanz: in Feuerreichweite (MaxRadius) fahren und töten` +
+    `Attack over distance: drive within firing range (MaxRadius) and kill` +
       (gestorben ? '' : ` — Lage: Jäger x=${lage.jx} HP=${lage.jhp}, Beute HP=${lage.bhp}, fährt=${lage.goal}`),
   )
 }
 
-console.log('\n== Was die Sim dabei gemeldet hat ==')
+console.log('\n== What the sim reported ==')
 const uniq = [...new Set(warnings.map((w) => w.split('\n')[0]?.slice(0, 110)))]
 for (const w of uniq.slice(0, 12)) console.log(`  · ${w}`)
 
-console.log(failures === 0 ? '\nKAMPF BESTANDEN' : `\nKAMPF: ${failures} FEHLER`)
+console.log(failures === 0 ? '\nKAMPF BESTANDEN' : `\nCOMBAT: ${failures} ERROR`)
 await game.close()
 process.exit(failures === 0 ? 0 : 1)

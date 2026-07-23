@@ -1,29 +1,29 @@
-# PLAN-1ZU1 — der Weg zum echten Spiel
+# PLAN-1ZU1 — the path to the real game
 
-Konsolidiert aus sieben Tiefenrecherchen (Juli 2026):
+Consolidated from seven in-depth research (July 2026):
 [frontend-menu](research/frontend-menu.md) · [worldview-camera](research/worldview-camera.md) ·
 [session-start](research/session-start.md) · [combat-projectiles](research/combat-projectiles.md) ·
 [session-ui-panels](research/session-ui-panels.md) · [maui-controls](research/maui-controls.md) ·
 [input-cursor-keymap](research/input-cursor-keymap.md).
-Jede Behauptung ist belegt (`Cfile:<zeile>` bzw. `<luadatei>:<zeile>`). Nichts geraten;
-Ungeklärtes steht als **OFFENE FRAGE**, nicht als Annahme im Fließtext.
+Every claim is proven (`Cfile:<zeile>` or `<luadatei>:<zeile>`). Nothing advised;
+Anything that is unclear is listed as an **OPEN QUESTION**, not as an assumption in the running text.
 
-## Ziel-Erlebnis
+## Destination Experience
 
-Spielverzeichnis verbinden → das **echte FA-Hauptmenü** aus `lua/ui/menus/main.lua` erscheint
-(Logo, Bracket-Animation, Menü-Musik) → **Skirmish** → die Karte lädt sich selbst, die ACU steht
-auf ihrem Marker → **die echte Spiel-UI** (`gamemain.CreateUI`) mit Weltansicht, Befehlen, Bau und
-Kampf → Spielende → zurück ins Hauptmenü. Alles aus `lua/ui/**` und `lua/sim/**`: kein Web-Menü,
-kein TS-HUD, keine nachgebaute Spiellogik.
+Connect game directory → the **real FA main menu** from `lua/ui/menus/main.lua` appears
+(Logo, bracket animation, menu music) → **Skirmish** → the map loads itself, the ACU is set
+on your marker → **the real game UI** (`gamemain.CreateUI`) with world view, commands, construction and
+Combat → end of game → back to the main menu. Everything from `lua/ui/**` and `lua/sim/**`: no web menu,
+no TS HUD, no recreated game logic.
 
-## Wo wir heute stehen
+## Where we are today
 
-Die Techdemo läuft (ACU → Bau-Menü → Gebäude aufs Raster → aus der echten Ökonomie bezahlt → die
-Fabrik produziert Panzer). Die Session-UI (economy, multifunction, orders, construction, unitview,
-unitviewDetail) rendert aus der Original-Lua über `setupGameUi()`
+The tech demo is running (ACU → construction menu → buildings on the grid → paid from the real economy → the
+Factory produces tanks). The session UI (economy, multifunction, orders, construction, unitview,
+unitviewDetail) renders from the original Lua via `setupGameUi()`
 ([src/lua/uiEngine.ts](../src/lua/uiEngine.ts)); zwei Lua-VMs, 22 Verify-Suiten grün.
-Volle Lochliste: [STATUS.md](STATUS.md). Es fehlt der **Rahmen** (Hauptmenü, Session-Start,
-WorldView, Input) und der **Kampf**.
+Full hole list: [STATUS.md](STATUS.md). The **frame** is missing (main menu, session start,
+WorldView, Input) and the **fight**.
 
 ## Abhängigkeiten
 
@@ -38,114 +38,114 @@ M4 Session-Start ─┬─> M5 Übergang ─────────────
                                                        M12 Movie/Splash/Audio
 ```
 
-Die **zwei Nähte** zwischen UI- und Sim-Strang: **M6** (der Sync-Kreislauf) und **M5**
-(`LaunchSinglePlayerSession`). Sonst hängen die Stränge nicht aneinander.
+The **two seams** between UI and Sim strand: **M6** (the sync circuit) and **M5**
+(`LaunchSinglePlayerSession`). Otherwise the strands won't hang together.
 
 ---
 
-## M1 — maui-Lücken schließen: Border, Tastatur, Fokus, InputCapture
+## M1 — close maui gaps: border, keyboard, focus, input capture
 
 **Größe: M** · hängt an: — · Recherche: [maui-controls](research/maui-controls.md),
 [input-cursor-keymap](research/input-cursor-keymap.md)
 
-**Ziel-Erlebnis:** Nichts Neues zu sehen — aber Panels bekommen ihre echten Rahmen, ein modaler
-Dialog schluckt Klicks daneben, und ein Control mit Keyboard-Fokus bekommt Tasten exklusiv.
+**Target Experience:** Nothing new to see — but panels get their real frames, a modal one
+Dialog swallows up clicks, and a control with keyboard focus gets keys exclusively.
 
-**Engine-Teile:**
+**Engine Parts:**
 
 - **`moho.border_methods` (2)**: `SetNewTextures(vertical, horizontal, upperLeft, upperRight,
-  lowerLeft, lowerRight)` und `SetSolidColor(color)`; sie setzen dabei die LazyVars
-  `BorderWidth`/`BorderHeight` aus den **Texturmaßen** (Cfile:1123156, 1123475; Schreibstellen
-  1122728/1122748). Heute liefert der Auto-Vivifier ([moho.lua](../src/engine-lua/moho.lua):530-536)
-  eine **leere Klasse** — der Border ist halb gebaut (`InternalCreateBorder` + LazyVars da,
-  Methoden nicht), und `border.lua:28` knallt beim ersten Texturwechsel. Dazu `border`-Kind
-  (9-Slice) im [mauiRenderer.ts](../src/ui/mauiRenderer.ts) (kennt heute nur `bitmap`/`text`).
-- **Tastatur-Events**: `__mauiKey(type, keyCode, rawKeyCode, mods)`. Event-Tabelle **exakt** wie
+  lowerLeft, lowerRight)` und `SetSolidColor(color)`; you set the LazyVars
+  `BorderWidth`/`BorderHeight` from the **texture dimensions** (Cfile:1123156, 1123475; writing locations
+  1122728/1122748). Today the Auto-Vivifier ([moho.lua](../src/engine-lua/moho.lua):530-536) delivers
+  an **empty class** — the border is half built (`InternalCreateBorder` + LazyVars there,
+  methods do not), and `border.lua:28` pops at the first texture change. Plus `border`-Child
+  (9-slice) in [mauiRenderer.ts](../src/ui/mauiRenderer.ts) (today only knows `bitmap`/`text`).
+- **Keyboard Events**: `__mauiKey(type, keyCode, rawKeyCode, mods)`. Event table **exactly** like
   `func_CreateLuaEvent` @0x795BD0 (Cfile:1136293-1136348). Enum-Ergänzung: `MouseHover=3`,
-  `KeyUp=9`, `KeyDown=10`, `Char=11` (Cfile:1136267-1136288). **`KeyCode` ist ein wx-Code, kein
-  VK** (`UIUtil.VK_PAUSE = 310` = `WXK_PAUSE`, uiutil.lua:81); `RawKeyCode` ist der MSW-VK.
+  `KeyUp=9`, `KeyDown=10`, `Char=11` (Cfile:1136267-1136288). **`KeyCode` is a wx code, not a
+  VK** (`UIUtil.VK_PAUSE = 310` = `WXK_PAUSE`, uiutil.lua:81); `RawKeyCode` is the MSW-VK.
 - **Routing** (drei identische Dispatcher: `MET_KeyDown` Cfile:1147634, `MET_KeyUp` 1147668,
-  `MET_Char` 1147745): Keyboard-Fokus-Control gesetzt ⇒ **nur** dieses bekommt `HandleEvent`
-  (liefert es `false`, wird der Capture-Stack **nicht** gefragt, das Event geht als `skipped` an
-  die Konsolen-Keymap); sonst Capture-Top; sonst `skipped`.
+  `MET_Char` 1147745): Keyboard focus control set ⇒ **only** this gets `HandleEvent`
+  (if it returns `false`, the capture stack is **not** asked, the event is sent as `skipped`
+  the console keymap); otherwise capture top; otherwise `skipped`.
 - **Fokus**: `AcquireKeyboardFocus(bool)` / `AbandonKeyboardFocus()` / `GetCurrentFocusControl()`
   (Cfile:1125768 / 1125828 / 1125718) + `OnLoseKeyboardFocus` (1124572), `OnKeyboardFocusChange`
-  (1124577). Ein `ButtonPress` auf ein anderes Control entzieht den Fokus (Cfile:1147523-1147531).
+  (1124577). A `ButtonPress` on another control removes the focus (Cfile:1147523-1147531).
 - **InputCapture-Stack** (`std::vector sInputCapture`, Cfile:430346): `AddInputCapture` (1147871),
   `RemoveInputCapture` — *„always first from back"* (1147921), `GetInputCapture` (1147818),
-  `AnyInputCapture` (1147773). **Wirkung:** ist der Stack nicht leer, startet der Maus-Hit-Test
-  nicht am Root-Frame, sondern bei `back()` (Cfile:1147376-1147390) — *das* ist die Modalität.
-- **Der UI-Scheduler ist frame-, nicht tickbasiert.** Die UI-VM benutzt heute den Sim-Scheduler
-  ([threads.lua](../src/engine-lua/threads.lua)). Das Original: `WaitFrames = coroutine.yield`,
-  `WaitSeconds(n)` pollt `CurrentTime()` (userinit.lua:13-21) — die UI-VM hat **keinen**
-  Tick-Scheduler. Daran hängen die Menü-Animationen und der Cursor-Animationsthread
+  `AnyInputCapture` (1147773). **Effect:** If the stack is not empty, the mouse hit test starts
+  not at the root frame, but at `back()` (Cfile:1147376-1147390) — *that* is the modality.
+- **The UI scheduler is frame based, not tick based.** The UI VM uses the Sim scheduler today
+  ([threads.lua](../src/engine-lua/threads.lua)). The original: `WaitFrames = coroutine.yield`,
+  `WaitSeconds(n)` polls `CurrentTime()` (userinit.lua:13-21) — the UI VM has **no**
+  Tick ​​scheduler. The menu animations and the cursor animation thread depend on this
   (cursor.lua:34-43).
 
-**Betroffene Original-Lua:** `lua/maui/border.lua`, `lua/maui/control.lua`,
-`lua/ui/uiutil.lua:615-646` (`MakeInputModal` — hängt `RemoveInputCapture` an `OnDestroy` und
-prüft `event.Type == 'KeyDown'` auf `VK_ESCAPE`/`VK_ENTER`), `lua/userinit.lua`.
+**Affected original Lua:** `lua/maui/border.lua`, `lua/maui/control.lua`,
+`lua/ui/uiutil.lua:615-646` (`MakeInputModal` — attaches `RemoveInputCapture` to `OnDestroy` and
+checks `event.Type == 'KeyDown'` for `VK_ESCAPE`/`VK_ENTER`), `lua/userinit.lua`.
 
 **Verifikation:** `scripts/verify-maui.ts` erweitern. (a) `Border(group):SetTextures(…)` ⇒ 8 Kacheln
-im `__mauiSnapshot()`, `BorderWidth()` == Breite der `vertical`-DDS. (b) Zwei Controls, eines mit
-Fokus ⇒ nur dieses sieht `KeyDown`; gibt es `false` zurück, sieht es **niemand** sonst.
-(c) `UIUtil.MakeInputModal(dialog)` ⇒ Hit-Test außerhalb liefert nichts aus dem Rest des Baums.
+in `__mauiSnapshot()`, `BorderWidth()` == width of the `vertical`-DDS. (b) Two controls, one with
+Focus ⇒ only this sees `KeyDown`; if it returns `false`, **no one** else sees it.
+(c) `UIUtil.MakeInputModal(dialog)` ⇒ hit test outside returns nothing from the rest of the tree.
 
 ---
 
-## M2 — Front-End-Boot: das echte Hauptmenü
+## M2 — Front-end boot: the real main menu
 
 **Größe: L** · hängt an: M1 · Recherche: [frontend-menu](research/frontend-menu.md)
 
-**Ziel-Erlebnis:** Nach dem Verbinden des Spielverzeichnisses steht das Original-Hauptmenü da:
-Logo, Konsolen-Rahmen, Versionstext, Bracket-Animation, die Knöpfe aus `menuTop` (Campaign,
-Skirmish, Multiplayer, …, Options, Exit) mit Glow und Tooltip, dazu Menü-Musik (als Handle geführt,
+**Target Experience:** After connecting the game directory, the original main menu is there:
+Logo, console frame, version text, bracket animation, the buttons from `menuTop` (Campaign,
+Skirmish, Multiplayer, ..., Options, Exit) with glow and tooltip, plus menu music (led as a handle,
 Ausgabe erst in M12).
 
-**Engine-Teile:**
+**Engine Parts:**
 
-1. **Reihenfolge geradeziehen.** `CUIManager::SetNewLuaState` (@0x84C4E0) erzeugt **erst** pro Head
-   einen `CMauiFrame` samt LazyVars (Cfile:1273621-1273666) und ruft **danach** `SetupUI()` aus
-   `/lua/ui/uimain.lua` (Cfile:1273680). Bei uns ist es umgedreht
-   ([gameUi.ts](../src/ui/gameUi.ts):106-107: `setupUi()` vor `createRootFrame()`).
-   `effecthelpers.lua:28` ruft auf **Modulebene** `UIUtil.CreateScreenGroup(GetFrame(0), …)` —
-   der Import von `main.lua` zerreißt sonst sofort. `SetupUI()` läuft bei **jedem**
-   Zustandswechsel neu (uimain.lua:22-25); `if alreadySetup then return end` (:29) schützt nur den Rest.
-2. **`startFrontEnd(host)`** in [uiEngine.ts](../src/lua/uiEngine.ts) als Gegenstück zu
+1. **Straighten the order.** `CUIManager::SetNewLuaState` (@0x84C4E0) generates **first** per head
+   a `CMauiFrame` including LazyVars (Cfile:1273621-1273666) and **then** calls out `SetupUI()`
+   `/lua/ui/uimain.lua` (Cfile:1273680). For us it's the other way around
+   ([gameUi.ts](../src/ui/gameUi.ts):106-107: `setupUi()` before `createRootFrame()`).
+   `effecthelpers.lua:28` calls at **module level** `UIUtil.CreateScreenGroup(GetFrame(0), …)` —
+   Otherwise the import of `main.lua` will immediately break. `SetupUI()` runs on **everyone**
+   Change of state new (uimain.lua:22-25); `if alreadySetup then return end` (:29) only protects the rest.
+2. **`startFrontEnd(host)`** in [uiEngine.ts](../src/lua/uiEngine.ts) as a counterpart to
    `setupGameUi()`: `import('/lua/ui/uimain.lua').StartFrontEndUI()` (uimain.lua:46-64).
-   **Es gibt genau eine UI-VM für alles** (`USER_GetLuaState`, Singleton, Cfile:1368027) — was
-   wechselt, ist der Zustand: `UIS_none=0, splash=1, frontend=2, game=3, lobby=4`
+   **There is exactly one UI VM for everything** (`USER_GetLuaState`, Singleton, Cfile:1368027) — what
+   changes, the status is: `UIS_none=0, splash=1, frontend=2, game=3, lobby=4`
    (Cfile:1262301-1262311); `GetCurrentUIState()` (1265924) liest borders.lua:101.
-3. **Globals** (alle heute in
+3. **Globals** (all in today
    [ui-globals-missing.lua](../src/engine-lua/ui-globals-missing.lua), werfen beim Aufruf):
    `EngineStartFrontEndUI` (Cfile:1263827), `EngineStartSplashScreens` (1263790),
    `FrontEndData` + `GetFrontEndData`/`SetFrontEndData` (1268794 / 1268715),
-   `IN_RemoveKeyMapTable` (1260010 — uimain.lua:52 läuft bei uns **immer**, weil
+   `IN_RemoveKeyMapTable` (1260010 — uimain.lua:52 **always** works for us because
    `DebugFacilitiesEnabled()` false liefert), `FlushEvents` (1274594, main.lua:992),
    `ExitApplication` (1263877, main.lua:980), `ClearFrame(head)` (1264066).
-4. **Audio-Handles ohne Ausgabe.** `PlaySound` **muss ein Handle liefern** (Cfile:1348174), sonst
-   hat `StopSound(handle,[immediate])` (1348237) nichts zu stoppen; dazu `StartSound`,
+4. **Audio handles without output.** `PlaySound` **must provide a handle** (Cfile:1348174), otherwise
+   `StopSound(handle,[immediate])` (1348237) has nothing to stop; plus `StartSound`,
    `SoundIsPrepared` (1348102), `PauseSound`, `PlayVoice` (1348652). main.lua:231-249 startet
-   `Sound{Cue='AMB_Menu_Loop', Bank='AmbientTest'}` und `Sound{Cue='Main_Menu', Bank='Music'}` und
-   stoppt sie über das Handle. **Keine Ausgabe erfinden** — nur den Zustand führen (M12).
-5. **`GetVersion()`** (Core-Global, Cfile:599401) steht sichtbar im Menü (main.lua:172). Heute
-   liefert [ui-globals.lua](../src/engine-lua/ui-globals.lua):654 `'CFA'` — eine **erfundene Zahl
+   `Sound{Cue='AMB_Menu_Loop', Bank='AmbientTest'}` and `Sound{Cue='Main_Menu', Bank='Music'}` and
+   stops it via the handle. **Don't invent an output** — just maintain the state (M12).
+5. **`GetVersion()`** (Core-Global, Cfile:599401) is visible in the menu (main.lua:172). Today
+   returns [ui-globals.lua](../src/engine-lua/ui-globals.lua):654 `'CFA'` — a **made-up number
    im Produktivpfad** (→ OFFENE FRAGE 5).
-6. **`userinit.lua` laden** (Gegenstück zu `simInit.lua`; keine Lua-Datei lädt es, die Engine tut
-   es): bringt `Prefetcher = CreatePrefetchSet()` (userinit.lua:11/27) und den frame-basierten
-   Scheduler aus M1.
-7. **Ohne Film starten — auf dem Original-Weg:** `Prefs.SetOption('mainmenu_bgmovie', false)`
-   (options.lua:358-371, Default true; main.lua:151-153). Der Movie-Pfad kommt in M12.
+6. **Load `userinit.lua`** (counterpart to `simInit.lua`; no Lua file loads it, the engine does
+   es): brings `Prefetcher = CreatePrefetchSet()` (userinit.lua:11/27) and the frame-based
+   Scheduler from M1.
+7. **Start without film — the original way:** `Prefs.SetOption('mainmenu_bgmovie', false)`
+   (options.lua:358-371, default true; main.lua:151-153). The movie path comes in M12.
 
-**Betroffene Original-Lua:** `lua/ui/uimain.lua`, `lua/ui/menus/main.lua` (`CreateUI`, 50-993),
+**Affected original Lua:** `lua/ui/uimain.lua`, `lua/ui/menus/main.lua` (`CreateUI`, 50-993),
 `lua/ui/uiutil.lua`, `lua/ui/effecthelpers.lua`, `lua/ui/menucommon.lua`, `lua/maui/button.lua`,
 `lua/ui/game/tooltip.lua`, `lua/ui/help/tooltips.lua`, `lua/user/prefs.lua`, `lua/userinit.lua`.
 
 **Verifikation:** `scripts/verify-frontend.ts` — UI-VM booten, Root-Frame, `StartFrontEndUI()`;
-`__mauiSnapshot()` muss `/scx_menu/logo/logo.dds`, `border-console-top_bmp.dds` und **genau so
-viele `large_btn_up.dds`-Bitmaps enthalten, wie `menuTop` Einträge hat** (main.lua:104-142).
-Browser (`?frontend`): Klick auf „Skirmish" muss mit **genau einer** Meldung scheitern —
-`InternalCreateLobby … nicht implementiert` (lobbycomm.lua:121). Das ist der ehrliche Beweis, dass
-die Kette bis zur Lobby trägt.
+`__mauiSnapshot()` must be `/scx_menu/logo/logo.dds`, `border-console-top_bmp.dds` and **exactly like that
+many `large_btn_up.dds` bitmaps contain as `menuTop` has entries** (main.lua:104-142).
+Browser (`?frontend`): Clicking on “Skirmish” must fail with **exactly one** message —
+`InternalCreateLobby … nicht implementiert` (lobbycomm.lua:121). This is honest proof that
+carries the chain to the lobby.
 
 ---
 
@@ -153,174 +153,174 @@ die Kette bis zur Lobby trägt.
 
 **Größe: M** · hängt an: M1, M2 · Recherche: [input-cursor-keymap](research/input-cursor-keymap.md)
 
-**Ziel-Erlebnis:** Der Mauszeiger ist der Original-Cursor (animiert, 30 Formen). ESC/Enter/`~` tun,
-was sie im Original tun. `Ctrl-W` togglet das Military-Panel — weil `keyactions.lua` es sagt, nicht
-weil wir es verdrahtet haben. Shift hängt Befehle an die Queue.
+**Target Experience:** The mouse pointer is the original cursor (animated, 30 shapes). ESC/Enter/`~` do,
+what they do in the original. `Ctrl-W` toggle the military panel — because `keyactions.lua` says not to
+because we wired it. Shift adds commands to the queue.
 
-**Engine-Teile:**
+**Engine Parts:**
 
-1. **`ConExecute` echt machen.** Ein Key-Action-String ist eine **Konsolenzeile**, kein
-   Lua-Callback: `UI_Lua <code>` (`CConFunc_UI_Lua`, Cfile:423593-423600) hängt die Argumente
-   zusammen und ruft `SCR_LuaDoString(code, UI_Manager->mState)` (Cfile:1256278-1256324) — bei uns
-   `host.eval()` in der **UI-VM**. Heute loggt `ConExecute` nur (ui-globals.lua:648-651) ⇒ **jede**
-   Tastenaktion ist tot, auch wenn die Keymap käme. Unbekanntes Kommando muss **knallen**.
-2. **Keymap laden wie die Engine.** `CUIKeyHandler::LoadKeyMappings` (Cfile:1259476-1259525) tut es
-   selbst — keine Lua-Datei tut es: `SCR_Import('/lua/keymap/keyNames.lua')` → `SetKeyNameTable`,
-   dann `SCR_Import('/lua/keymap/keymapper.lua')` → **ruft `GetKeyMappings()`** → `AddKeyMapTable`.
-3. `IN_AddKeyMapTable` (Cfile:1259176-1259266): Schlüssel = Key-String, Wert = Tabelle mit `.action`
-   (Pflicht) + optional `.keyRepeat`; `category`/`order` ignoriert die Engine.
+1. **Make `ConExecute` real.** A key action string is a **console line**, not a
+   Lua callback: `UI_Lua <code>` (`CConFunc_UI_Lua`, Cfile:423593-423600) hangs the arguments
+   together and calls `SCR_LuaDoString(code, UI_Manager->mState)` (Cfile:1256278-1256324) — with us
+   `host.eval()` in the **UI VM**. Today `ConExecute` only logs (ui-globals.lua:648-651) ⇒ **everyone**
+   Key action is dead even if the keymap came. Unknown command must **pop**.
+2. **Load keymap like the engine.** `CUIKeyHandler::LoadKeyMappings` (Cfile:1259476-1259525) does it
+   itself — no Lua file does it: `SCR_Import('/lua/keymap/keyNames.lua')` → `SetKeyNameTable`,
+   then `SCR_Import('/lua/keymap/keymapper.lua')` → **calls `GetKeyMappings()`** → `AddKeyMapTable`.
+3. `IN_AddKeyMapTable` (Cfile:1259176-1259266): Key = key string, value = table with `.action`
+   (mandatory) + optional `.keyRepeat`; `category`/`order` ignores the engine.
    `IN_RemoveKeyMapTable` (1259267), `IN_ClearKeyMap` (1260044).
 4. `IN_ParseKeyModifiers` (Cfile:1259566-1259720): Split an `-`, erster Token = Tastenname → Index
-   in `in_keyNames[256]` = **Windows-VK** (keyNames.lua:2), Modifier als Flags in denselben int:
+   in `in_keyNames[256]` = **Windows-VK** (keyNames.lua:2), modifiers as flags in the same int:
    **`Shift = 0x80000000`, `Ctrl = 0x40000000`, `Alt = 0x20000000`** (Cfile:1259627/1259648/1259668).
-5. **Ein Tastendruck** (`sub_838D10`, Cfile:1258983-1259080): (1) hat **irgendein** Control
-   Keyboard-Fokus ⇒ **kein Hotkey** — wer tippt, löst keinen Hotkey aus; (2) Auto-Repeat ohne
-   `keyRepeat` ⇒ ignorieren; (3) Treffer ⇒ `CON_Execute(action)` (1259059); (4) Sonderfälle über den
+5. **One key press** (`sub_838D10`, Cfile:1258983-1259080): (1) has **some** control
+   Keyboard focus ⇒ **no hotkey** — typing does not trigger a hotkey; (2) Auto-repeat without
+   `keyRepeat` ⇒ ignore; (3) Hit ⇒ `CON_Execute(action)` (1259059); (4) Special cases about the
    **wx**-Keycode: `13` (Enter) → `chat.ActivateChat` (Cfile:1263522-1263560), `126` (`~`) →
-   `uimain.ToggleConsole()` (1262747-1262775); (5) **jeder** Pfad endet mit `m_skipped = 1` — Hotkey
-   und maui-Event schließen sich **nicht** aus.
-6. `IsKeyDown(name)` (`MAUI_KeyIsDown`, Cfile:1141557-1141585): liefert **false**, wenn das Fenster
-   nicht im Vordergrund ist **oder** ein Control Fokus hat. Argument ist ein `EMauiKeyCode`-**Name**:
-   `IsKeyDown('Shift')` — **commandmode.lua:82, die Befehls-Queue**.
-7. **Cursor.** `GetCursor()` (Cfile:1274426) liefert das **eine** `CMauiCursor` (5 Methoden: `Hide`,
-   `Show`, `ResetToDefault`, `SetDefaultTexture`, `SetNewTexture`). `SetTexture`/`Reset` sind **Lua**
-   (cursor.lua), nicht Engine. `UIUtil.GetCursor(id)` liest aus `skins[…].cursors[id]` fünf Werte:
+   `uimain.ToggleConsole()` (1262747-1262775); (5) **every** path ends with `m_skipped = 1` — hotkey
+   and Maui event are **not** mutually exclusive.
+6. `IsKeyDown(name)` (`MAUI_KeyIsDown`, Cfile:1141557-1141585): returns **false** if the window
+   is not in the foreground **or** a control has focus. Argument is a `EMauiKeyCode` **Name**:
+   `IsKeyDown('Shift')` — **commandmode.lua:82, the command queue**.
+7. **Cursor.** `GetCursor()` (Cfile:1274426) returns the **one** `CMauiCursor` (5 methods: `Hide`,
+   `Show`, `ResetToDefault`, `SetDefaultTexture`, `SetNewTexture`). `SetTexture`/`Reset` are **Lua**
+   (cursor.lua), not Engine. `UIUtil.GetCursor(id)` reads five values ​​from `skins[…].cursors[id]`:
    `texture, hotspotX, hotspotY, [numFrames], [fps]` (skins.lua:169; 30 Formen, meist animiert —
-   `RULEUCC_Reclaim` = 23 Frames à 12 fps). Bei uns hängt `__uiSetCursorTexture` an **nichts**
-   (ui-globals.lua:24 = `false`) ⇒ das Cursor-Objekt ist wirkungslos. TS-Hook: DDS → Blob-URL →
+   `RULEUCC_Reclaim` = 23 frames at 12 fps). For us, `__uiSetCursorTexture` is attached to **nothing**
+   (ui-globals.lua:24 = `false`) ⇒ the cursor object has no effect. TS hook: DDS → Blob URL →
    `document.body.style.cursor = url(<png>) <hx> <hy>, auto`.
-8. **Auflösen:** ESC und Pfeiltasten hängen heute direkt am `window` ([main.ts](../src/main.ts):651-680,
-   726-742). Das gehört `uimain.EscapeHandler` (uimain.lua:119) und `keyactions.lua`.
+8. **Resolve:** ESC and arrow keys are now attached directly to the `window` ([main.ts](../src/main.ts):651-680,
+   726-742). This belongs to `uimain.EscapeHandler` (uimain.lua:119) and `keyactions.lua`.
 
-**Betroffene Original-Lua:** `lua/keymap/{keyNames,keymapper,defaultKeyMap,keyactions}.lua`,
+**Affected original Lua:** `lua/keymap/{keyNames,keymapper,defaultKeyMap,keyactions}.lua`,
 `lua/ui/uimain.lua`, `lua/ui/game/eschandler.lua`, `lua/maui/cursor.lua`, `lua/ui/uiutil.lua`,
 `lua/ui/dialogs/keybindings.lua`, `lua/ui/game/commandmode.lua`.
 
-**Verifikation:** `scripts/verify-input.ts` — (a) `ConExecute('UI_Lua LOG("hi")')` erzeugt die
-Logzeile; ein erfundenes Kommando knallt. (b) `keymapper.GetKeyMappings()` liefert für **jeden**
-Eintrag aus `defaultKeyMap.lua` eine `action` (keymapper.lua:112 warnt sonst), und `'Ctrl-W'` parst
-auf `0x40000000 | 0x57`. Browser: nach `SetupUI()` steht `body.style.cursor` auf der Skin-Textur;
-Shift-Klick hängt einen Befehl an die Queue statt ihn zu ersetzen.
+**Verification:** `scripts/verify-input.ts` — (a) `ConExecute('UI_Lua LOG("hi")')` creates the
+log line; an invented command pops. (b) `keymapper.GetKeyMappings()` delivers for **everyone**
+Entry from `defaultKeyMap.lua` to `action` (keymapper.lua:112 warns otherwise), and `'Ctrl-W'` parses
+on `0x40000000 | 0x57`. Browser: after `SetupUI()` there is `body.style.cursor` on the skin texture;
+Shift-click appends a command to the queue instead of replacing it.
 
 ---
 
-## M4 — Session-Start aus der Original-Lua
+## M4 — Session start from the original Lua
 
 **Größe: L** · hängt an: — (Sim-Seite, ab sofort baubar) · Recherche:
 [session-start](research/session-start.md)
 
-**Ziel-Erlebnis:** Die Karte liest sich selbst. Die ACU steht auf ihrem `ARMY_n`-Marker und warpt
-ein (`PlayCommanderWarpInEffect`); auf SCMP_009 liegen **108 Massepunkte und 8 Hydrocarbon** als
-Original-Splats (`mass_marker.dds`) mit `massDeposit01_prop.bp` — statt erfundener Ringe.
+**Target Experience:** The map reads itself. The ACU stands on its `ARMY_n` marker and warps
+a (`PlayCommanderWarpInEffect`); There are **108 ground points and 8 hydrocarbon** on SCMP_009
+Original splats (`mass_marker.dds`) with `massDeposit01_prop.bp` — instead of invented rings.
 
-**Engine-Teile:**
+**Engine Parts:**
 
-1. **`/maps` in den VFS.** `GameVfs.mount` mountet heute nur `gamedata/*.scd`
-   ([vfs.ts](../src/vfs/vfs.ts):27-28), obwohl der Kommentar daneben `bin/SupComDataPath.lua`
-   korrekt zitiert; `main.ts` liest die Karte über einen separaten `DirectorySource` (main.ts:305/413).
-   Solange `_save.lua` nicht als `/maps/<x>/<x>_save.lua` im LuaHost-VFS liegt, kann `SetupSession()`
-   es nicht `doscript`en.
-2. **Der Fund: `/schook`.** `bin/SupComDataPath.lua` setzt `hook = { '/schook' }`; die Engine liest
-   das (Cfile:505923-505936 → `SCR_AddHookDirectory`) und hängt bei **jedem** Skript-Load zusätzlich
-   `<hookdir><pfad>` an (Cfile:595822-595866, Logzeile `"Hooked %s with %s"`).
-   **`schook/lua/siminit.lua` ist der fehlende halbe Session-Start:** es umhüllt `BeginSession` und
-   ruft `ScenarioUtils.CreateProps()` (:17), `CreateResources()` (:18), Scores und
-   `victory.CheckVictory` (:23-27); es umhüllt `OnCreateArmyBrain` und ruft
-   `InitializeStartLocation(name)` (:47) + `SetPlans` (:48). `CreateProps`/`CreateResources` werden
-   **nirgends sonst** aufgerufen. `schook.scd` liegt bereits im VFS
-   ([gameFiles.ts](../scripts/gameFiles.ts):86) — es wird nur nie geladen.
-3. **Echter SimInit-Boot.** `installEngine()` lädt heute `SimSync.lua` direkt und ruft
-   `ResetSyncTable()` selbst — beides macht sonst `SetupSession()` (siminit.lua:45/100). Statt dessen
+1. **`/maps` in the VFS.** `GameVfs.mount` only mounts `gamedata/*.scd` today
+   ([vfs.ts](../src/vfs/vfs.ts):27-28), although the comment next to it is `bin/SupComDataPath.lua`
+   correctly quoted; `main.ts` reads the card via a separate `DirectorySource` (main.ts:305/413).
+   As long as `_save.lua` is not in the LuaHost VFS as `/maps/<x>/<x>_save.lua`, `SetupSession()`
+   it doesn't `doscript`en.
+2. **The find: `/schook`.** `bin/SupComDataPath.lua` sets `hook = { '/schook' }`; the engine reads
+   that (Cfile:505923-505936 → `SCR_AddHookDirectory`) and also hangs with **every** script load
+   `<hookdir><pfad>` (Cfile:595822-595866, log line `"Hooked %s with %s"`).
+   **`schook/lua/siminit.lua` is the missing half session start:** it wraps `BeginSession` and
+   calls `ScenarioUtils.CreateProps()` (:17), `CreateResources()` (:18), scores and
+   `victory.CheckVictory` (:23-27); it envelops `OnCreateArmyBrain` and calls
+   `InitializeStartLocation(name)` (:47) + `SetPlans` (:48). `CreateProps`/`CreateResources`
+   **not called anywhere else**. `schook.scd` is already in the VFS
+   ([gameFiles.ts](../scripts/gameFiles.ts):86) — it just never loads.
+3. **Real SimInit boot.** `installEngine()` loads `SimSync.lua` directly today and calls
+   `ResetSyncTable()` itself — otherwise `SetupSession()` (siminit.lua:45/100) does both. Instead
    `/lua/simInit.lua`. Voraussetzung: `CreatePrefetchSet()` (**simInit.lua:232, Top-Level!**),
-   `__active_mods` (:33) und `/lua/dataInit.lua` (34 Zeilen: `BOOLEAN/INTEGER/FLOAT/VECTOR2/VECTOR3/
+   `__active_mods` (:33) and `/lua/dataInit.lua` (34 lines: `BOOLEAN/INTEGER/FLOAT/VECTOR2/VECTOR3/
    RECTANGLE/STRING/GROUP`) — ohne die DSL ist jedes `_save.lua` unlesbar, und der strenge `_G`
-   (config.lua:51) würde korrekt knallen.
-4. **`ScenarioInfo` deserialisieren, nicht erfinden.** [session.ts](../src/sim/session.ts):61-72 baut
-   ein Mini-Table; es fehlen `save`, `script`, `Env`, `Options`, `norushradius`, `Configurations`,
-   und `ArmySetup` hat kein `Team`/`PlayerName`/`ArmyColor`/`StartSpot` — `BeginSession`
-   (siminit.lua:150) liest aber `army.Team`. Vorlage: `SinglePlayerLaunch.lua:228-295`
+   (config.lua:51) would pop correctly.
+4. **Deserialize `ScenarioInfo`, don't invent it.** [session.ts](../src/sim/session.ts):61-72 builds
+   a mini table; `save`, `script`, `Env`, `Options`, `norushradius`, `Configurations` are missing,
+   and `ArmySetup` has no `Team`/`PlayerName`/`ArmyColor`/`StartSpot` — `BeginSession`
+   (siminit.lua:150) but reads `army.Team`. Template: `SinglePlayerLaunch.lua:228-295`
    (`SetupCommandLineSkirmish`) + `LobbyComm.GetDefaultPlayerOptions` (lobbycomm.lua:29) +
-   `defaultOptions` (SPL:123-135). Die Engine schreibt je Armee `ArmySetup[ArmyName] = teamInfo[i]`
-   und `ArmyIndex = i` (**1-basiert**, Cfile:1071871), dann `_G.ScenarioInfo` (:1071889).
-5. **Boot-Reihenfolge** (`Moho::Sim::Setup`, Cfile:1071723): Seed/PhysConstants → `ScenarioInfo` →
-   **`SetupSession()`** (:1071898 — *bevor* eine Armee existiert) → EntityDB/CommandDB →
+   `defaultOptions` (SPL:123-135). The engine writes `ArmySetup[ArmyName] = teamInfo[i]` for each army
+   and `ArmyIndex = i` (**1-based**, Cfile:1071871), then `_G.ScenarioInfo` (:1071889).
+5. **Boot Order** (`Moho::Sim::Setup`, Cfile:1071723): Seed/PhysConstants → `ScenarioInfo` →
+   **`SetupSession()`** (:1071898 — *before* an army exists) → EntityDB/CommandDB →
    **`Sim::CreateArmies`** (:1072015) → Props (:1072071) → **`BeginSession()`** (:1072090 —
-   *nachdem* alle Brains da sind, *bevor* es Units gibt) → `Sim::PostInitialize` (:1072103, nur bei
+   *after* all Brains are there, *before* there are Units) → `Sim::PostInitialize` (:1072103, only at
    `Options.PrebuiltUnits == 'On'`).
-6. **`CreateArmies`** (Cfile:1073404): je Armee zuerst `GenerateArmyStart` (**Zufall**, Cfile:1017961),
-   dann Felder aus `ArmySetup` (**`Faction → mFaction = Faction − 1`**, :1017289), dann **Lua**
+6. **`CreateArmies`** (Cfile:1073404): per army first `GenerateArmyStart` (**Random**, Cfile:1017961),
+   then fields from `ArmySetup` (**`Faction → mFaction = Faction − 1`**, :1017289), then **Lua**
    `OnCreateArmyBrain(i+1, brain, ArmyName, PlayerName)` (:1073457). `brain:GetFactionIndex()` =
-   `mFaction + 1` (Cfile:733604) — 1-basiert, direkt als Index in `factions.lua`.
-7. **`BeginSession()`** (siminit.lua:137) → `ScenarioInfo.Env.OnPopulate` → das Karten-Skript →
+   `mFaction + 1` (Cfile:733604) — 1-based, directly indexed into `factions.lua`.
+7. **`BeginSession()`** (siminit.lua:137) → `ScenarioInfo.Env.OnPopulate` → the map script →
    `InitializeArmies()` (scenarioutilities.lua:436) → `CreateInitialArmyGroup` →
-   `CreateInitialArmyUnit` (Cfile:1025200: Position aus `GetArmyStartPos()`, **`pos.y = 0.0`**,
+   `CreateInitialArmyUnit` (Cfile:1025200: Position from `GetArmyStartPos()`, **`pos.y = 0.0`**,
    `mComplete = 1`).
-8. **Bindungen** (`sim_SimInits`): `ListArmies` (1024373), `SetArmyStart(army, x, z)` (**nur 2D**,
+8. **Bindings** (`sim_SimInits`): `ListArmies` (1024373), `SetArmyStart(army, x, z)` (**2D only**,
    1024490), `GenerateArmyStart` (1017961), `brain:GetArmyStartPos` (1016481),
    `ShouldCreateInitialArmyUnits` (= `not /noinitialunits`, 1024331), **`CreateResourceDeposit`**
-   (687675 → `AddDepositPoint` 686680: Rechteck `trunc(p − size/2) … +size` in int16-Zellen ⇒ ein
-   Mass-Punkt ist genau **eine 1×1-Zelle**, dasselbe Raster wie `COORDS_GridSnap`), `CreatePropHPR`
+   (687675 → `AddDepositPoint` 686680: Rectangle `trunc(p − size/2) … +size` in int16 cells ⇒ a
+   Dimension point is exactly **a 1×1 cell**, same grid as `COORDS_GridSnap`), `CreatePropHPR`
    (1015362), `CreateUnitHPR`, `SetAlliance`, `SetArmyPlans`, `InitializeArmyAI`,
    `SetIgnoreArmyUnitCap`, `AddBuildRestriction`, `ArmyInitializePrebuiltUnits` (1024702),
    `GetMapSize`, `Random` (deterministisch → OFFENE FRAGE 3), `Warp`, `OrientFromDir`,
-   `SetAlliedVictory`/`EndGame`/`IsGameOver`. Unit-Methoden: `SetCustomName`, `HideBone`,
+   `SetAlliedVictory`/`EndGame`/`IsGameOver`. Unit methods: `SetCustomName`, `HideBone`,
    `CreateTarmac`, `PlayCommanderWarpInEffect`, `CreateWreckageProp`.
-9. **Auflösen:** [main.ts](../src/main.ts):413-432 (Marker-Parser) und :483 (`spawnViaLua('uel0001')`)
-   fallen weg.
+9. **Resolve:** [main.ts](../src/main.ts):413-432 (marker parser) and :483 (`spawnViaLua('uel0001')`)
+   fall away.
 
-**Betroffene Original-Lua:** `lua/simInit.lua`, `schook/lua/siminit.lua`, `lua/dataInit.lua`,
+**Affected original Lua:** `lua/simInit.lua`, `schook/lua/siminit.lua`, `lua/dataInit.lua`,
 `lua/scenarioutilities.lua`, `lua/scenarioframework.lua`, `lua/factions.lua`, `lua/victory.lua`,
 `lua/aibrain.lua`, `maps/<x>/<x>_{scenario,save,script}.lua`.
 
 **Verifikation:** `scripts/verify-session-start.ts`, vier Stufen einzeln rot/grün:
 (a) `doscript('/lua/dataInit.lua', env); doscript('/maps/SCMP_009/SCMP_009_save.lua', env)` ⇒
 `env.Scenario.MasterChain._MASTERCHAIN_.Markers.ARMY_1.position == {672.5, 18.6797, 346.5}`.
-(b) Nach dem Hook-Load ist `BeginSession` die **gehookte** Fassung (Zähler-Spion auf
-`CreateResourceDeposit`). (c) `ArmyBrains[1]:GetArmyStartPos()` == `672.5, 346.5` — der Beweis, dass
-`InitializeStartLocation` aus dem Hook lief. (d) `BeginSession()` ⇒ genau **1 Unit** je nicht-ziviler
+(b) After the hook load, `BeginSession` is the **hooked** version (counter spy on
+`CreateResourceDeposit`). (c) `ArmyBrains[1]:GetArmyStartPos()` == `672.5, 346.5` — proof that
+`InitializeStartLocation` ran from the hook. (d) `BeginSession()` ⇒ exactly **1 unit** per non-civilian
 Armee, Blueprint == `Factions[faction].InitialUnit`; **116 Deposits** (108 Mass, 8 Hydrocarbon).
-Browser: Karte laden, ACU steht auf dem Startpunkt — **ohne** `?luaspawn`.
+Browser: Load map, ACU is at the starting point — **without** `?luaspawn`.
 
 ---
 
-## M5 — Der Übergang: `LaunchSinglePlayerSession` (Naht 2)
+## M5 — The transition: `LaunchSinglePlayerSession` (seam 2)
 
 **Größe: M** · hängt an: M2, M4 · Recherche: [frontend-menu](research/frontend-menu.md) §6,
 [session-start](research/session-start.md) §2.1
 
-**Ziel-Erlebnis:** Die Session startet aus der **Original-Lua**, nicht aus einem Web-Button. Der
-Launcher-Knopf verschwindet.
+**Target experience:** The session starts from the **original Lua**, not from a web button. The
+Launcher button disappears.
 
-**Engine-Teile:**
+**Engine Parts:**
 
 - `LaunchSinglePlayerSession(sessionInfo)` — **UI-VM**-Bindung (Cfile:1321744; mHelp *„launch a new
   single player session."*). Rumpf: `WLD_SetupSessionInfo(luaTable)` → `WLD_BeginSession(…)`
-  (Cfile:1321776-1321782); wirft, wenn schon eine Session läuft. Gelesene Felder — **mehr gibt es
-  nicht**: `scenarioInfo` (1321432), `scenarioMods` (1321444), `teamInfo` (1321455), `RandomSeed`
-  (fehlt ⇒ Systemzeit, 1321475), `scenarioInfo.map` (1321529), `createReplay` (1321539),
-  `playerName` (1321545). Bei uns: bootet den Sim-Worker mit genau dieser Tabelle.
-- Der **Bauplan** für `sessionInfo` steht komplett in `SinglePlayerLaunch.lua:228-295`
+  (Cfile:1321776-1321782); throws if a session is already running. Fields read — **there are more
+  not**: `scenarioInfo` (1321432), `scenarioMods` (1321444), `teamInfo` (1321455), `RandomSeed`
+  (missing ⇒ system time, 1321475), `scenarioInfo.map` (1321529), `createReplay` (1321539),
+  `playerName` (1321545). For us: boots the Sim Worker with exactly this table.
+- The **construction plan** for `sessionInfo` is completely in `SinglePlayerLaunch.lua:228-295`
   (`SetupCommandLineSkirmish`) — Fraktionen, Farben, Teams, `defaultOptions`, `GetExtraArmies`
-  (NEUTRAL_CIVILIAN), alles aus der Original-Lua, **ohne Netzwerk-Lobby**.
+  (NEUTRAL_CIVILIAN), everything from the original Lua, **without network lobby**.
 - `LoadScenario` (maputil.lua:21-30) = `doscript('/lua/dataInit.lua', env)` + `doscript(scenName, env)`
-  — dasselbe, was die Engine in `WLD_LoadScenarioInfo` (Cfile:1320686-1320693) tut.
-- Der **Einstieg ist in der Engine verdrahtet:** `main` (Cfile:1373640-1373870) prüft `/map <x>` →
+  — the same thing the engine does in `WLD_LoadScenarioInfo` (Cfile:1320686-1320693).
+- The **entry is wired into the engine:** `main` (Cfile:1373640-1373870) checks `/map <x>` →
   `func_StartCommandLineSession` (1373521) → `singleplayerlaunch.StartCommandLineSession` (1373668).
-  Browser-Gegenstück: `?map=<x>` über das schon vorhandene `HasCommandLineArg`.
+  Browser counterpart: `?map=<x>` over the already existing `HasCommandLineArg`.
 - Weitere UI-Bindungen: `SessionGetScenarioInfo` (1330883), `PrefetchSession`,
   `WorldIsLoading`/`WorldIsPlaying` (1322303).
-- **Rückweg:** `sub_88C9C0` (Cfile:1321251) = `WLD_Teardown()` → `UI_StartFrontEnd()`. Nach dem Spiel
-  landet man wieder im Hauptmenü — und weil `SetNewLuaState` die Frames neu baut, ist der maui-Baum
+- **Return path:** `sub_88C9C0` (Cfile:1321251) = `WLD_Teardown()` → `UI_StartFrontEnd()`. After the game
+  you end up back in the main menu - and because `SetNewLuaState` rebuilds the frames, the maui tree is
   dabei leer.
 
-**Betroffene Original-Lua:** `lua/ui/lobby/SinglePlayerLaunch.lua`, `lua/ui/maputil.lua`,
-`lua/ui/lobby/lobbyComm.lua` (nur `GetDefaultPlayerOptions`), `lua/ui/uimain.lua` (`NoteGameOver`).
+**Affected original Lua:** `lua/ui/lobby/SinglePlayerLaunch.lua`, `lua/ui/maputil.lua`,
+`lua/ui/lobby/lobbyComm.lua` (`GetDefaultPlayerOptions` only), `lua/ui/uimain.lua` (`NoteGameOver`).
 
-**Verifikation:** `scripts/verify-launch.ts` — `SetupCommandLineSkirmish` gegen SCMP_009 laufen
-lassen, die erzeugte `sessionInfo` prüfen (`teamInfo[1].ArmyName == 'ARMY_1'`, `Faction`,
-`scenarioInfo.Options == defaultOptions`), dann `LaunchSinglePlayerSession(sessionInfo)` ⇒ der Worker
-bootet, nach N Beats steht die ACU auf `ARMY_1`. Browser: `?map=SCMP_009` ⇒ Session läuft, **ohne**
-dass eine TS-Zeile eine Armee anlegt; `NoteGameOver` ⇒ Hauptmenü, `GetFrame(0)` hat 0 Kinder.
+**Verification:** `scripts/verify-launch.ts` — Running `SetupCommandLineSkirmish` against SCMP_009
+have the generated `sessionInfo` checked (`teamInfo[1].ArmyName == 'ARMY_1'`, `Faction`,
+`scenarioInfo.Options == defaultOptions`), then `LaunchSinglePlayerSession(sessionInfo)` ⇒ the worker
+boots, after N beats the ACU is at `ARMY_1`. Browser: `?map=SCMP_009` ⇒ Session running, **without**
+that a TS line creates an army; `NoteGameOver` ⇒ Main menu, `GetFrame(0)` has 0 children.
 
 ---
 
@@ -328,12 +328,12 @@ dass eine TS-Zeile eine Armee anlegt; `NoteGameOver` ⇒ Hauptmenü, `GetFrame(0
 
 **Größe: M** · hängt an: M4 · Recherche: [session-ui-panels](research/session-ui-panels.md)
 
-**Ziel-Erlebnis:** Nichts Neues sichtbar — aber ab hier lebt **jedes** Panel im Original-Takt, und
-`UnitData` kommt aus `Sync` statt aus einem TS-Snapshot.
+**Target experience:** Nothing new visible — but from here on out, **every** panel lives in the original beat, and
+`UnitData` comes from `Sync` instead of a TS snapshot.
 
-**Engine-Teile:**
+**Engine Parts:**
 
-- **Der Kreislauf — die Reihenfolge *ist* Semantik:**
+- **The cycle — the order *is* semantics:**
 
   ```
   SIM:  Sim::Sync (Cfile:1074261)  →  Sync.__ArmyStats, Sync.Cheaters, …
@@ -347,18 +347,18 @@ dass eine TS-Zeile eine Armee anlegt; `NoteGameOver` ⇒ Hauptmenü, `GetFrame(0
             └ UI_LuaBeat (1262940)               → gamemain.OnBeat()    (gamemain.lua:437)
   ```
 
-  Wer erst `OnBeat` rechnet, zeigt die Daten des vorigen Beats. Heute ruft
+  If you calculate `OnBeat` first, you will see the data from the previous beat. Today is calling
   [gameUi.ts](../src/ui/gameUi.ts):161 `Economy._BeatFunction()` **direkt** — an
-  `AddBeatFunction`/`OnBeat` vorbei. Registriert sind dort aber: economy.lua:239,
+  `AddBeatFunction`/`OnBeat` over. But the following are registered there: economy.lua:239,
   avatars.lua:70/747, score.lua:86, objectives2.lua:109, rallypoint.lua:56, commandmode.lua:87,
   connectivity.lua:147.
 - `usersync.lua` verteilt: `Sync.Sounds` → `PlaySound` (:22), `Sync.UnitData` → `UnitData` (:44),
-  `Sync.ReleaseIds` (:48), `Sync.RequestingExit` (:16), `Sync.UserConRequests` (:38). Die Sim-Seite
-  legt die Tabelle je Beat neu an (simsync.lua:9-31).
-- Transport über die Worker-Grenze: structured clone statt `SCR_ToByteStream`/`SCR_FromByteStream`
-  (Cfile:1328276) — gleiche Semantik, andere Leitung: Engine-Freiheit, kein Logik-Nachbau
+  `Sync.ReleaseIds` (:48), `Sync.RequestingExit` (:16), `Sync.UserConRequests` (:38). The Sim Page
+  creates the table again for each beat (simsync.lua:9-31).
+- Transport across the worker boundary: structured clone instead of `SCR_ToByteStream`/`SCR_FromByteStream`
+  (Cfile:1328276) — same semantics, different management: engine freedom, no logic replica
   (Einschränkung → OFFENE FRAGE 12).
-- **Session-Globals** (kein einziges neues Control nötig): `GetArmiesTable`
+- **Session Globals** (not a single new control necessary): `GetArmiesTable`
   (Cfile:1266971-1267112 — `{numArmies, focusArmy, armiesTable[i] = {name, nickname, faction, color,
   iconColor, showScore, civilian, human, outOfGame, authorizedCommandSources}}`),
   `SessionGetScenarioInfo` (1330883), `GetGameTime` (**String**, 1266614), `GameTime` (**Sekunden**,

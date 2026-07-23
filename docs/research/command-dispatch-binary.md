@@ -1,23 +1,23 @@
-# Befehls-Dispatch (Command → Task) — aus dem Binary
+# Command dispatch (Command → Task) — from the binary
 
-**Quelle:** `IAiCommandDispatchImpl::DispatchTask` @ **0x608EF0** (der große
-Switch, in faf-re als Stub). Die **Callee-Liste** dieser Funktion ist
-faktisch die Dispatch-Tabelle: jeder Befehlstyp erzeugt einen konkreten
-Task und pusht ihn auf den Task-Stack des Unit-Threads (siehe
-[sim-core.md](sim-core.md): Rückgabewert steuert das Scheduling).
+**Source:** `IAiCommandDispatchImpl::DispatchTask` @ **0x608EF0** (the big one
+Switch, in faf-re as a stub). The **Callee list** of this function is
+in fact the dispatch table: each type of command creates a specific one
+Task and pushes it to the task stack of the unit thread (see
+[sim-core.md](sim-core.md): Return value controls scheduling).
 
 Befehls-Enum: `EUnitCommandType` (faf-re `command/SSTICommandIssueData.h`).
 
-## Dispatch-Tabelle
+## Dispatch table
 
-| Opcode | Befehl | erzeugter Task / Aktion |
+| Opcode | command | generated task/action |
 | --- | --- | --- |
 | 0x01 | Stop | `IAiCommandDispatchImpl::Stop` |
 | 0x02 | Move | `NewMoveTask` |
-| 0x03 | Dive | (Tauch-Zustand) |
+| 0x03 | Dive | (Diving state) |
 | 0x04 | FormMove | `CUnitFormAndMoveTask` |
-| 0x05 | BuildSiloTactical | Silo-Bau |
-| 0x06 | BuildSiloNuke | Silo-Bau |
+| 0x05 | BuildSiloTactical | Silo construction |
+| 0x06 | BuildSiloNuke | Silo construction |
 | 0x07 | BuildFactory | `CFactoryBuildTask` |
 | 0x08 | BuildMobile | `CUnitMobileBuildTask` |
 | 0x09 | BuildAssist | `CUnitAssistMoveTask` (+ Assist) |
@@ -44,7 +44,7 @@ Befehls-Enum: `EUnitCommandType` (faf-re `command/SSTICommandIssueData.h`).
 | 0x1E | KillSelf | `IAiCommandDispatchImpl::KillSelf` |
 | 0x1F | DestroySelf | `Entity::Destroy` |
 | 0x20 | Sacrifice | `CUnitSacrificeTask` |
-| 0x21 | Pause | `Unit::SetPaused` |
+| 0x21 | break | `Unit::SetPaused` |
 | 0x22 | OverCharge | `CUnitFireAtTask` |
 | 0x23 | AggressiveMove | `NewMoveTask` (aggressiv) |
 | 0x24 | FormAggressiveMove | `CUnitFormAndMoveTask` (aggressiv) |
@@ -57,10 +57,10 @@ Weitere Callees: `NewCallTransportCommand`, `IssueRefuelTask`,
 `IssueCallAirStagingPlatformTask`, `CUnitCarrierLaunch`,
 `CUnitCarrierRetrieve` — Transport-/Träger-/Nachtank-Wege.
 
-## Für den Nachbau (Phase C)
-- Unser `UnitCommand` kennt nur `move`. Zielbild: dieses Enum als Befehlstyp,
-  eine Task-Basisklasse mit `execute() -> SchedulingResult` (−1 fertig,
-  0 sofort nochmal, N warten), Queue-Semantik aus [sim-core.md](sim-core.md)
-  (Patrol/FormPatrol rotieren den Kopf ans Ende = Ringqueue).
-- Die genaue Verzweigung im Switch (Bedingungen, Ziel-Auflösung) liegt bei
-  0x608EF0 bereit, wenn ein einzelner Task exakt nachgebaut wird.
+## For reconstruction (Phase C)
+- Our `UnitCommand` only knows `move`. Target image: this enum as a command type,
+  a task base class with `execute() -> SchedulingResult` (−1 done,
+  0 immediately again, N wait), queue semantics from [sim-core.md](sim-core.md)
+  (Patrol/FormPatrol rotate the head to the end = ring cue).
+- The exact branching in the switch (conditions, target resolution) is included
+  0x608EF0 ready if a single task is recreated exactly.

@@ -18,7 +18,7 @@ export async function resolve(specifier, context, next) {
   if (isLua(specifier)) {
     const base = context.parentURL ? dirname(fileURLToPath(context.parentURL)) : process.cwd()
     const file = specifier.split('?')[0]
-    const abs = file.startsWith('.') ? resolvePath(base, file) : file
+    const abs = file.startsWith('.')? resolvePath(base, file) : file
     return { url: pathToFileURL(abs).href, format: 'lua', shortCircuit: true }
   }
   return next(specifier, context)

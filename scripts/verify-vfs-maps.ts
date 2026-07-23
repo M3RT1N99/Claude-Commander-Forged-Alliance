@@ -48,7 +48,7 @@ class NodeFile implements RandomAccessFile {
   }
 }
 
-/** Dieselbe Quelle wie im Browser, nur mit Node-Dateien. */
+/** Same source as in the browser, only with node files. */
 class NodeSource implements GameSource {
   readonly label = 'Node'
   private readonly open_: NodeFile[] = []
@@ -82,36 +82,36 @@ const check = (ok: boolean, label: string): void => {
 }
 
 const source = new NodeSource()
-console.log('\n== Das VFS mountet Archive UND das Spielverzeichnis ==')
+console.log('\n== The VFS mounts archives AND the game directory ==')
 const vfs = await GameVfs.mount(source, () => {})
 
-// Aus den Archiven (wie bisher).
-check(vfs.exists('lua/ui/menus/main.lua'), 'lua/ui/menus/main.lua (aus lua.scd)')
+// From the archives (as before).
+check(vfs.exists('lua/ui/menus/main.lua'), 'lua/ui/menus/main.lua (from lua.scd)')
 
-// Lose Dateien — nur über den zweiten Mount erreichbar.
+// Loose files — only accessible via the second mount.
 check(
   vfs.exists('maps/X1CA_TUT/X1CA_TUT_scenario.lua'),
-  'maps/X1CA_TUT/X1CA_TUT_scenario.lua (Tutorial — daran starb der Ja-Knopf)',
+  'maps/X1CA_TUT/X1CA_TUT_scenario.lua (Tutorial — this is where the yes button died)',
 )
 const maps = vfs.find((p) => /^maps\/[^/]+\/[^/]+_scenario\.lua$/.test(p))
-check(maps.length > 20, `${maps.length} Karten-Szenarien im VFS`)
+check(maps.length > 20, `${maps.length} Map scenarios in VFS`)
 const scmaps = vfs.find((p) => p.endsWith('.scmap'))
-check(scmaps.length > 20, `${scmaps.length} .scmap-Dateien`)
+check(scmaps.length > 20, `${scmaps.length} .scmap files`)
 
-// Und sie sind LESBAR (nicht nur gelistet).
+// And they are READABLE (not just listed).
 const text = await vfs.readText('maps/X1CA_TUT/X1CA_TUT_scenario.lua')
-check(text.includes('ScenarioInfo'), `das Szenario ist lesbar (${text.length} Zeichen)`)
+check(text.includes('ScenarioInfo'), `the scenario is readable (${text.length} characters)`)
 
-// Die Archive haben Vorrang — eine lose Datei darf sie nicht überdecken.
+// The archives have priority — a loose file cannot cover them.
 check(
   vfs.resolve('lua/ui/menus/main.lua')?.toLowerCase().includes('lua/ui/menus/main.lua') === true,
-  'die Archive behalten Vorrang (SupComDataPath: erster Treffer gewinnt)',
+  'the archives retain priority (SupComDataPath: first hit wins)',
 )
 
 // --- SCMAP tail: every retail map must parse down to exact EOF ---------------
 // (render-details.md par. 1 decoded the full tail: masks, terrain type,
 // v60 skybox, props; the parser now throws on leftover bytes.)
-console.log('\n== SCMAP-Schwanz: alle Karten bis exakt EOF ==')
+console.log('\n== SCMAP tail: all maps up to exactly EOF ==')
 {
   // Only real maps under maps/ — lua/ai/opai/opaimap.scmap is a v51 SC1-format
   // helper the parser rejects by design.
@@ -131,10 +131,10 @@ console.log('\n== SCMAP-Schwanz: alle Karten bis exakt EOF ==')
       shaderCount.set(m.terrainShader, (shaderCount.get(m.terrainShader) ?? 0) + 1)
     } catch (e) {
       failed++
-      if (failed <= 3) console.log(`  · FEHLER ${p}: ${e instanceof Error ? e.message : e}`)
+      if (failed <= 3) console.log(`  · ERROR ${p}: ${e instanceof Error ? e.message : e}`)
     }
   }
-  check(failed === 0 && parsed === realMaps.length, `${parsed}/${realMaps.length} Karten bis EOF geparst`)
+  check(failed === 0 && parsed === realMaps.length, `${parsed}/${realMaps.length} maps parsed up to EOF`)
   // Terrain shader split documented in render-details.md par. 4:
   // TTerrain 39, TTerrainXP 20, TTerrainGlow 1 — the variant choice in
   // terrainMaterial.ts depends on exactly these strings.
@@ -144,8 +144,8 @@ console.log('\n== SCMAP-Schwanz: alle Karten bis exakt EOF ==')
       shaderCount.get('TTerrainGlow') === 1,
     `terrain shader split: ${[...shaderCount].map(([k, v]) => `${k}=${v}`).join(', ')}`,
   )
-  check(withProps > 10, `${withProps} Karten mit Props (SCMP_005 hat ~47k)`)
-  check(withSkybox > 0, `${withSkybox} Karten mit v60-Skybox-Block`)
+  check(withProps > 10, `${withProps} cards with props (SCMP_005 has ~47k)`)
+  check(withSkybox > 0, `${withSkybox} cards with v60 skybox block`)
   // Spot checks on one known map: props carry real blueprint paths and an
   // orthonormal rotation basis.
   const m9 = parseScmap(await vfs.read('maps/scmp_009/scmp_009.scmap'))
@@ -193,13 +193,13 @@ console.log('\n== SCMAP-Schwanz: alle Karten bis exakt EOF ==')
   }
   check(
     unresolved.length === 0,
-    `SCMP_009: ${resolved}/${distinct.length} Prop-Blueprints aufgelöst` +
-      (unresolved.length ? ` (fehlt: ${unresolved.slice(0, 3).join(', ')})` : ''),
+    `SCMP_009: ${resolved}/${distinct.length} Prop-Blueprints aufgelöst`+
+      (unresolved.length ? ` (missing: ${unresolved.slice(0, 3).join(', ')})` : ''),
   )
   check(
     albedoMissing.length === 0,
     `alle Prop-LOD-Albedos vorhanden (${albedoOk}/${lodTotal})` +
-      (albedoMissing.length ? ` — fehlt: ${albedoMissing.slice(0, 3).join(' | ')}` : ''),
+      (albedoMissing.length ? ` — missing: ${albedoMissing.slice(0, 3).join(' | ')}` : ''),
   )
   // The pine group is the '..'-reference case: LOD chain 30/175/700 with
   // per-LOD meshes and the LOD0 albedo one directory up.

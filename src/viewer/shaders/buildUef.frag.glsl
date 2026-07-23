@@ -1,8 +1,8 @@
-// Port von UEFBuildHiFiPS (effects/mesh.fx:2928-2961), Pass P0 der Technique
+// Port of UEFBuildHiFiPS (effects/mesh.fx:2928-2961), pass P0 of the technique
 // UEFBuild (mesh.fx:5656: AlphaBlend SrcAlpha/InvSrcAlpha, Cull CW,
-// PARAM_FRACTIONCOMPLETE — material.y ist der Baufortschritt 0..1,
-// material.x das Alter der Unit in Sekunden). Die Baustelle ist blau
-// durchscheinend und blendet mit dem Fortschritt zur normalen Farbe.
+// PARAM_FRACTIONCOMPLETE — material.y is the construction progress 0..1,
+// material.x is the age of the unit in seconds). The construction site is blue
+// translucent and fades as it progresses to normal color.
 
   precision highp float;
 
@@ -44,11 +44,11 @@
       tsn.z * normalize(vNormal)
     );
     vec4 specular = texture2D(specTeamMap, vUv0);
-    // environment = texCUBE(...) — bis Cubemap-Support ehrlich 0.
+    // environment = texCUBE(...) — up to cubemap support honestly 0.
     vec3 environment = vec3(0.0);
     vec4 secondary = texture2D(secondaryMap, texcoord2 * 10.0);
 
-    // Teamfarbe blendet erst in den letzten 10 % ein (mesh.fx:2944-2946).
+    // Team color only fades in the last 10% (mesh.fx:2944-2946).
     vec3 team = teamColor * ((fraction >= 0.9) ? (fraction - 0.9) * 10.0 : 0.0);
     vec3 albedoRgb = mix(team, albedo.rgb, 1.0 - specular.a);
 
@@ -58,16 +58,16 @@
     vec3 phongAdditive = vec3(pow(phongAmount, 8.0)) * specular.g;
     vec3 phongMultiplicative = 2.0 * environment * specular.r;
 
-    // ComputeLight mit Schatten-Attenuation 1 (bis zum Shadow-Pass).
+    // ComputeLight with Shadow Attenuation 1 (up to Shadow Pass).
     vec3 light = sunDiffuse * clamp(dot(sunDirection, normal), 0.0, 1.0) + sunAmbient;
     light = lightMultiplier * light + (vec3(1.0) - light) * shadowFill;
 
     float emissive = glowMultiplier * specular.b;
     vec3 color = albedoRgb * (emissive + light + phongMultiplicative) + phongAdditive;
 
-    // Der BLAU-PULS (mesh.fx:2956-2958): t pendelt mit frac(0.02*time) in
-    // [0.35, 0.7]; die unfertige Farbe ist Richtung Blau verschoben und
-    // blendet mit dem Fortschritt zur fertigen.
+    // The BLUE PULS (mesh.fx:2956-2958): t commutes with frac(0.02*time) in
+    // [0.35, 0.7]; the unfinished color is shifted towards blue and
+    // fades with the progress towards completion.
     float t = min(max(fract(0.02 * time), 0.35), 0.7);
     vec3 current = mix(color + secondary.rgb, vec3(0.0, 0.0, 1.0), t);
     vec3 outColor = mix(current, color, fraction);

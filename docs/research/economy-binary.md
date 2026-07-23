@@ -1,29 +1,29 @@
-# Wirtschafts-Verteilung — direkt aus dem Binary rekonstruiert (IDA)
+# Economic distribution — reconstructed directly from the binary (IDA)
 
-**Quelle:** IDA-Dekompilat von `func_ArmyProcessEconomy` @ **0x771B50**
-(FAF-`ForgedAlliance.exe`). In **faf-re nicht rekonstruiert** — die Recherche
-konnte nur sagen „Request/Grant-System, Formeln fehlen". Hier steht der echte
-Verteilungsalgorithmus, als Spezifikation destilliert (kein Rohcode).
+**Source:** IDA decompilation from `func_ArmyProcessEconomy` @ **0x771B50**
+(FAF-`ForgedAlliance.exe`). Not reconstructed in **faf-re** — the research
+could only say "Request/Grant system, formulas missing". The real one is here
+Distribution algorithm, distilled as a specification (not raw code).
 
-Aufgerufen aus `CArmyImpl::OnTick` @ 0x6FFD70 (`func_ArmyProcessEconomy(mEconomy)`),
-also **einmal pro Armee pro Tick**, nach dem Leeren der Verbraucher-Akkus.
+Called from `CArmyImpl::OnTick` @ 0x6FFD70 (`func_ArmyProcessEconomy(mEconomy)`),
+i.e. **once per army per tick**, after emptying the consumer batteries.
 
 ## Datenmodell
 
-- `CEconomy` hält eine intrusive Liste `mConsumptionData` von **Verbrauchern**
-  (jeder Bau-/Reparatur-/Verbrauchs-Request eines Units).
-- Pro Verbraucher: `mResources = {ENERGY, MASS}` (diesen Tick angefordert) und
-  ein `granted`-Feld (kumuliert das bisher Gewährte).
-- Armee-Pools: `mResources` = **Einkommen dieses Ticks**, `mTotals.mStored` =
+- `CEconomy` maintains an intrusive list `mConsumptionData` of **consumers**
+  (each build/repair/consumption request of a unit).
+- Per consumer: `mResources = {ENERGY, MASS}` (this tick requested) and
+  a `granted` field (cumulates what has been granted so far).
+- Army pools: `mResources` = **Income of this tick**, `mTotals.mStored` =
   **Vorrat/Lager**, `mTotals.mMaxStorage` = Lagerkapazität (double!).
 
-## Algorithmus (pro Tick)
+## Algorithm (per tick)
 
 ### 1. Nachfrage sammeln, in ZWEI Kategorien trennen
-Für jeden Verbraucher: `demand[res] = max(0, requested[res] - granted[res])`.
-Dann zählen, wie viele der beiden Ressourcen er braucht:
-- braucht **beide** (E **und** M) → Summe in `demandBoth`
-- braucht **nur eine** → Summe in `demandSingle`
+For every consumer: `demand[res] = max(0, requested[res] - granted[res])`.
+Then count how many of the two resources he needs:
+- needs **both** (E **and** M) → sum in `demandBoth`
+- needs **only one** → sum in `demandSingle`
 
 `totalDemand = demandBoth + demandSingle` (je Ressource).
 
@@ -31,9 +31,9 @@ Dann zählen, wie viele der beiden Ressourcen er braucht:
 ```
 available[res] = mStored[res] + income[res] * (1 + handicap)
 ```
-Das **Handicap multipliziert das Einkommen** (Balance-Option; 0 = keins).
+The **handicap multiplies the income** (balance option; 0 = none).
 
-### 3. Primäre Ratio (die S1-Drosselung)
+### 3. Primary Ratio (the S1 throttling)
 ```
 r1 = 1.0 ; limitingRes = ENERGY
 for res in {ENERGY, MASS}:
@@ -49,15 +49,15 @@ grantBoth[res] = demandBoth[res] * r1
 leftover[res]  = max(0, available[res] - grantBoth[res])
 ```
 
-### 5. Sekundäre Ratio (die S2-Drosselung, nur Nicht-Engpass-Ressource)
+### 5. Secondary Ratio (the S2 throttling, non-bottleneck resource only)
 ```
 r2 = 1.0
 for res != limitingRes:
     if demandSingle[res] * r2 > leftover[res]:
         r2 = leftover[res] / demandSingle[res]
 ```
-Verbraucher, die **nur die reichliche** Ressource brauchen, bekommen aus dem
-Rest eine eigene (höhere) Ratio — sie werden nicht vom Engpass der anderen
+Consumers who **only need the abundant** resource get from the
+Rest their own (higher) ratio - they are not affected by the bottleneck of others
 Ressource ausgebremst.
 
 ### 6. Verteilen (zweite Schleife über Verbraucher)
@@ -82,64 +82,64 @@ if mResourceSharing: overflow an Verbündete verteilen
 mStored = min(available, mMaxStorage)
 income  = 0                                                 # Akku für nächsten Tick zurücksetzen
 ```
-Alle `mStored/mReclaimed`-Writes laufen über `InterlockedCompareExchange`
-(atomar, weil Stats parallel gelesen werden).
+All `mStored/mReclaimed` writes run over `InterlockedCompareExchange`
+(atomic, because stats are read in parallel).
 
-## Konsequenz für unseren Nachbau
+## Consequence for our replica
 
-Unsere aktuelle Floating Economy in [src/sim/simWorld.ts](../../src/sim/simWorld.ts)
-ist **zu simpel**: ein globaler Stall-Faktor. Das Original hat:
+Our current floating economy in [src/sim/simWorld.ts](../../src/sim/simWorld.ts)
+is **too simple**: a global stall factor. The original has:
 
-1. **Pro-Verbraucher-Requests** statt eines Summen-Drains.
-2. **Zwei Ratios** (r1 für Doppel-, r2 für Einzel-Verbraucher) — dadurch
-   laufen z. B. reine Energie-Verbraucher weiter, wenn nur Masse fehlt.
-3. **`LimitingRate = granted/requested` pro Verbraucher** — der Baufortschritt
-   eines *einzelnen* Bauwerks skaliert mit *seiner* Ratio, nicht mit einem
+1. **Per-consumer requests** instead of a sum drain.
+2. **Two ratios** (r1 for double, r2 for single consumers) — thereby
+   run e.g. B. pure energy consumers continue if only mass is missing.
+3. **`LimitingRate = granted/requested` per consumer** — the construction progress
+   of a *single* building scales with *its* ratio, not with one
    Armee-Globalwert.
 4. **Handicap multipliziert Einkommen**, Overflow = Betrag über `mMaxStorage`.
 
-→ Umbau in Phase C: `EconRequest`-Liste pro Armee, dieser 7-Schritt-Tick,
-Units konsumieren über `LimitingRate`. Verifikation: 1 Energie-Extraktor +
-1 masse-limitierter Bau → Energie-Verbraucher darf voll laufen.
+→ Reconstruction in Phase C: `EconRequest` list per army, this 7-step tick,
+Units consume via `LimitingRate`. Verification: 1 Energy Extractor +
+1 mass-limited building → energy consumer is allowed to run at full capacity.
 
-## Status: umgesetzt
+## Status: implemented
 
-Implementiert in [`Army.tick`](../../src/sim/simWorld.ts) als 7-Schritt-Tick
-mit `EconRequest`-Liste (Unterhalt fertiger Units + Baustellen), r1/r2 und
-`LimitingRate` pro Verbraucher. **Overflow-Sharing** (Schritt 8) verteilt
-Overflow bei aktivem `resourceSharing` per Waterfilling in aufsteigender
-Armee-Reihenfolge an Verbündete mit freiem Lager (Rest verloren); Geber klemmt
-immer auf Kapazität. Verifiziert in
+Implemented in [ZZPROTECT0ZZ](../../src/sim/simWorld.ts) as a 7-step tick
+with `EconRequest` list (maintenance of finished units + construction sites), r1/r2 and
+`LimitingRate` per consumer. **Overflow Sharing** (Step 8) distributed
+Overflow with active `resourceSharing` via water filling in ascending order
+Army order to allies with free camp (rest lost); Encoder is stuck
+always at capacity. Verified in
 [`scripts/verify-economy.ts`](../../scripts/verify-economy.ts): Doc-Prüffall
-(Masse-Engpass → Doppel r1=0.5, reiner Energie-Bau r2=1), Buchhaltung,
-Overflow-Klemmung, Sharing-Fälle und Determinismus.
+(mass bottleneck → double r1=0.5, pure energy construction r2=1), accounting,
+Overflow clamping, sharing cases and determinism.
 
-## Korrektur: Produktion wird NICHT gedrosselt
+## Correction: Production is NOT throttled
 
-Frühere Annahme (unterversorgter Extraktor produziert weniger Masse) ist
+Previous assumption (underpowered extractor produces less mass) is
 **binär widerlegt** (`func_ArmyProcessEconomy` @0x771B50, vollständig gelesen):
-die Zwei-Ratio-Verteilung fasst **nur Verbraucher** (`mConsumptionData`) an —
-passive Produktion (`mResources`) ist bedingungsloses Einkommen und wird nie
-an die Grant-Ratio gekoppelt. `Unit::SetProductionActive` @0x6AAA90 setzt nur
-ein Flag, keine Economy-Kopplung. Die `LimitingRate` wirkt **ausschließlich auf
-Arbeit** (Bau/Reparatur/Reclaim/Capture über `Unit::ResourceConsumed` +0x53C),
-nie auf Produktion. Einen „unpowered"-Abschalter für Produktion gibt es im
-Base-Engine nicht; Intel/Schild/Stealth-Abschaltung bei Energiemangel ist
-Lua-getrieben und betrifft die Masse-Produktion nicht. → Die aktuelle Impl ist
-hier bereits 1:1; der Lock-Test in verify-economy.ts sichert das ab.
+the two-ratio distribution covers **only consumers** (`mConsumptionData`) —
+passive production (`mResources`) is unconditional income and will never
+linked to the grant ratio. `Unit::SetProductionActive` @0x6AAA90 only sets
+a flag, not an economy coupling. The `LimitingRate` works **exclusively
+Work** (Build/Repair/Reclaim/Capture via `Unit::ResourceConsumed` +0x53C),
+never on production. There is an "unpowered" switch-off for production
+Base engine not; Intel/Shield/Stealth shutdown when power is low
+Lua driven and does not affect mass production. → The current impl is
+here already 1:1; The lock test in verify-economy.ts ensures this.
 
 ## Builder-BuildRate: Mechanik umgesetzt
 
-Die echte Bauformel ist eingebaut (`buildRequest` in simWorld.ts, binär
+The real construction formula is built in (`buildRequest` in simWorld.ts, binary
 bestätigt: `delta = buildRate/BuildTime · ratio · 0.1` je Bauer, CBuildTask
 Helper::UpdateWorkProgress @0x5f5f2c). `SimUnit.buildTarget` + `issueBuild`
-weisen einen fertigen Bauer einer Baustelle zu; mehrere Bauer wirken **additiv**
+assign a completed builder to a construction site; several pawns have an **additive** effect
 (Assist), Reichweite über `Economy.MaxBuildDistance` gegatet. `BUILDER_RATE`
-bleibt nur noch als Fallback für Baustellen OHNE jede Zuweisung (hält die
+only remains as a fallback for construction sites WITHOUT any assignment (holds the
 Sandbox lauffähig). Verifiziert (Timing, Assist-Stacking, Reichweiten-Gate).
 
-**Noch offen:** (1) Sandbox-Bauauftrag statt Direkt-Spawn — der Bauer soll per
-Kommando zur Baustelle laufen (Approach-State CUnitMobileBuildTask::Execute ist
-im Decomp NICHT geliftet; aktuell statisches Distanz-Gate als Stand-in) und
-dann bauen, damit der Selbstbau-Fallback entfällt. (2) Fabrik-Rolloff,
+**Still open:** (1) Sandbox construction order instead of direct spawn - the farmer should be sent via
+Run the command to the construction site (approach state CUnitMobileBuildTask::Execute is
+NOT lifted in decomp; currently static distance gate as stand-in) and
+then build it so that the self-build fallback is no longer necessary. (2) factory rolloff,
 OnStartBuild/OnStopBeingBuilt-Lua-Callbacks, Adjacency-Buffs.

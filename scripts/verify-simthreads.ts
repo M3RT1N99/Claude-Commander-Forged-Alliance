@@ -54,7 +54,7 @@ check(num(host, 'GetSimTicksPerSecond()') === 10, `GetSimTicksPerSecond = ${num(
 check(Math.abs(num(host, 'SecondsPerTick()') - 0.1) < 1e-9, `SecondsPerTick = ${num(host, 'SecondsPerTick()')}`)
 check(currentTick(host) === 0, `Start-Tick = ${currentTick(host)}`)
 
-console.log('\n== ForkThread + WaitTicks(1): Schleife läuft pro Tick ==')
+console.log('\n== ForkThread + WaitTicks(1): Loop runs per tick ==')
 host.eval('counter = 0')
 host.eval('ForkThread(function() while true do counter = counter + 1; WaitTicks(1) end end)')
 for (let i = 0; i < 5; i++) simTick(host)
@@ -62,13 +62,13 @@ check(num(host, 'counter') === 5, `Zähler nach 5 Ticks = ${num(host, 'counter')
 check(currentTick(host) === 5, `Tick = ${currentTick(host)}`)
 check(Math.abs(num(host, 'GetGameTimeSeconds()') - 0.5) < 1e-9, `GetGameTimeSeconds = ${num(host, 'GetGameTimeSeconds()')} (0.5 s)`)
 
-console.log('\n== WaitTicks(3): resümiert exakt 3 Ticks nach dem ersten Lauf ==')
+console.log('\n== WaitTicks(3): sums up exactly 3 ticks after the first run ==')
 host.eval('resumeTick = -1')
 host.eval('ForkThread(function() WaitTicks(3); resumeTick = GetGameTick() end)')
 const startTick = currentTick(host)
 for (let i = 0; i < 4; i++) simTick(host)
-// erster Lauf bei startTick+1, WaitTicks(3) -> resume bei startTick+4
-check(num(host, 'resumeTick') === startTick + 4, `resümiert bei Tick ${num(host, 'resumeTick')} (erwartet ${startTick + 4})`)
+// first run at startTick+1, WaitTicks(3) -> resume at startTick+4
+check(num(host, 'resumeTick') === startTick + 4, `summarizes at Tick ${num(host, 'resumeTick')} (expected ${startTick + 4})`)
 
 console.log('\n== ForkThread-Argumente ==')
 host.eval('argsum = 0')
@@ -76,8 +76,8 @@ host.eval('ForkThread(function(a, b) argsum = a + b end, 3, 4)')
 simTick(host)
 check(num(host, 'argsum') === 7, `argsum = ${num(host, 'argsum')} (erwartet 7)`)
 
-console.log('\n== KillThread stoppt einen Thread ==')
-// Handle in einem GLOBAL halten (local überlebt den nächsten eval nicht).
+console.log('\n== KillThread stops a thread ==')
+// Keep handle in a GLOBAL (local won't survive the next eval).
 host.eval('kc = 0; KILL = ForkThread(function() while true do kc = kc + 1; WaitTicks(1) end end)')
 simTick(host) // kc = 1
 simTick(host) // kc = 2

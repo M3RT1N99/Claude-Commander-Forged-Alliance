@@ -30,7 +30,7 @@ import {
  *    immer emittiert.
  */
 
-/** Die Blueprint-Felder, die die Laufzeit liest (Defaults: effects-audio.md). */
+/** The blueprint fields that the runtime reads (Defaults: effects-audio.md). */
 export interface EmitterBpData {
   Lifetime?: number
   Repeattime?: number
@@ -69,7 +69,7 @@ export interface EmitterBpData {
   RampSelectionCurve?: EfxCurveBp
 }
 
-/** Der Zustand des Emitters, wie die Sim ihn pro Beat meldet. */
+/** The state of the emitter as the sim reports it per beat. */
 export interface EmitterState {
   x: number
   y: number
@@ -81,7 +81,7 @@ export interface EmitterState {
   qz: number
   /** ScaleEmitter-Faktor (EFFECT_SCALE, Param 18). */
   scale: number
-  /** OffsetEmitter — LOKAL zum Bone, UNSKALIERT (Cfile:907969/894720). */
+  /** OffsetEmitter — LOCAL to bone, UNSCALE (Cfile:907969/894720). */
   ox?: number
   oy?: number
   oz?: number
@@ -118,10 +118,10 @@ export interface SpawnedParticle {
   dragZ: number
 }
 
-/** Grad → Bogenmaß, exakt der Faktor aus dem Binary (Cfile:894896). */
+/** Degrees → radians, exactly the factor from the binary (Cfile:894896). */
 const DEG = 0.017453292
 
-/** v um Quaternion (w,x,y,z) drehen. */
+/** rotate v around quaternion (w,x,y,z). */
 function qrot(
   qw: number,
   qx: number,
@@ -146,7 +146,7 @@ export class EmitterRuntime {
   /** TICKCOUNT: startet 0, += TICKINCREMENT (Default 1) NACH dem Tick
    *  (Cfile:894994; Ctor-Defaults 893976-893979). */
   private tickCount = 0
-  /** Der EmitRate-Akkumulator: Bruchteile tragen über (Cfile:894662-894679). */
+  /** The EmitRate accumulator: fractional carry over (Cfile:894662-894679). */
   private totalEmissions = 0
 
   private readonly c: Record<string, EfxCurve>
@@ -211,10 +211,10 @@ export class EmitterRuntime {
    * Liefert die in diesem Tick gespawnten Partikel.
    */
   tick(state: EmitterState, simTick: number): SpawnedParticle[] {
-    // ProcessLifetime: Lifetime >= 0 und TICKCOUNT drüber → keine Emission
-    // mehr. (Lifetime 0 heißt im Blueprint-Default „sofort fertig" — solche
-    // Emitter leben über ihre Partikel, nicht über den Emitter selbst.
-    // Beobachtung aus den Daten: 0 kommt praktisch nicht vor; -1 oder >0.)
+    // ProcessLifetime: Lifetime >= 0 and TICKCOUNT above → no emission
+    // more. (Lifetime 0 means “immediately ready” in the blueprint default - such
+    // Emitters live through their particles, not through the emitter itself.
+    // Observation from the data: 0 practically does not occur; -1 or >0.)
     const expired = this.life >= 0 && this.tickCount >= this.life && this.life > 0
     if (expired || !state.enabled) {
       this.tickCount += 1
@@ -230,7 +230,7 @@ export class EmitterRuntime {
 
     const out: SpawnedParticle[] = []
     for (let j = 0; j < n; j++) {
-      // InterpolateEmission: Kurvenzeit + j/N, Geburt um j/N gestaffelt
+      // InterpolateEmission: curve time + y/N, birth staggered by y/N
       // (Cfile:894685, 894712-894717, 894868, 894922).
       const stagger = this.interpolate && n > 1 ? j / n : 0
       const a2 = wrapEmitterTime(this.tickCount + stagger, this.repeat)
@@ -246,8 +246,8 @@ export class EmitterRuntime {
     const scale = s.scale
 
     // --- Spawn-Position -----------------------------------------------------
-    // Lokaler Offset: PosCurves · Scale + OffsetEmitter (UNSKALIERT), dann
-    // durch die Attachment-Matrix in die Welt (Cfile:894706-894733).
+    // Local offset: PosCurves · Scale + OffsetEmitter (UNSCALE), then
+    // through the attachment matrix into the world (Cfile:894706-894733).
     let lx = sampleCurve(this.c.XPos!, a2, r) * scale + (s.ox ?? 0)
     let ly = sampleCurve(this.c.YPos!, a2, r) * scale + (s.oy ?? 0)
     let lz = sampleCurve(this.c.ZPos!, a2, r) * scale + (s.oz ?? 0)
@@ -255,8 +255,8 @@ export class EmitterRuntime {
     let px = s.x + lx
     let py = s.y + ly
     let pz = s.z + lz
-    // SizeCurve ist KEIN Shader-Attribut: zufälliger Einheitsvektor in der
-    // XZ-Ebene × (rand−0.5)·Size(a2)·Scale als Positions-Jitter
+    // SizeCurve is NOT a shader attribute: random unit vector in the
+    // XZ plane × (rand−0.5)·Size(a2)·Scale as position jitter
     // (Cfile:894772, 894791-894808).
     const jitter = (r() - 0.5) * sampleCurve(this.c.Size!, a2, r) * scale
     const jang = r() * Math.PI * 2
@@ -264,7 +264,7 @@ export class EmitterRuntime {
     pz += Math.sin(jang) * jitter
 
     // --- Richtung/Geschwindigkeit -------------------------------------------
-    // mDir = Dir(a2) · Scale — KEIN normalize (Cfile:894838-894848); dann
+    // mDir = Dir(a2) · Scale — NO normalize (Cfile:894838-894848); then
     // komponentenweise × Velocity-Skalar (Cfile:894860-894864).
     const vel = sampleCurve(this.c.Velocity!, a2, r)
     let vx = sampleCurve(this.c.XDir!, a2, r) * scale * vel
@@ -281,7 +281,7 @@ export class EmitterRuntime {
     if (this.localAccel) {
       ;[ax, ay, az] = qrot(s.qw, s.qx, s.qy, s.qz, ax, ay, az)
     }
-    // Gravity: −0.02 pro Tick² auf Y, NACH der lokalen Drehung
+    // Gravity: −0.02 per tick² on Y, AFTER local rotation
     // (Cfile:894809-894837).
     if (this.gravity) ay -= 0.02
 
@@ -289,9 +289,9 @@ export class EmitterRuntime {
     // Grad → Bogenmaß mit exakt 0.017453292 (Cfile:894896, 894915-894917).
     let angle = sampleCurve(this.c.InitialRotation!, a2, r) * DEG
     const rotRate = sampleCurve(this.c.RotationRate!, a2, r) * DEG
-    // AlignToBone: ohne Flat ersetzt die Bone-Z-Achse die Geschwindigkeit
-    // (Alignment-Achse, Cfile:894911-894913); mit Flat wird der Winkel aus
-    // der Achse gerechnet (Cfile:894899-894908).
+    // AlignToBone: without flat, the bone z-axis replaces the speed
+    // (Alignment Axis, Cfile:894911-894913); with Flat the angle is off
+    // the axis (Cfile:894899-894908).
     if (this.alignToBone) {
       const axis = qrot(s.qw, s.qx, s.qy, s.qz, 0, 0, 1)
       if (this.flat) {
@@ -305,9 +305,9 @@ export class EmitterRuntime {
     const lifetime = Math.max(sampleCurve(this.c.Lifetime!, a2, r), 0)
     const beginSize = sampleCurve(this.c.StartSize!, a2, r) * scale
     const endSize = sampleCurve(this.c.EndSize!, a2, r) * scale
-    // Die Rate entsteht beim UPLOAD: (End − Begin) / Lifetime (faf-re
-    // ParticleRenderBuckets.cpp:4493-4494). Lifetime 0 → Partikel ist sofort
-    // tot, die Rate ist dann egal (0 statt Division durch 0).
+    // The rate is created during the UPLOAD: (End − Begin) / Lifetime (faf-re
+    // ParticleRenderBuckets.cpp:4493-4494). Lifetime 0 → particle is instantaneous
+    // dead, the rate then doesn't matter (0 instead of dividing by 0).
     const sizeRate = lifetime > 0 ? (endSize - beginSize) / lifetime : 0
 
     // --- Textur/Ramp --------------------------------------------------------

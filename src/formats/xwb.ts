@@ -44,20 +44,20 @@
 export interface XwbEntry {
   /** Dauer in Samples (dwFlagsAndDuration >> 4). */
   duration: number
-  /** MINIWAVEFORMAT-Tag: 0 = PCM (in FA immer 0). */
+  /** MINIWAVEFORMAT tag: 0 = PCM (always 0 in FA). */
   formatTag: number
   channels: number
   sampleRate: number
   blockAlign: number
   bitsPerSample: number
-  /** Absoluter Byte-Offset der PCM-Daten in der .xwb-Datei. */
+  /** Absolute byte offset of the PCM data in the .xwb file. */
   offset: number
-  /** Länge der PCM-Daten in Bytes. */
+  /** Length of PCM data in bytes. */
   length: number
 }
 
 export interface XwbBank {
-  /** Interner Bankname aus BANKDATA — die .xsb referenziert DIESEN Namen. */
+  /** Internal bank name from BANKDATA — the .xsb references THIS name. */
   bankName: string
   /** dwFlags-Bit 0: Streaming-Bank (Alignment 2048, z. B. Music, *Stream). */
   streaming: boolean
@@ -78,8 +78,8 @@ export function parseXwb(bytes: Uint8Array): XwbBank {
   const version = view.getUint32(4, true)
   const headerVersion = view.getUint32(8, true)
   if (version !== 43 || headerVersion !== 42) {
-    // Alle 100 FA-Banks sind 43/42; andere Versionen haben andere Layouts.
-    throw new Error(`XWB: Version ${version}/${headerVersion} (erwartet 43/42, XACT 3.0)`)
+    // All 100 FA banks are 43/42; other versions have different layouts.
+    throw new Error(`XWB: Version ${version}/${headerVersion} (expected 43/42, XACT 3.0)`)
   }
 
   // Segmenttabelle: 5 × {offset, length}
@@ -96,13 +96,13 @@ export function parseXwb(bytes: Uint8Array): XwbBank {
   const metaElemSize = view.getUint32(bankData + 0x48, true)
   const compactFormat = view.getUint32(bankData + 0x54, true)
   if (compactFormat !== 0) {
-    throw new Error(`XWB ${bankName}: CompactFormat ${compactFormat} — in FA nie beobachtet, nicht implementiert`)
+    throw new Error(`XWB ${bankName}: CompactFormat ${compactFormat} — never observed in FA, not implemented`)
   }
   if (metaElemSize < 24) {
     throw new Error(`XWB ${bankName}: EntryMetaDataElementSize ${metaElemSize} < 24`)
   }
   if (metaLength < entryCount * metaElemSize) {
-    throw new Error(`XWB ${bankName}: Metadaten-Segment zu kurz (${metaLength} B für ${entryCount} Einträge)`)
+    throw new Error(`XWB ${bankName}: Metadata segment too short (${metaLength} B for ${entryCount} entries)`)
   }
 
   const entries: XwbEntry[] = []
@@ -124,7 +124,7 @@ export function parseXwb(bytes: Uint8Array): XwbBank {
       length: playLength,
     }
     if (entry.offset + entry.length > bytes.byteLength) {
-      throw new Error(`XWB ${bankName}: Wave ${i} ragt aus der Datei (${entry.offset}+${entry.length} > ${bytes.byteLength})`)
+      throw new Error(`XWB ${bankName}: Wave ${i} sticks out of the file (${entry.offset}+${entry.length} > ${bytes.byteLength})`)
     }
     entries.push(entry)
   }
@@ -139,7 +139,7 @@ export function parseXwb(bytes: Uint8Array): XwbBank {
  */
 export function wavFromEntry(bytes: Uint8Array, entry: XwbEntry): Uint8Array {
   if (entry.formatTag !== 0) {
-    throw new Error(`XWB: Wave hat formatTag ${entry.formatTag} — nur PCM (0) wird unterstützt`)
+    throw new Error(`XWB: Wave has formatTag ${entry.formatTag} — only PCM (0) is supported`)
   }
   const byteRate = entry.sampleRate * entry.blockAlign
   const out = new Uint8Array(44 + entry.length)

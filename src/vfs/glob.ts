@@ -12,7 +12,7 @@ export function globToRegExp(pattern: string): RegExp {
   return new RegExp(`^${escaped}$`)
 }
 
-/** Alle Pfade unter `dir`, deren Dateiname auf `pattern` passt (führendes `/` inklusive). */
+/** All paths under `dir` whose filename matches `pattern` (leading `/` included). */
 export function findFiles(paths: Iterable<string>, dir: string, pattern: string): string[] {
   const rx = globToRegExp(pattern || '*')
   const prefix = dir.replace(/^\/+/, '').toLowerCase()

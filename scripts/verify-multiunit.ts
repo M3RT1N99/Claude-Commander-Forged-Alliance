@@ -28,7 +28,7 @@ class NF implements RandomAccessFile {
 
 const GAME = process.env.CFA_GAME_DIR ?? 'C:/Program Files (x86)/Steam/steamapps/common/Supreme Commander Forged Alliance'
 
-// je Fraktion Kommandeur/Struktur/Mobil abgedeckt
+// per faction commander/structure/mobile covered
 const UNITS: [string, string][] = [
   ['uel0001', 'UEF ACU'],
   ['ueb1101', 'UEF Energiegenerator T1'],
@@ -49,9 +49,9 @@ for (const a of ['mohodata.scd', 'lua.scd']) {
 }
 const uf = await NF.open(`${GAME}/gamedata/units.scd`); openFiles.push(uf)
 const uz = await ZipArchive.open(uf)
-// Die Sim braucht auch das SKELETT der Unit: Waffentuerme und Muendungen
-// haengen an Knochennamen (weapon.lua:67). Es kommt aus derselben SCM-Datei,
-// die auch der Renderer liest.
+// The sim also needs the SKELETON of the unit: turrets and muzzles
+// depend on bone names (weapon.lua:67). It comes from the same SCM file,
+// which the renderer also reads.
 const assetExists = (p: string): boolean => uz.get(p.toLowerCase()) != null
 const readAsset = async (p: string): Promise<Uint8Array | null> => {
   const e = uz.get(p.toLowerCase())
@@ -68,10 +68,10 @@ const check = (ok: boolean, label: string): void => { console.log(`  ${ok ? 'OK 
 
 const host = await LuaHost.create(files, () => {})
 installEngine(host)
-// Flaches Testgelaende — EXPLIZIT, weil die Engine ohne Karte knallt (kein stiller 0-Wert).
+// Flat test area - EXPLICIT because the engine crashes without a map (no silent 0 value).
 setTerrainSource(host, FLAT_TEST_TERRAIN)
 
-console.log('\n== Spawn aller Sandbox-Units über die echte Unit.lua ==')
+console.log('\n== Spawn all sandbox units via the real Unit.lua ==')
 for (const [id, name] of UNITS) {
   try {
     loadUnitBlueprint(host, id, bps.get(id)!)
@@ -86,5 +86,5 @@ for (const [id, name] of UNITS) {
 
 host.close()
 for (const f of openFiles) await f.close()
-console.log(failures === 0 ? `\nMULTIUNIT BESTANDEN (${UNITS.length} Units)` : `\n${failures} CHECK(S) FEHLGESCHLAGEN`)
+console.log(failures === 0 ? `\nMULTIUNIT PASSED (${UNITS.length} Units)` : `\n${failures} CHECK(S) FEHLGESCHLAGEN`)
 process.exit(failures === 0 ? 0 : 1)

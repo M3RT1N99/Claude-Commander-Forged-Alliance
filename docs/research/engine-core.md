@@ -1,71 +1,71 @@
-# Engine-Kern — aus der IDA-Dekompilation (Cfile/ForgedAlliance.exe.c)
+# Engine core — from IDA decompilation (Cfile/ForgedAlliance.exe.c)
 
-Grundlage für den Engine-Bau: **die Engine lädt/führt die Original-Lua aus, die
-Lua IST das Spiel.** Quelle: vollständige Dekompilation mit Symbolnamen
+Basis for engine construction: **the engine loads/executes the original Lua, which
+Lua IS the game.** Source: full decompilation with symbol names
 (`Moho::` = Engine, `LuaPlus::` = Lua-5.0-Bindung). Zeilen = Cfile-Zeilen.
 
 ## 1. Lua-Global-Registrierung: `Moho::CScrLuaInitForm`
 
-Jede C-Funktion, die die Lua als Global sieht (ForkThread, WaitTicks,
-EntityCategoryGetUnitList, …), wird über ein `CScrLuaInitForm` registriert:
+Any C function that Lua sees as global (ForkThread, WaitTicks,
+EntityCategoryGetUnitList, …), is registered via a `CScrLuaInitForm`:
 
 - `luadef_ForkThread.mMethodName = "ForkThread"`, `.mClassName = "<global>"`
-  (:592409-592410) — Name + Klasse ("<global>" = freie Funktion).
-- Registrierung verkettet in `Moho::scr_CoreInits.mForms` (:592407); die
-  `register_*_LuaFuncDef`-Zeiger stehen in einem Sammel-Array (:53965-53974).
-- Die eigentliche C-Impl heißt `cfunc_<Name>` bzw. `cfunc_<Name>L`
-  (L-Variante bekommt den `LuaPlus::LuaState*`), z. B. `cfunc_ForkThread`
+  (:592409-592410) — name + class ("<global>" = free function).
+- Registration chained in `Moho::scr_CoreInits.mForms` (:592407); the
+  `register_*_LuaFuncDef` pointers are in a collection array (:53965-53974).
+- The actual C-Impl is called `cfunc_<Name>` or `cfunc_<Name>L`
+  (L variant gets the `LuaPlus::LuaState*`), e.g. E.g. `cfunc_ForkThread`
   (:592397) → `cfunc_ForkThreadL(*(LuaState**)(a1+68))`.
 
-→ **Engine-Nachbau:** eine Registry, die benannte C(TS)-Funktionen als Lua-
-Globals (bzw. Klassenmethoden) in den jeweiligen Lua-State hängt.
+→ **Engine replica:** a registry that contains named C(TS) functions as Lua
+Globals (or class methods) depend on the respective Lua state.
 
 ## 2. Sim-Thread-Scheduler: `Moho::CTaskThread` + `mWaitTicks`
 
-Die deterministische Coroutine-Ausführung des Sim-Lua (ForkThread/WaitTicks):
+The Sim-Lua deterministic coroutine execution (ForkThread/WaitTicks):
 
-- Lua-`ForkThread(fn, args…)` → `cfunc_ForkThreadL` erzeugt einen Task-Thread
-  (Coroutine) auf einer Stage; Threads hängen in einer verketteten Liste
+- Lua-`ForkThread(fn, args…)` → `cfunc_ForkThreadL` creates a task thread
+  (Coroutine) on a stage; Threads hang in a linked list
   `stage->mThreads` (:438592-438594, 437095-437097).
-- Pro Sim-Beat läuft `Moho::CTaskThread::DoTaskTick(thrd)` (:438885):
-  - `v1 = --thrd->mWaitTicks; if (v1 > 0) return` — schläft noch (:438899-438902).
-  - sonst `TaskTick(mTask)` (Coroutine fortsetzen, :438912) und je Status:
-    - `TASKSTATUS_Wait` → `mWaitTicks = 1` (ein Tick warten, :438944)
+- Pro Sim-Beat runs `Moho::CTaskThread::DoTaskTick(thrd)` (:438885):
+  - `v1 = --thrd->mWaitTicks; if (v1 > 0) return` — still sleeping (:438899-438902).
+  - otherwise `TaskTick(mTask)` (continue coroutine, :438912) and per status:
+    - `TASKSTATUS_Wait` → `mWaitTicks = 1` (wait a tick, :438944)
     - default `n` → `mWaitTicks = n - 1` (**WaitTicks(n)**, :438947)
     - `TASKSTATUS_Done` → Subtask poppen, weiter (:438927-438936)
     - `TASKSTATUS_Abort` → `CTaskThread::Destroy` (:438921-438923)
     - `TASKSTATUS_Suspend` → `Stage(thrd)` (:438924-438926)
 - `cfunc_KillThread`/`cfunc_ResumeThread` (:6225,6248) steuern Threads.
 
-→ **Engine-Nachbau:** ein Sim-Scheduler, der pro 10-Hz-Beat alle Lua-Threads
-(wasmoon-Coroutinen) durchgeht, `waitTicks` dekrementiert und fällige
-fortsetzt. `ForkThread`, `WaitTicks`, `WaitFor`, `KillThread` als Lua-Globals.
-Das ersetzt den fehlenden Tick im aktuellen `LuaSim` (nur `OnCreate`).
+→ **Engine replica:** a sim scheduler that runs all Lua threads per 10 Hz beat
+(wasmoon coroutines) goes through, `waitTicks` decrements and due
+continues. `ForkThread`, `WaitTicks`, `WaitFor`, `KillThread` as Lua globals.
+This replaces the missing tick in the current `LuaSim` (only `OnCreate`).
 
-## 3. Skriptbare Objekte: `Moho::CScriptObject`
+## 3. Scriptable objects: `Moho::CScriptObject`
 
-Basis aller Lua-gekoppelten Sim-Objekte (Unit erbt letztlich hierüber):
+Basis of all Lua-coupled Sim objects (Unit ultimately inherits from this):
 
 - `CScriptObject::RunScript(filename, …)` (:11501-11502), `Call` (:11501),
   `RunScriptMultiRet` (:6154), `FindScript` (:6153),
-  `CreateLuaObject`/`SetLuaObject` (:6149-6150) — die C→Lua-Aufrufbrücke.
-- `Moho::SCR_CreateSimpleMetatable(obj, L)` (:6390) — erzeugt die Metatable,
-  über die Lua die C-Methoden eines Objekts sieht.
-- `LogScriptWarning` (:6152) — Fehlerpfad (erklärt die WARN-Ausgaben).
+  `CreateLuaObject`/`SetLuaObject` (:6149-6150) — the C→Lua call bridge.
+- `Moho::SCR_CreateSimpleMetatable(obj, L)` (:6390) — creates the metatable,
+  through which Lua sees the C methods of an object.
+- `LogScriptWarning` (:6152) — Error path (explains the WARN outputs).
 
 → **Engine-Nachbau:** existiert im Ansatz (`src/lua/moho.ts` bindet
-entity_methods/unit_methods via Metatable; `unitFactory.ts` instanziiert).
-Muss auf das echte CScriptObject-Modell ausgerichtet werden (Metatable-basiert,
+entity_methods/unit_methods via Metatable; `unitFactory.ts` instantiated).
+Must align with the real CScriptObject model (Metatable based,
 C-Callbacks OnCreate/OnTick/OnDamage über RunScript).
 
-## Bezug zum aktuellen Repo
+## Reference to the current repo
 
-- `src/lua/host.ts` — Lua-Host (wasmoon). Fehlt: der Sim-Beat + Thread-Scheduler.
-- `src/lua/moho.ts` — moho-Methoden-Stubs. Muss zur echten API-Oberfläche wachsen.
-- `src/sim/simWorld.ts` — **paralleler TS-Nachbau** (Ökonomie/Bewegung); soll
-  durch die Lua-getriebene Sim ERSETZT werden (siehe Memory
-  „engine-first-nicht-hardcoden").
+- `src/lua/host.ts` — Lua host (wasmoon). Missing: the sim beat + thread scheduler.
+- `src/lua/moho.ts` — moho method stubs. Must grow to true API interface.
+- `src/sim/simWorld.ts` — **parallel TS replica** (economy/movement); should
+  REPLACED by the Lua-driven sim (see Memory
+  "engine-first-not-hardcoded").
 
-*(Wird mit den Ergebnissen der 5-Agenten-Engine-Kartierung erweitert:
-moho-Sim-API-Umfang, maui-UI-Framework, Game-Loop-Reihenfolge,
-Command-Dispatch, Blueprint-Laden.)*
+*(Expanded with 5-agent engine mapping results:
+moho sim api scope, maui ui framework, game loop order,
+Command dispatch, blueprint loading.)*

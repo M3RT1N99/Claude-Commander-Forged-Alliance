@@ -9,76 +9,76 @@
   <body>
     <header id="topbar">
       <h1>CLAUDE COMMANDER <span>FORGED ALLIANCE</span></h1>
-      <div id="source-label">Keine Spieldaten verbunden</div>
+      <div id="source-label">No game data connected</div>
     </header>
 
     <main id="layout">
       <nav id="menu" aria-label="Hauptmenü">
         <button class="menu-item active" data-mode="start">
           <span class="menu-label">Start</span>
-          <span class="menu-sub">Spieldaten &amp; Status</span>
+          <span class="menu-sub">Game data & status</span>
         </button>
         <button class="menu-item" data-mode="frontend" disabled>
           <span class="menu-label">Hauptmenü</span>
-          <span class="menu-sub">Das echte Menü des Spiels</span>
+          <span class="menu-sub">The real menu of the game</span>
         </button>
         <button class="menu-item" data-mode="sandbox" disabled>
           <span class="menu-label">Sandbox</span>
           <span class="menu-sub">Techdemo spielen</span>
         </button>
         <button class="menu-item" data-mode="units" disabled>
-          <span class="menu-label">Einheiten <span class="badge" id="badge-units" hidden></span></span>
-          <span class="menu-sub">Modelle &amp; Animationen</span>
+          <span class="menu-label">Units <span class="badge" id="badge-units" hidden></span></span>
+          <span class="menu-sub">Models & Animations</span>
         </button>
         <button class="menu-item" data-mode="maps" disabled>
-          <span class="menu-label">Karten <span class="badge" id="badge-maps" hidden></span></span>
+          <span class="menu-label">Cards <span class="badge" id="badge-maps" hidden></span></span>
           <span class="menu-sub">Gelände &amp; Vorschau</span>
         </button>
-        <button id="btn-collapse" title="Seitenleiste ein-/ausklappen">⟨ Seitenleiste</button>
+        <button id="btn-collapse" title="Collapse/unfold sidebar">⟨ Seitenleiste</button>
       </nav>
 
       <aside id="sidebar">
         <section id="start-panel">
           <h2>Spieldaten</h2>
           <p class="hint">
-            Wähle dein Installationsverzeichnis von
-            <em>Supreme Commander: Forged Alliance</em> (Steam/GOG). Die Dateien
-            bleiben lokal — nichts wird hochgeladen.
+            Choose your installation directory
+            <em>Supreme Commander: Forged Alliance</em> (Steam/GOG). The files
+            remain local — nothing is uploaded.
           </p>
-          <button id="btn-pick-dir" class="primary">Spielverzeichnis wählen…</button>
+          <button id="btn-pick-dir" class="primary">Select game directory…</button>
           <button id="btn-resume" hidden>Erneut verbinden</button>
           <input id="input-dir" type="file" webkitdirectory hidden />
           <button id="btn-fallback" hidden>Ordner wählen (Fallback)…</button>
           <p class="hint">
-            Danach stehen links Sandbox (die Techdemo), der Einheiten-Viewer und
-            der Karten-Viewer bereit.
+            Then on the left are Sandbox (the tech demo), the unit viewer and
+            the map viewer is ready.
           </p>
         </section>
 
         <section id="sandbox-panel" hidden>
           <h2>Sandbox</h2>
           <p class="hint">
-            Startet die Techdemo auf der gewählten Karte — im <strong>Vollbild</strong>,
-            wie das Spiel: die ACU steht am Startpunkt von Armee 1, alles Weitere
-            läuft über die Original-UI (Bau-Menü der ACU, Fabrik, Produktion).<br />
+            Starts the tech demo on the selected map - in <strong>Vollbild</strong>,
+            like the game: the ACU is at the starting point of army 1, everything else
+            runs via the original UI (construction menu of the ACU, factory, production).<br />
             <strong>Linksklick</strong> = Auswahl / Gebäude setzen ·
             <strong>Rechtsklick</strong> = Bewegung / Abbrechen ·
             <strong>Leertaste + Maus</strong> = Kamera · Mausrad = Zoom ·
-            <strong>ESC</strong> = zurück zum Launcher
+            <strong>ESC</strong> = back to the launcher
           </p>
-          <button id="btn-sandbox-start" class="primary">Sandbox starten</button>
+          <button id="btn-sandbox-start" class="primary">Start sandbox</button>
           <div id="sandbox-info"></div>
         </section>
 
         <section id="map-panel" hidden>
-          <h2>Karte</h2>
+          <h2>Map</h2>
           <select id="map-select" size="10"></select>
           <div id="map-info"></div>
         </section>
 
         <section id="unit-panel" hidden>
-          <h2>Einheit</h2>
-          <input id="unit-search" type="search" placeholder="Suchen… (z. B. UEL0001)" />
+          <h2>Unit</h2>
+          <input id="unit-search" type="search" placeholder="Search… (e.g. UEL0001)" />
           <select id="unit-select" size="12"></select>
           <label class="row">
             Teamfarbe

@@ -27,7 +27,7 @@ import { Heightfield, type HeightfieldData } from './terrain'
 const ctx = self as unknown as Worker
 let host: LuaHost | null = null
 let engine: Engine | null = null
-/** Die Lua-Dateien bleiben liegen — ein Reset baut daraus einen frischen Host. */
+/** The Lua files remain there - a reset creates a fresh host from them. */
 let bootFiles: Map<string, Uint8Array> | null = null
 /**
  * Pause: die WELT steht (CWldSession::RequestPause). Der Beat setzt aus — kein
@@ -51,15 +51,15 @@ type InMsg =
   | { type: 'attack'; id: number; targetId: number; queue?: boolean }
   // Repair (dispatch 0x14): resume building an unfinished structure.
   | { type: 'repair'; id: number; targetId: number; queue?: boolean }
-  // Der Sammelpunkt einer Fabrik (IssueFactoryRallyPoint, Cfile:1008266) — KEIN
-  // Bewegungsbefehl: die Fabrik bleibt stehen.
+  // A factory's rally point (IssueFactoryRallyPoint, Cfile:1008266) — NONE
+  // Movement order: the factory stops.
   | { type: 'rally'; id: number; x: number; y: number; z: number }
   | { type: 'reset'; terrain: HeightfieldData }
-  // SessionRequestPause/SessionResume (mHelp: „Pause the world simulation.").
-  // Die Engine hält die WELT an — der Beat läuft nicht weiter, die UI schon.
+  // SessionRequestPause/SessionResume (mHelp: “Pause the world simulation.”).
+  // The engine stops the WORLD — the beat doesn't continue, but the UI does.
   | { type: 'pause'; paused: boolean }
-  // Ein Bau-Befehl: Baustelle setzen (CreateUnit mit beingBuilt=1, wie
-  // Sim::CreateUnit es tut) und dem Bauer den Auftrag geben.
+  // A build command: Set construction site (CreateUnit with beingBuilt=1, like
+  // Sim::CreateUnit does) and give the order to the farmer.
   | {
       type: 'build'
       reqId: number
@@ -71,11 +71,11 @@ type InMsg =
       bones: SimBone[]
       pos: Vec3
       army: number
-      /** Shift gehalten? Dann wird der Auftrag an die Bau-Reihe ANGEHÄNGT. */
+      /** Shift held? The order is then ATTACHED to the construction series. */
       queue: boolean
     }
-  // Fabrik-Auftrag (IssueBlueprintCommand "UNITCOMMAND_BuildFactory"): die
-  // Einheit geht in die Warteschlange, die Fabrik arbeitet sie im Beat ab.
+  // Factory order (IssueBlueprintCommand "UNITCOMMAND_BuildFactory"): the
+  // Unit goes into the queue, the factory processes it in beat.
   | {
       type: 'factoryBuild'
       factoryId: number
@@ -87,20 +87,20 @@ type InMsg =
       count: number
     }
   // Increase/DecreaseBuildCountInQueue (Moho::ISSUE_IncreaseCommandCount
-  // Cfile:1257266 / DecreaseCommandCount Cfile:1257378): einen Eintrag der
-  // Fabrik-Warteschlange um delta aendern; <= 0 entfernt ihn.
+  // Cfile:1257266 / DecreaseCommandCount Cfile:1257378): an entry of the
+  // change factory queue by delta; <= 0 removes it.
   | { type: 'adjustQueue'; factoryId: number; index: number; delta: number }
-  // Ein Emitter-Blueprint fuer das Partikelsystem: die Sim hat alle 2724
-  // _emit.bp beim Boot geparst (__registered.Emitter) — der Renderer holt
-  // sie lazy, statt sie selbst noch einmal zu laden.
+  // An emitter blueprint for the particle system: the sim has all 2724
+  // _emit.bp parsed on boot (__registered.Emitter) — the renderer fetches
+  // Lazy them instead of reloading them yourself.
   | { type: 'emitterBp'; reqId: number; bp: string }
-  // Ein Mesh-Blueprint (Wrack-Varianten aus ExtractWreckageBlueprint,
-  // lua/system/blueprints.lua:187): ShaderName/SpecularName fuer den Renderer.
+  // A mesh blueprint (wreck variants from ExtractWreckageBlueprint,
+  // lua/system/blueprints.lua:187): ShaderName/SpecularName for the renderer.
   | { type: 'meshBp'; reqId: number; bp: string }
-  // SimCallback der UI (Cfile:1359123): eine Funktion aus lua/simcallbacks.lua
-  // in der Sim rufen. argsLua ist der Serialisierungs-Snapshot der UI-VM als
-  // Lua-Konstruktor-Literal (SCR_ToByteStream-Aequivalent), die Auswahl kommt
-  // als Entity-IDs.
+  // SimCallback of the UI (Cfile:1359123): a function from lua/simcallbacks.lua
+  // call in the sim. argsLua is the serialization snapshot of the UI VM as
+  // Lua constructor literal (SCR_ToByteStream equivalent), the choice comes
+  // as entity IDs.
   | { type: 'simCallback'; func: string; argsLua: string; unitIds: number[] }
 
 ctx.onmessage = async (e: MessageEvent<InMsg>): Promise<void> => {
@@ -108,18 +108,18 @@ ctx.onmessage = async (e: MessageEvent<InMsg>): Promise<void> => {
   if (msg.type === 'boot') {
     bootFiles = msg.files
     const h = await LuaHost.create(msg.files, (level, m) => ctx.postMessage({ type: 'log', level, msg: m }))
-    // Der EINE Engine-Boot — derselbe wie in jeder Testsuite. Vorher stellte
-    // sich der Worker die Engine selbst zusammen und vergaß dabei das
-    // Bau-System (build.ts lief im Browser überhaupt nicht).
+    // The ONE engine boot — the same as in every test suite. Before presented
+    // The worker put the engine together himself and forgot about it
+    // Construction system (build.ts didn't run in the browser at all).
     engine = installEngine(h)
-    // Das Gelände der geladenen Karte, VOR dem ersten Spawn: OnCreate-Pfade der
-    // Original-Lua lesen GetSurfaceHeight, und ohne Quelle knallt es jetzt (statt
-    // still 0 zu liefern). Dieselbe bilineare Abfrage wie im Renderer.
+    // The terrain of the loaded map, BEFORE the first spawn: OnCreate paths of the
+    // Original Lua read GetSurfaceHeight, and without source it now pops (instead of
+    // silently deliver 0). Same bilinear query as in the renderer.
     const hf = new Heightfield(msg.terrain)
     setTerrainSource(h, (x, z) => hf.at(x, z))
-    // ALLE Projektil- und Prop-Blueprints, VOR dem ersten Schuss. Die Engine
-    // lädt beim Start ebenfalls alles (Blueprints.lua über DiskFindFiles) —
-    // mitten im Tick kann eine Waffe nichts nachladen.
+    // ALL projectile and prop blueprints, BEFORE the first shot. The engine
+    // also loads everything at startup (Blueprints.lua via DiskFindFiles) —
+    // In the middle of a tick, a weapon cannot reload anything.
     loadBlueprintGroups(h, msg.files)
     host = h
     ctx.postMessage({ type: 'booted' })
@@ -137,8 +137,8 @@ ctx.onmessage = async (e: MessageEvent<InMsg>): Promise<void> => {
     return
   }
   if (!host) return
-  // Script, Blueprint und Skelett muessen in der Sim liegen, BEVOR eine Unit
-  // dieses Typs entsteht — auch wenn die Fabrik sie spaeter selbst spawnt.
+  // Script, blueprint and skeleton must be in the sim BEFORE a unit
+  // of this type is created - even if the factory itself spawns them later.
   const prepare = (m: { id: string; scriptPath: string; scriptBytes: Uint8Array | null; bpBytes: Uint8Array | null; bones: SimBone[] }): void => {
     if (!host) return
     if (m.scriptBytes && !host.hasFile(m.scriptPath)) host.addFile(m.scriptPath, m.scriptBytes)
@@ -156,8 +156,8 @@ ctx.onmessage = async (e: MessageEvent<InMsg>): Promise<void> => {
   } else if (msg.type === 'build') {
     try {
       prepare(msg)
-      // Reihenfolge wie in der Engine: erst die Baustelle (Sim::CreateUnit mit
-      // beingBuilt=1), dann der Auftrag an den Bauer (OnStartBuild/'MobileBuild').
+      // Sequence as in the engine: first the construction site (Sim::CreateUnit with
+      // beingBuilt=1), then the order to the builder (OnStartBuild/'MobileBuild').
       const uid = spawnBuildSite(host, msg.id, msg.pos, msg.army)
       host.eval(`__issueBuildTask(${msg.builderId}, ${uid}, nil, ${!msg.queue})`)
       ctx.postMessage({ type: 'spawned', reqId: msg.reqId, uid })
@@ -170,21 +170,21 @@ ctx.onmessage = async (e: MessageEvent<InMsg>): Promise<void> => {
   } else if (msg.type === 'adjustQueue') {
     host.eval(`__adjustFactoryQueue(${msg.factoryId}, ${msg.index}, ${msg.delta})`)
   } else if (msg.type === 'emitterBp') {
-    // __emitterBpJson liefert JSON (oder 'null') — pull parst direkt.
+    // __emitterBpJson returns JSON (or 'null') — pull parses directly.
     const bp = host.pull<unknown>(`__emitterBpJson(${JSON.stringify(msg.bp)})`)
     ctx.postMessage({ type: 'emitterBp', reqId: msg.reqId, bp })
   } else if (msg.type === 'meshBp') {
     const bp = host.pull<unknown>(`__meshBpJson(${JSON.stringify(msg.bp)})`)
     ctx.postMessage({ type: 'meshBp', reqId: msg.reqId, bp })
   } else if (msg.type === 'simCallback') {
-    // KEIN host.call mit Objekten (wasmoon reicht sie als userdata durch,
-    // nicht als Lua-Tabelle) — das Args-Literal wertet die Lua-Seite aus.
+    // NO host.call with objects (wasmoon passes them as userdata,
+    // not as a Lua table) — the Args literal evaluates the Lua page.
     const ids = msg.unitIds.map((n) => Math.floor(n)).join(',')
     host.eval(`__simCallback(${JSON.stringify(msg.func)}, ${msg.argsLua}, { ${ids} })`)
   } else if (msg.type === 'move') {
-    // Der Befehls-Dispatch (IAiCommandDispatchImpl::DispatchTask @0x608EF0):
-    // ein Move ERSETZT die Arbeit — laufender Bau bricht mit der vollen
-    // Abbruch-Kette ab (Cfile:814989), erst dann kommt das Navigator-Ziel.
+    // The command dispatch (IAiCommandDispatchImpl::DispatchTask @0x608EF0):
+    // a move REPLACES the work - ongoing construction breaks with the full one
+    // Abort chain ends (Cfile:814989), only then does the navigator destination come.
     // Shift (queue) appends instead: clear = NOT shift (Cfile:1240965).
     host.eval(`__dispatchMove(${msg.id}, ${msg.x}, ${msg.z}, ${msg.queue ? 'false' : 'true'})`)
   } else if (msg.type === 'rally') {
@@ -228,8 +228,8 @@ function loadBlueprintGroups(h: LuaHost, files: Map<string, Uint8Array>): void {
   const props: string[] = []
   for (const path of files.keys()) {
     if (!path.endsWith('.bp')) continue
-    // `/effects/entities/**` sind ebenfalls ProjectileBlueprints: die Trümmer
-    // beim Tod (defaultexplosions.lua:285) und die Nuke-Effekt-Controller.
+    // `/effects/entities/**` are also ProjectileBlueprints: the rubble
+    // at death (defaultexplosions.lua:285) and the Nuke effect controller.
     if (path.startsWith('projectiles/') || path.startsWith('effects/')) proj.push(path)
     else if (path.startsWith('props/')) props.push(path)
   }
@@ -244,30 +244,30 @@ function loadBlueprintGroups(h: LuaHost, files: Map<string, Uint8Array>): void {
 
 function tickAndPost(): void {
   if (!host || !engine) return
-  // Pause: kein Beat. Der Zustand wird trotzdem gemeldet — die UI zeigt weiter
-  // an, was steht (die Engine rendert im Pausenzustand auch weiter).
+  // Break: no beat. The status is still reported — the UI continues to show
+  // what is there (the engine continues to render when paused).
   if (paused) return
-  // Ein Sim-Beat: Bau-Bedarf → Ökonomie → gewährte Rate → Lua-Threads → Physik.
+  // A sim beat: construction needs → economics → granted rate → Lua threads → physics.
   beat(engine)
-  // Der Zustand kommt als JSON-STRING (LuaHost.pull), nicht als Rückgabewert:
-  // eine zurückgegebene Lua-Tabelle bleibt im wasmoon-Registry hängen und wird
-  // nie eingesammelt — bei 10 Beats/s läuft die Sim-VM sonst langsam voll.
-  // (Nebenwirkung, die damit auch weg ist: eine LEERE Tabelle kam als `{}` statt
-  // `[]` an, und der Main-Thread starb an "m.units is not iterable".)
+  // The state comes as a JSON STRING (LuaHost.pull), not as a return value:
+  // a returned Lua table is stuck in the wasmoon registry and becomes
+  // never collected - at 10 beats/s the Sim VM would otherwise slowly fill up.
+  // (Side effect that is also gone: an EMPTY table appeared as `{}`
+  // `[]`, and the main thread died because of "m.units is not iterable".)
   const units = host.pull<unknown[]>('__readAllUnitsJson()')
-  // Die PROJEKTILE gehoeren zum Zustand: die Engine zeichnet jeden Schuss
-  // (CUIWorldView rendert die Sim-Entities). Ohne diesen Kanal ist der Kampf
-  // im Browser unsichtbar — die Sim schiesst, und niemand sieht es.
+  // The PROJECTILES belong to the state: the engine records every shot
+  // (CUIWorldView renders the sim entities). Without this channel there is a fight
+  // Invisible in the browser - the sim shoots and no one sees it.
   const projectiles = host.pull<unknown[]>('__readAllProjectilesJson()')
-  // Die EMITTER (Muendungsfeuer, Trails, Bau-/Einschlag-Effekte): die Sim
-  // rechnet ihre Weltposition (Owner + Knochen), das Partikelsystem zeichnet.
+  // The EMITTERS (muzzle flashes, trails, construction/impact effects): the sim
+  // calculates their world position (owner + bones), draws the particle system.
   const emitters = host.pull<unknown[]>('__readAllEmittersJson()')
-  // Die PROPS (Wracks): Unit.OnKilled → CreateWreckageProp → CreateProp laeuft
-  // komplett in der Original-Lua; ohne diesen Kanal bleibt jedes Wrack unsichtbar.
+  // The PROPS (wrecks): Unit.OnKilled → CreateWreckageProp → CreateProp is running
+  // completely in the original Lua; Without this channel, any wreck remains invisible.
   const props = host.pull<unknown[]>('__readAllPropsJson()')
   const a = engine.economy.army(1)
-  // Der SIM-TICK gehoert zum Zustand: die Spielzeit-Uhr der UI (score.lua:230,
-  // GetGameTime) zaehlt in Sim-Ticks und steht bei Pause still.
+  // The SIM-TICK belongs to the state: the game time clock of the UI (score.lua:230,
+  // GetGameTime) counts in Sim ticks and stands still when paused.
   const tick = Number(host.eval('return __gameTick'))
   ctx.postMessage({
     type: 'states',

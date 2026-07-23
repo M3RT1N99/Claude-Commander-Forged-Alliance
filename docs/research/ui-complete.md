@@ -172,22 +172,22 @@ Container `AtTopIn(parent, 368)`, `AtRightIn(parent)`, Breite 60; pro belegter G
 - lua.scd → lua/ui/game/commandmode.lua (StartCommandMode/EndCommandMode, OnCommandIssued → AddCommandFeedbackBlip, orderModes/toggleModes-Referenztabellen)
 - lua.scd → lua/ui/game/commandmeshes.lua + commandgraphparams.lua (Meshes je CommandType; Orderline-Farben/Waypoint-Texturen je UNITCOMMAND_*)
 - lua.scd → lua/ui/game/rallypoint.lua (WorldMesh, Shader 'RallyPoint', UniformScale 0.10)
-- lua.scd → lua/skins/skins.lua (skins.default.cursors: vollständige Cursor-Tabelle mit Hotspots/Frames/FPS; Fonts + Farben je Fraktion)
+- lua.scd → lua/skins/skins.lua (skins.default.cursors: complete cursor table with hotspots/frames/FPS; fonts + colors per faction)
 - lua.scd → lua/ui/controls/worldview.lua (OnUpdateCursor Z.131-202, DecalFunctions Z.28-90, ApplyCursor Z.234)
-- lua.scd → lua/keymap/defaultKeyMap.lua (vollständige Original-Tastenbelegung) + lua/keymap/keyactions.lua (Konsolen-Aktionen je Binding)
+- lua.scd → lua/keymap/defaultKeyMap.lua (complete original key mapping) + lua/keymap/keyactions.lua (console actions per binding)
 - lua.scd → lua/ui/game/tabs.lua Z.34-56 (tabs: menu/diplomacy/pause) + Z.58+ (menus.main) + layouts/tabs_mini.lua (Panel-Breite 180, oben zentriert)
-- lua.scd → lua/ui/game/score.lua (SetupPlayerLines Z.114, _OnBeat Z.226 Sortierung/Farben) + layouts/score_mini.lua (AtRightTopIn 18/7, Uhr + Unit-Count)
+- lua.scd → lua/ui/game/score.lua (SetupPlayerLines Z.114, _OnBeat Z.226 sorting/colors) + layouts/score_mini.lua (AtRightTopIn 18/7, clock + unit count)
 - lua.scd → lua/ui/game/avatars.lua (CreateAvatarUI Z.46, CreateIdleEngineerList Z.419, CreateIdleFactoryList Z.556) + layouts/avatars_mini.lua (rechts, Top 200, Breite 200)
 - lua.scd → lua/ui/game/multifunction.lua Z.60-135 (overlays: control/team-color/economy/military-radar; pings: alert/move/attack/marker) + layouts/multifunction_mini.lua
 - lua.scd → lua/ui/game/ping.lua Z.15-20 (PingTypes) + lua/ui/game/pingGroup.lua
-- lua.scd → lua/ui/game/tooltip.lua (CreateMouseoverDisplay Z.23, Hotkey-Einblendung) + lua/ui/help/tooltips.lua (82 KB Texte) + lua/ui/help/unitdescription.lua
+- lua.scd → lua/ui/game/tooltip.lua (CreateMouseoverDisplay Z.23, hotkey display) + lua/ui/help/tooltips.lua (82 KB texts) + lua/ui/help/unitdescription.lua
 - lua.scd → lua/ui/game/timer.lua, consoleecho.lua, announcement.lua, zoomslider.lua, tracking.lua, connectivity.lua, rename.lua, gameresult.lua
 - lua.scd → lua/ui/game/chat.lua + layouts/chat_layout.lua; lua/ui/game/diplomacy.lua + shareResources.lua + allianceOffer.lua
-- lua.scd → lua/ui/game/minimap.lua + layouts/minimap_mini.lua (Window mit Drag-Handles, Rahmen mini-map-brd/*)
-- lua.scd → lua/ui/game/gamecommon.lua (iconBmpWidth/Height 48 + 1px Padding; GetUnitIconFileNames → /textures/ui/common/icons/units/<IconName>_icon|_build_btn_up|down|over.dds)
+- lua.scd → lua/ui/game/minimap.lua + layouts/minimap_mini.lua (window with drag handles, frame mini-map-brd/*)
+- lua.scd → lua/ui/game/gamecommon.lua (iconBmpWidth/Height 48 + 1px padding; GetUnitIconFileNames → /textures/ui/common/icons/units/<IconName>_icon|_build_btn_up|down|over.dds)
 - lua.scd → lua/ui/game/buildmode.lua + build_templates.lua (Taste B, Tech-Keys, Template-Verwaltung in Prefs)
 - lua.scd → lua/ui/menus/main.lua, lua/ui/lobby/lobby.lua, lua/ui/lobby/lobbyOptions.lua, lua/ui/dialogs/mapselect.lua, options.lua, keybindings.lua, score.lua
-- Projekt: C:\Users\Marti\Documents\02Projekte\Claude Commander Forged Alliance\src\ui\hud.ts (aktueller Stand: Economy Z.230-249, Orders Z.251-285 nur 6 Slots, UnitView Z.287-299, Minimap Z.301-334, Strategic Icons Z.121-196)
-- Projekt: C:\Users\Marti\Documents\02Projekte\Claude Commander Forged Alliance\src\sim\simWorld.ts:153 (UnitCommand kennt nur 'move' — Bau/Queue/Reclaim fehlen komplett)
+- Project: C:\Users\Marti\Documents\02Projects\Claude Commander Forged Alliance\src\ui\hud.ts (current status: Economy Z.230-249, Orders Z.251-285 only 6 slots, UnitView Z.287-299, Minimap Z.301-334, Strategic Icons Z.121-196)
+- Project: C:\Users\Marti\Documents\02Projects\Claude Commander Forged Alliance\src\sim\simWorld.ts:153 (UnitCommand only knows 'move' - construction/queue/reclaim are completely missing)
 - Projekt: C:\Users\Marti\Documents\02Projekte\Claude Commander Forged Alliance\src\sandbox\sandbox.ts:85-320 (SandboxController: spawn/clickSelect/boxSelect/commandMove/stopSelected/selectedCaps/hudUnits)
-- Extrahierte Original-Quellen (nur lesend, für Referenz): C:\Users\Marti\AppData\Local\Temp\claude\c--Users-Marti-Documents-02Projekte-Claude-Commander-Forged-Alliance\795d25b0-6aed-4269-81c5-1f3b66283dbf\scratchpad\lua\
+- Extracted original sources (read only, for reference): C:\Users\Marti\AppData\Local\Temp\claude\c--Users-Marti-Documents-02Projects-Claude-Commander-Forged-Alliance\795d25b0-6aed-4269-81c5-1f3b66283dbf\scratchpad\lua\

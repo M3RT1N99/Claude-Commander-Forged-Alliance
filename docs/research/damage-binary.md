@@ -1,23 +1,23 @@
-# Schadenssystem — direkt aus dem Binary rekonstruiert (IDA)
+# Damage system — reconstructed directly from the binary (IDA)
 
-**Quelle:** IDA-Dekompilat von `ForgedAlliance.exe` (FAF-Build, IDB-MD5
-`d27b16b5d9b1c0480dd92316b125448e`). Diese Funktionen sind in **faf-re nicht
-rekonstruiert** (`EngineUnrecoveredStubs.cpp:61`: `SIM_Damage` ist ein
-No-Op-Stub) — die Recherche konnte sie nur aus Lua-Kommentaren *erraten*.
-Hier steht, was die Engine wirklich tut.
+**Source:** IDA decompilation from `ForgedAlliance.exe` (FAF build, IDB-MD5
+`d27b16b5d9b1c0480dd92316b125448e`). These functions are not available in **faf-re
+reconstructed** (`EngineUnrecoveredStubs.cpp:61`: `SIM_Damage` is a
+No-Op-Stub) — research could only *guess* it from Lua comments.
+Here's what the engine actually does.
 
-Adress-Verifikation (faf-re-Adressen treffen diese IDB exakt):
+Address verification (faf-re addresses exactly match this IDB):
 `0x737E60` → `SIM_Damage`, `0x518870` → `RMeshBlueprintLOD::Init`,
 `0x608EF0` → `IAiCommandDispatchImpl::DispatchTask`.
 
 ## Aufrufkette
 
-| Adresse | Funktion |
+| Address | Function |
 | --- | --- |
 | `0x737E60` | `SIM_Damage` — Dispatcher |
 | `0x737680` | `SIM_DoDamageArea` |
-| `0x737140` | `SIM_DoDamagePoint` — **die Kernformel** |
-| `0x736E40` | Schild-Abzug pro Ziel |
+| `0x737140` | `SIM_DoDamagePoint` — **the core formula** |
+| `0x736E40` | Shield penalty per target |
 | `0x736EB0` | `SIM_DoDamage` — Schild-Vorstufe |
 | `0x6A9D60` | `Unit::ProcessArmorOnDamage` |
 
@@ -30,7 +30,7 @@ switch (damage.mMethod):
   2 RING_EFFECT   -> DoDamageRing
 ```
 
-## 2. `SIM_DoDamageArea` — **kein Distanz-Falloff (belegt)**
+## 2. `SIM_DoDamageArea` — **no distance falloff (occupied)**
 
 ```
 shields = SIM_DoDamage(...)          // Schilde zuerst; merkt sich Absorbiertes
@@ -55,11 +55,11 @@ for entity in entities:
     SIM_DoDamagePoint(sim, d)
 ```
 
-**Wichtig:** Es gibt **keinerlei Abstandsdämpfung**. Jede Entity im Radius
-bekommt den **vollen** Betrag (abzüglich Schild). Der `mVector` ist nur die
-Richtung (für Impuls/Effekte), er skaliert den Schaden nicht.
+**Important:** There is **no distance attenuation**. Any entity in the radius
+gets the **full** amount (minus the sign). The `mVector` is just that
+Direction (for momentum/effects), it doesn't scale damage.
 
-## 3. `SIM_DoDamagePoint` — die Kernformel
+## 3. `SIM_DoDamagePoint` — the core formula
 
 ```
 if damage.mAmount == 0: return
@@ -98,18 +98,18 @@ if damageType in unit.mArmor (map<string,float>):
 return amount                     # kein Eintrag = Faktor 1.0
 ```
 
-## Korrekturen gegenüber der bisherigen Annahme
+## Corrections compared to the previous assumption
 
-| Bisher angenommen (aus Lua-Kommentar) | **Tatsächlich (Binary)** |
+| Adopted so far (from Lua comment) | **Actually (Binary)** |
 | --- | --- |
-| `effektiv = amount * ArmorMult * (1 - Handicap)` | `effektiv = amount * ArmorMult / (1 + Handicap)` — **Division**, nicht `(1-h)` |
-| Flächenschaden ohne Falloff (vermutet) | ✅ bestätigt — voller Betrag an jede Entity im Radius |
-| — | **`NOSPLASHDAMAGE`-Kategorie ist immun gegen Flächenschaden** |
-| — | Selbstschaden: Projektil wird auf seinen Launcher aufgelöst |
-| — | `OnExtraDamageDealt` feuert, wenn Rüstung den Schaden ≥ 2× verstärkt |
-| — | Schild-Absorption wird **vor** dem Einzelschaden abgezogen (nicht danach) |
+| `effektiv = amount * ArmorMult * (1 - Handicap)` | `effektiv = amount * ArmorMult / (1 + Handicap)` — **Division**, not `(1-h)` |
+| Area damage without falloff (assumed) | ✅ confirmed — full amount to every entity in radius |
+| — | **`NOSPLASHDAMAGE` category is immune to area damage** |
+| — | Self-Damage: Projectile dissipates onto its launcher |
+| — | `OnExtraDamageDealt` fires when armor increases damage ≥ 2× |
+| — | Shield absorption is deducted **before** the single damage (not after) |
 
-## Offen (noch aus dem Binary zu holen)
-- `SIM_DoDamage` (0x736EB0) — wie genau Schilde gesammelt/getroffen werden
+## Open (still to be removed from the binary)
+- `SIM_DoDamage` (0x736EB0) — how exactly shields are collected/hit
 - `DoDamageRing` — Ring-Variante (min/max-Radius)
-- Health-Abzug/Tod: passiert in Lua (`Unit.lua:OnDamage`), nicht in der Engine
+- Health penalty/death: happens in Lua (`Unit.lua:OnDamage`), not in the engine

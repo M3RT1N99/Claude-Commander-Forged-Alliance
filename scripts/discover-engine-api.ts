@@ -38,9 +38,9 @@ const GAME =
   process.env.CFA_GAME_DIR ??
   'C:/Program Files (x86)/Steam/steamapps/common/Supreme Commander Forged Alliance'
 
-// Eine Unit pro Fraktion + Gebaeude/Fabrik/Panzer: deckt die Lifecycle-Pfade ab.
+// One unit per faction + building/factory/tank: covers the lifecycle paths.
 const IDS = [
-  'uel0001', 'ual0001', 'url0001', 'xsl0001', // ACUs aller vier Fraktionen
+  'uel0001', 'ual0001', 'url0001', 'xsl0001', // ACUs from all four factions
   'ueb1101', 'ueb1103', 'ueb0101', 'uel0201', // Gen, Extraktor, Fabrik, Panzer
 ]
 
@@ -66,7 +66,7 @@ const host = await LuaHost.create(files, (level, msg) => {
   if (level === 'WARN') errors.push(msg)
 })
 const engine = installEngine(host)
-// Flaches Testgelaende — EXPLIZIT, weil die Engine ohne Karte knallt.
+// Flat test area - EXPLICIT because the engine crashes without a map.
 setTerrainSource(host, FLAT_TEST_TERRAIN)
 
 const missing = new Set<string>()
@@ -74,23 +74,23 @@ host.installStubTrap((name) => missing.add(name))
 
 for (const id of IDS) loadUnitBlueprint(host, id, bps.get(id)!)
 
-console.log('\n== Spawn aller Testunits (Original-Klassen) ==')
+console.log('\n== Spawn of all test units (original classes) ==')
 const ids: number[] = []
 for (const id of IDS) {
   try {
     ids.push(spawnLuaUnit(host, id, { x: 20 + ids.length * 8, y: 0, z: 20 }, 1))
     console.log(`  OK   ${id}`)
   } catch (e) {
-    console.log(`  FEHLER ${id}: ${(e as Error).message.split('\n')[0]?.slice(0, 110)}`)
+    console.log(`  ERROR ${id}: ${(e as Error).message.split('\n')[0]?.slice(0, 110)}`)
   }
 }
 
-// Laufzeitpfade: Bewegung + 60 Beats (Threads, Oekonomie, Bau)
+// Runtime paths: movement + 60 beats (threads, economy, construction)
 if (ids[0]) host.eval(`__units[${ids[0]}]:GetNavigator():SetGoal({ 60, 0, 60 })`)
 for (let i = 0; i < 60; i++) beat(engine)
 
-console.log(`\n== FEHLENDE ENGINE-GLOBALS (${missing.size}) ==`)
-console.log(missing.size === 0 ? '  (keine — die Original-Lua findet alles)' : `  ${[...missing].sort().join(', ')}`)
+console.log(`\n== MISSING ENGINE GLOBALS (${missing.size}) ==`)
+console.log(missing.size === 0 ? '  (none — the original Lua finds everything)' : `  ${[...missing].sort().join(', ')}`)
 
 if (errors.length > 0) {
   console.log(`\n== WARNUNGEN (${errors.length}, erste 8) ==`)

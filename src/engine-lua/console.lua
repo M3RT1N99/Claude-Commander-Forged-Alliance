@@ -1,40 +1,40 @@
 -- =====================================================================
--- Die Konsole der Engine: ConExecute und die ConVars.
+-- The engine's console: ConExecute and the ConVars.
 --
--- 19 der 37 Optionen wirken ueber genau diesen Weg (options.lua):
+-- 19 of the 37 options work in exactly this way (options.lua):
 --
 --     set = function(key, value, startup)
 --         ConExecute("ui_KeyboardPanSpeed " .. value)
 --     end
 --
--- Dahinter liegen in der Engine echte Variablen (Moho::TConVar<bool|int|float>,
--- z. B. `float Moho::ui_KeyboardPanSpeed = 90.0;`), die die C++-Seite in ihren
--- Schleifen liest — die WorldView fragt bei jedem Bild ui_KeyboardPanSpeed ab,
--- die Kamera cam_ZoomAmount, der Renderer shadow_Fidelity.
+-- Behind this are real variables in the engine (Moho::TConVar<bool|int|float>,
+-- e.g. E.g. `float Moho::ui_KeyboardPanSpeed = 90.0;`) that contains the C++ page in their
+-- Loops reads — the WorldView queries ui_KeyboardPanSpeed ​​for each image,
+-- the camera cam_ZoomAmount, the renderer shadow_Fidelity.
 --
--- Bisher hat unser ConExecute nur geloggt. Damit war jede dieser 19 Optionen
--- eine Attrappe: der Regler bewegte sich, der Wert wurde gespeichert — und
+-- So far our ConExecute has only logged. That was each of these 19 options
+-- a dummy: the controller moved, the value was saved — and
 -- niemand las ihn je.
 --
--- ZWEI DINGE, die man nicht raten darf:
+-- TWO THINGS not to advise:
 --
---  1. Die Namen sind NICHT case-sensitiv. options.lua schreibt `ren_Skydome`
---     und `ren_bloom`, die Engine heisst `Moho::ren_SkyDome` und
---     `Moho::ren_Bloom`. Wer exakt vergleicht, verliert genau diese zwei.
---  2. Ein Konsolenbefehl ist entweder eine VARIABLE (Name + Wert) oder eine
---     FUNKTION (CConFunc, z. B. WLD_IncreaseSimRate). Eine Funktion, die es bei
---     uns nicht gibt, wird EINMAL gemeldet — nicht still verschluckt.
+--  1. The names are NOT case sensitive. options.lua writes `ren_Skydome`
+--     and `ren_bloom`, the engine is called `Moho::ren_SkyDome` and
+--     `Moho::ren_Bloom`. If you compare exactly, you lose exactly these two.
+--  2. A console command is either a VARIABLE (name + value) or a
+--     FUNCTION (CConFunc, e.g. WLD_IncreaseSimRate). A function that it at
+--     doesn't exist to us, is reported ONCE - not swallowed up silently.
 --
--- STANDARD-LUA 5.4 (geht roh in host.eval, nicht durch den FA-Transpiler).
+-- STANDARD LUA 5.4 (goes raw in host.eval, not through the FA transpiler).
 -- =====================================================================
 
 __conVars = {}
 __conUnknown = {}
 __uiConSink = false
 
--- Die Variablen, die die Original-Lua ueber ConExecute setzt
--- (peek-lua --grep "ConExecute\("). Alle existieren in der Decomp als
--- Moho::TConVar bzw. Moho::<name>.
+-- The variables that the original Lua sets via ConExecute
+-- (peek-lua --grep "ConExecute\()). All exist in the decomp as
+-- Moho::TConVar or Moho::<name>.
 local KNOWN_VARS = {
   'cam_ZoomAmount', 'cam_NearZoom', 'cam_PanSpeed',
   'ui_KeyboardPanSpeed', 'ui_KeyboardPanAccelerateMultiplier',
@@ -45,7 +45,7 @@ local KNOWN_VARS = {
   'ren_SkyDome', 'ren_Bloom', 'ren_Oblivion', 'ren_SelectBoxes',
   'SC_CameraScaleLOD', 'SC_VerticalSync', 'SC_AntiAliasingSamples',
   'SC_PrimaryAdapter', 'SC_SecondaryAdapter', 'SC_ToggleCursorClip',
-  -- Die Reichweiten-Ringe (gamemain.lua:519-523, worldview.lua). In der Engine
+  -- The range rings (gamemain.lua:519-523, worldview.lua). In the engine
   -- registriert: "range_RenderHighlighted", "range_RenderSelected",
   -- "range_RenderBuild", "range_Fill", "range_InnerThicknessCoeff",
   -- "range_OuterThicknessCoeff".
@@ -53,9 +53,9 @@ local KNOWN_VARS = {
   'range_Fill', 'range_InnerThicknessCoeff', 'range_OuterThicknessCoeff',
 }
 
--- STARTWERTE — nur die, die in der Decomp BELEGT sind. Ein Default, den ich
--- nicht belegen kann, wird nicht erfunden: die Variable startet dann ohne Wert
--- und bekommt ihn beim Start von optionslogic.Apply(true), das jede Option mit
+-- START VALUES — only those that are USED in the decomp. A default that I
+-- cannot be assigned, is not invented: the variable then starts without a value
+-- and gets it when starting optionslogic.Apply(true), which includes every option
 -- ihrem `set` durchlaeuft (Moho::OPTIONS_Apply, Cfile:1368338).
 local DEFAULTS = {
   cam_ZoomAmount = 0.40000001,                   -- Cfile:421825
@@ -81,7 +81,7 @@ for _, name in ipairs(KNOWN_VARS) do
   __conVars[key(name)] = { name = name, value = DEFAULTS[name] }
 end
 
---- Den Wert einer ConVar lesen (auch aus TS, ueber __conGet).
+--- Read the value of a ConVar (also from TS, via __conGet).
 function __conGet(name)
   local entry = __conVars[key(name)]
   if not entry then return nil end
@@ -98,22 +98,22 @@ local function parseValue(text)
   return text
 end
 
---- ConExecute(cmd) — ein Konsolenbefehl, wie ihn die Engine kennt.
+--- ConExecute(cmd) — a console command as the engine knows it.
 ---
---- Beispiele aus der Original-Lua:
+--- Examples from the original Lua:
 ---   ConExecute("ui_KeyboardPanSpeed 90")     -- Variable setzen
----   ConExecute("ren_Skydome true")           -- (anderer Fall als Moho::ren_SkyDome!)
----   ConExecute("WLD_IncreaseSimRate")        -- Funktion ohne Argument
+--- ConExecute("ren_Skydome true") -- (different case than Moho::ren_SkyDome!)
+--- ConExecute("WLD_IncreaseSimRate") -- Function without argument
 function ConExecute(cmd)
   if not cmd then return end
   local text = tostring(cmd)
   local name, rest = string.match(text, '^%s*(%S+)%s*(.*)$')
   if not name then return end
-  rest = string.match(rest, '^(.-)%s*$') -- Leerraum hinten weg
+  rest = string.match(rest, '^(.-)%s*$') -- Empty space at the back
 
   -- UI_Lua <code>: "Run lua code in the appropriate UI lua state."
-  -- (CConFunc_UI_Lua, Cfile:423593-423600). Fast jede Keymap-Aktion aus
-  -- keyactions.lua laeuft darueber (z. B. der Esc-Handler:
+  -- (CConFunc_UI_Lua, Cfile:423593-423600). Almost every keymap action
+  -- keyactions.lua runs over it (e.g. the Esc handler:
   -- 'UI_Lua import("/lua/ui/uimain.lua").EscapeHandler()').
   if string.lower(name) == 'ui_lua' then
     local chunk, err = (loadstring or load)(rest, 'UI_Lua')
@@ -151,22 +151,22 @@ function ConExecute(cmd)
   if entry then
     local value = parseValue(rest)
     if value == nil then
-      -- Variable ohne Wert: die Engine gibt den aktuellen aus. Wir tun dasselbe.
+      -- Variable without value: the engine outputs the current one. We do the same.
       LOG(entry.name .. ' = ' .. tostring(entry.value))
       return
     end
     entry.value = value
-    -- Die Engine ist bei uns TypeScript: sie muss von der Aenderung erfahren
-    -- (Kamera, Renderer, Auswahl lesen diese Werte).
+    -- Our engine is TypeScript: it has to know about the change
+    -- (Camera, renderer, selection read these values).
     if __uiConSink then
       __uiConSink(entry.name, value)
     end
     return
   end
 
-  -- Kein bekannter Wert-Name -> eine Konsolen-FUNKTION (CConFunc). Die gibt es
-  -- bei uns noch nicht. EINMAL melden, nicht still schlucken — sonst sieht
-  -- niemand, welches Engine-Teil als Naechstes fehlt.
+  -- No known value name -> a console FUNCTION (CConFunc). There are
+  -- not yet with us. Report ONCE, don't swallow silently - otherwise you'll see
+  -- no one knows which engine part is missing next.
   if not __conUnknown[key(name)] then
     __conUnknown[key(name)] = text
     WARN('ConExecute: "' .. text .. '" — dieser Konsolenbefehl fehlt noch')

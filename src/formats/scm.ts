@@ -72,7 +72,7 @@ export function parseScm(data: Uint8Array): ScmModel {
   const magic = new TextDecoder('ascii').decode(data.subarray(0, 4))
   if (magic !== 'MODL') throw new Error(`SCM: falsches Magic "${magic}" (erwartet MODL)`)
   const version = view.getUint32(4, true)
-  if (version !== 5) throw new Error(`SCM: nicht unterstützte Version ${version}`)
+  if (version !== 5) throw new Error(`SCM: unsupported version ${version}`)
 
   const boneOffset = view.getUint32(8, true)
   const weightedBoneCount = view.getUint32(12, true)
@@ -85,13 +85,13 @@ export function parseScm(data: Uint8Array): ScmModel {
   const totalBoneCount = view.getUint32(44, true)
 
   if (boneOffset + totalBoneCount * BONE_SIZE > data.byteLength) {
-    throw new Error('SCM: Bone-Daten außerhalb der Datei')
+    throw new Error('SCM: Bone data outside the file')
   }
   if (vertexOffset + vertexCount * VERTEX_SIZE > data.byteLength) {
-    throw new Error('SCM: Vertex-Daten außerhalb der Datei')
+    throw new Error('SCM: Vertex data outside the file')
   }
   if (indexOffset + indexCount * 2 > data.byteLength) {
-    throw new Error('SCM: Index-Daten außerhalb der Datei')
+    throw new Error('SCM: Index data outside the file')
   }
 
   // --- Bones ---------------------------------------------------------------

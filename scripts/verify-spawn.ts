@@ -53,19 +53,19 @@ for (const archive of ['mohodata.scd', 'lua.scd']) {
   const zip = await ZipArchive.open(file)
   for (const [key, entry] of zip.entries) if (key.endsWith('.lua')) files.set(key, await zip.read(entry))
 }
-// Unit-Script + Blueprint aus units.scd
+// Unit script + blueprint from units.scd
 const unitsFile = await NodeFile.open(`${GAME}/gamedata/units.scd`)
 openFiles.push(unitsFile)
 const unitsZip = await ZipArchive.open(unitsFile)
-// Die Sim braucht auch das SKELETT der Unit: Waffentuerme und Muendungen
-// haengen an Knochennamen (weapon.lua:67). Es kommt aus derselben SCM-Datei,
-// die auch der Renderer liest.
+// The sim also needs the SKELETON of the unit: turrets and muzzles
+// depend on bone names (weapon.lua:67). It comes from the same SCM file,
+// which the renderer also reads.
 const assetExists = (p: string): boolean => unitsZip.get(p.toLowerCase()) != null
 const readAsset = async (p: string): Promise<Uint8Array | null> => {
   const e = unitsZip.get(p.toLowerCase())
   return e ? unitsZip.read(e) : null
 }
-// Unit-Script vorladen; das Blueprint wird über loadUnitBlueprint registriert.
+// preload unit script; the blueprint is registered via loadUnitBlueprint.
 files.set(
   'units/uel0001/uel0001_script.lua',
   await unitsZip.read(unitsZip.get('units/uel0001/uel0001_script.lua')!),
@@ -83,23 +83,23 @@ const host = await LuaHost.create(files, (level, msg) => {
   if (level === 'WARN') warnings.push(msg)
 })
 installEngine(host)
-// Flaches Testgelaende — EXPLIZIT, weil die Engine ohne Karte knallt (kein stiller 0-Wert).
+// Flat test area - EXPLICIT because the engine crashes without a map (no silent 0 value).
 setTerrainSource(host, FLAT_TEST_TERRAIN)
 const missing = new Set<string>()
 loadUnitBlueprint(host, 'uel0001', uel0001bp)
 setUnitBones(host, 'uel0001', await bonesFromBlueprint('uel0001', uel0001bp, readAsset, assetExists))
 
-console.log('\n== Spawn über Original-Klasse (UEL0001 = TWalkingLandUnit) ==')
+console.log('\n== Spawn via original class (UEL0001 = TWalkingLandUnit) ==')
 try {
   const id = spawnLuaUnit(host, 'uel0001', { x: 128, y: 20, z: 128 }, 1)
-  check(id > 0, `gespawnt, Unit-ID ${id}`)
+  check(id > 0, `spawned, unit ID ${id}`)
   const state = readLuaUnit(host, id)
-  check(state?.name === 'uel0001', `Zustand.name = ${state?.name}`)
+  check(state?.name === 'uel0001', `Condition.name = ${state?.name}`)
   check(state?.x === 128 && state?.z === 128, `Position (${state?.x}, ${state?.y}, ${state?.z})`)
-  check(state?.maxHealth === 12000, `maxHealth = ${state?.maxHealth} (aus Original-bp)`)
+  check(state?.maxHealth === 12000, `maxHealth = ${state?.maxHealth} (from original bp)`)
   check(
     typeof state?.health === 'number' && state.health > 0,
-    `health = ${state?.health} (OnCreate-Kette gelaufen)`,
+    `health = ${state?.health} (OnCreate chain run)`,
   )
 } catch (err) {
   check(false, `spawn: ${(err as Error).message.slice(0, 200)}`)

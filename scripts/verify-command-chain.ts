@@ -46,30 +46,30 @@ const log = (msg: string): void => {
   if (!quiet) console.log(`  · ${msg}`)
 }
 
-// --- Dateien (erstes Archiv gewinnt, wie im Browser) ------------------------
+// --- Files (first archive wins, like in the browser) -----------------------
 const game = await GameFiles.open()
 const files = game.luaFiles
 const allPaths = game.paths
 const bpPaths = [...allPaths].filter((p) => /^units\/[^/]+\/[^/]+_unit\.bp$/.test(p))
 
-// --- Die Sim-VM (Original-Engine-Boot, flaches Testgelände) -----------------
-console.log('\n== Sim: ACU über die Original-Unit.lua ==')
+// --- The Sim VM (original engine boot, flat test site) -----------------
+console.log('\n== Sim: ACU via the Original-Unit.lua ==')
 const simHost = await LuaHost.create(files, () => {})
 const engine = installEngine(simHost)
-setTerrainSource(simHost, () => 20) // flaches Testgelände auf Höhe 20
-// Blueprint UND Skelett — genau das, was der Worker beim Spawn mitschickt.
+setTerrainSource(simHost, () => 20) // flat test area at altitude 20
+// Blueprint AND Skeleton — exactly what the worker sends with it when spawning.
 for (const id of ['uel0001', 'ueb0101']) await game.giveUnit(simHost, id)
 const acu = spawnLuaUnit(simHost, 'uel0001', { x: 100, y: 20, z: 100 }, 1)
 check(acu > 0, `ACU gespawnt (id ${acu})`)
-// GiveInitialResources läuft nach WaitTicks(5) — erst danach hat die Armee etwas.
+// GiveInitialResources runs after WaitTicks(5) — only then does the army have anything.
 for (let i = 0; i < 8; i++) beat(engine)
 const eco0 = engine.economy.army(1)
-// ZAHLEN festhalten, nicht das Armee-Objekt: army(1) ist eine Referenz, die sich
-// mit jedem Beat weiterdreht — ein Vergleich gegen sie vergleicht sich selbst.
+// Hold NUMBERS, not the army object: army(1) is a reference that
+// keeps turning with every beat - a comparison against them compares itself.
 const maxMass0 = eco0.maxMass
-check(eco0.mass > 0 && eco0.energy > 0, `Startvorrat aus GiveInitialResources: ${eco0.mass.toFixed(0)} Masse, ${eco0.energy.toFixed(0)} Energie`)
+check(eco0.mass > 0 && eco0.energy > 0, `Starting supply from GiveInitialResources: ${eco0.mass.toFixed(0)} mass, ${eco0.energy.toFixed(0)} energy`)
 
-// --- Die UI-VM (dieselbe wie im Browser) ------------------------------------
+// --- The UI VM (same as in the browser) ------------------------------------
 console.log('\n== UI: Panels aufbauen, ACU auswählen ==')
 const dims = new Map<string, [number, number]>()
 for (const key of game.paths) {
@@ -78,7 +78,7 @@ for (const key of game.paths) {
     const dds = parseDds(await game.read(key))
     dims.set(key, [dds.width, dds.height])
   } catch {
-    // Kaputte DDS: nicht raten.
+    // Broken DDS: don't guess.
   }
 }
 const fonts = new FontBook()
@@ -102,7 +102,7 @@ loadUiBlueprints(uiHost, bpPaths)
 setupGameUi(uiHost, log)
 uiHost.setGlobal('__uiSimCommand', () => {})
 
-// Die Engine spiegelt den Sim-Zustand in die UI-VM (UserUnit::UpdateUnitData).
+// The engine reflects the sim state into the UI VM (UserUnit::UpdateUnitData).
 const mirror = (): void => {
   for (const u of simHost.eval('return __readAllUnits()') as {
     id: number
@@ -123,7 +123,7 @@ const mirror = (): void => {
 mirror()
 check(Number(uiHost.eval(`return __uiSelectByIds({ ${acu} })`)) === 1, 'ACU in der UI ausgewählt')
 
-// --- Das Bau-Icon: die Original-construction.lua startet den Command-Mode ---
+// --- The construction icon: the Original-construction.lua starts the command mode ---
 console.log('\n== Bau-Icon → commandmode.lua ==')
 uiHost.eval(`import('/lua/ui/game/commandmode.lua').StartCommandMode('build', { name = 'ueb0101' })`)
 const cm = getCommandMode(uiHost)
@@ -132,12 +132,12 @@ check(cm.mode === 'build' && cm.name === 'ueb0101', `Command-Mode = build/${Stri
 const fp = footprintOf(uiHost, 'ueb0101')
 check(fp[0] === 5 && fp[1] === 5, `Footprint aus dem Blueprint: ${fp[0]}×${fp[1]} (ueb0101_unit.bp:151)`)
 
-// Der Snap ist keine Geschmacksfrage (COORDS_GridSnap @0x50B1E0):
+// The snap is not a question of taste (COORDS_GridSnap @0x50B1E0):
 //   cell.x  = trunc(103.4 − 2.5) = trunc(100.9) = 100
 //   world.x = 100 + 2.5 = 102.5
-//   cell.z  = trunc(108.9 − 2.5) = trunc(106.4) = 106  →  world.z = 108.5
-// Ein 5×5-Gebäude sitzt also IMMER auf einer halben Koordinate — genau so steht
-// es im Original auf dem Raster.
+//   cell.z = trunc(108.9 − 2.5) = trunc(106.4) = 106 → world.z = 108.5
+// So a 5×5 building ALWAYS sits on half a coordinate — that’s exactly what it says
+// it in the original on the grid.
 const snapped = snapToGrid(103.4, 108.9, fp[0], fp[1], () => 20)
 check(
   snapped.x === 102.5 && snapped.z === 108.5,
@@ -145,7 +145,7 @@ check(
 )
 check(snapped.y === 20, 'Die Höhe kommt NACH dem Snap aus dem Gelände (Cfile:641588)')
 
-// --- Der Klick in die Welt --------------------------------------------------
+// --- The click into the world --------------------------------------------------
 console.log('\n== Klick in die Welt: Baustelle + Auftrag ==')
 const sim = {
   move: (id: number, x: number, z: number): void => {
@@ -196,7 +196,7 @@ check(
   `Baustelle liegt auf dem gerasterten Punkt (${site0?.x}, ${site0?.z})`,
 )
 
-// --- Der Bau läuft ----------------------------------------------------------
+// --- Construction is underway --------------------------------------------------------
 console.log('\n== Beats: der Bau wächst, die Ökonomie zahlt ==')
 const massBefore = engine.economy.army(1).mass
 for (let i = 0; i < 20; i++) beat(engine)
@@ -206,38 +206,38 @@ check(site1.health > 0, `Leben wächst mit: ${site1.health.toFixed(0)} von ${sit
 const massAfter = engine.economy.army(1).mass
 check(massAfter < massBefore, `Masse bezahlt: ${massBefore.toFixed(0)} → ${massAfter.toFixed(0)}`)
 
-// Bis fertig. ueb0101: BuildTime aus dem Blueprint, ACU-BuildRate 10 →
-// delta = 10/BuildTime · Rate · 0.1 pro Tick. Kein Zeitlimit erfinden: es wird
-// gerechnet, bis die Sim fertig ist (oder es nie wird — dann knallt der Test).
+// See you done. ueb0101: BuildTime from the blueprint, ACU BuildRate 10 →
+// delta = 10/BuildTime · Rate · 0.1 per tick. Don't invent a time limit: it will
+// Calculated until the sim is finished (or it never is - then the test fails).
 let ticks = 20
 while (readLuaUnit(simHost, siteId)!.fraction < 1 && ticks < 4000) {
   beat(engine)
   ticks++
 }
 const done = readLuaUnit(simHost, siteId)!
-check(done.fraction >= 1, `Fabrik fertig nach ${ticks} Beats (${(ticks / 10).toFixed(0)} s Spielzeit)`)
+check(done.fraction >= 1, `Factory finished according to ${ticks} beats (${(ticks / 10).toFixed(0)} s playing time)`)
 check(done.health === done.maxHealth, `Volles Leben: ${done.health} = ${done.maxHealth}`)
-// Die fertige Fabrik zählt jetzt in der Ökonomie (vorher NICHT — unfertige Units
-// sind für die Ökonomie unsichtbar).
+// The finished factory now counts in the economy (previously NOT - unfinished units
+// are invisible to the economy).
 //
-// Der EINE zusätzliche Beat ist kein Trick, sondern die Beat-Reihenfolge aus
-// Sim::AdvanceBeat (@:1076363): Bau-Bedarf → Ökonomie → gewährte Rate anwenden.
-// Fertig wird die Fabrik in der DRITTEN Stufe — das Lager der neuen Unit fließt
-// also erst in den Ökonomie-Tick des nächsten Beats ein.
+// The ONE additional beat is not a trick, but rather the beat order
+// Sim::AdvanceBeat (@:1076363): Construction demand → economy → apply granted rate.
+// The factory will be finished in the THIRD stage - the warehouse of the new unit will flow
+// So first into the economics of the next beat.
 beat(engine)
 const ecoEnd = engine.economy.army(1)
 check(
   ecoEnd.maxMass === maxMass0 + 80,
-  `Das Lager wuchs um die StorageMass der Fabrik: ${maxMass0} → ${ecoEnd.maxMass} (+80, ueb0101_unit.bp:148)`,
+  `The warehouse grew by the factory's StorageMass: ${maxMass0} → ${ecoEnd.maxMass} (+80, ueb0101_unit.bp:148)`,
 )
 
-// --- Der Klick mit ausgewählter FABRIK -------------------------------------
+// --- The click with selected FACTORY -------------------------------------
 //
-// Eine Fabrik hat kein RULEUCC_Move (ueb0101_unit.bp) — ein Klick in die Welt
-// ist für sie der SAMMELPUNKT (IssueFactoryRallyPoint, Cfile:1008266), kein
-// Bewegungsbefehl. Vorher ging der Move-Befehl an alles, und die Sim hat das
-// Gebäude an den Klickpunkt TELEPORTIERT (motion.lua: MaxSpeed 0 → „sofort am
-// Ziel"). Genau das ist im Browser passiert.
+// A factory does not have a RULEUCC_Move (ueb0101_unit.bp) — one click in the world
+// is for them the COLLECTION POINT (IssueFactoryRallyPoint, Cfile:1008266), no
+// Movement command. Before, the move command went to everything, and the sim has that
+// Building TELEPORTED to the click point (motion.lua: MaxSpeed ​​0 → “immediately on
+// Target"). That's exactly what happened in the browser.
 console.log('\n== Klick mit ausgewählter Fabrik: Sammelpunkt, keine Fahrt ==')
 mirror()
 check(

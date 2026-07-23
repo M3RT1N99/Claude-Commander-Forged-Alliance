@@ -43,11 +43,11 @@ export interface UiEngine {
 export interface UiFileSystem {
   exists: (path: string) => boolean
   find: (dir: string, pattern: string) => string[]
-  /** Maße einer DDS-Textur — daraus bemisst sich ein Bitmap ohne Layout-Helfer. */
+  /** Dimensions of a DDS texture - this is used to measure a bitmap without a layout helper. */
   textureSize?: (path: string) => [number, number] | null
-  /** Breite eines Strings in Pixeln (CMauiText::GetStringAdvance, Cfile:1146720). */
+  /** Width of a string in pixels (CMauiText::GetStringAdvance, Cfile:1146720). */
   stringAdvance?: (text: string, family: string, size: number) => number
-  /** Ober-/Unterlänge der Schrift — text.lua:39 baut daraus die Höhe. */
+  /** Upper/lower length of the font - text.lua:39 uses this to build the height. */
   fontMetrics?: (family: string, size: number) => [number, number]
   /**
    * Die Engine erfährt, wenn eine ConVar sich ändert.
@@ -73,26 +73,26 @@ export interface UiFileSystem {
 }
 
 export function installUiEngine(host: LuaHost, fs: UiFileSystem): UiEngine {
-  // Reihenfolge wie beim Sim-Boot und aus demselben Grund: erst die
-  // Engine-Primitive, dann class.lua neu laden (class.lua:78 snapshottet
-  // ForkThread als Upvalue), dann die Original-Lua.
+  // Order as with the SIM boot and for the same reason: first the
+  // Engine primitives, then reload class.lua (class.lua:78 snapshotted
+  // ForkThread as Upvalue), then the original Lua.
   installSimThreads(host)
   installEngineGlobals(host)
-  // GetVersion() (Core-Global, Cfile:599401) liefert die Version der ENGINE:
-  // Moho::GetEngineVersion @0x4D3D30 ist `STR_Printf("%1.1f.%i", 1.5, 3764)` —
-  // einkompiliert, nicht aus den Spieldaten gelesen. Die Engine hier sind wir,
-  // also steht unsere Version drin. Im Hauptmenü ist sie sichtbar (main.lua:172).
+  // GetVersion() (Core-Global, Cfile:599401) returns the version of the ENGINE:
+  // Moho::GetEngineVersion @0x4D3D30 is `STR_Printf("%1.1f.%i", 1.5, 3764)` —
+  // compiled in, not read from the game data. The engine here is us,
+  // so our version is there. It is visible in the main menu (main.lua:172).
   host.setGlobal('__engineVersion', `${pkg.name} ${pkg.version}`)
   host.eval(UI_GLOBALS_LUA)
   host.eval(PREFS_LUA)
-  // Die Konsole der Engine (ConExecute + ConVars). 19 der 37 Optionen wirken
-  // ueber genau diesen Weg — vorher hat ConExecute nur geloggt, und damit war
-  // jede davon eine Attrappe.
+  // The engine's console (ConExecute + ConVars). 19 of the 37 options work
+  // via exactly this path - previously ConExecute only logged, and that was it
+  // each one a dummy.
   host.eval(CONSOLE_LUA)
 
-  // Die gespeicherten Einstellungen zurückholen — VOR allem, was sie liest
-  // (prefs.lua:96 greift ungeprüft auf das Profil zu, main.lua:151 fragt
-  // `mainmenu_bgmovie`, uimain.lua:31 das Skin).
+  // Restore the saved settings — BEFORE everything she reads
+  // (prefs.lua:96 accesses the profile without checking, main.lua:151 asks
+  // `mainmenu_bgmovie`, uimain.lua:31 the skin).
   if (fs.prefs) {
     const stored = fs.prefs.load()
     if (stored) {
@@ -109,11 +109,11 @@ export function installUiEngine(host: LuaHost, fs: UiFileSystem): UiEngine {
     )
   }
 
-  // DiskGetFileInfo ist die Naht zum VFS. UIUtil.UIFile/SkinnableFile bauen
-  // darauf ihre Skin-Fallback-Kette (uiutil.lua:310) — ohne echte Antwort
-  // findet die UI ihre Texturen nicht.
-  // `exists` und `DiskGetFileInfo` sind Core-Globals (docs/research/engine-api.md)
-  // und die Naht zum VFS. Localization.lua:21 und UIUtil.UIFile bauen darauf.
+  // DiskGetFileInfo is the seam to the VFS. Build UIUtil.UIFile/SkinnableFile
+  // then their skin fallback chain (uiutil.lua:310) — with no real answer
+  // the UI cannot find its textures.
+  // `exists` and `DiskGetFileInfo` are core globals (docs/research/engine-api.md)
+  // and the seam to the VFS. Localization.lua:21 and UIUtil.UIFile rely on it.
   host.setGlobal('exists', (path: string) => fs.exists(normalize(path)))
   host.setGlobal('DiskGetFileInfo', (path: string) => fs.exists(normalize(path)))
   host.setGlobal('__uiDiskFindFiles', (dir: string, pattern: string) =>
@@ -125,11 +125,11 @@ export function installUiEngine(host: LuaHost, fs: UiFileSystem): UiEngine {
     end
   `)
 
-  // Die gemeinsame Boot-Kette beider VMs — dieselben Dateien, die
-  // globalInit.lua:14-24 lädt. Nicht einzeln zusammengeraten: config.lua
-  // bringt `iscallable`, Localization.lua bringt `LOC`, collapse.lua die
-  // Pfad-Normalisierung. (Den ConvertCClassToLuaClass-Lauf am Ende von
-  // globalInit brauchen wir nicht: unsere moho-Klassen SIND schon Lua-Klassen,
+  // The common boot chain of both VMs — the same files that
+  // globalInit.lua:14-24 is loading. Not recommended individually: config.lua
+  // brings `iscallable`, Localization.lua brings `LOC`, collapse.lua the
+  // Path normalization. (The ConvertCClassToLuaClass run at the end of
+  // We don't need globalInit: our moho classes ARE already Lua classes,
   // siehe engine-lua/moho.lua.)
   host.loadGlobal('/lua/system/config.lua')
   host.loadGlobal('/lua/system/class.lua')
@@ -141,16 +141,16 @@ export function installUiEngine(host: LuaHost, fs: UiFileSystem): UiEngine {
   host.loadGlobal('/lua/system/MultiEvent.lua')
   host.loadGlobal('/lua/system/collapse.lua')
 
-  // Die UI-Seite des Sync-Tables. Das Gegenstück zu `/lua/simsync.lua` in der
-  // Sim: die Engine legt beides selbst in den jeweiligen State (keine Lua-Datei
-  // ruft es auf, deshalb steht es hier). Es bringt `Sync`, `PreviousSync`,
-  // `UnitData` und `OnSync()` — und ohne `UnitData` scheitert schon
-  // orders.lua:909 an der ersten Selektion.
+  // The UI page of the sync table. The counterpart to `/lua/simsync.lua` in the
+  // Sim: the engine puts both into the respective state itself (no Lua file
+  // calls it up, that's why it's here). It brings `Sync`, `PreviousSync`,
+  // `UnitData` and `OnSync()` - and without `UnitData` it fails
+  // orders.lua:909 on the first selection.
   host.loadGlobal('/lua/usersync.lua')
 
-  // maui-Substrat: die LazyVar-Instanzen, die InternalCreate*-Globals und
-  // DoInit → OnInit. Muss NACH class.lua/moho stehen (die Controls sind
-  // Lua-Klassen) und VOR jeder UI-Lua, die Controls erzeugt.
+  // maui substrate: the LazyVar instances, the InternalCreate* globals and
+  // DoInit → OnInit. Must be AFTER class.lua/moho (the controls are
+  // Lua classes) and BEFORE any UI Lua that creates controls.
   host.eval(MAUI_LUA)
   if (fs.textureSize) {
     host.setGlobal('__uiTextureDims', (path: string) => fs.textureSize!(normalize(path)))
@@ -166,22 +166,22 @@ export function installUiEngine(host: LuaHost, fs: UiFileSystem): UiEngine {
     )
   }
 
-  // Alle noch nicht gebauten UI-Globals bekommen eine Funktion, die beim AUFRUF
-  // mit ihrem Namen scheitert. Referenzieren geht (die UI-Lua baut daraus beim
-  // Laden Tabellen), Aufrufen knallt — kein stiller Stub, sondern eine Liste
-  // dessen, was als Nächstes zu bauen ist.
+  // All UI globals that have not yet been built get a function that is activated when CALLED
+  // fails with her name. Referencing is possible (the UI Lua builds from this when
+  // Loading tables), calling pops — not a silent stub, but a list
+  // of what to build next.
   host.eval(UI_GLOBALS_MISSING_LUA)
 
-  // Der Boot-Ablauf der Engine (Profil, Optionen anwenden, Front-End, Spiel-UI)
-  // — in Lua, nicht in TS-Template-Literalen. Definiert nur Funktionen, gerufen
-  // wird nichts; deshalb steht es am Ende.
+  // The engine boot flow (profile, apply options, front-end, game UI)
+  // — in Lua, not in TS template literals. Only defines functions, called
+  // nothing will happen; that's why it's at the end.
   host.eval(UI_BOOT_LUA)
   host.eval(WORLD_COMMANDS_LUA)
 
   // IN_InitKeyHandler (CUIManager::Init → LoadKeyMappings, Cfile:1259476):
-  // die Engine lädt beim UI-Boot SELBST keyNames.lua und
-  // keymapper.GetKeyMappings() in die Keymap — sie wartet nicht auf lobby.lua.
-  // Ohne diesen Schritt bleibt jede Taste tot (die Keymap ist leer).
+  // the engine loads ITSELF keyNames.lua and when UI boots
+  // keymapper.GetKeyMappings() into the keymap — it doesn't wait for lobby.lua.
+  // Without this step, every key remains dead (the keymap is empty).
   host.eval('__uiInitKeyMap()')
 
   return { host }
@@ -210,13 +210,13 @@ export function loadUiBlueprints(host: LuaHost, bpPaths: string[]): number {
   installBlueprintPipeline(host)
   const list = bpPaths.map((p) => `'/${p}'`).join(',')
   host.eval(`__bpFiles = { ${list} }; LoadBlueprints()`)
-  // Die Original-Lua erwartet die Blueprints unter dem Global `__blueprints`
-  // (so heisst die Tabelle, die die Engine in den State legt).
+  // The original Lua expects the blueprints under the Global `__blueprints`
+  // (this is the name of the table that the engine puts in the state).
   host.eval(`__blueprints = __registered.Unit`)
   return Number(host.eval('local n = 0 for _ in pairs(__blueprints) do n = n + 1 end return n'))
 }
 
-/** `/textures/x.dds` → `textures/x.dds` (das VFS führt Pfade ohne führenden /). */
+/** `/textures/x.dds` → `textures/x.dds` (the VFS leads paths without leading /). */
 function normalize(path: string): string {
   return path.replace(/^\/+/, '').toLowerCase()
 }
@@ -247,7 +247,7 @@ export function applySession(host: LuaHost, info: SessionInfo, playerName = 'Com
       host.call('__uiSessionSetOption', key, value)
     }
   }
-  // Genau EIN Client (der Spieler). Die Engine zählt Befehlsquellen 1-basiert
+  // Exactly ONE client (the player). The engine counts command sources 1-based
   // (Cfile:1330618: `mLocalCmdSrc + 1`; 255 → 0 „can't issue commands").
   host.call('__uiSessionSetCommandSources', playerName, 1)
   host.call('__uiSessionSetFocusArmy', info.armies.find((a) => a.human)?.index ?? 1)
@@ -303,9 +303,9 @@ export function finishSessionLoading(host: LuaHost): void {
 }
 
 export function setupGameUi(host: LuaHost, log: (msg: string) => void): void {
-  // Der Lua-Code dazu steht in ui-boot.lua — hier wird er nur gerufen. Jedes
-  // Panel einzeln, damit ein fehlendes Engine-Teil nur SEIN Panel kostet und
-  // benannt wird, statt den ganzen Aufbau mitzureißen.
+  // The Lua code for this is in ui-boot.lua - it is just called here. Each
+  // Panel individually, so that a missing engine part only costs ITS panel and
+  // is named instead of dragging the entire structure along with it.
   host.eval('__uiCreateScreenTree()')
 
   const count = Number(host.eval('return __uiPanelCount()'))
@@ -313,12 +313,12 @@ export function setupGameUi(host: LuaHost, log: (msg: string) => void): void {
     const name = String(host.eval(`return __uiPanelName(${i})`))
     const err = host.eval(`return __uiBuildPanel(${i})`)
     if (err === undefined || err === null) {
-      log(`UI: ${name}.lua läuft`)
+      log(`UI: ZZPROTECT0ZZ.lua läuft`)
     } else {
-      // Ohne das Abschneiden des [string "…"]-Präfixes verschluckt die Ausgabe
-      // die eigentliche Lua-Meldung.
+      // Without truncating the [string "..."] prefix, the output is choked
+      // the actual Lua message.
       const msg = String(err).replace(/\[string "[\s\S]*?"\]/g, '').split('\n')[0]
-      log(`UI: ${name}.lua NOCH NICHT — ${msg?.slice(0, 200)}`)
+      log(`UI: ZZPROTECT0ZZ.lua NOCH NICHT — ${msg?.slice(0, 200)}`)
     }
   }
 
@@ -340,21 +340,21 @@ export function setupGameUi(host: LuaHost, log: (msg: string) => void): void {
  */
 export function startFrontEnd(host: LuaHost): void {
   host.eval('__uiEnsureProfile()')
-  // Die Optionen anwenden — genau das tut Moho::OPTIONS_Apply() beim Start
-  // (Cfile:1368338: optionslogic.Apply(true)). Ohne diesen Aufruf wirkt KEINE
-  // gespeicherte Option: der Wert steht in den Prefs, aber niemand trägt ihn in
-  // die Engine.
+  // Apply the options — that's exactly what Moho::OPTIONS_Apply() does at startup
+  // (Cfile:1368338: optionslogic.Apply(true)). Without this call, NONE works
+  // saved option: the value is in the prefs, but no one enters it
+  // the engine.
   host.eval('__uiApplyOptions()')
-  // Der Weg beginnt beim Splash — genau wie im Spiel. Dass er sofort ins
-  // Front-End durchreicht, entscheidet die Original-Lua, nicht wir.
+  // The path begins with the splash — just like in the game. That he immediately
+  // Frontend passes through, the original Lua decides, not us.
   host.eval('__uiStartFrontEnd()')
 }
 
 /**
- * Führt `SetupUI()` aus dem Original-`uimain.lua` aus — den Einstiegspunkt, den
- * die Engine selbst ruft (Cfile:1262333:
- * `SCR_Import('/lua/ui/uimain.lua')['SetupUI']()`). Danach stehen Skin, Layout
- * und Cursor — alles aus der Original-Lua, nichts aus TS.
+ * Runs `SetupUI()` from the original `uimain.lua` — the entry point
+ * the engine itself calls (Cfile:1262333:
+ * `SCR_Import('/lua/ui/uimain.lua')['SetupUI']()`). Then there are skin and layout
+ * and cursors — everything from the original Lua, nothing from TS.
  */
 export function setupUi(host: LuaHost): void {
   host.eval('__uiEnsureProfile()')

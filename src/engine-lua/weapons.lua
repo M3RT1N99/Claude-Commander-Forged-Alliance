@@ -1,30 +1,30 @@
 -- =====================================================================
--- WAFFEN — die zwei Engine-Tasks pro Waffe.
+-- WEAPONS — the two engine tasks per weapon.
 --
--- Die Engine haengt an JEDE Waffe zwei Tasks (CAiAttackerImpl::CreateWeapon,
--- Cfile:791794-791828) — aber nur, wenn `ManualFire == false`:
+-- The engine attaches two tasks to EVERY weapon (CAiAttackerImpl::CreateWeapon,
+-- Cfile:791794-791828) — but only if `ManualFire == false`:
 --
 --   CAcquireTargetTask::TaskTick  (Cfile:792838)  sucht Ziele
---       Rhythmus: alle ceil(TargetCheckInterval * 10) Ticks
---   CFireWeaponTask::Dispatch     (Cfile:983912)  taktet das Feuern
---       Rhythmus: JEDEN Tick
+--       Rhythm: every ceil(TargetCheckInterval * 10) ticks
+--   CFireWeaponTask::Dispatch (Cfile:983912) times the firing
+--       Rhythm: EVERY tick
 --
--- Was die Engine dabei NICHT tut: schiessen. `UnitWeapon::Fire` (Cfile:985500)
--- ruft `RunScript("OnFire")` — und mehr nicht. Den Schuss macht die Lua in ihrer
+-- What the engine does NOT do: shoot. `UnitWeapon::Fire` (Cfile:985500)
+-- calls `RunScript("OnFire")` — and nothing more. The Lua takes the shot in hers
 -- Salven-Zustandsmaschine (defaultweapons.lua RackSalvoFiringState:582 ->
--- CreateProjectileAtMuzzle). Wer hier ein Projektil erzeugt, hat die Salven,
--- Muendungen, Nachladezeiten und Effekte des Originals uebergangen.
+-- CreateProjectileAtMuzzle). Whoever creates a projectile here has the volleys,
+-- Muzzles, reload times and effects of the original have been ignored.
 --
 -- STANDARD-LUA 5.4.
 -- =====================================================================
 
---- Das Ziel einer Waffe setzen (Moho::UnitWeapon::SetTarget, Cfile:985364-985494).
+--- Set the target of a weapon (Moho::UnitWeapon::SetTarget, Cfile:985364-985494).
 ---
---- Die Callbacks haengen an der FLANKE, nicht am Aufruf:
----   kein Ziel -> Ziel   ruft OnGotTarget   (Cfile:985494)
----   Ziel -> kein Ziel   ruft OnLostTarget  (Cfile:985364)
---- Beides auf der WAFFE. Wer OnGotTarget bei jedem Tick feuert, startet die
---- Salven-FSM in jedem Tick neu — die Waffe kaeme nie zum Schuss.
+--- The callbacks depend on the EDGE, not on the call:
+--- no target -> target calls OnGotTarget (Cfile:985494)
+--- Target -> no target calls OnLostTarget (Cfile:985364)
+--- Both on the WEAPON. Whoever fires OnGotTarget with every tick starts it
+--- Salvo FSM new every tick - the weapon would never fire.
 function __weaponSetTarget(w, target, groundPos)
   local had = (w.__target ~= nil) or (w.__targetGround ~= nil)
   local has = (target ~= nil) or (groundPos ~= nil)
@@ -46,8 +46,8 @@ function __weaponSetTarget(w, target, groundPos)
   end
 end
 
---- DoInstaHit (Cfile:987034): eine Waffe ohne ProjectileId trifft SOFORT.
---- Die Engine loggt dabei woertlich („no projectile blueprint, doing instahit
+--- DoInstaHit (Cfile:987034): a weapon without ProjectileId hits IMMEDIATELY.
+--- The engine logs literally (“no projectile blueprint, doing instahit
 --- instead", Cfile:985669).
 function __weaponInstaHit(w)
   local bp = w.__bp or {}
@@ -58,7 +58,7 @@ function __weaponInstaHit(w)
   Damage(u, u.__pos, t, (bp.Damage or 0), bp.DamageType or 'Normal')
 end
 
---- Der Feuer-Sound der Sim (die Sim hat keine Ausgabe — die hat die UI-VM).
+--- The sim's fire sound (the sim has no output — the UI VM does).
 __simSounds = {}
 function __simSoundRequested(cue)
   __simSounds[table.getn(__simSounds) + 1] = cue
@@ -67,14 +67,14 @@ end
 -- ---------------------------------------------------------------------
 -- Zielerfassung — CAcquireTargetTask::TaskTick (Cfile:792838-793228)
 --
--- Der Suchradius ist ein MAXIMUM, kein Produkt:
+-- The search radius is a MAXIMUM, not a product:
 --   radius = max(MaxRadius, TrackingRadius * MaxRadius)   (Cfile:793125-793132)
--- TrackingRadius < 1 verkleinert also nichts.
+-- So TrackingRadius < 1 doesn't shrink anything.
 --
--- ABWEICHUNG, ausdruecklich benannt: die Engine sucht in den BLIPS der Unit
--- (mBlipsInRange — die Aufklaerungs-DB, Cfile:793167). Unsere Sim hat noch keine
--- Aufklaerung; wir nehmen alle lebenden Einheiten der Feind-Armee im Radius. Das
--- ist eine bewusste Abweichung, kein Nachbau (combat-projectiles.md §9).
+-- DEVIATION, expressly named: the engine searches in the BLIPS of the unit
+-- (mBlipsInRange — the reconnaissance DB, Cfile:793167). Our sim doesn't have one yet
+-- Enlightenment; we take all living units of the enemy army in the radius. The
+-- is a conscious deviation, not a replica (combat-projectiles.md §9).
 -- ---------------------------------------------------------------------
 local function canTarget(w, u, target)
   if target.__destroyQueued or target.__dead then return false end
@@ -85,7 +85,7 @@ end
 
 local function acquireTarget(w, u)
   local bp = w.__bp or {}
-  -- HoldFire (1) LOESCHT das Ziel (Cfile:793085-793097).
+  -- HoldFire (1) DELETES the target (Cfile:793085-793097).
   if (u.__fireState or 0) == 1 then
     __weaponSetTarget(w, nil, nil)
     return
@@ -97,9 +97,9 @@ local function acquireTarget(w, u)
   if maxRadius <= 0 then return end
   local radius = math.max(maxRadius, (bp.TrackingRadius or 1) * maxRadius)
 
-  -- Ein ATTACK-BEFEHL (CAttackTargetTask setzt das Ziel ueber den
-  -- AiAttacker auf die Waffen) hat Vorrang vor der freien Zielsuche —
-  -- sobald das Befehlsziel im Suchradius steht, feuert die Waffe darauf.
+  -- An ATTACK COMMAND (CAttackTargetTask sets the target via the
+  -- AiAttacker on the weapons) has priority over free target search -
+  -- As soon as the command target is within the search radius, the weapon fires at it.
   local forcedId = __attackOrders[u.__id]
   if forcedId then
     local ft = __units[forcedId]
@@ -113,8 +113,8 @@ local function acquireTarget(w, u)
     end
   end
 
-  -- Steht das alte Ziel noch und ist es in Reichweite, bleibt es (die Engine
-  -- prueft es ueber CanAttackTarget, Cfile:793034).
+  -- If the old target is still there and is within range, it (the engine
+  -- checks it via CanAttackTarget, Cfile:793034).
   local cur = w.__target
   if cur and canTarget(w, u, cur) then
     local p, q = u.__pos, cur.__pos
@@ -215,7 +215,7 @@ end
 --   UnitWeapon::Fire()                 -> RunScript("OnFire")
 --   mFireClock = (int)(10.0f / rof);   <- TRUNKIERT, in Ticks
 --
--- RateOfFire 1 heisst also: alle 10 Ticks = jede Sekunde.
+-- RateOfFire 1 means: every 10 ticks = every second.
 -- ---------------------------------------------------------------------
 local function fireTick(w, u)
   if (w.__fireClock or 0) > 0 then
@@ -250,7 +250,7 @@ local function fireTick(w, u)
     if minR > 0 and d2 < minR * minR then return end
   end
 
-  -- Und jetzt die Lua: OnFire startet die Salven-Zustandsmaschine.
+  -- And now the Lua: OnFire starts the Salvo state machine.
   if w.OnFire then
     local ok, err = pcall(function() w:OnFire() end)
     if not ok then WARN('OnFire: ' .. tostring(err)) end
@@ -264,23 +264,23 @@ end
 
 -- ---------------------------------------------------------------------
 -- CollisionBeam-Tick (Moho::CollisionBeamEntity::MotionTick @911386 +
--- CheckCollision): pro Tick zaehlt der Intervall-Zaehler; erreicht er
--- CollisionCheckInterval, castet die Engine den Strahl von der Muendung
--- entlang deren Blickrichtung und ruft bei WECHSEL des Getroffenen
--- OnImpact(type, entity) — den Schaden macht die Lua (CollisionBeam.lua:186).
--- Die maximale Strahllaenge ist die Waffenreichweite (bp.MaxRadius) —
--- ABGELEITET (CheckCollision ist nicht dekompilierbar); ein Beam schiesst
--- nie weiter, als seine Waffe reicht.
+-- CheckCollision): the interval counter counts per tick; he reaches
+-- CollisionCheckInterval, the engine casts the beam from the muzzle
+-- along their line of sight and calls out when the person hit CHANGES
+-- OnImpact(type, entity) — the damage is done by the Lua (CollisionBeam.lua:186).
+-- The maximum beam length is the weapon range (bp.MaxRadius) —
+-- DERIVED (CheckCollision is not decompileable); a beam shoots
+-- never further than his weapon can reach.
 -- ---------------------------------------------------------------------
 local function beamCast(beam)
   local w = beam.Weapon
   local u = w and w.unit
   if not u or u.__destroyQueued or u.__dead then return end
   local start, rot = __boneWorld(u, beam.__muzzleBone)
-  -- Die Strahlrichtung: im Original richtet das Turret-Aiming die Muendung
-  -- aufs Ziel; unsere Tuerme drehen (noch) nicht — der Cast zielt deshalb wie
-  -- der Projektilschuss auf die Koerpermitte des AKTUELLEN Waffenziels
-  -- (dieselbe Zielsemantik wie fireTick). Ohne Ziel: Muendungs-Blickrichtung.
+  -- The beam direction: in the original, the turret aiming directs the muzzle
+  -- on target; our towers don't turn (yet) - so the cast aims like that
+  -- the projectile shot at the center of the body of the CURRENT weapon target
+  -- (same target semantics as fireTick). Without a goal: muzzle line of sight.
   local dir
   local aimZiel = w.__target
   if aimZiel and not aimZiel.__destroyed and not aimZiel.__destroyQueued then
@@ -296,8 +296,8 @@ local function beamCast(beam)
   beam.__beamBones[1] = { start[1], start[2], start[3] }
   beam.__beamOrient = rot
 
-  -- Naechster Treffer entlang des Strahls: Ray-Kugel gegen alle Feind-Units
-  -- (dieselbe Koerperkugel wie die Projektil-Kollision, __unitCollision).
+  -- Next hit along the beam: Ray bullet against all enemy units
+  -- (the same body sphere as the projectile collision, __unitCollision).
   local bestT = maxLen
   local bestUnit = nil
   for _, ziel in pairs(__units) do
@@ -324,7 +324,7 @@ local function beamCast(beam)
     end
   end
 
-  -- Terrain: Marsch in 1-m-Schritten bis der Strahl unter den Boden taucht.
+  -- Terrain: March in 1m increments until the beam dips below the ground.
   local terrainT = nil
   if not bestUnit or bestT > 1 then
     local schritt = 1
@@ -351,7 +351,7 @@ local function beamCast(beam)
     start[3] + dir[3] * endT,
   }
 
-  -- OnImpact NUR bei Wechsel des Getroffenen (CollisionBeam.lua:182-185:
+  -- OnImpact ONLY when the person hit changes (CollisionBeam.lua:182-185:
   -- "only executes this function when the thing it is touching changes").
   local kennung = impactType .. ':' .. tostring(impactEntity and impactEntity.__id or '')
   if kennung ~= beam.__lastImpact then
@@ -370,8 +370,8 @@ function __beamTick()
     if not beam.__destroyed and not beam.__destroyQueued and u and not u.__destroyed then
       lebend[#lebend + 1] = beam
       if beam.__enabled then
-        -- Bone 0 folgt der Muendung JEDEN Tick; der Kollisions-Check laeuft
-        -- im Intervall (MotionTick @911410: Zaehler, dann CheckCollision).
+        -- Bone 0 follows the mouth EVERY tick; the collision check is running
+        -- in the interval (MotionTick @911410: Counter, then CheckCollision).
         beam.__intervalCount = beam.__intervalCount + 1
         if beam.__intervalCount >= beam.__interval then
           beam.__intervalCount = 0
@@ -384,16 +384,16 @@ function __beamTick()
   __collisionBeams = lebend
 end
 
---- Ein Waffen-Tick fuer alle Einheiten. Laeuft VOR der Thread-Stage, weil die
---- Salven-FSM der Lua Coroutinen benutzt: OnFire setzt den Zustand, und der
+--- One weapon tick for all units. Runs BEFORE the thread stage because that
+--- Salvo FSM uses the Lua coroutines: OnFire sets the state, and the
 --- Thread-Scheduler laeuft ihn im selben Beat weiter.
 function __weaponTick()
   -- Command queue head advance FIRST (TaskTick pops finished commands and
   -- starts the next, sim-core.md:211-252), then the attack orders.
   __ordersTick()
-  -- Attack-Orders ZUERST (CAttackTargetTask laeuft vor den Waffen-Tasks):
-  -- sie steuern die Bewegung in Reichweite, die Zielerfassung unten
-  -- bevorzugt dann das Befehlsziel.
+  -- Attack orders FIRST (CATtackTargetTask runs before the weapon tasks):
+  -- they control movement within range, target acquisition below
+  -- then prefers the command target.
   __attackTick()
   for _, u in pairs(__units) do
     if not u.__destroyQueued and not u.__dead and u.__weapons then
@@ -403,7 +403,7 @@ function __weaponTick()
           if not bp.ManualFire then
             -- Zielsuche im Rhythmus TargetCheckInterval * 10 Ticks, aufgerundet
             -- mit CEIL (Cfile:792904-792908: `round(x) + (x>round(x))` = ceil,
-            -- Minimum 1). Mit round-half-up prueften wir bei x.4x einen Tick zu
+            -- Minimum 1). With round-half-up we checked a tick at x.4x
             -- oft.
             local interval = math.max(1, math.ceil((bp.TargetCheckInterval or 3.0) * 10))
             if (__gameTick % interval) == 0 then
@@ -419,7 +419,7 @@ function __weaponTick()
       end
     end
   end
-  -- Die Dauerstrahlen ticken im selben Beat (CollisionBeamEntity::MotionTick
-  -- laeuft in derselben Sim-Stage wie die Waffen-Tasks).
+  -- The continuous beams tick with the same beat (CollisionBeamEntity::MotionTick
+  -- runs in the same sim stage as the weapon tasks).
   __beamTick()
 end

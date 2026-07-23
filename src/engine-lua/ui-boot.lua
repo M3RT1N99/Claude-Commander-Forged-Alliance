@@ -1,23 +1,23 @@
 -- =====================================================================
--- Was die ENGINE beim Hochfahren der UI tut — in Lua, nicht in TS.
+-- What the ENGINE does when booting up the UI — in Lua, not in TS.
 --
--- Diese Datei ist das Gegenstueck zu dem, was in der C++-Engine als fester
--- Ablauf steht: Profil sicherstellen, Optionen anwenden, Front-End starten,
--- Spiel-UI aufspannen. Bisher stand dieser Lua-Code in TS-Template-Literalen
--- (`host.eval(\`…\`)`) — und damit an einer Stelle, an der ihn kein Werkzeug als
--- Lua sieht: keine Syntaxhervorhebung, keine Pruefung, und ein Backtick in einem
--- Kommentar beendet still den TS-String. CLAUDE.md verbietet das ausdruecklich.
--- TS ist nur noch Loader und Bruecke.
+-- This file is the counterpart to what is known in the C++ engine as fixed
+-- The process is: ensure profile, apply options, start front-end,
+-- Open game UI. Until now, this Lua code was in TS template literals
+-- (`host.eval(\`…\`)`) — and therefore in a place where no tool can use it
+-- Lua sees: no syntax highlighting, no checking, and a backtick all in one
+-- Comment silently ends the TS string. CLAUDE.md expressly prohibits this.
+-- TS is just loader and bridge.
 --
--- STANDARD-LUA 5.4 (geht roh in host.eval, nicht durch den FA-Transpiler).
+-- STANDARD LUA 5.4 (goes raw in host.eval, not through the FA transpiler).
 -- =====================================================================
 
---- Ein Benutzerprofil muss existieren.
+--- A user profile must exist.
 ---
---- prefs.lua:96 greift ungeprueft darauf zu, und main.lua:57-62 baut ohne
---- `profile.current` den Profil-Dialog statt des Menues. Angelegt wird es ueber
---- den Original-Weg: Prefs.CreateProfile (prefs.lua:31) — dieselbe Funktion, die
---- das Spiel benutzt, wenn jemand zum ersten Mal startet; sie setzt
+--- prefs.lua:96 accesses it without checking, and main.lua:57-62 builds without it
+--- `profile.current` the profile dialog instead of the menu. It is created via
+--- the original way: Prefs.CreateProfile (prefs.lua:31) — the same function that
+--- uses the game when someone starts it for the first time; she sets
 --- `profile.current` selbst (prefs.lua:57).
 function __uiEnsureProfile()
   local Prefs = import('/lua/user/prefs.lua')
@@ -26,80 +26,80 @@ function __uiEnsureProfile()
   end
 end
 
---- Die Optionen anwenden — der Aufruf, den die Engine selbst macht.
+--- Apply the options — the call that the engine itself makes.
 ---
 --- Moho::OPTIONS_Apply() (Cfile:1368338-1368360) ruft
 --- `SCR_Import('/lua/options/optionslogic.lua')['Apply']` mit `Call_True_Obj`,
---- also Apply(true). Damit laufen ALLE `set`-Funktionen der 37 Optionen mit
---- startup=true durch (deshalb rufen primary_adapter/vsync/antialiasing dabei
---- KEIN ConExecute — sie sind beim Start schon gesetzt).
+--- so Apply(true). This means that ALL `set` functions of the 37 options work
+--- startup=true (that's why primary_adapter/vsync/antialiasing calls
+--- NO ConExecute — they are already set at startup).
 ---
---- Ohne diesen Aufruf wirkt beim Start keine einzige Option: der gespeicherte
---- Wert steht zwar in den Prefs, aber niemand traegt ihn in die Engine.
+--- Without this call, not a single option works at startup: the saved one
+--- Value is in the prefs, but nobody puts it into the engine.
 function __uiApplyOptions()
   import('/lua/options/optionslogic.lua').Apply(true)
 end
 
---- Das Front-End starten (Splash -> main.lua), wie main() es tut.
+--- Start the front-end (Splash -> main.lua) like main() does.
 ---
---- Cfile:1373865: ohne Kommandozeilen-Argumente ruft die Engine
+--- Cfile:1373865: the engine calls without command line arguments
 --- Moho::UI_StartSplashScreens().
 ---
---- `movie.nologo` ist die Original-Preference dafuer, die Logo-Filme zu
---- ueberspringen (splash.lua:22-25: dann sofort EngineStartFrontEndUI()). Wir
---- setzen sie, weil diese Engine keinen SFD-Decoder hat — das ist dieselbe Lage
---- wie `/nomovie` auf der Kommandozeile (Cfile:1143020-1143035).
+--- `movie.nologo` is the original preference for protecting the logo films
+--- skip (splash.lua:22-25: then immediately EngineStartFrontEndUI()). We
+--- put them because this engine doesn't have an SFD decoder — that's the same situation
+--- like `/nomovie` on the command line (Cfile:1143020-1143035).
 ---
---- Sie ist NOETIG, nicht bequem: laedt ein Film nicht, ruft movie.lua:52
---- `OnStopped()`, und splash.lua behandelt nur `OnFinished` (splash.lua:75) —
---- der Splash bliebe also stehen, bis jemand eine Taste drueckt. Genau so
---- verhaelt sich auch das Original mit /nomovie.
+--- It is NECESSARY, not convenient: if a film doesn't load, movie.lua:52 calls
+--- `OnStopped()`, and splash.lua only handles `OnFinished` (splash.lua:75) —
+--- So the splash would stay until someone presses a key. Just as
+--- the original also behaves with /nomovie.
 ---
---- Der HINTERGRUNDFILM des Menues braucht dagegen KEINEN Sonderfall mehr:
---- `mainmenu_bgmovie` bleibt die echte Option (Default true), main.lua:151 baut
---- sein Movie, InternalSet liefert ehrlich false, und das Menue steht ohne Film.
+--- The BACKGROUND FILM of the menu no longer needs a special case:
+--- `mainmenu_bgmovie` remains the real option (default true), main.lua:151 builds
+--- its Movie, InternalSet honestly returns false, and the menu is without a movie.
 function __uiStartFrontEnd()
   SetPreference('movie.nologo', true)
   EngineStartSplashScreens()
 end
 
---- SetupUI() aus dem Original-uimain.lua — der Einstiegspunkt, den die Engine
+--- SetupUI() from the Original-uimain.lua — the entry point that the engine
 --- selbst ruft (Cfile:1262333: SCR_Import('/lua/ui/uimain.lua')['SetupUI']()).
 function __uiSetupUi()
   import('/lua/ui/uimain.lua').SetupUI()
 end
 
 -- =====================================================================
--- Der Weltstart — die Provider-Kette der Engine
+-- The world launch — the engine's provider chain
 -- =====================================================================
 
---- func_StartGameUI (Cfile:1262514): setzt den UI-Zustand auf UIS_game und
---- ruft uimain.StartGameUI() — dort entsteht der WldUIProvider
---- (gamemain.lua:225, "SHOULD NOT BE CALLED FROM LUA CODE"). Die Engine ruft
---- es ZWEIMAL: beim Weltstart (func_DoPreload, Cfile:1320768) und nach dem
---- Laden erneut mit frischen Root-Frames (DoInitializing, Cfile:1321035) —
---- der zweite Aufruf raeumt so den Lade-Dialog ab. Wer die Kette in EINER
---- VM zweimal faehrt, muss dazwischen __mauiResetFrames() rufen (das ist
---- das SetNewLuaState der Engine).
+--- func_StartGameUI (Cfile:1262514): sets the UI state to UIS_game and
+--- calls uimain.StartGameUI() — the WldUIProvider is created there
+--- (gamemain.lua:225, "SHOULD NOT BE CALLED FROM LUA CODE"). The engine is calling
+--- it TWICE: at world start (func_DoPreload, Cfile:1320768) and after
+--- Reload with fresh root frames (DoInitializing, Cfile:1321035) —
+--- the second call clears the loading dialog. Whoever the chain in ONE
+--- VM runs twice, has to call __mauiResetFrames() in between (that is
+--- the SetNewLuaState of the engine).
 function __uiStartGameUI()
-  -- func_StartGameUI (Cfile:1262514) setzt sUIState = UIS_game (3) VOR dem
-  -- Lua-Aufruf — der Enter-Fallback des Key-Handlers (Chat) prueft ihn.
+  -- func_StartGameUI (Cfile:1262514) sets sUIState = UIS_game (3) BEFORE the
+  -- Lua call — the enter fallback of the key handler (chat) checks it.
   __uiState = 3
   import('/lua/ui/uimain.lua').StartGameUI()
 end
 
---- Die Lade-Dialog-Aufrufe der Engine, mit demselben Nil-Check wie im
+--- The engine's loading dialog calls, with the same Nil check as in
 --- Original (`if ( sWldUIProvider )`, Cfile:1320769/1321066):
 ---   StartLoadingDialog  beim Weltstart (Cfile:1320770)
----   UpdateLoadingDialog(elapsed) pro Bild waehrend des Ladens (Cfile:1295322)
----   StopLoadingDialog   nach dem ersten Beat mit Sync-Daten (Cfile:1321067)
---- StopLoadingDialog zeigt das Fraktionsbild, blendet es nach 1,5 s aus und
---- forkt InitialAnimations (gamemain.lua:253-263) — ERST DARIN werden Score,
---- Economy, Avatare und die Reiter eingeblendet. Ohne diese Kette stehen die
---- Panels fuer immer unsichtbar da.
+--- UpdateLoadingDialog(elapsed) per image while loading (Cfile:1295322)
+--- StopLoadingDialog after the first beat with sync data (Cfile:1321067)
+--- StopLoadingDialog shows the faction image, hides it after 1.5 s and
+--- forks InitialAnimations (gamemain.lua:253-263) — FIRST THAT will score,
+--- Economy, avatars and tabs displayed. Without this chain they stand
+--- Panels forever invisible.
 function __uiProviderStartLoading()
-  -- WorldIsLoading() ist wahr zwischen DoPreload und DoInitializing —
-  -- uimain.EscapeHandler (uimain.lua:120) unterdrueckt ESC waehrend des Ladens.
+  -- WorldIsLoading() is true between DoPreload and DoInitializing —
+  -- uimain.EscapeHandler (uimain.lua:120) suppresses ESC during loading.
   __uiWorldLoading = true
   if __uiWldProvider then __uiWldProvider:StartLoadingDialog() end
 end
@@ -114,17 +114,17 @@ function __uiProviderStopLoading()
 end
 
 -- =====================================================================
--- Die Spiel-UI (gamemain.lua:145-154)
+-- The Game UI (gamemain.lua:145-154)
 -- =====================================================================
 
---- Der Bildschirm-Baum, exakt wie gamemain.lua ihn aufspannt: EINE Screen-Group,
---- darin die vier Cluster von borders.lua. Alle Panels haengen an diesen Gruppen
---- — wer sie stattdessen an GetFrame(0) haengt, bekommt jedes Panel an die
---- falsche Stelle (die Layout-Dateien rechnen gegen den Cluster, nicht gegen den
---- Bildschirm).
+--- The screen tree, exactly as gamemain.lua creates it: ONE screen group,
+--- inside the four clusters of borders.lua. All panels depend on these groups
+--- — if you attach them to GetFrame(0) instead, you get every panel to them
+--- wrong location (the layout files calculate against the cluster, not against the
+--- Screen).
 ---
---- Die Handles leben in der Tabelle `__ui`, nicht in Globals: `x = nil` legt
---- unter dem strengen _G (config.lua:51-56) keinen Schluessel an, und der
+--- The handles live in the table `__ui`, not in globals: `x = nil`
+--- no key under the strict _G (config.lua:51-56), and the
 --- spaetere Lesezugriff wirft "access to nonexistent global variable".
 function __uiCreateScreenTree()
   __ui = {}
@@ -133,34 +133,34 @@ function __uiCreateScreenTree()
   __ui.controlCluster, __ui.statusCluster, __ui.mapGroup, __ui.windowGroup =
     import('/lua/ui/game/borders.lua').SetupBorderControl(__ui.gameParent)
 
-  -- Der ONE-SHOT aus gamemain.lua:136-140, woertlich: beim ERSTEN Bild nach dem
-  -- Aufbau laeuft gamemain.OnFirstUpdate() — dort entsteht das Punkte-Panel
-  -- (score.lua:CreateScoreUI), die ACU bekommt den Spielernamen, die Musik und
-  -- der Start-Zoom laufen an. Ohne den Haken fehlte das alles kommentarlos.
+  -- The ONE-SHOT from gamemain.lua:136-140, literally: in the FIRST picture after that
+  -- Setup runs gamemain.OnFirstUpdate() - this is where the points panel is created
+  -- (score.lua:CreateScoreUI), the ACU gets the player name, music and
+  -- the start zoom starts. Without the hook, all of this would be missing without comment.
   __ui.controlCluster:SetNeedsFrameUpdate(true)
   __ui.controlCluster.OnFrame = function(self, deltaTime)
     __ui.controlCluster:SetNeedsFrameUpdate(false)
     import('/lua/ui/game/gamemain.lua').OnFirstUpdate()
   end
 
-  -- Dieses Gerüst ist unser provider.CreateGameInterface (gamemain.lua:316-328)
-  -- — und der stellt am Ende zwei Zustaende her, ohne die die UI klemmt:
-  -- supressExitDialog = false (Zeile 326; StartLoadingDialog hatte es auf true
-  -- gesetzt — solange es true bleibt, ist ESC im Spiel TOT, uimain.lua:120)
-  -- und FlushEvents (Zeile 327).
+  -- This framework is our provider.CreateGameInterface (gamemain.lua:316-328)
+  -- — and in the end it creates two states without which the UI gets stuck:
+  -- supressExitDialog = false (line 326; StartLoadingDialog had it set to true
+  -- set — as long as it remains true, ESC is DEAD in the game, uimain.lua:120)
+  -- and FlushEvents (line 327).
   import('/lua/ui/game/gamemain.lua').supressExitDialog = false
   FlushEvents()
 end
 
---- Die Panels der Spiel-UI, in der Reihenfolge aus gamemain.lua:145-154.
---- Jedes Panel wird EINZELN gebaut, damit ein fehlendes Engine-Teil nur SEIN
---- Panel kostet und benannt wird — statt den ganzen Aufbau mitzureissen.
+--- The game UI panels, in the order from gamemain.lua:145-154.
+--- Each panel is built INDIVIDUALLY so that any missing engine part just BE
+--- Panel costs and is named - instead of taking the entire structure along.
 __uiPanels = {
   {
-    -- gamemain.lua:142 — die HAUPTANSICHT. Sie ist ein Control (CUIWorldView),
-    -- kein Sonderfall: worldview.lua:22 haengt sie in die mapGroup. Nur deshalb
-    -- laesst sich im Original auch die MINIMAP verschieben — sie ist dieselbe
-    -- Klasse (minimap.lua:115).
+    -- gamemain.lua:142 — the MAIN VIEW. It is a control (CUIWorldView),
+    -- no special case: worldview.lua:22 puts it in the mapGroup. Just because of that
+    -- The MINIMAP can also be moved in the original - it is the same
+    -- Class (minimap.lua:115).
     name = 'worldview',
     build = function()
       import('/lua/ui/game/worldview.lua').CreateMainWorldView(__ui.gameParent, __ui.mapGroup)
@@ -200,65 +200,65 @@ __uiPanels = {
     end,
   },
   {
-    -- gamemain.lua:154 — die Detailansicht (Rollover-Tooltip). construction.lua
-    -- ruft sie ungeprueft (UnitViewDetail.Hide()), also MUSS sie stehen.
+    -- gamemain.lua:154 — the detailed view (rollover tooltip). construction.lua
+    -- it calls unchecked (UnitViewDetail.Hide()), so it MUST be there.
     name = 'unitviewDetail',
     build = function()
       import('/lua/ui/game/unitviewDetail.lua').SetupUnitViewLayout(__ui.mapGroup, __ui.mapGroup)
     end,
   },
-  -- Ab hier der REST von gamemain.lua:146-165, in der Original-Reihenfolge.
+  -- From here on out the REST of gamemain.lua:146-165, in the original order.
   {
-    -- gamemain.lua:146 — die Reiter oben (Diplomatie, Ziele, Punkte …).
+    -- gamemain.lua:146 — the tabs at the top (diplomacy, goals, points…).
     name = 'tabs',
     build = function()
       import('/lua/ui/game/tabs.lua').Create(__ui.mapGroup)
     end,
   },
   {
-    -- gamemain.lua:155 — die Spieler-Avatare (oben rechts).
+    -- gamemain.lua:155 — the player avatars (top right).
     name = 'avatars',
     build = function()
       import('/lua/ui/game/avatars.lua').CreateAvatarUI(__ui.mapGroup)
     end,
   },
   {
-    -- gamemain.lua:156 — die Kontrollgruppen-Anzeige (Strg+1 …).
+    -- gamemain.lua:156 — the control group display (Ctrl+1…).
     name = 'controlgroups',
     build = function()
       import('/lua/ui/game/controlgroups.lua').CreateUI(__ui.mapGroup)
     end,
   },
   {
-    -- gamemain.lua:157 — das Funkprotokoll (Kampagnen-Meldungen).
+    -- gamemain.lua:157 — the radio protocol (campaign messages).
     name = 'transmissionlog',
     build = function()
       import('/lua/ui/game/transmissionlog.lua').CreateTransmissionLog()
     end,
   },
   {
-    -- gamemain.lua:158 — die Hilfetexte.
+    -- gamemain.lua:158 — the help texts.
     name = 'helptext',
     build = function()
       import('/lua/ui/game/helptext.lua').CreateHelpText(__ui.mapGroup)
     end,
   },
   {
-    -- gamemain.lua:159 — die Spielzeit-Uhr.
+    -- gamemain.lua:159 — the game time clock.
     name = 'timer',
     build = function()
       import('/lua/ui/game/timer.lua').CreateTimerDialog(__ui.mapGroup)
     end,
   },
   {
-    -- gamemain.lua:160 — das Konsolen-Echo.
+    -- gamemain.lua:160 — the console echo.
     name = 'consoleecho',
     build = function()
       import('/lua/ui/game/consoleecho.lua').CreateConsoleEcho(__ui.mapGroup)
     end,
   },
   {
-    -- gamemain.lua:161-162 — Bau-Vorlagen und Verhoehnungen.
+    -- gamemain.lua:161-162 — construction templates and mockeries.
     name = 'templates+taunt',
     build = function()
       import('/lua/ui/game/build_templates.lua').Init()
@@ -266,20 +266,20 @@ __uiPanels = {
     end,
   },
   {
-    -- gamemain.lua:164 — das Chat-Fenster. Auch ein `Window` (verschiebbar).
+    -- gamemain.lua:164 — the chat window. Also a `Window` (slidable).
     name = 'chat',
     build = function()
       import('/lua/ui/game/chat.lua').SetupChatLayout(__ui.windowGroup)
     end,
   },
   {
-    -- gamemain.lua:165 — DIE MINIMAP. Sie haengt in einem `Window`
-    -- (lua/maui/window.lua): verschiebbar, in der Groesse aenderbar, mit
-    -- Minimalgroesse 150x150 (minimap.lua:114). Darin sitzt eine WorldView mit
+    -- gamemain.lua:165 — THE MINIMAP. It hangs in a `Window`
+    -- (lua/maui/window.lua): movable, resizable, with
+    -- Minimum size 150x150 (minimap.lua:114). There is a WorldView in it
     -- isMiniMap = true (minimap.lua:115) — kartografisch, Draufsicht.
     --
-    -- GENAU DAS ist der Grund, warum man sie im Spiel bewegen kann. Unser
-    -- TS-Nachbau war ein festgenageltes <canvas>; er ist geloescht.
+    -- THAT is EXACTLY why you can move them in the game. Our
+    -- TS replica was a nailed down <canvas>; it is deleted.
     name = 'minimap',
     build = function()
       import('/lua/ui/game/minimap.lua').CreateMinimap(__ui.windowGroup)
@@ -287,10 +287,10 @@ __uiPanels = {
   },
 }
 
---- Baut Panel Nr. `i`. Liefert nil bei Erfolg, sonst die Fehlermeldung.
+--- Builds panel no. `i`. Returns nil if successful, otherwise the error message.
 function __uiBuildPanel(i)
   local panel = __uiPanels[i]
-  if not panel then return 'kein Panel ' .. tostring(i) end
+  if not panel then return 'no panel ' .. tostring(i) end
   local ok, err = pcall(panel.build)
   if ok then return nil end
   return tostring(err)
@@ -305,8 +305,8 @@ function __uiPanelCount()
   return #__uiPanels
 end
 
---- Ab jetzt gibt es Empfaenger fuer Selektions-Ereignisse (im Original
---- registriert die Engine den SelectionListener erst beim Session-Start,
+--- From now on there are receivers for selection events (in the original
+--- the engine only registers the SelectionListener when the session starts,
 --- Cfile:1294170).
 function __uiSessionStarted()
   __uiSessionActive = true

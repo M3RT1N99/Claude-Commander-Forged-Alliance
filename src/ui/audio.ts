@@ -25,8 +25,8 @@ import type { GameVfs } from '../vfs/vfs'
  *
  * KATEGORIE-LAUTSTÄRKEN (SupCom.xgs): every cue's sound carries a 0-based
  * category index; the xgs category table gives name, parent and the
- * authored volume (dB byte). Per category one GainNode with
- * gain = authoredLinear x userVolume, chained along the parent to
+ * authorized volume (dB byte). Per category one GainNode with
+ * gain = authorizedLinear x userVolume, chained along the parent to
  * 'Global' -> destination (FAudio semantics; the engine caches the user
  * float and never reads it back — AudioEngine::SetVolume/GetVolume,
  * Cfile:603714/605038).
@@ -40,14 +40,14 @@ export class GameAudio {
   private readonly userVolumes = new Map<string, number>()
   /** soundBankName (klein) → geparste .xsb. */
   private readonly soundBanks = new Map<string, XsbBank>()
-  /** innerer WaveBank-Name (klein) → VFS-Pfad der .xwb. */
+  /** inner WaveBank name (small) → VFS path of the .xwb. */
   private readonly waveBankFiles = new Map<string, string>()
-  /** innerer WaveBank-Name (klein) → lazy geladene Bank (Bytes + Metadaten). */
+  /** inner WaveBank name (small) → lazy loaded bank (bytes + metadata). */
   private readonly waveBanks = new Map<string, Promise<{ bank: XwbBank; bytes: Uint8Array } | null>>()
-  /** Handle-ID (aus der UI-VM) → laufende Quelle. */
+  /** Handle ID (from UI VM) → running source. */
   private readonly playing = new Map<number, AudioBufferSourceNode>()
   private readonly missWarned = new Set<string>()
-  /** Abgespielte Cues — der Beweiszähler für den Selbsttest. */
+  /** Cues played — the evidence counter for the self-test. */
   playedCount = 0
 
   private constructor(
@@ -55,8 +55,8 @@ export class GameAudio {
     private readonly log: (msg: string) => void,
   ) {
     this.ctx = new AudioContext()
-    // Autoplay-Policy: der Context startet suspended, bis eine Nutzergeste
-    // kommt — der erste Klick/Tastendruck weckt ihn.
+    // Autoplay policy: the context starts suspended until a user gesture
+    // comes — the first click/button press wakes him up.
     const wecken = (): void => {
       void this.ctx.resume()
       window.removeEventListener('pointerdown', wecken, true)
@@ -70,7 +70,7 @@ export class GameAudio {
     if (typeof AudioContext === 'undefined') return null
     const audio = new GameAudio(vfs, log)
 
-    // Alle Sound-Banks (klein): Bank-Name → Cues.
+    // All sound banks (small): Bank name → Cues.
     const xsbPaths = vfs.find((p) => p.startsWith('sounds/') && p.endsWith('.xsb'))
     const xsbBytes = await vfs.readMany(xsbPaths)
     for (const [path, bytes] of xsbBytes) {
@@ -82,7 +82,7 @@ export class GameAudio {
       }
     }
 
-    // Wave-Bank-Namen per Header-Scan (innerer Name @0x3C..0x7C, WBND-Layout).
+    // Wave bank names via header scan (inner name @0x3C..0x7C, WBND layout).
     const xwbPaths = vfs.find((p) => p.startsWith('sounds/') && p.endsWith('.xwb'))
     for (const path of xwbPaths) {
       try {
@@ -97,7 +97,7 @@ export class GameAudio {
       }
     }
 
-    // The global settings: category tree + authored volumes (SupCom.xgs).
+    // The global settings: category tree + authorized volumes (SupCom.xgs).
     // Missing file is loud, not silent — without it every cue runs untinted
     // through the destination and the volume options do nothing.
     try {
@@ -132,16 +132,16 @@ export class GameAudio {
 
   /**
    * SetVolume(category, float) — the raw user float, multiplied onto the
-   * authored gain (FAudio: current = authored x set). Cached; GetVolume
+   * authorized gain (FAudio: current = authorized x set). cached; GetVolume
    * never reads back from the engine (Moho AudioEngine, Cfile:605038,
-   * insert-default 1.0).
+   * insert default 1.0).
    */
   setVolume(category: string, volume: number): void {
     this.userVolumes.set(category, volume)
     if (!this.xgs) return
     const i = this.xgs.categories.findIndex((c) => c.name === category)
     if (i < 0) {
-      this.warnOnce(`SetVolume: Kategorie '${category}' unbekannt`)
+      this.warnOnce(`SetVolume: Category '${category}' unknown`)
       return
     }
     this.categoryNodes[i]!.gain.value = this.xgs.categories[i]!.volumeLinear * volume
@@ -175,16 +175,16 @@ export class GameAudio {
     this.log(`Audio: ${msg}`)
   }
 
-  /** __uiAudioSink: eine Cue abspielen (StartSound, ui-globals.lua). */
+  /** __uiAudioSink: play a cue (StartSound, ui-globals.lua). */
   play(bankName: string, cueName: string, handleId: number): void {
     const sb = this.soundBanks.get(String(bankName ?? '').toLowerCase())
     if (!sb) {
-      this.warnOnce(`Sound-Bank '${bankName}' unbekannt`)
+      this.warnOnce(`Sound-Bank '${bankName}' unknown`)
       return
     }
     const cue = sb.cues.get(String(cueName ?? ''))
     if (!cue) {
-      this.warnOnce(`Cue '${bankName}:${cueName}' nicht in der Bank`)
+      this.warnOnce(`Cue '${bankName}:${cueName}' not in the bank`)
       return
     }
     const wbName = sb.waveBanks[cue.waveBankIndex]
@@ -193,10 +193,10 @@ export class GameAudio {
       if (!wb) return
       const entry = wb.bank.entries[cue.waveIndex]
       if (!entry) {
-        this.warnOnce(`Wave ${cue.waveIndex} fehlt in '${wbName}'`)
+        this.warnOnce(`Wave ${cue.waveIndex} is missing in '${wbName}'`)
         return
       }
-      // PCM16 → AudioBuffer, ohne Decoder (alle FA-Waves sind PCM16).
+      // PCM16 → AudioBuffer, without decoder (all FA waves are PCM16).
       const frames = entry.length / entry.blockAlign
       const buffer = this.ctx.createBuffer(entry.channels, frames, entry.sampleRate)
       const pcm = new Int16Array(
@@ -224,14 +224,14 @@ export class GameAudio {
     })
   }
 
-  /** __uiAudioStopSink: eine laufende Quelle über ihre Handle-ID beenden. */
+  /** __uiAudioStopSink: stop a running source via its handle ID. */
   stop(handleId: number): void {
     const source = this.playing.get(handleId)
     if (source) {
       try {
         source.stop()
       } catch {
-        // schon beendet
+        // already finished
       }
       this.playing.delete(handleId)
     }
@@ -242,7 +242,7 @@ export class GameAudio {
       try {
         s.stop()
       } catch {
-        // schon beendet
+        // already finished
       }
     }
     this.playing.clear()

@@ -43,12 +43,12 @@ export async function bonesFromBlueprint(
   exists: (path: string) => boolean,
 ): Promise<SimBone[]> {
   const bp = parseBlueprint(new TextDecoder('utf-8').decode(bpBytes))
-  // `exists` ist nicht optional: resolveUnitPaths probiert mehrere Kandidaten
-  // durch (RES_CompletePath). Wer immer `true` liefert, bekommt den ersten —
-  // und wenn den niemand lesen kann, hat die Unit still KEIN Skelett. Genau so
-  // ein stiller Fallback ist es, der später als „die Waffe geht halt nicht" endet.
+  // `exists` is not optional: resolveUnitPaths tries multiple candidates
+  // by (RES_CompletePath). Whoever delivers `true` gets first place -
+  // and if no one can read it, the unit still has NO skeleton. Just as
+  // It's a silent fallback that later ends up as "the gun just doesn't work."
   const paths = resolveUnitPaths(id, bp, exists)
-  if (!paths) return [] // Unit ohne Modell (Effekt-Einheiten) — hat wirklich keine Knochen
+  if (!paths) return [] // Unit without a model (effect units) — really has no bones
   const bytes = await read(paths.mesh)
   if (!bytes) throw new Error(`Modell nicht lesbar: ${paths.mesh} (für ${id})`)
   return toSimBones(parseScm(bytes))
@@ -80,9 +80,9 @@ export const GAME_DIR =
 
 export class GameFiles {
   private constructor(
-    /** Alle .lua und .bp — das, was der Lua-Host als VFS bekommt. */
+    /** All .lua and .bp — what the Lua host gets as VFS. */
     readonly luaFiles: Map<string, Uint8Array>,
-    /** Jeder Pfad in jedem Archiv (auch Texturen, Modelle). */
+    /** Any path in any archive (including textures, models). */
     readonly paths: Set<string>,
     private readonly zips: ZipArchive[],
     private readonly handles: NodeFile[],
@@ -103,7 +103,7 @@ export class GameFiles {
       zips.push(zip)
       for (const [key, entry] of zip.entries) {
         paths.add(key.toLowerCase())
-        // Erstes Archiv gewinnt — wie im Browser (src/vfs/vfs.ts).
+        // First archive wins — like in the browser (src/vfs/vfs.ts).
         if ((key.endsWith('.lua') || key.endsWith('.bp')) && !luaFiles.has(key)) {
           luaFiles.set(key, await zip.read(entry))
         }
@@ -153,9 +153,9 @@ export class GameFiles {
    * Schuss da sein — mitten im Tick kann die Engine nichts nachladen.
    */
   loadProjectiles(host: LuaHost): number {
-    // Auch `/effects/entities/**` — dort liegen die TRÜMMER-Projektile
-    // (defaultexplosions.lua:285 wirft beim Tod DebrisMisc0x) und die
-    // Nuke-Effekt-Controller (uel0001_unit.bp:1188). Es sind ProjectileBlueprints.
+    // Also `/effects/entities/**` — that's where the RUMB projectiles are
+    // (defaultexplosions.lua:285 throws DebrisMisc0x on death) and the
+    // Nuke Effect Controller (uel0001_unit.bp:1188). They are ProjectileBlueprints.
     const paths = [...this.paths].filter(
       (p) => (p.startsWith('projectiles/') || p.startsWith('effects/')) && p.endsWith('.bp'),
     )

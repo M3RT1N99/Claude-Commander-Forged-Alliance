@@ -39,9 +39,9 @@ for (const a of ['mohodata.scd', 'lua.scd']) {
 }
 const uf = await NF.open(`${GAME}/gamedata/units.scd`); openFiles.push(uf)
 const uz = await ZipArchive.open(uf)
-// Die Sim braucht auch das SKELETT der Unit: Waffentuerme und Muendungen
-// haengen an Knochennamen (weapon.lua:67). Es kommt aus derselben SCM-Datei,
-// die auch der Renderer liest.
+// The sim also needs the SKELETON of the unit: turrets and muzzles
+// depend on bone names (weapon.lua:67). It comes from the same SCM file,
+// which the renderer also reads.
 const assetExists = (p: string): boolean => uz.get(p.toLowerCase()) != null
 const readAsset = async (p: string): Promise<Uint8Array | null> => {
   const e = uz.get(p.toLowerCase())
@@ -59,15 +59,15 @@ const near = (a: number, b: number, eps = 0.02): boolean => Math.abs(a - b) < ep
 
 const host = await LuaHost.create(files, () => {})
 const { economy: eco } = installEngine(host)
-// Flaches Testgelaende — EXPLIZIT, weil die Engine ohne Karte knallt (kein stiller 0-Wert).
+// Flat test area - EXPLICIT because the engine crashes without a map (no silent 0 value).
 setTerrainSource(host, FLAT_TEST_TERRAIN)
 for (const id of ['uel0001', 'ueb1101']) {
   loadUnitBlueprint(host, id, bps.get(id)!)
-  // Ohne Skelett kann keine Waffe aufgebaut werden (weapon.lua:67).
+  // No weapon can be constructed without a skeleton (weapon.lua:67).
   setUnitBones(host, id, await bonesFromBlueprint(id, bps.get(id)!, readAsset, assetExists))
 }
 
-// Beat in Original-Reihenfolge: Bau-Bedarf → Ökonomie → Bau anwenden → Threads → Physik
+// Beat in original order: Build Needs → Economics → Apply Build → Threads → Physics
 const beat = (): void => {
   buildCollect(host)
   eco.tick()
@@ -77,54 +77,54 @@ const beat = (): void => {
 }
 const num = (e: string): number => Number(host.eval(`return ${e}`))
 
-console.log('\n== ACU baut Energiegenerator (BuildRate 10, BuildTime 125) ==')
+console.log('\n== ACU builds energy generator (BuildRate 10, BuildTime 125) ==')
 const acu = spawnLuaUnit(host, 'uel0001', { x: 10, y: 0, z: 10 }, 1)
 const site = spawnBuildSite(host, 'ueb1101', { x: 14, y: 0, z: 10 }, 1) // 4 m entfernt (< MaxBuildDistance 10)
-check(acu > 0 && site > 0, `ACU #${acu}, Baustelle #${site}`)
-check(num(`__units[${site}].__fraction`) === 0, 'Baustelle startet unfertig (FractionComplete 0)')
+check(acu > 0 && site > 0, `ACU #${acu}, construction site #${site}`)
+check(num(`__units[${site}].__fraction`) === 0, 'Construction site starts unfinished (FractionComplete 0)')
 check(host.eval(`return __units[${site}]:IsBeingBuilt()`) === true, 'IsBeingBuilt() = true')
 
 const army = eco.army(1)
-army.mass = 100000 // reichlich Ressourcen für den Voll-Bau
+army.mass = 100000 // plenty of resources for full construction
 army.energy = 100000
-eco.tick() // Einkommen wird erst im Tick berechnet
-check(army.incomeEnergy === 20, `Einkommen vor Bau = ${army.incomeEnergy}/s (nur ACU; Baustelle traegt nichts bei)`)
+eco.tick() // Income is only calculated in the tick
+check(army.incomeEnergy === 20, `Income before construction = ${army.incomeEnergy}/s (ACU only; construction site contributes nothing)`)
 
 const tid = issueBuildTask(host, acu, site)
-check(tid > 0, `Bau-Auftrag erteilt (Task ${tid})`)
+check(tid > 0, `Construction order placed (task ${tid})`)
 
 console.log('\n== Fortschritt: delta = BuildRate/BuildTime · rate · 0.1 = 0.008/Tick ==')
 beat()
 check(near(num(`__units[${site}].__fraction`), 0.008), `nach 1 Beat: fraction ${num(`__units[${site}].__fraction`).toFixed(4)} (erwartet 0.0080)`)
-check(num(`__units[${site}].__health`) > 0, `Health waechst mit dem Bau: ${num(`__units[${site}].__health`).toFixed(1)}`)
+check(num(`__units[${site}].__health`) > 0, `Health grows with construction: ${num(`__units[${site}].__health`).toFixed(1)}`)
 // Kosten: BuildCostEnergy 750 · 0.008 = 6/Tick → 60/s
 check(near(army.expenseEnergy, 60, 1), `Energie-Ausgabe ${army.expenseEnergy.toFixed(1)}/s (750·0.008/Tick)`)
 
 console.log('\n== Fertigstellung nach BuildTime/BuildRate = 12,5 s (125 Beats) ==')
 for (let i = 0; i < 130; i++) beat()
-check(near(num(`__units[${site}].__fraction`), 1, 1e-6), `fertig: fraction = ${num(`__units[${site}].__fraction`)}`)
+check(near(num(`__units[${site}].__fraction`), 1, 1e-6), `done: fraction = ${num(`__units[${site}].__fraction`)}`)
 check(host.eval(`return __units[${site}]:IsBeingBuilt()`) === false, 'IsBeingBuilt() = false nach Fertigstellung')
-check(buildTaskCount(host) === 0, 'Bau-Task nach Fertigstellung entfernt')
-check(army.incomeEnergy === 40, `Generator produziert jetzt: Einkommen = ${army.incomeEnergy}/s (ACU 20 + Generator 20)`)
-check(near(army.expenseEnergy, 0, 0.01), `kein Bau-Verbrauch mehr (${army.expenseEnergy.toFixed(2)}/s)`)
+check(buildTaskCount(host) === 0, 'Construction task removed after completion')
+check(army.incomeEnergy === 40, `Generator now produces: Income = ${army.incomeEnergy}/s (ACU 20 + Generator 20)`)
+check(near(army.expenseEnergy, 0, 0.01), `no more construction consumption (${army.expenseEnergy.toFixed(2)}/s)`)
 
-console.log('\n== Stall: knappe Energie drosselt den Bau (LimitingRate < 1) ==')
+console.log('\n== Stall: scarce energy throttles construction (LimitingRate < 1) ==')
 const site2 = spawnBuildSite(host, 'ueb1101', { x: 16, y: 0, z: 10 }, 1)
 army.energy = 0 // leer; Einkommen 40/s = 4/Tick, Bedarf 6/Tick
 issueBuildTask(host, acu, site2)
 beat()
 const f2 = num(`__units[${site2}].__fraction`)
-check(f2 > 0 && f2 < 0.008, `gedrosselter Fortschritt: ${f2.toFixed(5)} (< 0.008 bei voller Rate)`)
+check(f2 > 0 && f2 < 0.008, `throttled progress: ${f2.toFixed(5)} (< 0.008 at full rate)`)
 check(army.energy >= 0, `Energie bleibt >= 0 (${army.energy.toFixed(2)})`)
 
-console.log('\n== Reichweite: Bauer ausser MaxBuildDistance -> kein Fortschritt, laeuft hin ==')
-const far = spawnBuildSite(host, 'ueb1101', { x: 200, y: 0, z: 10 }, 1) // weit weg
+console.log('\n== Range: Pawn outside MaxBuildDistance -> no progress, runs ==')
+const far = spawnBuildSite(host, 'ueb1101', { x: 200, y: 0, z: 10 }, 1) // far away
 army.energy = 100000
 issueBuildTask(host, acu, far)
 const fFar0 = num(`__units[${far}].__fraction`)
 beat()
-check(num(`__units[${far}].__fraction`) === fFar0, 'ausser Reichweite: kein Baufortschritt')
-check(host.eval(`return __units[${acu}]:IsMoving()`) === true, 'Bauer laeuft zum Ziel (Approach)')
+check(num(`__units[${far}].__fraction`) === fFar0, 'out of reach: no construction progress')
+check(host.eval(`return __units[${acu}]:IsMoving()`) === true, 'Farmer runs to the goal (approach)')
 
 host.close()
 for (const f of openFiles) await f.close()

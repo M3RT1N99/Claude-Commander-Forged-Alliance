@@ -13,7 +13,7 @@ import * as THREE from 'three'
  * (effects-audio.md; die Kurven und Lifetimes zählen in Ticks).
  */
 
-/** BlendMode aus dem Emitter-Blueprint (0..5) → Technique-Suffix der Engine. */
+/** BlendMode from the Emitter blueprint (0..5) → Technique suffix of the engine. */
 export const BLEND_SUFFIX = [
   'ALPHABLEND',
   'MODULATEINVERSE',
@@ -24,21 +24,21 @@ export const BLEND_SUFFIX = [
 ] as const
 
 const VERTEX = /* glsl */ `
-  // Pro Instanz — die Spawn-Werte, wie WorldVS sie erwartet (particle.fx:75-86):
+  // Per instance — the spawn values ​​as WorldVS expects them (particle.fx:75-86):
   attribute vec4 pPos;       // xyz = Spawn-Position (Welt), w = Startwinkel
   attribute vec2 pSize;      // x = Startgröße, y = Größen-Rate (per Tick)
   attribute vec4 pVelocity;  // xyz = Geschwindigkeit, w = Rotationsrate
   attribute vec3 pAccel;
   attribute vec4 pTime;      // x = Spawn-Tick, y = Lifetime, z = Framerate, w = Framesize
   attribute vec3 pTexOffset; // x = Texturzeilen-Offset, y = Ramp-V, z = Zeilenhöhe
-  attribute vec3 pDrag;      // dragCoeff (dx, dy, dz) — nur bei uDrag == 1
+  attribute vec3 pDrag;      // dragCoeff (dx, dy, dz) — only if uDrag == 1
 
   uniform float uTime;      // Sim-Tick + Frame-Anteil
   uniform vec3 uCamRight;   // InverseViewMatrix[0] (particle.fx:130)
   uniform vec3 uCamUp;      // InverseViewMatrix[1]
   uniform int uDrag;        // DragEnabled (ParticleResistance im Blueprint)
   uniform int uAnim;        // TextureFramecount > 1
-  uniform int uFlat;        // Flat: Quad in der XZ-Ebene statt Billboard
+  uniform int uFlat;        // Flat: Quad in the XZ plane instead of billboard
 
   varying vec2 vUv0;
   varying vec2 vUv1;
@@ -48,7 +48,7 @@ const VERTEX = /* glsl */ `
     float lifetime = pTime.y;
     float alphaT = t / lifetime;
 
-    // particle.fx:104-107 — analytische Integration, mit oder ohne Drag.
+    // particle.fx:104-107 — analytical integration, with or without drag.
     vec3 pos;
     if (uDrag == 1) {
       pos = (pDrag.z * pAccel - pDrag.y * pVelocity.xyz) * (exp(-pDrag.x * t) - 1.0)
@@ -57,15 +57,15 @@ const VERTEX = /* glsl */ `
       pos = pPos.xyz + pVelocity.xyz * t + 0.5 * pAccel * t * t;
     }
 
-    // particle.fx:110-119 — das ±1-Quad um den Startwinkel + Rotationsrate drehen.
+    // particle.fx:110-119 — rotate the ±1 quad by the starting angle + rotation rate.
     float rot = pPos.w + pVelocity.w * t;
     float rs = sin(rot);
     float rc = cos(rot);
     vec2 quad = vec2(position.x * rc - position.y * rs, position.x * rs + position.y * rc);
     float size = pSize.x + pSize.y * t;
 
-    // particle.fx:122-131 — Flat liegt in der Welt-XZ-Ebene, sonst Billboard
-    // über die Spalten der inversen View-Matrix.
+    // particle.fx:122-131 — Flat is in the World XZ plane, otherwise Billboard
+    // via the columns of the inverse view matrix.
     if (uFlat == 1) {
       pos += (quad.x * vec3(1.0, 0.0, 0.0) + quad.y * vec3(0.0, 0.0, 1.0)) * size;
     } else {
@@ -74,8 +74,8 @@ const VERTEX = /* glsl */ `
 
     gl_Position = projectionMatrix * viewMatrix * vec4(pos, 1.0);
 
-    // particle.fx:134-147 — UVs: Frame-Animation im Textur-Strip; die Ramp
-    // wird mit U = t/lifetime („alpha") und V = Ramp-Auswahl gesampelt.
+    // particle.fx:134-147 — UVs: frame animation in texture strip; the ramp
+    // is sampled with U = t/lifetime ("alpha") and V = ramp selection.
     vec2 uv = (position.xy + 1.0) * 0.5;
     if (uAnim == 1) {
       float frame = floor(pTime.z * t);
@@ -85,8 +85,8 @@ const VERTEX = /* glsl */ `
     vUv0 = uv;
     vUv1 = vec2(alphaT, pTexOffset.y);
 
-    // particle.fx:100 — WorldVS gibt für tote Partikel Out=0 zurück (das Quad
-    // degeneriert). Hier dasselbe: w=0 macht das Dreieck unsichtbar.
+    // particle.fx:100 — WorldVS returns Out=0 for dead particles (the quad
+    // degenerate). Same here: w=0 makes the triangle invisible.
     if (t < 0.0 || alphaT >= 1.0) {
       gl_Position = vec4(0.0, 0.0, 2.0, 0.0);
     }
@@ -101,8 +101,8 @@ const FRAGMENT = /* glsl */ `
   varying vec2 vUv1;
 
   void main() {
-    // WorldPS (particle.fx:250-255): Partikeltextur × Ramptextur — die Ramp
-    // kodiert Farbe UND Alpha über die Lebenszeit.
+    // WorldPS (particle.fx:250-255): Particle Texture × Ramp Texture — the ramp
+    // encodes color AND alpha over lifetime.
     gl_FragColor = texture2D(uTex, vUv0) * texture2D(uRamp, vUv1);
   }
 `
@@ -137,7 +137,7 @@ export function applyBlend(mat: THREE.ShaderMaterial, blendMode: number): void {
       mat.blendSrc = THREE.OneFactor
       mat.blendDst = THREE.OneMinusSrcAlphaFactor
       break
-    default: // 0 ALPHABLEND (und 5 REFRACT, s. o.): SrcAlpha / InvSrcAlpha
+    default: // 0 ALPHABLEND (and 5 REFRACT, see above): SrcAlpha / InvSrcAlpha
       mat.blendSrc = THREE.SrcAlphaFactor
       mat.blendDst = THREE.OneMinusSrcAlphaFactor
       break
@@ -150,13 +150,13 @@ export interface ParticleMaterialOptions {
   blendMode: number
   /** TextureFramecount > 1 ⇒ Frame-Animation (Technique-Familie …Animate…). */
   animated: boolean
-  /** Flat ⇒ Quad in der XZ-Ebene (TRampFlat_*). */
+  /** Flat ⇒ Quad in the XZ plane (TRampFlat_*). */
   flat: boolean
   /** ParticleResistance ⇒ Drag-Modell im Shader (DragEnabled). */
   drag: boolean
 }
 
-/** Ein Material je Emitter-Batch — Uniforms uTime/uCamRight/uCamUp pro Frame. */
+/** One material per emitter batch — Uniforms uTime/uCamRight/uCamUp per frame. */
 export function createParticleMaterial(o: ParticleMaterialOptions): THREE.ShaderMaterial {
   const mat = new THREE.ShaderMaterial({
     vertexShader: VERTEX,
@@ -171,7 +171,7 @@ export function createParticleMaterial(o: ParticleMaterialOptions): THREE.Shader
       uTex: { value: o.texture },
       uRamp: { value: o.ramp },
     },
-    // Alle Techniques: Depth-Test Less AN, Depth-Write AUS, Cull None
+    // All Techniques: Depth-Test Less ON, Depth-Write OFF, Cull None
     // (particle.fx: Depth_Enable_Less_Write_None, Rasterizer_Cull_None).
     depthTest: true,
     depthWrite: false,

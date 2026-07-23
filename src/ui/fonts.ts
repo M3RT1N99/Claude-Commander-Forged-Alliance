@@ -16,7 +16,7 @@ import { parseTtf, type FontMetrics } from '../formats/ttf'
 export class FontBook {
   private readonly byFamily = new Map<string, FontMetrics>()
 
-  /** Eine TTF-Datei aufnehmen. Der Familienname kommt aus der Datei selbst. */
+  /** Record a TTF file. The family name comes from the file itself. */
   add(bytes: Uint8Array): string {
     const m = parseTtf(bytes)
     this.byFamily.set(m.family.toLowerCase(), m)
@@ -35,26 +35,26 @@ export class FontBook {
     const m = this.byFamily.get(String(family).toLowerCase())
     if (!m) {
       throw new Error(
-        `Schrift '${family}' nicht geladen (bekannt: ${[...this.byFamily.keys()].join(', ')})`,
+        `Font '${family}' not loaded (known: ${[...this.byFamily.keys()].join(', ')})`,
       )
     }
     return m
   }
 
-  /** [Oberlänge, Unterlänge] in Pixeln — text.lua:39 macht daraus die Höhe. */
+  /** [ascender, descender] in pixels — text.lua:39 turns this into the height. */
   metrics(family: string, size: number): [number, number] {
     const f = this.font(family)
     const scale = size / f.unitsPerEm
     return [f.ascent * scale, Math.abs(f.descent) * scale]
   }
 
-  /** Breite eines Strings in Pixeln (CMauiText::GetStringAdvance, Cfile:1146720). */
+  /** Width of a string in pixels (CMauiText::GetStringAdvance, Cfile:1146720). */
   advance(text: string, family: string, size: number): number {
     return this.font(family).advance(text, size)
   }
 }
 
-/** Die Schriftdateien des Spiels: `<GameDir>/fonts/*.ttf` (loses Verzeichnis, kein Archiv). */
+/** The game's font files: `<GameDir>/fonts/*.ttf` (loose directory, not an archive). */
 export const FONT_FILES = [
   'ARIAL.TTF',
   'ARIALBD.TTF',

@@ -16,7 +16,7 @@ const targets = (await (await fetch(`http://127.0.0.1:${port}/json`)).json()) as
 }[]
 const page = targets.find((t) => t.type === 'page' && t.url.includes('localhost'))
 if (!page) {
-  console.log('keine Seite gefunden')
+  console.log('no page found')
   process.exit(1)
 }
 const ws = new WebSocket(page.webSocketDebuggerUrl)
@@ -36,12 +36,12 @@ const send = async (method: string, params: unknown = {}): Promise<any> => {
 }
 const evaluate = async (expression: string): Promise<any> => {
   const res = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true })
-  if (res.exceptionDetails) return `FEHLER: ${JSON.stringify(res.exceptionDetails).slice(0, 200)}`
+  if (res.exceptionDetails) return `ERROR: ${JSON.stringify(res.exceptionDetails).slice(0, 200)}`
   return res.result?.value
 }
 
 for (const label of labels) {
-  // Die Mitte des Controls finden, das den Text trägt.
+  // Find the center of the control that carries the text.
   const pos = await evaluate(`(() => {
     const el = [...document.querySelectorAll('#maui-root div')].find(d => d.textContent === ${JSON.stringify(label)} && d.children.length === 0)
     if (!el) return null
@@ -49,10 +49,10 @@ for (const label of labels) {
     return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }
   })()`)
   if (!pos) {
-    console.log(`Text "${label}" nicht gefunden`)
+    console.log(`Text "${label}" not found`)
     process.exit(1)
   }
-  console.log(`klick auf "${label}" @${pos.x},${pos.y}`)
+  console.log(`click on "${label}" @${pos.x},${pos.y}`)
   for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) {
     await send('Input.dispatchMouseEvent', {
       type,
@@ -65,7 +65,7 @@ for (const label of labels) {
   await new Promise((r) => setTimeout(r, 3500))
 }
 
-console.log('Log:', await evaluate(`document.querySelector('#log').textContent.split(String.fromCharCode(10)).filter(l => l.includes('FEHLER')).slice(-3).join(' || ') || 'kein Fehler'`))
+console.log('Log:', await evaluate(`document.querySelector('#log').textContent.split(String.fromCharCode(10)).filter(l => l.includes('ERROR')).slice(-3).join(' || ') || 'no error'`))
 console.log('Controls:', await evaluate(`document.querySelectorAll('#maui-root > div').length`))
 
 const shot = await send('Page.captureScreenshot', { format: 'png' })

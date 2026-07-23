@@ -69,7 +69,7 @@ const log = (msg: string): void => {
   if (!quiet) console.log(`  · ${msg}`)
 }
 
-// --- VFS: alle Archive, erstes gewinnt (wie im Browser) ---------------------
+// --- VFS: all archives, first wins (like in the browser) ---------------------
 const files = new Map<string, Uint8Array>()
 const allPaths = new Set<string>()
 const openFiles: NodeFile[] = []
@@ -84,7 +84,7 @@ for (const archive of archives) {
   zips.push(zip)
   for (const [key, entry] of zip.entries) {
     allPaths.add(key.toLowerCase())
-    // .lua UND .bp: LoadBlueprints() führt die .bp-Dateien als Lua aus.
+    // .lua AND .bp: LoadBlueprints() runs the .bp files as Lua.
     if ((key.endsWith('.lua') || key.endsWith('.bp')) && !files.has(key)) {
       files.set(key, await zip.read(entry))
     }
@@ -92,8 +92,8 @@ for (const archive of archives) {
 }
 const bpPaths = [...allPaths].filter((p) => /^units\/[^/]+\/[^/]+_unit\.bp$/.test(p))
 
-// Texturmaße: die maui-Lua fragt sie SYNCHRON (ein Bitmap ohne Layout-Helfer
-// bemisst sich nach seiner DDS). Also vorher lesen — dieselben Dateien, die die
+// Texture dimensions: the maui-Lua asks them SYNCHRONOUSLY (a bitmap without layout helper
+// is measured by his DDS). So read beforehand — the same files that the
 // Engine liest.
 const dims = new Map<string, [number, number]>()
 for (const zip of zips) {
@@ -103,18 +103,18 @@ for (const zip of zips) {
       const dds = parseDds(await zip.read(entry))
       dims.set(key, [dds.width, dds.height])
     } catch {
-      // Kaputte DDS: nicht raten. Die Lua bekommt nil und der Skin-Fallback greift.
+      // Broken DDS: don't guess. The Lua gets nil and the skin fallback takes effect.
     }
   }
 }
 
-// Die Schriften des Spiels — echte Metrik, keine geschätzte (siehe src/ui/fonts.ts).
+// The game's fonts — real metrics, not estimated ones (see src/ui/fonts.ts).
 const fonts = new FontBook()
 for (const name of await readdir(`${GAME}/fonts`)) {
   if (/\.ttf$/i.test(name)) fonts.add(await readFile(`${GAME}/fonts/${name}`))
 }
 
-console.log(`\n== UI-VM booten (${files.size} Lua-Dateien, ${dims.size} Texturmaße) ==`)
+console.log(`\n== Boot UI VM (${files.size} Lua files, ${dims.size} texture dimensions) ==`)
 const host = await LuaHost.create(files, (level, msg) => {
   if (level === 'WARN') log(`UI-WARN: ${msg.slice(0, 200)}`)
 })
@@ -128,16 +128,16 @@ installUiEngine(host, {
 createRootFrame(host, 1920, 1080)
 setupUi(host)
 
-check(fonts.has('Arial') && fonts.has('Zeroes Three'), 'Arial + Zeroes Three aus <GameDir>/fonts')
+check(fonts.has('Arial') && fonts.has('Zeroes Three'), 'Arial + Zeroes Three from <GameDir>/fonts')
 const arial = fonts.metrics('Arial', 14)
-check(arial[0] > 10 && arial[0] < 16, `Arial-Oberlänge bei 14px = ${arial[0].toFixed(2)} (aus der TTF)`)
+check(arial[0] > 10 && arial[0] < 16, `Arial ascender at 14px = ${arial[0].toFixed(2)} (from the TTF)`)
 
 const bpCount = loadUiBlueprints(host, bpPaths)
-check(bpCount > 500, `${bpCount} Blueprints in der UI-VM (echte Pipeline)`)
+check(bpCount > 500, `${bpCount} Blueprints in the UI VM (real pipeline)`)
 
-console.log('\n== Die Session (GetArmiesTable / SessionGetScenarioInfo) ==')
-// Ohne Session melden die Session-Globals „no active session." — wie das
-// Original (Cfile:1330339). Nichts wird still behauptet.
+console.log('\n== The Session (GetArmiesTable / SessionGetScenarioInfo) ==')
+// Without a session, the session globals report "no active session." - like that
+// Original (Cfile:1330339). Nothing is quietly stated.
 const noSession = host.eval(`
   local ok, err = pcall(SessionRequestPause)
   return tostring(ok) .. '|' .. tostring(err)
@@ -147,15 +147,15 @@ check(
   `ohne Session knallt SessionRequestPause: ${noSession.split('|')[1]?.replace(/\[string "[\s\S]*?"\]:?\d*:?\s*/, '')}`,
 )
 
-// Dieselbe Session, die auch die Sim bekommt (SANDBOX_SESSION) — EIN Weg für
-// Browser und Test (applySession in src/lua/uiEngine.ts).
+// The same session that the sim gets (SANDBOX_SESSION) — ONE way for
+// Browser and test (applySession in src/lua/uiEngine.ts).
 applySession(host, { ...SANDBOX_SESSION, map: 'SCMP_009' })
 check(
   Number(host.eval('return GetArmiesTable().numArmies')) === 2,
   'GetArmiesTable(): 2 armies (ARMY_1 + the selftest enemy ARMY_2)',
 )
 check(Number(host.eval('return GetArmiesTable().focusArmy')) === 1, 'focusArmy = 1 (1-basiert wie die Engine)')
-// faction ist 0-BASIERT: gamemain.lua:109 rechnet `faction + 1` in factions.lua.
+// faction is 0-BASED: gamemain.lua:109 converts `faction + 1` into factions.lua.
 check(
   Number(host.eval('return GetArmiesTable().armiesTable[1].faction')) === 0,
   'faction der UEF-Armee = 0 (die Lua rechnet +1, Cfile:1267057)',
@@ -175,8 +175,8 @@ check(
 )
 check(Number(host.eval('return SessionGetLocalCommandSource()')) === 1, 'lokale Befehlsquelle = 1')
 
-// Pause: die UI verlangt sie, die Engine reicht sie an die SIM weiter. Ohne
-// Naht knallt es (kein stiller No-Op) — hier wird die Naht gesetzt und geprüft.
+// Pause: the UI requests it, the engine passes it on to the SIM. Without
+// The seam pops (not a silent no-op) - this is where the seam is placed and checked.
 let paused: boolean | null = null
 host.setGlobal('__uiPauseSink', (p: boolean) => {
   paused = p
@@ -188,24 +188,24 @@ check(paused === false && host.eval('return SessionIsPaused()') === false, 'Sess
 
 console.log('\n== Die vier Original-Panels aufbauen (gamemain.lua:145-153) ==')
 setupGameUi(host, log)
-// Erst ein Frame, dann messen: die Grids der Original-UI legen ihre Kinder in
-// OnFrame aus (grid.lua:40-48) — genau wie die Engine es pro Bild tut.
+// First a frame, then measure: the grids of the original UI put their children in
+// OnFrame off (grid.lua:40-48) — just like the engine does per frame.
 host.eval('__mauiFrame(0.016)')
 
 const controls = Number(host.eval('return table.getn(__mauiSnapshot())'))
 check(controls > 50, `${controls} maui-Controls mit vollständigem Layout`)
-// Jedes sichtbare Control MUSS ein Layout haben; ein übersprungenes ist ein Fund.
+// Every visible control MUST have a layout; a skipped one is a find.
 const broken = Number(host.eval('local n = 0 for _ in pairs(__mauiBroken) do n = n + 1 end return n'))
 check(broken === 0, `kein Control ohne Layout (übersprungen: ${broken})`)
 
-// Kein Panel darf KOMPLETT aus dem Bild fallen. Die Original-UI rechnet ihr
-// Layout gegen den Root-Frame (= Fenstergröße); säße daneben noch ein
-// Web-Rahmen, läge das Orders-Panel (links 17, unten 0) hinter der Seitenleiste
-// und wäre unsichtbar — deshalb läuft die Sandbox im Vollbild-Spielmodus.
+// No panel should be COMPLETELY out of the picture. The original UI works for you
+// Layout against the root frame (= window size); would sit next to it
+// Web frame, the Orders panel (left 17, bottom 0) would be behind the sidebar
+// and would be invisible — that's why the sandbox runs in full-screen game mode.
 //
-// Teilweise überstehende Controls sind KEIN Fehler: die Klammern hängen im
-// Original absichtlich über den Rand (orders_mini.lua:22 setzt die Klammer auf
-// -17). Wer das verbietet, nagelt eine Lüge fest.
+// Controls that partially protrude are NOT an error: the brackets are hanging in the
+// Original intentionally over the edge (orders_mini.lua:22 puts the bracket on
+// -17). Anyone who forbids this is perpetuating a lie.
 const outside = host.eval(`
   local bad = {}
   for _, c in ipairs(__mauiSnapshot()) do
@@ -222,34 +222,34 @@ check(
 )
 
 console.log('\n== Die Reiter oben: Menü, Diplomatie, Pause (tabs.lua) ==')
-// Genau der Ast, der im Browser gestorben ist: tabs.lua:482 BuildContent baut
-// den Inhalt — 'main' aus seiner eigenen Menü-Tabelle, 'diplomacy' über
-// diplomacy.lua:CreateContent (das schon beim Import SessionGetScenarioInfo()
-// ruft). Ohne Session war beides tot; CollapseWindow lief danach auf ein
-// `false` und riss die UI mit.
+// Exactly the branch that died in the browser: tabs.lua:482 BuildContent builds
+// the content — 'main' from its own menu table, 'diplomacy' above
+// diplomacy.lua:CreateContent (which was already created during import SessionGetScenarioInfo()
+// calls). Without a session, both were dead; CollapseWindow then ran on
+// `false` and took the UI with it.
 const tabMenu = host.eval(`
   local ok, err = pcall(function() import('/lua/ui/game/tabs.lua').BuildContent('main') end)
   return tostring(ok) .. '|' .. tostring(err)
 `) as string
-check(tabMenu.startsWith('true'), `Reiter „Menü" öffnet sich${tabMenu.startsWith('true') ? '' : ' — ' + tabMenu}`)
+check(tabMenu.startsWith('true'), `Reiter „Menü" öffnet sich${tabMenu.startsWith('true')?'' : ' — ' + tabMenu}`)
 check(
   Number(host.eval(`return table.getn(import('/lua/ui/game/tabs.lua').controls.contentGroup.Buttons)`)) === 7,
   '7 Knöpfe im Spielmenü (Save/Load/Options/Restart/End/Exit/Close — tabs.lua:63-100)',
 )
 
-// Das Aufklappen ist eine ANIMATION über mehrere Bilder (tabs.lua:561-584: der
-// Rahmen wächst, dann fährt der Boden aus, dann blendet der Inhalt ein). Sie
-// muss ZU ENDE laufen, bevor der nächste Reiter dran ist — im Spiel sperrt
-// `animationLock` genau dafür (tabs.lua:544). Ohne Frames dazwischen prüfte der
-// Test einen Zustand, den die Engine nie erreicht.
+// The opening is an ANIMATION over several images (tabs.lua:561-584: the
+// frame grows, then the floor extends, then the content fades in). She
+// must FINISH before it is the next rider's turn - blocked in the game
+// `animationLock` exactly for that (tabs.lua:544). It checked without any frames in between
+// Test a state that the engine never reaches.
 const frames = (n: number) => {
   for (let i = 0; i < n; i++) host.eval('__mauiFrame(0.016)')
 }
 frames(30)
 
-// Umschalten auf Diplomatie: erst CollapseWindow (Ausblenden), dann ruft der
-// Callback BuildContent erneut — und der baut diplomacy.CreateContent.
-// diplomacy.lua liest schon beim Import SessionGetScenarioInfo().Options.TeamLock.
+// Switch to diplomacy: first CollapseWindow (hide), then it calls
+// Callback BuildContent again — and it builds diplomacy.CreateContent.
+// diplomacy.lua reads SessionGetScenarioInfo().Options.TeamLock during import.
 host.eval(`import('/lua/ui/game/tabs.lua').BuildContent('diplomacy')`)
 frames(60)
 const diplo = host.eval(`
@@ -262,20 +262,20 @@ check(
 )
 
 console.log('\n== Hit-Test: die freie Spielfläche gehört der Welt ==')
-// Im Original ist die Spielwelt selbst ein Control (CUIWorldView) INNERHALB der
-// mapGroup — in der Tiefenordnung also ÜBER den unsichtbaren Vollbild-Containern
-// (CreateScreenGroup deaktiviert seinen Hit-Test NICHT, uiutil.lua:333). Ein
-// Klick in die freie Fläche trifft dort die WorldView, nie den Container.
+// In the original, the game world itself is a control (CUIWorldView) WITHIN the
+// mapGroup — in depth order ABOVE the invisible full-screen containers
+// (CreateScreenGroup does NOT disable its hit test, uiutil.lua:333). A
+// Clicking in the free area hits the WorldView, never the container.
 //
-// Bei uns ist die Welt noch kein maui-Control. Fängt ein Container den Klick,
-// ist KEINE EINHEIT MEHR SELEKTIERBAR — genau dieser Fehler stand im Browser
-// (der Treffer war die "GameMain ScreenGroup"). Deshalb gilt: nur ein Control,
-// das etwas ZEICHNET (Bitmap/Text), verbraucht einen Klick.
-// Die freie Fläche IST die WorldView — ein echtes Control (CUIWorldView), das
-// gamemain.lua:142 in die mapGroup hängt. Sie verbraucht den Klick NICHT: im
-// Original behandelt sie ihn selbst (Auswahl, Befehl, Bau), bei uns tut das die
-// 3D-Seite. Die alte Krücke („ein Treffer auf einen unsichtbaren Container
-// gehört der Welt") ist damit weg.
+// With us the world is not yet under Maui control. If a container catches the click,
+// NO UNIT CAN BE SELECTED ANYMORE - exactly this error was in the browser
+// (the hit was the "GameMain ScreenGroup"). Therefore: only one control,
+// that DRAWS something (bitmap/text) uses one click.
+// The free area IS the WorldView — a real control (CUIWorldView) that
+// gamemain.lua:142 hangs in the mapGroup. It does NOT consume the click: in
+// Originally she handles it herself (selection, command, construction), with us she does it
+// 3D page. The old crutch (“a hit on an invisible container
+// belongs to the world") is gone.
 const worldHit = String(
   host.eval(`local c = __mauiHitTest(960, 500) if not c then return 'NICHTS' end return c.__kind`),
 )
@@ -286,9 +286,9 @@ check(
 )
 
 console.log('\n== Auswahl: __uiSetUnit → SelectUnits → OnSelectionChanged ==')
-// Die ACU, so wie die Sim sie meldet.
-// Die Naht zur Sim: ohne sie KNALLT jeder Befehl (statt still zu verpuffen).
-// Hier wird nur mitgeschrieben, was die UI schicken WÜRDE.
+// The ACU as the sim reports it.
+// The seam to the sim: without it, every command BANGS (instead of fizzling out quietly).
+// Only what the UI WOULD send is recorded here.
 host.eval('__t = { simCommands = {} }')
 host.setGlobal('__uiSimCommand', (name: string) => {
   host.eval(`table.insert(__t.simCommands, '${name}')`)
@@ -306,36 +306,36 @@ check(
 )
 
 console.log('\n== Kategorien + Avatare: die Engine-Sicht auf UserUnits ==')
-// Die Kategorie-Brücke (globals.lua entityBp): die Engine prüft Kategorien
-// auf UserUnits genauso wie auf Sim-Entities (cfunc_EntityCategoryContains).
-// Ohne sie liefert JEDER Filter der UI leere Listen — Avatar-Laschen,
-// Klick-Ziele, orders-Sonderpfade.
+// The category bridge (globals.lua entityBp): the engine checks categories
+// on UserUnits as well as on Sim Entities (cfunc_EntityCategoryContains).
+// Without it, EVERY filter in the UI returns empty lists — avatar tabs,
+// Click destinations, orders special paths.
 check(
   host.eval(`return EntityCategoryContains(categories.COMMAND, GetSelectedUnits()[1])`) === true,
   'EntityCategoryContains(COMMAND, userUnit) — die Kategorie-Brücke lebt',
 )
-// Die UEF-ACU trägt PODSTAGINGPLATFORM (uel0001_unit.bp:125, Drohnen-Upgrades)
-// — orders.lua:923-932 läuft diesen Pfad bei JEDER ACU-Auswahl.
+// The UEF-ACU carries PODSTAGINGPLATFORM (uel0001_unit.bp:125, drone upgrades)
+// — orders.lua:923-932 runs this path on EVERY ACU selection.
 check(
   Number(host.eval(`return table.getn(EntityCategoryFilterDown(categories.PODSTAGINGPLATFORM, GetSelectedUnits()))`)) === 1,
   'FilterDown findet die PODSTAGINGPLATFORM-Kategorie der UEF-ACU',
 )
-// Avatar-Kriterium der Engine (UserUnit-Ctor, Cfile:1362979): General.
-// QuickSelectPriority > 0 — die ACU-.bp setzt 1 (uel0001_unit.bp:817).
+// Engine Avatar Criteria (UserUnit-Ctor, Cfile:1362979): General.
+// QuickSelectPriority > 0 — the ACU-.bp sets 1 (uel0001_unit.bp:817).
 check(
   Number(host.eval(`return table.getn(GetArmyAvatars())`)) === 1,
   'GetArmyAvatars() = 1 (QuickSelectPriority > 0, Cfile:1362979)',
 )
-// mIsEngineer (Cfile:1362995-1363014): ENGINEER ohne COMMAND/SCOUT/
-// UNTARGETABLE — die leerlaufende ACU gehört NICHT in die Engineer-Lasche.
-// Bei LEER liefert die Engine nil, keine leere Tabelle (Cfile:1360921).
+// mIsEngineer (Cfile:1362995-1363014): ENGINEER without COMMAND/SCOUT/
+// UNTARGETABLE — the idle ACU does NOT belong in the engineer tab.
+// If EMPTY, the engine returns nil, not an empty table (Cfile:1360921).
 check(
   host.eval(`return GetIdleEngineers() == nil`) === true,
   'GetIdleEngineers() enthält die idle ACU NICHT (COMMAND-Ausschluss, nil bei leer)',
 )
-// ValidateUnitsList (Cfile:1360596-1360650): filtert tote/entfernte Units aus
-// einer gemerkten Liste (Strg-Gruppen, controlgroups.lua:102); Rückgabe ist
-// IMMER eine Tabelle, auch leer.
+// ValidateUnitsList (Cfile:1360596-1360650): filters out dead/removed units
+// a saved list (Ctrl groups, controlgroups.lua:102); return is
+// ALWAYS a table, even empty.
 check(
   Number(
     host.eval(`
@@ -353,10 +353,10 @@ check(
 )
 
 console.log('\n== orders.lua: die Befehls-Buttons kommen aus dem Blueprint ==')
-// GetUnitCommandData → General.CommandCaps der ACU. Move/Stop/Attack MÜSSEN da
-// sein, sonst hat die UI ihre Befehle erfunden.
-// Die Buttons stehen im Grid der Original-orders.lua (orders.lua:868 SetItem).
-// Ausgelesen wird der Grid-Inhalt, nicht eine Nachbau-Tabelle.
+// GetUnitCommandData → General.CommandCaps of the ACU. Move/Stop/Attack MUST be there
+// otherwise the UI has invented its commands.
+// The buttons are in the grid of the Original-orders.lua (orders.lua:868 SetItem).
+// The grid content is read, not a replica table.
 host.eval(`
   __t.orders = {}
   __t.enabled = {}
@@ -384,9 +384,9 @@ check(
   'RULEUCC_Nuke bleibt aus — die ACU hat die Fähigkeit nicht',
 )
 
-// Die Gegenprobe zum Hit-Test oben: das Orders-Panel gibt es erst MIT Auswahl
-// (orders.lua hält es sonst versteckt). Jetzt liegt dort ein Bitmap — und ein
-// Klick darauf ist ein UI-Klick, kein Bewegungsbefehl.
+// The counter-check to the hit test above: the orders panel is only available WITH a selection
+// (orders.lua keeps it hidden otherwise). Now there is a bitmap there - and a
+// Clicking on it is a UI click, not a movement command.
 check(
   host.eval(`return __ui.ordersModule.controls.bg:IsHidden() == false`) === true,
   'Mit Auswahl ist das Orders-Panel sichtbar (vorher: hidden)',
@@ -397,11 +397,11 @@ check(
 )
 
 console.log('\n== construction.lua: das Bau-Menü kommt aus dem Blueprint ==')
-// Die ACU baut, was ihre BuildableCategory hergibt (uel0001_unit.bp). Die Liste
-// zieht construction.lua über EntityCategoryGetUnitList — nicht über eine
-// handgeschriebene Tabelle.
-// Genau der Weg aus construction.lua:1677-1681: die Kategorien kommen aus
-// GetUnitCommandData (Engine, aus bp.Economy.BuildableCategory), die Liste aus
+// The ACU builds what its BuildableCategory provides (uel0001_unit.bp). The list
+// pulls construction.lua over EntityCategoryGetUnitList — not over one
+// handwritten table.
+// Exactly the way out of construction.lua:1677-1681: the categories come out
+// GetUnitCommandData(Engine, from bp.Economy.BuildableCategory), the list
 // EntityCategoryGetUnitList.
 const buildable = Number(
   host.eval(`
@@ -410,10 +410,10 @@ const buildable = Number(
   `),
 )
 check(buildable > 10, `${buildable} baubare Einheiten für die ACU (EntityCategoryGetUnitList)`)
-// Die Liste ist nicht irgendeine: die ACU baut GEBÄUDE (ueb0101 = T1-Landfabrik,
-// Kategorie BUILTBYCOMMANDER, ueb0101_unit.bp:50) — und eben KEINE Panzer
-// (uel0101 baut die Fabrik). Genau das unterscheidet ein echtes Bau-Menü von
-// einer geratenen Liste.
+// The list is not just any: the ACU builds BUILDINGS (ueb0101 = T1-Landfabrik,
+// Category BUILTBYCOMMANDER, ueb0101_unit.bp:50) — and NO tanks
+// (uel0101 builds the factory). This is exactly what distinguishes a real construction menu from
+// a recommended list.
 const inMenu = (bp: string): boolean =>
   host.eval(`
     local _, _, cats = GetUnitCommandData(GetSelectedUnits())
@@ -426,20 +426,20 @@ check(inMenu('ueb0101'), 'ueb0101 (T1-Landfabrik) steht im Bau-Menü der ACU')
 check(!inMenu('uel0101'), 'uel0101 (Panzer) steht NICHT drin — den baut die Fabrik')
 
 console.log('\n== Klick aufs Bau-Icon: der Bau-Modus startet, die Auswahl bleibt ==')
-// Der Weg, den ein Spieler nimmt: ACU wählen → Bau-Icon anklicken → Gebäude
-// setzen. Ging der Klick versehentlich an die WELT (weil eine unsichtbare Gruppe
-// über dem Icon lag), wurde die ACU stattdessen abgewählt.
+// The path a player takes: Select ACU → click on building icon → building
+// set. The click accidentally went to the WELT (because an invisible group
+// was above the icon), the ACU was deselected instead.
 //
-// Das Icon wird NICHT gesucht, sondern beim Namen genommen: construction.lua
-// hängt jedem Bau-Button seine Blueprint-ID an (`item.id`), und der Klick landet
-// über den Original-Weg in commandmode.StartCommandMode('build', {name=id}).
-// Erst ein Frame: die Grids der Original-UI legen ihre Kinder in OnFrame aus
-// (grid.lua:40-48) — nach einer Selektion ist das Bau-Menü frisch befüllt.
+// The icon is NOT searched for, but rather taken by name: construction.lua
+// appends its blueprint ID (`item.id`) to each construction button and the click lands
+// via the original way in commandmode.StartCommandMode('build', {name=id}).
+// First one frame: the grids of the original UI lay out their children in OnFrame
+// (grid.lua:40-48) — after a selection, the construction menu is freshly filled.
 host.eval('__mauiFrame(0.016)')
-// specialgrid.lua:108 hängt die Item-Daten als `control.Data` an den Button.
-// Genommen wird das erste GEBÄUDE im Menü (MotionType RULEUMT_None) — nur das
-// startet den Bau-Modus; mobile Einheiten baut die Fabrik (construction.lua:878).
-// Welcher Tab gerade offen ist, darf dem Test egal sein.
+// specialgrid.lua:108 attaches the item data to the button as `control.Data`.
+// The first BUILDING in the menu is taken (MotionType RULEUMT_None) - just that
+// starts construction mode; The factory (construction.lua:878) builds mobile units.
+// The test may not care which tab is currently open.
 host.eval(`
   __t.icon = false
   __t.iconId = false
@@ -466,9 +466,9 @@ if (hasIcon) {
     local c = __t.icon
     return { x = math.floor(c.Left() + c.Width() / 2), y = math.floor(c.Top() + c.Height() / 2) }
   `) as { x: number; y: number }
-  // Ein Klick ist Drücken UND Loslassen — und zwar über den Dragger: button.lua
-  // feuert OnClick erst in dragger:OnRelease (button.lua:122-133). Wer nur
-  // ButtonPress schickt, sieht nie einen Klick.
+  // One click is pressing AND releasing - via the dragger: button.lua
+  // OnClick only fires in dragger:OnRelease (button.lua:122-133). Who only
+  // ButtonPress sends, never sees a click.
   check(
     host.eval(
       `return __mauiMouse('ButtonPress', ${pos.x}, ${pos.y}, { Left = true }, 1)`,
@@ -499,9 +499,9 @@ if (hasIcon) {
 }
 
 console.log('\n== Abwahl darf die UI nicht töten ==')
-// GetUnitCommandData liefert bei leerer Auswahl LEERE TABELLEN (die Engine legt
-// sie hinter der Unit-Schleife immer an, Cfile:1264740). Gab unsere Version nil
-// zurück, starb orders.lua:891 beim ersten Klick ins Leere.
+// GetUnitCommandData returns EMPTY TABLES if the selection is empty (the engine sets
+// they always appear after the unit loop, Cfile:1264740). Our version was nil
+// back, orders.lua:891 died into the void at the first click.
 let deselectOk = true
 try {
   host.eval('__uiSelectByIds({})')
@@ -513,7 +513,7 @@ check(
   host.eval('return GetSelectedUnits() == nil') === true,
   'GetSelectedUnits() ist danach nil (Cfile:1361395)',
 )
-// Und die Auswahl wieder herstellen, damit die folgenden Prüfungen stimmen.
+// And restore the selection so that the following checks are correct.
 host.eval(`__uiSelectByIds({ 1 })`)
 
 console.log('\n== unitview.lua: Rollover zeigt die echte Unit ==')
@@ -526,27 +526,27 @@ check(rollover === 'uel0001', 'GetRolloverInfo().blueprintId = uel0001')
 
 console.log('\n== score.lua: das Punkte-Panel steht, die Uhr läuft aus dem Sim-Tick ==')
 // CreateScoreUI lief im One-Shot-OnFrame (gamemain.OnFirstUpdate,
-// ui-boot.lua) beim ersten __mauiFrame nach dem Panel-Aufbau.
+// ui-boot.lua) for the first __mauiFrame after panel construction.
 check(
   host.eval(`return import('/lua/ui/game/score.lua').controls.bg ~= nil`) === true,
   'CreateScoreUI hat das Panel gebaut (controls.bg existiert)',
 )
-// Die Uhr: GetGameTime() ist ein FORMATIERTER String (Cfile:1266614/1266640,
+// The clock: GetGameTime() is a FORMATTED string (Cfile:1266614/1266640,
 // %H:%M:%S); score._OnBeat schreibt ihn in controls.time (score.lua:230).
-// Der Antrieb ist der ECHTE Beat-Verteiler (UI_LuaBeat → gamemain.OnBeat,
-// Cfile:1262940) — Ökonomie-Spiegel vorher, sonst rechnet economy._BeatFunction
-// mit nichts.
+// The drive is the REAL beat distributor (UI_LuaBeat → gamemain.OnBeat,
+// Cfile:1262940) — Economy mirror beforehand, otherwise economy._BeatFunction calculates
+// with nothing.
 host.eval(`__uiSetEconomy(650, 4000, 650, 4000, 1, 10, 0, 0, 0, 0)`)
 host.eval(`__uiSetGameTick(725)`)
 host.eval(`__uiFactoryQueueBeat()`)
 host.eval(`import('/lua/ui/game/gamemain.lua').OnBeat()`)
 const scoreZeit = String(host.eval(`return import('/lua/ui/game/score.lua').controls.time:GetText()`))
 check(scoreZeit === '00:01:12', `die Uhr zeigt ${scoreZeit} (Tick 725 → 00:01:12)`)
-// FUND (dokumentiert): currentScores hat im Vanilla-3599-Datenbestand KEINEN
+// FOUND (documented): currentScores has NONE in the vanilla 3599 dataset
 // Produzenten — aibrain.lua:59/334 (CollectCurrentScores/SyncCurrentScores)
-// forkt niemand (weder Lua noch Engine; einziger Engine-Import von aibrain.lua
-// ist func_LoadAiBrain, Cfile:724474, nur für die Klasse). Die Punktespalte
-// bleibt 1:1 leer, bis eine Session sie liefert.
+// Nobody forks (neither Lua nor Engine; only engine import from aibrain.lua
+// is func_LoadAiBrain, Cfile:724474, for the class only). The points column
+// remains empty 1:1 until a session delivers it.
 check(
   host.eval(`return import('/lua/ui/game/score.lua').currentScores == false`) === true,
   'currentScores bleibt false — 1:1: Vanilla hat keinen Score-Sync-Produzenten',
@@ -554,7 +554,7 @@ check(
 
 console.log('\n== Die Hoch-Stubs der Inventur: CommandCap, SimCallback, Chat, Restart ==')
 // GetUnitCommandFromCommandCap (Cfile:1264844 + Mapping Cfile:1242230):
-// RULEUCC-Name (case-insensitiv, Praefix optional) -> Kommandoname OHNE
+// RULEUCC name (case-insensitive, prefix optional) -> command name WITHOUT
 // "UNITCOMMAND_"-Praefix — orders.lua:205 steckt ihn direkt in IssueCommand.
 check(
   host.eval(`return GetUnitCommandFromCommandCap('RULEUCC_Stop')`) === 'Stop',
@@ -569,8 +569,8 @@ check(
   "…('RULEUCC_RetaliateToggle') = 'None' (kein Mapping -> UNITCOMMAND_None)",
 )
 
-// SimCallback (Cfile:1359123): der Sink bekommt (Func, Args-als-Lua-Literal,
-// Auswahl-IDs); das Literal ist der Serialisierungs-SNAPSHOT (Kopie).
+// SimCallback (Cfile:1359123): the sink gets (func, args-as-lua-literal,
+// selection IDs); the literal is the serialization SNAPSHOT (copy).
 {
   let sink: [string, string, unknown] | null = null
   host.setGlobal('__uiSimCallbackSink', (f: string, a: string, ids: unknown) => {
@@ -586,7 +586,7 @@ check(
   check(argsOk === true, `SimCallback: Args-Snapshot als Lua-Literal auswertbar (${argsLua})`)
 }
 
-// GetSessionClients (Felder aus cfunc_GetSessionClientsL, Cfile:1321886-1321957).
+// GetSessionClients (fields from cfunc_GetSessionClientsL, Cfile:1321886-1321957).
 check(
   host.eval(`
     local c = GetSessionClients()
@@ -597,8 +597,8 @@ check(
 )
 
 // SessionSendChatMessage (Cfile:1322106-1322227): Snapshot + asynchrone
-// Zustellung an gamemain.ReceiveChat — msg.echo NACH dem Senden (chat.lua:759)
-// darf die zugestellte Kopie NICHT erreichen.
+// Delivery to gamemain.ReceiveChat — msg.echo AFTER sending (chat.lua:759)
+// may NOT reach the delivered copy.
 host.eval(`
   __chatTest = false
   import('/lua/ui/game/gamemain.lua').RegisterChatFunc(function(sender, data)
@@ -623,27 +623,27 @@ check(
 )
 
 console.log('\n== Der Tastatur-Pfad: Keymap, Executor, Fallbacks ==')
-// IN_InitKeyHandler (Cfile:1259476): die Engine hat beim Boot keyNames.lua +
-// keymapper.GetKeyMappings() geladen — die Keymap ist NICHT leer.
+// IN_InitKeyHandler (Cfile:1259476): the engine has keyNames.lua + when booting
+// keymapper.GetKeyMappings() loaded — the keymap is NOT empty.
 {
   const n = Number(
     host.eval(`local n = 0 for _ in pairs(__uiKeyActions) do n = n + 1 end return n`),
   )
   check(n > 30, `${n} Hotkeys aus keymapper.GetKeyMappings() geparst (defaultKeyMap.lua)`)
-  // Der Esc-Eintrag ist die Keymap-Aktion Nr. 1 (defaultKeyMap.lua:8 ->
+  // The Esc entry is keymap action #1 (defaultKeyMap.lua:8 ->
   // keyactions.lua:8, 'UI_Lua import(...).EscapeHandler()'), VK_ESCAPE=0x1B.
   check(
     host.eval(`return __uiKeyActions[27] ~= nil and string.find(__uiKeyActions[27], 'EscapeHandler', 1, true) ~= nil`) === true,
     `Esc ist gemappt: ${host.eval('return tostring(__uiKeyActions[27])')}`,
   )
 }
-// Executor-Weg Ende-zu-Ende: eigene Aktion -> ConExecute -> UI_Lua (der
-// Konsolenbefehl hinter fast jeder Keymap-Aktion, CConFunc_UI_Lua Cfile:423593).
+// Executor path end-to-end: own action -> ConExecute -> UI_Lua (the
+// Console command behind almost every keymap action, CConFunc_UI_Lua Cfile:423593).
 host.eval(`
   __keyTest = 0
   IN_AddKeyMapTable({ ['Ctrl-Shift-P'] = { action = 'UI_Lua __keyTest = __keyTest + 1' } })
 `)
-// VK von P = 0x50; Modifier-Bits Shift+Ctrl (Cfile:1259010-1259023).
+// CV of P = 0x50; Modifier bits Shift+Ctrl (Cfile:1259010-1259023).
 check(
   host.eval(`return __uiKeyMapExecute(80, true, true, false, false, 80)`) === true &&
     Number(host.eval('return __keyTest')) === 1,
@@ -654,13 +654,13 @@ check(
     Number(host.eval('return __keyTest')) === 1,
   'Auto-Repeat ohne keyRepeat-Flag wird verworfen (Cfile:1259049)',
 )
-// (Shift-P allein ist im Original WIRKLICH belegt — Patrol. Für den
-// Negativ-Test also ein VK, den keine Keymap kennt: 0x07 ist undefiniert.)
+// (Shift-P alone is REALLY documented in the original — Patrol. For the
+// Negative test i.e. a VK that no keymap knows: 0x07 is undefined.)
 check(
   host.eval(`return __uiKeyMapExecute(7, true, true, false, false, 7)`) === false,
   'unbelegte Taste -> kein Treffer, keine Aktion',
 )
-// Fokus blockt ALLE Hotkeys (Cfile:1259003-1259005) — auch passende.
+// Focus blocks ALL hotkeys (Cfile:1259003-1259005) - including matching ones.
 check(
   host.eval(`
     __mauiFocus = { __destroyed = false }
@@ -711,26 +711,26 @@ check(
     local m = import('/lua/ui/game/commandmode.lua').GetCommandMode()
     return m[1] == false
   `) === true,
-  'derselbe Befehl erneut schaltet ihn AUS (Toggle, Cfile:1255233)',
+  'the same command again turns it OFF (Toggle, Cfile:1255233)',
 )
 
-// WorldIsLoading: von der Provider-Kette gepflegt (ui-boot.lua) — nach
-// StopLoadingDialog ist die Welt nicht mehr am Laden.
+// WorldIsLoading: maintained by the provider chain (ui-boot.lua) — after
+// StopLoadingDialog the world is no longer loading.
 check(host.eval('return WorldIsLoading()') === false, 'WorldIsLoading() = false nach DoInitializing')
-// Der Enter-Fallback (Cfile:1263522-1263568) haengt am UI-Zustand: nur im
-// Spiel (sUIState = UIS_game, gesetzt von __uiStartGameUI) oeffnet Enter den
-// Chat. Diese Suite faehrt setupGameUi ohne die Provider-Kette — der Zustand
-// wird hier wie von func_StartGameUI gesetzt und der Fallback geprueft.
+// The Enter fallback (Cfile:1263522-1263568) depends on the UI state: only in
+// Game (sUIState = UIS_game, set by __uiStartGameUI) opens Enter
+// Chat. This suite runs setupGameUi without the provider chain — the condition
+// is set here as by func_StartGameUI and the fallback is checked.
 host.eval(`__uiState = 3`)
 check(
   host.eval(`return GetCurrentUIState()`) === 'game' &&
     host.eval(`return __uiKeyMapExecute(13, false, false, false, false, 13)`) === true,
-  'Enter ohne Keymap-Treffer geht an chat.ActivateChat (nur im Spiel, UIS_game=3)',
+  'Enter without keymap hit goes to chat.ActivateChat (in-game only, UIS_game=3)',
 )
 
-// RestartSession (Cfile:1263968): ohne Sink ist die Session nicht restartbar —
-// der Aufruf ist dann ein No-Op, KEIN Fehler; mit Sink laeuft der Neustart.
-check(host.eval('return SessionCanRestart()') === false, 'SessionCanRestart = false ohne Engine-Naht')
+// RestartSession (Cfile:1263968): without sink the session cannot be restarted —
+// the call is then a no-op, NOT an error; Sink restarts.
+check(host.eval('return SessionCanRestart()') === false, 'SessionCanRestart = false without engine seam')
 host.eval('RestartSession()')
 {
   let restarted = false
@@ -739,7 +739,7 @@ host.eval('RestartSession()')
   })
   check(host.eval('return SessionCanRestart()') === true, 'SessionCanRestart = true mit Naht')
   host.eval('RestartSession()')
-  check(restarted, 'RestartSession loest den Neustart aus')
+  check(restarted, 'RestartSession triggers the restart')
 }
 
 // === IsAlly/IsEnemy/IsNeutral (scr_UserInits, Cfile:1361954-1362085) ===

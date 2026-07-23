@@ -1,15 +1,15 @@
 __units = {}
 __nextUnitId = 1
 
--- KEIN Instanz-Fallback mehr. Fehlende Engine-Methoden sind nil und knallen
--- beim Aufruf — genau so soll es sein. Der frühere Feld-Stub lieferte für JEDEN
--- unbekannten Schlüssel eine (truthy!) Funktion; damit wurde in unit.lua:143
--- (self.FxDamage1Amount = self.FxDamage1Amount or damageamounts) die Stub-
--- FUNKTION statt der Zahl zugewiesen. Instanz-FELDER müssen nil bleiben.
+-- NO more instance fallback. Missing engine methods are bad and bad
+-- when called - that's exactly how it should be. The former field stub delivered for EVERYONE
+-- unknown key a (truthy!) function; This became unit.lua:143
+-- (self.FxDamage1Amount = self.FxDamage1Amount or damageamounts) the stub
+-- FUNCTION assigned instead of the number. Instance FIELDS must remain nil.
 
--- Engine-Globals, die Unit-OnCreate braucht ------------------------------
+-- Engine globals that Unit-OnCreate needs --------------------------------
 
--- TrashBag: Original aus trashbag.lua, sonst minimaler Ersatz.
+-- TrashBag: Original from trashbag.lua, otherwise minimal replacement.
 do
   local ok, mod = pcall(import, '/lua/system/trashbag.lua')
   if ok and mod and mod.TrashBag then
@@ -22,16 +22,16 @@ do
   end
 end
 
--- Sound{}: Blueprint-DSL-Konstruktor -> Argument zurueck
+-- Sound{}: Blueprint DSL constructor -> return argument
 Sound = Sound or function(t) return t end
 
--- Scenario: Sim-Global mit den Kartendaten (Marker). Minimal leer, damit
--- OnCreate-Pfade wie GetMarkers() (scenarioutilities.lua) fehlerfrei laufen;
--- echte Marker aus der geladenen Karte kommen spaeter.
+-- Scenario: Sim-Global with the map data (markers). Minimally empty, so that
+-- OnCreate paths such as GetMarkers() (scenarioutilities.lua) run without errors;
+-- Real markers from the loaded map come later.
 Scenario = Scenario or { MasterChain = { _MASTERCHAIN_ = { Markers = {} } }, Armies = {}, Props = {} }
 
 -- categories / EntityCategory*: echt in engineGlobals.ts (Ausdrucksbaum über
--- die Blueprint-Categories-Liste), NICHT hier.
+-- the Blueprint Categories list), NOT here.
 
 -- No brain/economy/navigator fallbacks here. installEconomy and installMotion
 -- run earlier in the engine boot (see engine.ts) and define the real ones;
@@ -41,9 +41,9 @@ Scenario = Scenario or { MasterChain = { _MASTERCHAIN_ = { Markers = {} } }, Arm
 -- Weapons: the engine instantiates them from the blueprint, using the Lua
 -- class from the unit script's Weapons table (keyed by the weapon Label).
 -- Base class is Weapon from /lua/sim/Weapon.lua (Class(moho.weapon_methods)).
--- Das Skelett je Blueprint liegt in bones.lua (__unitBones, __setBones ueber
--- __beginBones/__addBone/__finishBones) — mit Ruhepose, nicht nur Namen: ohne
--- Knochen-Transform gibt es keine Muendungsposition und damit kein Projektil.
+-- The skeleton for each blueprint is in bones.lua (__unitBones, __setBones above
+-- __beginBones/__addBone/__finishBones) — with rest pose, not just names: without
+-- Bone transform there is no muzzle position and therefore no projectile.
 
 function __createWeapons(u, bp)
   u.__weapons = {}
@@ -64,24 +64,24 @@ function __createWeapons(u, bp)
     w.__enabled = true
     u.__weapons[i] = w
 
-    -- Und dann ruft die Engine OnCreate — genau wie auf der Unit selbst.
+    -- And then the engine calls OnCreate — just like on the unit itself.
     --
-    -- Das ist kein Detail: DefaultProjectileWeapon.OnCreate endet mit
-    -- ChangeState(self, self.IdleState) (defaultweapons.lua:87), und erst der
-    -- IdleState startet die Zustandsmaschine der Waffe. Ohne OnCreate lief sie
-    -- gar nicht — bis irgendein spaeterer Zustandswechsel sie doch anwarf.
+    -- This is not a detail: DefaultProjectileWeapon.OnCreate ends with
+    -- ChangeState(self, self.IdleState) (defaultweapons.lua:87), and only the
+    -- IdleState starts the weapon's state machine. It ran without OnCreate
+    -- not at all - until some later change of state triggered it.
     --
-    -- Folge: der Overcharge der ACU (IdleState.Main -> StartEconomyDrain,
-    -- defaultweapons.lua:404) lud seine 5000 Energie nicht beim Start auf
-    -- (wo der Startvorrat sie deckt), sondern IRGENDWANN spaeter — bei leerer
-    -- Kasse. Dann fordert er 500 Energie/Tick, bekommt bei 2/Tick Einkommen
-    -- eine Rate von 0.004, wird nie fertig und verhungert nebenbei jede Fabrik.
-    -- Die Reihenfolge der Engine ist die Loesung, nicht ein Sonderfall.
+    -- Consequence: the overcharge of the ACU (IdleState.Main -> StartEconomyDrain,
+    -- defaultweapons.lua:404) did not charge its 5000 energy at startup
+    -- (where the starting supply covers them), but SOMETIME later - when the supply is empty
+    -- Checkout. Then he demands 500 energy/tick and gets income at 2/tick
+    -- a rate of 0.004, never finishes and starves every factory along the way.
+    -- The order of the engine is the solution, not a special case.
     if w.OnCreate then w:OnCreate() end
   end
 end
 
--- Unit spawnen: Original-Script-Klasse instanziieren + OnCreate ----------
+-- Spawn unit: instantiate original script class + OnCreate ----------
 function __spawnUnit(scriptPath, bpId, x, y, z, army, complete)
   local bp = __registered.Unit[bpId]
   if not bp then return -1, 'blueprint not registered: ' .. tostring(bpId) end
@@ -92,32 +92,32 @@ function __spawnUnit(scriptPath, bpId, x, y, z, army, complete)
   local u = cls()
   local id = __nextUnitId
   __nextUnitId = id + 1
-  -- IsUnit(e) unterscheidet die Arten (Projektile haben auch ein Blueprint).
+  -- IsUnit(e) distinguishes the types (projectiles also have a blueprint).
   u.__isUnit = true
   u.__bp = bp
   u.__id = id
   u.__army = army
   u.__brain = __getBrain(army)
   u.__pos = { x, y, z }
-  -- Das Skelett aus dem Modell (siehe __setBones). Es muss VOR OnCreate stehen:
-  -- die Waffen pruefen ihre Turm-Knochen beim Aufbau (weapon.lua:67).
+  -- The skeleton from the model (see __setBones). It must be BEFORE OnCreate:
+  -- the weapons test their turret bones during construction (weapon.lua:67).
   u.__bones = __unitBones[string.lower(bpId)] or { names = {}, xform = {}, index = {} }
   u.__heading = 0
   u.__navigator = __getNavigator(id)
-  -- echte Felder (nicht der wrapInstance-Stub) für die Physik-Fortschreibung
+  -- real fields (not the wrapInstance stub) for the physics update
   u.__goal = false
   u.__speed = 0
   u.__health = (bp.Defense and bp.Defense.MaxHealth) or 0
   u.__fraction = 1
-  -- Erstellungs-Tick: die Build-/Wreckage-Shader zaehlen ihr Alter darueber
+  -- Build tick: the build/wreckage shaders count their age above this
   -- (mesh.fx: material.x = time - creationTime).
   u.__spawnTick = __gameTick or 0
-  -- Engine-bereitgestellte Instanz-Felder (vor OnCreate vorhanden)
+  -- Engine-provided instance fields (exists before OnCreate)
   u.Trash = TrashBag()
   __units[id] = u
 
-  -- Blueprint-Ökonomie in die Engine-Ökonomie der Armee einklinken (Original:
-  -- CEconomy im CArmyImpl; die Unit registriert Produktion/Unterhalt).
+  -- Integrate blueprint economics into the army's engine economics (original:
+  -- CEconomy in CARmyImpl; the unit registers production/maintenance).
   local e = bp.Economy or {}
   __econRegister(army, id,
     e.ProductionPerSecondMass or 0, e.ProductionPerSecondEnergy or 0,
@@ -127,10 +127,10 @@ function __spawnUnit(scriptPath, bpId, x, y, z, army, complete)
     -- (mex stall, Cfile:953936-953944) — only ACUs/sACUs carry it.
     e.NaturalProducer == true)
 
-  -- OnPreCreate VOR OnCreate — so ruft es die Engine (Cfile: OnPreCreate
-  -- @943748, danach OnCreate @944007). Dort entstehen self.Sync (SyncMeta),
-  -- self.Trash und self.EventCallbacks; ohne diesen Schritt laufen spaeter
-  -- z. B. DoUnitCallbacks (unit.lua:2815) ins Leere.
+  -- OnPreCreate BEFORE OnCreate — this is how the engine calls it (Cfile: OnPreCreate
+  -- @943748, then OnCreate @944007). This is where self.Sync (SyncMeta) is created,
+  -- self.Trash and self.EventCallbacks; without this step run later
+  -- e.g. B. DoUnitCallbacks (unit.lua:2815) into the void.
   local okPre, errPre = pcall(function() u:OnPreCreate() end)
   if not okPre then return id, tostring(errPre) end
 
@@ -141,9 +141,9 @@ function __spawnUnit(scriptPath, bpId, x, y, z, army, complete)
   local okW, errW = pcall(function() __createWeapons(u, bp) end)
   if not okW then return id, tostring(errW) end
 
-  -- OnCreate läuft als Thread (Original: Unit-Logik ist kooperativ). Der erste
-  -- Slice läuft sofort (Sofort-Zustand); WaitTicks/ForkThread darin laufen auf
-  -- den folgenden Beats weiter. Fallback ohne Scheduler: direkter pcall.
+  -- OnCreate runs as a thread (original: unit logic is cooperative). The first
+  -- Slice runs immediately (immediate state); WaitTicks/ForkThread in it run on
+  -- the following beats. Fallback without scheduler: direct pcall.
   local ok, err
   if __startThread then
     ok, err = __startThread(function() u:OnCreate() end)
@@ -152,9 +152,9 @@ function __spawnUnit(scriptPath, bpId, x, y, z, army, complete)
   end
   if not ok then return id, tostring(err) end
 
-  -- Fertig platzierte Units (Karten-Startunits) bekommen von der Engine direkt
-  -- OnStopBeingBuilt — daher forkt jede ACU dort GiveInitialResources und die
-  -- Armee erhaelt ihren Startvorrat. Baustellen bekommen das erst bei
+  -- Completely placed units (card starting units) are received directly from the engine
+  -- OnStopBeingBuilt — so every ACU there forks GiveInitialResources and the
+  -- Army receives its starting supplies. Construction sites only get this
   -- Fertigstellung (siehe __finishUnit).
   if complete ~= false then
     local ok2, err2
@@ -168,9 +168,9 @@ function __spawnUnit(scriptPath, bpId, x, y, z, army, complete)
   return id, ''
 end
 
--- Baustelle: wie __spawnUnit, aber UNFERTIG (FractionComplete 0, Health 0,
--- IsBeingBuilt) — ohne OnStopBeingBuilt. Produktion/Unterhalt bleiben inaktiv
--- bis zur Fertigstellung.
+-- Construction site: like __spawnUnit, but UNFINISHED (FractionComplete 0, Health 0,
+-- IsBeingBuilt) — without OnStopBeingBuilt. Production/maintenance remains inactive
+-- until completion.
 function __spawnBuildSite(scriptPath, bpId, x, y, z, army)
   local id, err = __spawnUnit(scriptPath, bpId, x, y, z, army, false)
   if id < 0 then return id, err end
@@ -182,9 +182,9 @@ function __spawnBuildSite(scriptPath, bpId, x, y, z, army)
   return id, err
 end
 
--- Fertigstellung einer Baustelle: die Engine setzt den Zustand und ruft dann
--- OnStopBeingBuilt auf der Unit (Original-Kette; dort schalten Gebaeude ihre
--- Produktion ein, Fabriken ihre Bau-Caps usw.).
+-- Completion of a construction site: the engine sets the status and then calls
+-- OnStopBeingBuilt on the unit (original chain; buildings switch theirs there
+-- Production stops, factories their construction caps, etc.).
 function __finishUnit(id, builderId)
   local u = __units[id]
   if not u then return false, 'unknown unit ' .. tostring(id) end
@@ -202,10 +202,10 @@ function __finishUnit(id, builderId)
   return ok, (ok and '' or tostring(err))
 end
 
--- Alle Units in einem Aufruf lesen (ein Eval pro Beat für den Renderer/Worker).
--- EIN Zustandsabbild einer Unit. Frueher gab es zwei — __readUnit ohne
--- fraction/moving, __readAllUnits ohne mesh. Zwei Abbilder derselben Sache
--- laufen garantiert auseinander; wer dann welches liest, entscheidet der Zufall.
+-- Read all units in one call (one eval per beat for the renderer/worker).
+-- ONE state image of a unit. There used to be two — __readUnit without
+-- fraction/moving, __readAllUnits without mesh. Two images of the same thing
+-- are guaranteed to diverge; Whoever reads which one is decided by chance.
 -- The unit's active order for the command graph (UICommandGraph draws
 -- order lines + waypoint markers per UNITCOMMAND_*, params from
 -- commandgraphparams.lua).
@@ -288,28 +288,28 @@ local function readRow(id, u)
     born = u.__spawnTick or 0,
     mesh = u.__meshBp,
     army = u.__army or 1,
-    -- „idle" im Sinn der Engine (die Idle-Sets am UserArmy, Cfile:1352334-1352374,
-    -- werden aus dem TASK-Zustand gepflegt): kein Bewegungsziel, kein laufender
-    -- oder wartender Bau-Auftrag, keine Fabrik-Produktion — und eine BAUSTELLE
-    -- ist nicht leerlaufend, sie ist noch gar nicht in Betrieb. Ein bauender
-    -- Ingenieur steht still und ist trotzdem NICHT idle.
+    -- "idle" in the sense of the engine (the idle sets on UserArmy, Cfile:1352334-1352374,
+    -- are maintained from the TASK state): no movement target, no running
+    -- or waiting construction order, no factory production - and a CONSTRUCTION SITE
+    -- is not idle, it is not even in operation yet. A building one
+    -- Engineer stands still and is still NOT idle.
     idle = not moving
       and (u.__fraction or 1) >= 1
       and not __builderBusy(id)
       and (u.__buildQueue == nil or u.__buildQueue[1] == nil),
-    -- Die Bau-Warteschlange einer Fabrik ({ id, count }) — die UI zeigt sie an
-    -- (construction.lua:1620), also gehoert sie in den Zustand, den die Sim meldet.
+    -- A factory's build queue ({ id, count }) — the UI displays it
+    -- (construction.lua:1620), so it belongs to the status that the sim reports.
     buildQueue = u.__buildQueue or {},
   }
 end
 
--- Der Unit-Zustand als JSON-STRING.
+-- The unit state as a JSON STRING.
 --
--- Dieselbe Falle wie beim maui-Snapshot: ein Rueckgabewert aus Lua nach JS bleibt
--- im wasmoon-Registry haengen und wird nie eingesammelt. Der Worker liest den
--- Zustand ZEHNMAL PRO SEKUNDE — die Sim-VM wuerde langsam aber sicher volllaufen.
--- Deshalb uebergibt Lua einen String an eine JS-Funktion (LuaHost.pull), statt
--- eine Tabelle zurueckzugeben.
+-- The same trap as with the Maui snapshot: a return value from Lua to JS remains
+-- hangs in the wasmoon registry and is never collected. The worker reads it
+-- Condition TEN TIMES PER SECOND — the Sim VM would slowly but surely fill up.
+-- That's why Lua passes a string to a JS function (LuaHost.pull) instead
+-- to return a table.
 local function jstr(s)
   s = tostring(s)
   s = string.gsub(s, '\\', '\\\\')

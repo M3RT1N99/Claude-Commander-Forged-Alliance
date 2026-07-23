@@ -21,15 +21,15 @@ const suites = readdirSync(here)
   .sort()
 
 if (suites.length === 0) {
-  console.error(`Keine Verify-Suite passt zu "${filter}".`)
+  console.error(`No verification suite matches "${filter}".`)
   process.exit(1)
 }
 
 const results: { suite: string; ok: boolean }[] = []
 for (const suite of suites) {
   console.log(`\n── ${suite} ${'─'.repeat(Math.max(0, 60 - suite.length))}`)
-  // Relativer Pfad + cwd auf die Projektwurzel — der Absolutpfad enthält
-  // Leerzeichen und würde mit shell:true zerbrechen.
+  // Relative path + cwd to the project root — which contains absolute path
+  // spaces and would break with shell:true.
   // --import registers the .lua text loader so engine Lua can live in real
   // .lua files (Vite does the same through `?raw`).
   const r = spawnSync('npx', ['tsx', '--import', './scripts/register-lua.mjs', `scripts/${suite}`], {
@@ -41,7 +41,7 @@ for (const suite of suites) {
 }
 
 console.log(`\n${'='.repeat(64)}\nZusammenfassung:`)
-for (const { suite, ok } of results) console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${suite}`)
+for (const { suite, ok } of results) console.log(`  ${ok ? 'PASS' : 'FAIL'} ${suite}`)
 const failed = results.filter((r) => !r.ok)
 console.log(failed.length === 0 ? `\nALLE ${results.length} SUITEN BESTANDEN` : `\n${failed.length}/${results.length} SUITEN FEHLGESCHLAGEN`)
 process.exit(failed.length === 0 ? 0 : 1)

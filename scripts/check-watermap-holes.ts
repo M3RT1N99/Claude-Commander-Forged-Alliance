@@ -85,10 +85,10 @@ for (const dir of dirs) {
   if (holes > 0 || r2 < 0.95) {
     console.log(
       `${dir}: G ≈ ${a.toFixed(4)}·depth + ${b.toFixed(3)}  R²=${r2.toFixed(3)}  ` +
-        `Löcher: ${holes} (${holePct}% der Unterwasser-Texel)`,
+        `Holes: ${holes} (${holePct}% of underwater Texels)`,
     )
   }
   if (!worst || holes > worst.holes) worst = { map: dir, holes }
 }
 
-console.log(`\nSchlimmste Karte: ${worst?.map} (${worst?.holes} Löcher)`)
+console.log(`\nWorst card: ${worst?.map} (${worst?.holes} holes)`)

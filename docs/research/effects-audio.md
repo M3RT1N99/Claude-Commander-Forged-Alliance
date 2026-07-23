@@ -1,52 +1,52 @@
 # agent5
 
 ## Summary
-Effekte in SupCom:FA sind vollständig datengetrieben: 2.724 Effekt-Blueprints (Lua-DSL-Dateien `*_emit.bp` in `effects.scd`) in drei Typen — EmitterBlueprint (Partikel, 2.437), TrailEmitterBlueprint (Poly-Trails, 184), BeamBlueprint (Beams, 103). Ein Emitter ist im Kern eine Textur + Ramp-Textur + 21 Kurven (je `XRange` + Keys `{x=Zeit_in_Ticks, y=Mittelwert, z=Zufalls-Spread}`) + 13 Flags; die Partikel-Integration (Position, Rotation, Größe, Frame-Animation, Alpha=t/lifetime→Ramp-U) passiert komplett analytisch im Vertex-Shader (`effects/particle.fx`), d.h. sie ist 1:1 in WebGL/WebGPU nachbaubar. Lua-Skripte referenzieren Emitter nur über Pfad-Strings, gebündelt in `lua/EffectTemplates.lua` (~586 Templates) und erzeugt über Engine-Funktionen `CreateEmitterAtBone/CreateAttachedEmitter/CreateTrail/CreateBeamEmitterOnEntity`. Audio ist XACT3: 78 `.xwb` Wave Banks + 80 `.xsb` Sound Banks + `SupCom.xgs` unter `<FA>/sounds/` (NICHT in einer .scd!) — alle Waves sind unkomprimiertes PCM16 (32 kHz mono SFX / 44,1 kHz Stereo Musik), Extraktion ist trivial; Blueprints referenzieren Sounds als `Sound { Bank='UEL', Cue='UEL0201_Move_Loop', LodCutoff='UnitMove_LodCutoff' }`, insgesamt 1.896 Cues.
+Effects in SupCom:FA are completely data-driven: 2,724 effect blueprints (Lua DSL files `*_emit.bp` in `effects.scd`) in three types — EmitterBlueprint (Particles, 2,437), TrailEmitterBlueprint (Poly-Trails, 184), BeamBlueprint (Beams, 103). An emitter is essentially a texture + ramp texture + 21 curves (each `XRange` + keys `{x=Zeit_in_Ticks, y=Mittelwert, z=Zufalls-Spread}`) + 13 flags; The particle integration (position, rotation, size, frame animation, Alpha=t/lifetime→Ramp-U) happens completely analytically in the vertex shader (`effects/particle.fx`), i.e. it can be recreated 1:1 in WebGL/WebGPU. Lua scripts only reference emitters via path strings, bundled in `lua/EffectTemplates.lua` (~586 templates) and generated via engine functions `CreateEmitterAtBone/CreateAttachedEmitter/CreateTrail/CreateBeamEmitterOnEntity`. Audio is Blueprints reference sounds as `Sound { Bank='UEL', Cue='UEL0201_Move_Loop', LodCutoff='UnitMove_LodCutoff' }`, totaling 1,896 cues.
 
 ## Key Facts
-- Emitter-Blueprints liegen NUR in gamedata/effects.scd unter effects/Emitters/ — 2724 Dateien: 2437 EmitterBlueprint, 184 TrailEmitterBlueprint, 103 BeamBlueprint (keine _emit.bp in units/projectiles/env.scd).
-- Das .bp-Format ist reines Lua: die Datei ruft die globale Funktion EmitterBlueprint{...} / TrailEmitterBlueprint{...} / BeamBlueprint{...} auf (definiert in mohodata.scd → lua/system/Blueprints.lua); BlueprintId defaultet auf den kleingeschriebenen Dateipfad.
-- Ein EmitterBlueprint hat 21 Kurven (SizeCurve, X/Y/ZDirectionCurve, EmitRateCurve, LifetimeCurve, VelocityCurve, X/Y/ZAccelCurve, ResistanceCurve, Start/EndSizeCurve, InitialRotationCurve, RotationRateCurve, FrameRateCurve, TextureSelectionCurve, X/Y/ZPosCurve, RampSelectionCurve) — jede mit XRange + Keys {x,y,z}.
-- Kurven-Auswertung (SEfxCurve::GetValue): lineare Interpolation von y UND z zwischen den Keys, dann Rückgabe (rand()-0.5)*z + y — z ist also die Zufalls-Streubreite, nicht ein dritter Wert.
-- Zeiteinheit aller Kurven/Lifetimes sind Sim-Ticks (10/s); der Shader bekommt time = tick + frameDelta. Lifetime = -1 bedeutet unendlich.
-- Die komplette Partikel-Physik steckt im Vertex-Shader effects/particle.fx: ohne Drag pos = P0 + V*t + 0.5*A*t^2, mit Drag (ParticleResistance) pos = (dz*A - dy*V)*(e^(-dx*t)-1) + dy*A*t + P0; Größe = Size.x + Size.y*t; Rotation = angle0 + rotRate*t.
-- Farbe = Partikeltextur * Ramp-Textur; die Ramp wird mit U = t/lifetime und V = RampSelection gesampelt (Ramp kodiert Farbe+Alpha über die Lebenszeit). 747 Partikeltexturen liegen in textures.scd unter textures/particles/.
-- BlendMode-Mapping (aus CWorldParticles.cpp ResolveParticleTechniqueSuffix): 0=ALPHABLEND, 1=MODULATEINVERSE, 2=MODULATE2XINVERSE, 3=ADD, 4=PREMODALPHA, 5=REFRACT. Häufigster Wert in den Daten ist 3 (ADD, ~1744x), dann 0 (~658x).
-- Trails (TrailEmitterBlueprint) sind Ribbon/Poly-Trails mit TrailLength, Size, TextureRepeatRate, RepeatTexture + RampTexture — erzeugt per CreateTrail(entity,bone,army,bp).
-- Projektil-Trails: lua/sim/DefaultProjectiles.lua definiert FxTrails (Liste von EmitterBlueprints via CreateEmitterOnEntity), PolyTrail/PolyTrails (TrailEmitterBlueprints via CreateTrail) und Beams (BeamBlueprints via CreateBeamEmitterOnEntity) — Klassen EmitterProjectile, SinglePolyTrailProjectile, MultiCompositeEmitterProjectile usw.
-- Mündungsfeuer: lua/sim/defaultweapons.lua PlayFxMuzzleSequence -> CreateAttachedEmitter(unit, muzzleBone, army, v):ScaleEmitter(FxMuzzleFlashScale) über die Tabelle FxMuzzleFlash (typischerweise ein EffectTemplate).
-- Einschläge/Explosionen: lua/defaultexplosions.lua + lua/EffectUtilities.lua (CreateEffects, CreateBoneEffects, CreateEffectsWithOffset, CreateRandomEffects) iterieren über EffectTemplate-Tabellen aus lua/EffectTemplates.lua (~586 Template-Tabellen, 180 KB, Pfade zusammengesetzt aus EmtBpPath='/effects/emitters/').
-- Sounds liegen NICHT in einer .scd, sondern im Klartext-Ordner <FA>/sounds/: 78 *.xwb, 80 *.xsb, 1 SupCom.xgs, plus sounds/Voice/{US,DE}. Engine: AudioEngine::Create("/sounds") enumeriert *.xwb und *.xsb und lädt SupCom.xgs.
-- XWB-Header ist 'WBND' (Version 43 / HeaderVersion 42) mit 5 Segmenten (BANKDATA@0x34, ENTRYMETADATA@0x94, SEEKTABLES, ENTRYNAMES, ENTRYWAVEDATA); Entry-Metadaten sind 24 Byte je Eintrag (Duration, MiniWaveFormat, PlayRegion-Offset+Länge).
-- ALLE FA-Waves sind PCM (formatTag=0), 16 bit: SFX 32000 Hz mono (blockAlign 2), Musik 44100 Hz stereo (blockAlign 4, streaming-Bank mit alignment 2048) — kein XMA/ADPCM/WMA, also kein Decoder nötig, nur WAV-Header davorschreiben.
-- XSB-Header ist 'SDBK' (Tool/Format-Version 43); Felder: numSimpleCues@0x13, numComplexCues@0x15, numWaveBanks@0x1B, numSounds@0x1C, cueNamesLength@0x1E, simpleCuesOffset@0x22, complexCuesOffset@0x26, cueNamesOffset@0x2A, waveBankNameTableOffset@0x3A (64 Byte/Name), soundsOffset@0x46, soundBankName@0x4A (64 Byte). Cue-Namen sind eine null-getrennte Stringliste.
-- Blueprint-Sound-Referenz: Audio = { AmbientMove = Sound { Bank='UEL', Cue='UEL0201_Move_Loop', LodCutoff='UnitMove_LodCutoff' }, ... }; die globale Lua-Funktion Sound{} baut ein CSndParams (mBank, mCue, mLodCutoff) und löst zur Laufzeit BankId+CueId auf. Insgesamt 1896 Cues über alle 80 .xsb.
-- Sound-Lua-API: user-side PlaySound(sndParams, prepareOnly) / StopSound(handle,[immediate]) / SetVolume(category,vol) / PlayVoice(params,duck); sim-side PlayLoop(self,sndParams) / StopLoop(self,handle); Entity hat PlaySound und SetAmbientSound, Weapon hat PlaySound(bp.Audio.Fire).
-- Musiksystem: lua/UserMusic.lua — Battle- und Peace-Cues aus Bank 'Music' (Cues: Main_Menu, Base_Building, Battle), Umschaltung nach 20 Battle-Events, Rückschaltung nach 200 Ticks Ruhe; Ducking ist in CUserSoundManager per XACT-Variablen 'Duck'/'DuckLength' implementiert.
+- Emitter blueprints are ONLY in gamedata/effects.scd under effects/Emitters/ — 2724 files: 2437 EmitterBlueprint, 184 TrailEmitterBlueprint, 103 BeamBlueprint (no _emit.bp in units/projectiles/env.scd).
+- The .bp format is pure Lua: the file calls the global function EmitterBlueprint{...} / TrailEmitterBlueprint{...} / BeamBlueprint{...} (defined in mohodata.scd → lua/system/Blueprints.lua); BlueprintId defaults to the lowercase file path.
+- An EmitterBlueprint has 21 curves (SizeCurve, X/Y/ZDirectionCurve, EmitRateCurve, LifetimeCurve, VelocityCurve, RampSelectionCurve) — each with XRange + Keys {x,y,z}.
+- Curve evaluation (SEfxCurve::GetValue): linear interpolation of y AND z between the keys, then return (rand()-0.5)*z + y — so z is the random spread, not a third value.
+- Time unit of all curves/lifetimes are Sim-Ticks (10/s); the shader gets time = tick + frameDelta. Lifetime = -1 means infinite.
+- The complete particle physics is in the vertex shader effects/particle.fx: without drag pos = P0 + V*t + 0.5*A*t^2, with drag (ParticleResistance) pos = (dz*A - dy*V)*(e^(-dx*t)-1) + dy*A*t + P0; Size = Size.x + Size.y*t; Rotation = angle0 + rotRate*t.
+- color = particle texture * ramp texture; the ramp is sampled with U = t/lifetime and V = RampSelection (ramp encodes color+alpha over lifetime). 747 particle textures are located in textures.scd under textures/particles/.
+- BlendMode mapping (from CWorldParticles.cpp ResolveParticleTechniqueSuffix): 0=ALPHABLEND, 1=MODULATEINVERSE, 2=MODULATE2XINVERSE, 3=ADD, 4=PREMODALPHA, 5=REFRACT. The most common value in the data is 3 (ADD, ~1744x), then 0 (~658x).
+- Trails (TrailEmitterBlueprint) are ribbon/poly trails with TrailLength, Size, TextureRepeatRate, RepeatTexture + RampTexture — created via CreateTrail(entity,bone,army,bp).
+- Projectile Trails: lua/sim/DefaultProjectiles.lua defines FxTrails (list of EmitterBlueprints via CreateEmitterOnEntity), PolyTrail/PolyTrails (TrailEmitterBlueprints via CreateTrail) and Beams (BeamBlueprints via CreateBeamEmitterOnEntity) — classes EmitterProjectile, SinglePolyTrailProjectile, MultiCompositeEmitterProjectile, etc.
+- Muzzle flash: lua/sim/defaultweapons.lua PlayFxMuzzleSequence -> CreateAttachedEmitter(unit, muzzleBone, army, v):ScaleEmitter(FxMuzzleFlashScale) via the table FxMuzzleFlash (typically an EffectTemplate).
+- Impacts/Explosions: lua/defaultexplosions.lua + lua/EffectUtilities.lua (CreateEffects, CreateBoneEffects, CreateEffectsWithOffset, CreateRandomEffects) iterate over EffectTemplate tables from lua/EffectTemplates.lua (~586 template tables, 180 KB, paths composed of EmtBpPath='/effects/emitters/').
+- Sounds are NOT in an .scd, but in the plain text folder <FA>/sounds/: 78 *.xwb, 80 *.xsb, 1 SupCom.xgs, plus sounds/Voice/{US,DE}. Engine: AudioEngine::Create("/sounds") enumerates *.xwb and *.xsb and loads SupCom.xgs.
+- XWB header is 'WBND' (Version 43 / HeaderVersion 42) with 5 segments (BANKDATA@0x34, ENTRYMETADATA@0x94, SEEKTABLES, ENTRYNAMES, ENTRYWAVEDATA); Entry metadata is 24 bytes per entry (Duration, MiniWaveFormat, PlayRegion offset+length).
+- ALL FA waves are PCM (formatTag=0), 16 bit: SFX 32000 Hz mono (blockAlign 2), music 44100 Hz stereo (blockAlign 4, streaming bank with alignment 2048) — no XMA/ADPCM/WMA, so no decoder necessary, just prefix WAV header.
+- XSB header is 'SDBK' (tool/format version 43); Fields: numSimpleCues@0x13, numComplexCues@0x15, numWaveBanks@0x1B, numSounds@0x1C, cueNamesLength@0x1E, simpleCuesOffset@0x22, complexCuesOffset@0x26, cueNamesOffset@0x2A, waveBankNameTableOffset@0x3A (64 Byte/Name), soundsOffset@0x46, soundBankName@0x4A (64 Bytes). Cue names are a zero-separated list of strings.
+- Blueprint Sound Reference: Audio = { AmbientMove = Sound { Bank='UEL', Cue='UEL0201_Move_Loop', LodCutoff='UnitMove_LodCutoff' }, ... }; the global Lua function Sound{} builds a CSndParams (mBank, mCue, mLodCutoff) and resolves BankId+CueId at runtime. A total of 1896 cues across all 80 .xsb.
+- Sound Lua API: user-side PlaySound(sndParams, prepareOnly) / StopSound(handle,[immediate]) / SetVolume(category,vol) / PlayVoice(params,duck); sim-side PlayLoop(self,sndParams) / StopLoop(self,handle); Entity has PlaySound and SetAmbientSound, Weapon has PlaySound(bp.Audio.Fire).
+- Music system: lua/UserMusic.lua — battle and peace cues from bank 'Music' (cues: Main_Menu, Base_Building, Battle), switching after 20 battle events, switching back after 200 ticks of rest; Ducking is implemented in CUserSoundManager via XACT variables 'Duck'/'DuckLength'.
 
 ## Details
 ## 1. Partikel/Emitter — Format & Parameter
 
 ### Dateiformat
-`gamedata/effects.scd` (ZIP) → `effects/Emitters/*.bp`. Klartext-Lua, Aufruf einer globalen Konstruktorfunktion:
+`gamedata/effects.scd` (ZIP) → `effects/Emitters/*.bp`. Plaintext Lua, calling a global constructor function:
 
-- `EmitterBlueprint { ... }` — 2437 Dateien
-- `TrailEmitterBlueprint { ... }` — 184 Dateien
-- `BeamBlueprint { ... }` — 103 Dateien
-- Gesamt 2724 (davon 2702 mit Suffix `_emit.bp`, 22 ohne).
+- `EmitterBlueprint { ... }` — 2437 files
+- `TrailEmitterBlueprint { ... }` — 184 files
+- `BeamBlueprint { ... }` — 103 files
+- Total 2724 (of which 2702 with suffix `_emit.bp`, 22 without).
 
-Registrierung in `mohodata.scd → lua/system/Blueprints.lua`: `LoadBlueprints()` scannt `/effects,/env,/meshes,/projectiles,/props,/units` nach `*.bp` und führt sie als Lua aus; die Funktionen `EmitterBlueprint/BeamBlueprint/TrailEmitterBlueprint` legen sie in `original_blueprints.{Emitter,Beam,TrailEmitter}` ab; `BlueprintId` = lowercase Quellpfad (also `/effects/emitters/xyz_emit.bp`) sofern nicht explizit gesetzt. Danach `RegisterEmitterBlueprint()` etc. an die Engine.
+Registration in `mohodata.scd → lua/system/Blueprints.lua`: `LoadBlueprints()` scans `/effects,/env,/meshes,/projectiles,/props,/units` for `*.bp` and executes them as Lua; Store the functions `EmitterBlueprint/BeamBlueprint/TrailEmitterBlueprint` in `original_blueprints.{Emitter,Beam,TrailEmitter}`; `BlueprintId` = lowercase source path (i.e. `/effects/emitters/xyz_emit.bp`) unless explicitly set. Then `RegisterEmitterBlueprint()` etc. to the engine.
 
-### EmitterBlueprint-Felder (verifiziert gegen REmitterBlueprint, size 0x284)
+### EmitterBlueprint fields (verified against REmitterBlueprint, size 0x284)
 Basis `REffectBlueprint`: `BlueprintId`, `HighFidelity/MedFidelity/LowFidelity` (bool, default 1).
 
 Skalare / Flags:
-| Feld | Default | Bedeutung |
+| field | Default | Meaning |
 |---|---|---|
 | `Lifetime` | 0 | Emitter-Lebensdauer in Ticks; `-1` = unendlich |
 | `Repeattime` | 0 | Zyklus-Länge (Kurven-XRange-Bezug) |
 | `TextureFramecount` | 0 | Frames im Textur-Strip (>1 ⇒ „Animate"-Technique) |
-| `TextureStripcount` | 1 | Anzahl Zeilen (Textur-Varianten) in der Textur |
+| `TextureStripcount` | 1 | Number of lines (texture variants) in the texture |
 | `Blendmode` | 0 | 0..5 (siehe unten) |
 | `SortOrder` | 0 | Render-Sortierung |
 | `LODCutoff` | 100 | Kamera-Distanz-Cutoff |
@@ -55,22 +55,22 @@ Skalare / Flags:
 | `Gravity` | false | |
 | `AlignRotation` | false | ⇒ Technique „Align" (Quad an Bewegungsrichtung) |
 | `AlignToBone` | false | ⇒ Technique „AlignToBone" |
-| `Flat` | false | ⇒ Technique „Flat" (XZ-Ebene statt Billboard) |
+| `Flat` | false | ⇒ Technique “Flat” (XZ plane instead of billboard) |
 | `EmitIfVisible` | true | |
 | `CatchupEmit` | true | |
 | `CreateIfVisible` | false | |
 | `ParticleResistance` | false | ⇒ Drag-Modell im Shader |
-| `InterpolateEmission` | true | Partikel entlang Bewegungsspur zwischen Ticks verteilen |
+| `InterpolateEmission` | true | Distribute particles along motion track between ticks |
 | `SnapToWaterline` | true | |
 | `OnlyEmitOnWater` | false | |
 | `Texture` | '' | z.B. `/textures/particles/line_white_add_06.dds` |
 | `RampTexture` | '' | z.B. `/textures/particles/ramp_antimatter_01.dds` |
 
-### Die 21 Kurven
-Reihenfolge laut `REmitterBlueprint` bzw. Enum `EEmitterCurve`:
+### The 21 curves
+Sequence according to `REmitterBlueprint` or Enum `EEmitterCurve`:
 `SizeCurve, XDirectionCurve, YDirectionCurve, ZDirectionCurve, EmitRateCurve, LifetimeCurve, VelocityCurve, XAccelCurve, YAccelCurve, ZAccelCurve, ResistanceCurve, StartSizeCurve, EndSizeCurve, InitialRotationCurve, RotationRateCurve, FrameRateCurve, TextureSelectionCurve, XPosCurve, YPosCurve, ZPosCurve, RampSelectionCurve`
 
-Jede Kurve:
+Each curve:
 ```
 EmitRateCurve = { XRange = 4.00, Keys = { { x=2.044, y=25.643, z=0.000 }, ... } }
 ```
@@ -86,40 +86,40 @@ finde ersten Key mit key.x > interp
         y = lerp(prev.y, cur.y, f);  z = lerp(prev.z, cur.z, f)
 return (random01() - 0.5) * z + y
 ```
-(Datei: `faf-re/src/sdk/moho/effects/rendering/SEfxCurve.cpp:319`)
+(File: `faf-re/src/sdk/moho/effects/rendering/SEfxCurve.cpp:319`)
 
-In der eigenen Decomp verifiziert (Cfile/ForgedAlliance.exe.c) und als
+Verified in your own decomp (Cfile/ForgedAlliance.exe.c) and as
 `src/effects/curves.ts` umgesetzt (Suite: `scripts/verify-emitter-curves.ts`):
 - `Moho::SEfxCurve::GetValue` @0x514E50, Cfile:649014-649070. 0 Keys → 0.0
-  (:649030-649031); Scan `while (key.x <= t)` (:649049); t vor dem ersten Key
-  → Clamp auf first.y/z (:649054-649058); t auf/hinter dem letzten Key →
-  Clamp auf last.y/z (:649036-649045); sonst `(rand-0.5)*(preZ+(curZ-preZ)*f)
+  (:649030-649031); Scan `while (key.x <= t)` (:649049); t before the first key
+  → Clamp on first.y/z (:649054-649058); t on/behind the last key →
+  Clamp on last.y/z (:649036-649045); otherwise `(rand-0.5)*(preZ+(curZ-preZ)*f)
   + f*(curY-preY) + preY` (:649065-649067). rand = Mersenne-Twister × 2^-32,
-  Bereich [0,1), EIN Zug pro Aufruf (func_RandomFloatSafe :648929-648937).
-- GetValue bricht die Zeit NICHT um und liest XRange nicht. Der zyklische
-  Umbruch steht beim AUFRUFER: `t = fmod(TICKCOUNT - tick, Repeattime)` plus
+  Range [0,1), ONE move per invocation (func_RandomFloatSafe :648929-648937).
+- GetValue does NOT wrap time or read XRange. The cyclical one
+  The break is at the CALLER: `t = fmod(TICKCOUNT - tick, Repeattime)` plus
   Vorzeichen-Korrektur (floored modulo), Cfile:894655-894661 (EmitRate) bzw.
-  :894693-894698 (pro Partikel). `Repeattime = 0` → fmod = NaN → GetValue
-  clampt auf den ersten Key.
-- `func_MakeEmitterCurve` Cfile:649226-649274 baut die Laufzeit-Kurve:
-  Keys werden sortiert eingefügt (stabil aufsteigend nach x, sub_5151B0
-  :649185-649191); Kurve ohne Keys → Default XRange=10, ein Key {5,0,0}
-  (:649264-649271). In den echten Daten: 0 unsortierte Kurven, 159 Kurven
-  mit doppeltem x (Ergebnis dort = y des LETZTEN Keys mit gleichem x).
-- Blueprint-Feldreihenfolge der 21 Kurven: `REmitterBlueprint::Init`
-  Cfile:645017-645079 (= Liste oben). Die Laufzeit-Lanes (`mCurves`,
-  CEfxEmitter-Ctor Cfile:893987-894008) sind anders sortiert: XDir, YDir,
+  :894693-894698 (per particle). `Repeattime = 0` → fmod = NaN → GetValue
+  clamps to the first key.
+- `func_MakeEmitterCurve` Cfile:649226-649274 builds the runtime curve:
+  Keys are inserted sorted (stable ascending according to x, sub_5151B0
+  :649185-649191); Curve without keys → Default XRange=10, one key {5,0,0}
+  (:649264-649271). In the real data: 0 unsorted curves, 159 curves
+  with double x (result there = y of the LAST key with the same x).
+- Blueprint field order of the 21 curves: `REmitterBlueprint::Init`
+  Cfile:645017-645079 (= list above). The runtime lanes (`mCurves`,
+  CEfxEmitter-Ctor Cfile:893987-894008) are sorted differently: XDir, YDir,
   ZDir, EmitRate, Lifetime, Velocity, XAccel, YAccel, ZAccel, Resistance,
   Size, XPos, YPos, ZPos, StartSize, EndSize, InitialRotation, RotationRate,
   FrameRate, TextureSelection, RampSelection.
 
-Emitter-Laufzeit-Skalare (Enum `EEmitterParam`, per `effect:SetEmitterParam('name',v)` setzbar): `POSITION_X/Y/Z, TICKCOUNT, LIFETIME, REPEATTIME, TICKINCREMENT, BLENDMODE, FRAMECOUNT, USE_LOCAL_VELOCITY, USE_LOCAL_ACCELERATION, USE_GRAVITY, ALIGN_ROTATION, INTERPOLATE_EMISSION, TEXTURE_STRIPCOUNT, ALIGN_TO_BONE, SORTORDER, FLAT, SCALE, LODCUTOFF, EMITIFVISIBLE, CATCHUPEMIT, CREATEIFVISIBLE, SNAPTOWATERLINE, ONLYEMITONWATER, PARTICLERESISTANCE`.
+Emitter runtime scalars (Enum `EEmitterParam`, settable via `effect:SetEmitterParam('name',v)`): `POSITION_X/Y/Z, TICKCOUNT, LIFETIME, REPEATTIME, TICKINCREMENT, BLENDMODE, FRAMECOUNT, USE_LOCAL_VELOCITY, USE_LOCAL_ACCELERATION, USE_GRAVITY, ALIGN_ROTATION, INTERPOLATE_EMISSION, TEXTURE_STRIPCOUNT, ALIGN_TO_BONE, SORTORDER, FLAT, SCALE, LODCUTOFF, EMITIFVISIBLE, CATCHUPEMIT, CREATEIFVISIBLE, SNAPTOWATERLINE, ONLYEMITONWATER, PARTICLERESISTANCE`.
 
-### Wie die Engine sie abspielt (der entscheidende Teil für den Nachbau)
-`effects/particle.fx` (in effects.scd) enthält die komplette Simulation im **Vertex-Shader** `WorldVS`. Pro Partikel-Quad werden folgende Vertex-Attribute geliefert:
+### How the engine plays them (the crucial part for the replication)
+`effects/particle.fx` (in effects.scd) contains the complete simulation in the **vertex shader** `WorldVS`. The following vertex attributes are provided per particle quad:
 `Corner(float2 Quad-Ecke ±1)`, `Pos(float4: xyz=Spawn-Position, w=Startwinkel)`, `Size(float2: x=BeginSize, y=Size-Rate)`, `Velocity(float4: xyz=Geschwindigkeit, w=Rotationsrate)`, `Acceleration(float3)`, `inTime(float4: x=SpawnTime, y=Lifetime, z=Framerate, w=FrameSize)`, `inTexOffset(float3: x=Texturzeilen-Offset, y=Ramp-V, z=Zeilenhöhe)`, `dragCoeff(float3)`.
 
-Globale Shader-Var `time = tick + frameDelta` (Ticks!).
+Global shader var `time = tick + frameDelta` (ticks!).
 ```
 t = time - spawnTime;  alpha = t / lifetime;   // >=1 ⇒ Partikel tot
 DragEnabled? pos = (dz*A - dy*V)*(e^(-dx*t) - 1) + dy*A*t + P0
@@ -133,9 +133,9 @@ uv0 = (Corner+1)*0.5;  bei Animate: frame=floor(framerate*t); uv0.x = uv0.x*fram
 uv1 = (alpha, texOff.y)   // Ramp-Lookup!
 Farbe = tex2D(ParticleTex0, uv0) * tex2D(RampTex, uv1)
 ```
-Technique-Name = `TRamp` + [`Animate`] + [`Align` | `AlignToBone` | `Flat`] + `_<BLEND>`; zusätzlich `TLight_*` (LightParticle), `TBeam_OneTexture_*` / `TBeam_TwoTexture_*`, `TPolyTrail_*`.
+Technique name = `TRamp` + [`Animate`] + [`Align` | `AlignToBone` | `Flat`] + `_<BLEND>`; additionally `TLight_*` (LightParticle), `TBeam_OneTexture_*` / `TBeam_TwoTexture_*`, `TPolyTrail_*`.
 
-**BlendMode → Render-State** (aus `CWorldParticles.cpp:443 ResolveParticleTechniqueSuffix` + particle.fx):
+**BlendMode → Render State** (from `CWorldParticles.cpp:443 ResolveParticleTechniqueSuffix` + particle.fx):
 | Wert | Suffix | Blend (Src, Dst) |
 |---|---|---|
 | 0 | `_ALPHABLEND` | SrcAlpha, InvSrcAlpha |
@@ -144,8 +144,8 @@ Technique-Name = `TRamp` + [`Animate`] + [`Align` | `AlignToBone` | `Flat`] + `_
 | 3 | `_ADD` | SrcAlpha, One |
 | 4 | `_PREMODALPHA` | One, InvSrcAlpha |
 | 5 | `_REFRACT` | SrcAlpha, InvSrcAlpha + Refraktion (samplet Backbuffer) |
-Alle: Depth-Test Less, **kein** Depth-Write, Cull None.
-Häufigkeit in den Daten: 3(ADD) ≈1744, 0 ≈658, 1 ≈181, 2 ≈17, 4 ≈26, 5 ≈21.
+All: Depth-Test Less, **no** Depth-Write, Cull None.
+Frequency in the data: 3(ADD) ≈1744, 0 ≈658, 1 ≈181, 2 ≈17, 4 ≈26, 5 ≈21.
 
 ### Beams
 `BeamBlueprint` (RBeamBlueprint, size 0x84):
@@ -162,7 +162,7 @@ BeamBlueprint {
 }
 ```
 Runtime `SWorldBeam`: Start/End-Transform (mit Last-Transform für Interpolation), Width, StartColor/EndColor (Vector4), 2 Texturen, UShift/VShift/RepeatRate, BlendMode.
-Lua: `CreateBeamEmitter(bp,army)`, `CreateBeamEmitterOnEntity(entity,bone,army,bp)`, `CreateBeamEntityToEntity(e,b,other,b,army,bp)`, `CreateAttachedBeam(entity,bone,army,length,thickness,texture)`, `AttachBeamEntityToEntity(...)`. Beam-Params (`effect:SetBeamParam(name,v)`): `POSITION/ENDPOSITION (xyz), LENGTH, LIFETIME, STARTCOLOR(rgba), ENDCOLOR(rgba), THICKNESS, USHIFT, VSHIFT, REPEATRATE, LODCUTOFF`.
+Lua: `CreateBeamEmitter(bp,army)`, `CreateBeamEmitterOnEntity(entity,bone,army,bp)`, `CreateBeamEntityToEntity(e,b,other,b,army,bp)`, `CreateAttachedBeam(entity,bone,army,length,thickness,texture)`, `AttachBeamEntityToEntity(...)`. Beam Params (`effect:SetBeamParam(name,v)`): `POSITION/ENDPOSITION (xyz), LENGTH, LIFETIME, STARTCOLOR(rgba), ENDCOLOR(rgba), THICKNESS, USHIFT, VSHIFT, REPEATRATE, LODCUTOFF`.
 
 ### Trails (Ketten-/Poly-Trails)
 `TrailEmitterBlueprint` (RTrailBlueprint, size 0x80):
@@ -182,23 +182,23 @@ TrailEmitterBlueprint {
 ```
 Runtime `CEfxTrailEmitter` (size 0x1B8): `mTrailLength`, `mTotalTicks`, `mLife`, `mLength`. Render: `TPolyTrail_<BLEND>`, PS = `tex2D(Ramp, uv1) * tex2D(RepeatTex, uv0)`. Zusätzlich `EmitIfVisible`, `CatchupEmit`.
 
-## 2. Trails bei Projektilen
+## 2. Projectile trails
 `mohodata.scd → lua/sim/DefaultProjectiles.lua` — drei orthogonale Mechanismen, oft kombiniert:
-- **`FxTrails`** = Liste von *EmitterBlueprints* (Partikel-Rauchfahne), in `OnCreate`: `CreateEmitterOnEntity(self, army, fx):ScaleEmitter(FxTrailScale):OffsetEmitter(0,0,FxTrailOffset)`. Default `'/effects/emitters/missile_munition_trail_01_emit.bp'`.
+- **`FxTrails`** = List of *EmitterBlueprints* (particle smoke plume), in `OnCreate`: `CreateEmitterOnEntity(self, army, fx):ScaleEmitter(FxTrailScale):OffsetEmitter(0,0,FxTrailOffset)`. Default `'/effects/emitters/missile_munition_trail_01_emit.bp'`.
 - **`PolyTrail` / `PolyTrails` + `PolyTrailOffset` + `RandomPolyTrails`** = *TrailEmitterBlueprints* via `CreateTrail(self, -1, army, bp):OffsetEmitter(0,0,off)`.
 - **`Beams` / `BeamName`** = *BeamBlueprints* via `CreateBeamEmitterOnEntity(self, -1, army, bp)`.
 
-Klassenhierarchie: `Projectile` → `EmitterProjectile` → {`SingleBeamProjectile`, `MultiBeamProjectile`, `SinglePolyTrailProjectile`, `MultiPolyTrailProjectile`} → {`SingleCompositeEmitterProjectile`, `MultiCompositeEmitterProjectile`}; dazu `OnWaterEntryEmitterProjectile` (Trail-Wechsel bei Wassereintritt, `TrailDelay`, `EnterWaterSound`).
+Class hierarchy: `Projectile` → `EmitterProjectile` → {`SingleBeamProjectile`, `MultiBeamProjectile`, `SinglePolyTrailProjectile`, `MultiPolyTrailProjectile`} → {`SingleCompositeEmitterProjectile`, `MultiCompositeEmitterProjectile`}; plus `OnWaterEntryEmitterProjectile` (trail change when water enters, `TrailDelay`, `EnterWaterSound`).
 
 ## 3. Größenordnung
-- **2.724** Emitter-Familie-Blueprints (2437 Emitter / 184 Trail / 103 Beam) — alle in `effects.scd`.
+- **2,724** Emitter Family Blueprints (2437 Emitter / 184 Trail / 103 Beam) — all in `effects.scd`.
 - **747** Partikeltexturen (`textures.scd → textures/particles/`), inkl. `ramp_*.dds` Farbrampen.
-- **~586** Top-Level-Templates in `lua/EffectTemplates.lua` (180 KB), die Emitter-Pfade zu Effekt-Listen bündeln (z.B. `FireCloudMed01`, `ConcussionRingSml01`, `DefaultHitExplosion01`).
+- **~586** top-level templates in `lua/EffectTemplates.lua` (180 KB), which bundle emitter paths into effect lists (e.g. `FireCloudMed01`, `ConcussionRingSml01`, `DefaultHitExplosion01`).
 - **335** weitere Effekt-Entities (`effects/Entities/*` — Meshes + `_proj.bp` + `_script.lua`), plus `effects/Explosion`, `effects/Nuke`, `effects/QuantumWarhead`, `effects/EMPFluxWarhead`.
 - 11 `.fx`-Shader in effects.scd (`particle.fx`, `mesh.fx`, `terrain.fx`, `water2.fx`, `sky.fx`, `ui.fx`, `vision.fx`, `cartographic.fx`, `range.fx`, `primbatcher.fx`, `frame.fx`).
 
-### Lua-API der Engine (Effekte)
-Aus `EffectLuaStartupRegistrations.cpp` (Hilfetexte 1:1):
+### Engine Lua API (Effects)
+From `EffectLuaStartupRegistrations.cpp` (help texts 1:1):
 ```
 CreateEmitterAtEntity(entity, army, emitter_bp_name)
 CreateEmitterOnEntity(entity, army, emitter_bp_name)
@@ -228,25 +228,25 @@ effect:Destroy()
 ```
 `bone = -1` bedeutet Entity-Root.
 
-### Wie Unit-/Waffen-Skripte Effekte referenzieren
-- `lua/EffectTemplates.lua` definiert Tabellen aus Pfadstrings, z.B.
+### How unit/weapon scripts reference effects
+- `lua/EffectTemplates.lua` defines tables from path strings, e.g.
   `FireCloudMed01 = { EmtBpPath..'fire_cloud_06_emit.bp', EmtBpPath..'explosion_fire_sparks_01_emit.bp' }` mit `EmtBpPath = '/effects/emitters/'`; Kombination via `TableCat(...)`.
-- `lua/EffectUtilities.lua` ist die Verteil-Schicht: `CreateEffects(obj,army,tbl)`, `CreateEffectsWithOffset`, `CreateEffectsWithRandomOffset`, `CreateBoneEffects(obj,bone,army,tbl)`, `CreateBoneEffectsOffset`, `CreateBoneTableEffects`, `CreateRandomEffects`, `ScaleEmittersParam` — alle iterieren die Template-Tabelle und rufen `CreateEmitterAtEntity/AtBone/OnEntity`.
-- **Mündungsfeuer**: `mohodata → lua/sim/defaultweapons.lua`, `PlayFxMuzzleSequence(muzzle)` → `for k,v in self.FxMuzzleFlash do CreateAttachedEmitter(self.unit, muzzle, army, v):ScaleEmitter(self.FxMuzzleFlashScale) end`. Analog `FxChargeMuzzleFlash`, `FxRackChargeMuzzleFlash`.
-- **Explosionen/Einschläge**: `lua/defaultexplosions.lua` (`CreateDefaultHitExplosion`, `CreateScalableUnitExplosion`, `CreateFlash`, `CreateDebrisProjectiles`, …) verwendet `EffectTemplate.*` + `CreateEffects*`.
+- `lua/EffectUtilities.lua` is the distribution layer: `CreateEffects(obj,army,tbl)`, `CreateEffectsWithOffset`, `CreateEffectsWithRandomOffset`, `CreateBoneEffects(obj,bone,army,tbl)`, `CreateBoneEffectsOffset`, `CreateBoneTableEffects`, `CreateRandomEffects`, `ScaleEmittersParam` — all iterate the template table and call `CreateEmitterAtEntity/AtBone/OnEntity`.
+- **Muzzle flash**: `mohodata → lua/sim/defaultweapons.lua`, `PlayFxMuzzleSequence(muzzle)` → `for k,v in self.FxMuzzleFlash do CreateAttachedEmitter(self.unit, muzzle, army, v):ScaleEmitter(self.FxMuzzleFlashScale) end`. Analogous to `FxChargeMuzzleFlash`, `FxRackChargeMuzzleFlash`.
+- **Explosions/Impacts**: `lua/defaultexplosions.lua` (`CreateDefaultHitExplosion`, `CreateScalableUnitExplosion`, `CreateFlash`, `CreateDebrisProjectiles`, …) uses `EffectTemplate.*` + `CreateEffects*`.
 - **Collision-Beams**: `lua/defaultcollisionbeams.lua` + `mohodata → lua/sim/CollisionBeam.lua`.
 
 ## 4. AUDIO
 
 ### Ablageort & Format
-**Wichtig:** es gibt **keine** `sounds.scd`. Alle Audiodaten liegen unkomprimiert im Verzeichnis
+**Important:** there is **no** `sounds.scd`. All audio data is in the directory uncompressed
 `<FA>/sounds/`:
 - 78 × `*.xwb` — XACT Wave Banks (Magic `WBND`)
 - 80 × `*.xsb` — XACT Sound Banks (Magic `SDBK`)
-- 1 × `SupCom.xgs` — XACT Global Settings (Magic `XGSF`, 2666 B) — enthält Kategorien (Volume-Gruppen), RPC-Kurven, globale Variablen (`CameraDistance`, `ZoomPercent`, `Duck`, `DuckLength`, `Angle`, `*_LodCutoff`).
+- 1 × `SupCom.xgs` —
 - `<FA>/sounds/Voice/{US,DE}/` — Sprachbänke.
 
-Engine (`AudioEngine.cpp:3618 func_LoadSoundPath`): `EnumerateFiles(voicePath, "*.xwb", false, …)` dann `"*.xsb"`; `CUserSoundManager` ctor: `mVoiceEngine(AudioEngine::Create("/sounds"))`; `func_InitSound` lädt `/sounds/SupCom.xgs` über das VFS. Weitere Engines: `mAmbientEngine`, `mTutorialEngine`.
+Engine (`AudioEngine.cpp:3618 func_LoadSoundPath`): `EnumerateFiles(voicePath, "*.xwb", false, …)` then `"*.xsb"`; `CUserSoundManager` ctor: `mVoiceEngine(AudioEngine::Create("/sounds"))`; `func_InitSound` loads `/sounds/SupCom.xgs` via the VFS. Other engines: `mAmbientEngine`, `mTutorialEngine`.
 
 ### XWB-Header (Hex-verifiziert, Explosions.xwb / Music.xwb / UEL.xwb)
 ```
@@ -273,12 +273,12 @@ ENTRYMETADATA: 24 B je Eintrag:
   u32 LoopRegion.dwTotalSamples
 MINIWAVEFORMAT Bitfelder: tag[1:0], channels[4:2], samplesPerSec[22:5], blockAlign[30:23], bitsPerSample[31]
 ```
-**Messwerte:** ALLE Banks `tag=0` = **PCM**, `bits=1` = **16 Bit**.
-- SFX/Explosions/Units: 1 Kanal, 32000 Hz, blockAlign 2 (z.B. `0x810FA004`).
+**Measured values:** ALL banks `tag=0` = **PCM**, `bits=1` = **16 bit**.
+- SFX/Explosions/Units: 1 channel, 32000 Hz, blockAlign 2 (e.g. `0x810FA004`).
 - Musik: 2 Kanäle, 44100 Hz, blockAlign 4 (`0x82158888`), Streaming-Bank, alignment 2048.
-- `ENTRYNAMES`-Segment ist leer ⇒ Waves haben **keine Namen**, nur Indizes; die Namen kommen aus dem `.xsb`.
+- `ENTRYNAMES` segment is empty ⇒ Waves have **no names**, only indices; the names come from the `.xsb`.
 
-⇒ **Extraktion ist trivial**: Bytes `[waveDataOffset + PlayRegion.dwOffset, +dwLength)` sind rohes PCM16-LE; nur einen 44-Byte-RIFF/WAVE-Header davorsetzen. **Kein Codec, kein XMA/ADPCM/WMA.**
+⇒ **Extraction is trivial**: Bytes `[waveDataOffset + PlayRegion.dwOffset, +dwLength)` are raw PCM16-LE; just put a 44-byte RIFF/WAVE header in front of it. **No codec, no XMA/ADPCM/WMA.**
 
 ### XSB-Header (Hex-verifiziert, Explosions.xsb / Music.xsb)
 ```
@@ -310,10 +310,10 @@ MINIWAVEFORMAT Bitfelder: tag[1:0], channels[4:2], samplesPerSec[22:5], blockAli
 ```
 Beispiel Explosions.xsb (1253 B): waveBanks = `Explosions`, `ExplosionsStream`; Cues = `Explosion_Medium, Expl_Water_Lrg_01, Expl_Water_Lrg_02, UEF_Nuke_Impact, Aeon_Nuke_Impact, Cybran_Nuke_Impact, Explosion_Large_01, Explosion_Bomb, Expl_Anti_Nuke`.
 Music.xsb: `Main_Menu, Base_Building, Battle`.
-**Gesamt 1896 Cues über alle 80 .xsb.** Die Cue→Sound→Clip→Event-Kette ist inzwischen VOLLSTÄNDIG verifiziert und implementiert (src/formats/xsb.ts, byte-genau gegen alle 100 .xsb inkl. Voice gemessen; Endposition == entryLength für alle 4446 Sounds; XACT 3.0 hat 5-Byte-Clip-Meta ohne Filterfelder, Event-Typ 4 = PlayWave + 7-Byte-Pitch/Vol-Variation — eigener Fund, weicht von den XACT-3.4-Referenzen ab). Auflösungs-Fallen: XAS_Weapons.xwb heißt intern `XAS_Weapon` (über den INNEREN Banknamen auflösen); XAA.xsb referenziert bankübergreifend UAA.
+**Total 1896 cues across all 80 .xsb.** The Cue→Sound→Clip→Event chain is now COMPLETELY verified and implemented (src/formats/xsb.ts, measured byte-precise against all 100 .xsb including voice; end position == entryLength for all 4446 sounds; XACT 3.0 has 5-byte clip meta without filter fields, event type 4 = PlayWave + 7-byte pitch/vol variation — own discovery, differs from the XACT 3.4 references). Resolution Traps: XAS_Weapons.xwb is internally named `XAS_Weapon` (resolve via INNER bank name); XAA.xsb references UAA across banks.
 
-### Referenzierung aus Blueprints
-Globale Lua-Funktion `Sound{}` (`cfunc_SoundL`, baut `CSndParams` aus `{Cue, Bank, LodCutoff}`); zusätzlich `RPCSound{}` (mit RPC-Loop-Variable) und `GetCueBank()`.
+### Referencing from blueprints
+Global Lua function `Sound{}` (`cfunc_SoundL`, builds `CSndParams` from `{Cue, Bank, LodCutoff}`); additionally `RPCSound{}` (with RPC loop variable) and `GetCueBank()`.
 ```lua
 -- units/UEL0201/UEL0201_unit.bp
 Audio = {
@@ -325,53 +325,53 @@ Audio = {
 },
 Weapon = { { Audio = { Fire = Sound { Bank='UELWeapon', Cue='UEL0201_Cannon_Sgl', LodCutoff='Weapon_LodCutoff' } } } }
 ```
-`CSndParams` (size 0x50): `mBank` (string), `mCue` (string), `mLodCutoff` (CSndVar*), `mRpcLoopVariable`, lazily aufgelöste `mBankId`/`mCueId` (u16). `LodCutoff` ist der **Name einer XACT-Variable** aus `SupCom.xgs` (z.B. `UnitMove_LodCutoff`, `Weapon_LodCutoff`), nicht ein Zahlenwert.
+`CSndParams` (size 0x50): `mBank` (string), `mCue` (string), `mLodCutoff` (CSndVar*), `mRpcLoopVariable`, lazily resolved `mBankId`/`mCueId` (u16). `LodCutoff` is the **name of an XACT variable** from `SupCom.xgs` (e.g. `UnitMove_LodCutoff`, `Weapon_LodCutoff`), not a numerical value.
 
-Bank-Namenskonvention: `U<Faction><Domain>` — `UEL/UEA/UEB/UES` (UEF Land/Air/Building/Sea), `UAL/UAA/…` (Aeon), `URL/URA/…` (Cybran), `XS*` (Seraphim), `X??` (FA-Erweiterungen); plus `…Weapon`, `…Destroy`, `…Stream`-Varianten; global: `Interface`, `Explosions`, `Impacts`, `UnitsGlobal`, `UnitRumble`, `Music`, `AmbientTest`, `Op_Briefing`, `FMV_BG`, `*Select`.
+Bank naming convention: `U<Faction><Domain>` — `UEL/UEA/UEB/UES` (UEF Land/Air/Building/Sea), `UAL/UAA/…` (Aeon), `URL/URA/…` (Cybran), `XS*` (Seraphim), `X??` (FA extensions); plus `…Weapon`, `…Destroy`, `…Stream` variants; global: `Interface`, `Explosions`, `Impacts`, `UnitsGlobal`, `UnitRumble`, `Music`, `AmbientTest`, `Op_Briefing`, `FMV_BG`, `*Select`.
 
 ### Sound-Lua-API
 User-Layer (`CUserSoundManager.cpp`):
 `handle = PlaySound(sndParams, prepareOnly)`, `StartSound(handle)`, `bool = SoundIsPrepared(handle)`, `StopSound(handle, [immediate=false])`, `StopAllSounds`, `PauseSound(category, bPause)`, `PauseVoice(category, bPause)`, `SetVolume(category, volume)`, `float GetVolume(category)`, `DisableWorldSounds`, `EnableWorldSounds`, `PlayVoice(params, duck)`, `PlayTutorialVO(params)`.
 Sim-Layer (`Sim.cpp`): `handle = PlayLoop(self, sndParams)`, `StopLoop(self, handle)`.
-Entity-Methoden (`Entity.cpp`): `PlaySound`, `SetAmbientSound`. Weapon (`UnitWeapon.cpp`): `PlaySound`. Unit-Skripte nutzen `unit:PlayUnitSound('DeathExplosion')` etc. (Name = Key in `bp.Audio`).
+Entity methods (`Entity.cpp`): `PlaySound`, `SetAmbientSound`. Weapon (`UnitWeapon.cpp`): `PlaySound`. Unit scripts use `unit:PlayUnitSound('DeathExplosion')` etc. (Name = Key in `bp.Audio`).
 `SAudioRequest` (sim→user Bridge, size 0x1C): `{ Vec3 position, ELayer layer, CSndParams* params, HSound* sound, EAudioRequestType type }` mit `type ∈ {EntitySound=0, StartLoop=1, StopLoop=2}`.
 
-3D-Audio: `AudioEngine::Calculate3D(worldPos, engine, cue)` (X3DAudio-Emitter/Listener, Doppler, LPF, Reverb). Globale XACT-Variablen die die Engine je Frame setzt: `CameraDistance`, `ZoomPercent`, `Angle`. Ducking über `Duck`/`DuckLength`-Variablen (`mDuckMode`, `mActiveDuckingSounds`).
+3D Audio: `AudioEngine::Calculate3D(worldPos, engine, cue)` (X3DAudio Emitter/Listener, Doppler, LPF, Reverb). Global XACT variables that the engine sets per frame: `CameraDistance`, `ZoomPercent`, `Angle`. Ducking via `Duck`/`DuckLength` variables (`mDuckMode`, `mActiveDuckingSounds`).
 
 ### Open-Source-Parser (Web-Recherche)
-- **`unxwb`** (Luigi Auriemma) — der Standard-Extractor für XACT Wave Banks; deckt WBND/Version 43 ab.
-- **`xnb_parse`** (fesh0r) — Python: `xnb_parse/xact/xwb.py`, `xsb.py` — sauberer, lesbarer Referenz-Parser für beide Formate. Gute Vorlage für einen JS/TS-Port.
-- **MonoGame** — hat XWB-Lesecode (`WaveBank`/`SoundBank` in `MonoGame.Framework/Audio/`); ein vollwertiger `XactImporter/XactProcessor` wurde nie fertiggestellt (Issue #2661), aber die Runtime-Reader sind brauchbar.
-- **`XWBTool`** (Microsoft DirectXTK) — offizielles Tool, erzeugt/liest XWB; dokumentiert die Struktur.
-- **multimedia.cx MultimediaWiki: „XACT"** — die maßgebliche Format-Dokumentation für WBND und SDBK.
-- `towav`/`xma_parse` sind nur für XMA (Xbox 360) nötig — **für FA irrelevant**, da alles PCM ist.
+- **`unxwb`** (Luigi Auriemma) — the default extractor for XACT Wave Banks; covers WBND/version 43.
+- **`xnb_parse`** (fesh0r) — Python: `xnb_parse/xact/xwb.py`, `xsb.py` — clean, readable reference parser for both formats. Good template for a JS/TS port.
+- **MonoGame** — has XWB read code (`WaveBank`/`SoundBank` in `MonoGame.Framework/Audio/`); a full-fledged `XactImporter/XactProcessor` was never completed (Issue #2661), but the runtime readers are usable.
+- **`XWBTool`** (Microsoft DirectXTK) — official tool, creates/reads XWB; documents the structure.
+- **multimedia.cx MultimediaWiki: “XACT”** — the definitive format documentation for WBND and SDBK.
+- `towav`/`xma_parse` are only necessary for XMA (Xbox 360) — **irrelevant for FA** since everything is PCM.
 
-**Empfehlung Nachbau:** eigener kleiner XWB-Reader (~100 Zeilen, PCM-Slices → WAV/AudioBuffer) + XSB-Reader für die Cue-Namen-Tabelle. Da nur Cue→Wave-Zuordnung gebraucht wird, kann man alternativ einmalig offline mit `unxwb`+`xnb_parse` alle Waves als `<Bank>/<CueName>.ogg` exportieren und im Browser nur noch benannte Dateien laden — das umgeht die komplexe Complex-Cue/Variation-Logik von XACT.
+**Recommendation:** own small XWB reader (~100 lines, PCM slices → WAV/AudioBuffer) + XSB reader for the cue name table. Since only cue→wave assignment is needed, you can alternatively export all waves as `<Bank>/<CueName>.ogg` offline once with `unxwb`+`xnb_parse` and only load named files in the browser - this bypasses the complex complex cue/variation logic of XACT.
 
 ## 5. Musik / Ambient
-- **Musik**: `lua.scd → lua/UserMusic.lua`. Zwei Cue-Listen aus Bank `Music`: `BattleCues = { Sound{Cue='Battle', Bank='Music'} }`, `PeaceCues = { Sound{Cue='Base_Building', Bank='Music'} }`. Logik: `NotifyBattle()` zählt Kampf-Events; ≥ `BattleEventThreshold = 20` Events (Reset wenn > `BattleCounterReset = 30` Ticks Pause) ⇒ `StartBattleMusic()` (harter Cut, `StopSound(Music,true)`); nach `PeaceTimer = 200` Ticks (20 s) ohne Kampf ⇒ `StartPeaceMusic()` (Fade-out via `StopSound(Music)` + `WaitFor(Music)`, 3 s Pause, dann Peace-Cue). Cues rotieren zyklisch. `Music.xwb` = 250 MB Streaming-Bank, 12 Waves, 44,1 kHz Stereo PCM; `Music.xsb`-Cues: `Main_Menu`, `Base_Building`, `Battle`.
-- **Ambient**: `AmbientTest.xsb/.xwb` (Cues: `AMB_Menu_Loop`, `Gen_Fire_Loop`, `Gen_Fire_Start`, `Gen_Tree_Crush`, `AMB_Planet_Rumble_zoom`, `AMB_SER_OP_Briefing`); `gamedata/ambience.scd` ist **leer** (nur ein Verzeichniseintrag) — Ambient-Loops laufen also über die normalen Bank/Cue-Pfade + `mAmbientEngine` im `CUserSoundManager`.
-- **Unit-Ambient-Loops**: `bp.Audio.AmbientMove` etc. → `Entity:SetAmbientSound(params)` bzw. sim-seitig `PlayLoop(self, params)`; `HSound` ist das Loop-Handle mit intrusiver Liste im `CSimSoundManager`, `UpdateLoopCompletionState()` signalisiert Ende. `UnitRumble.xsb/.xwb` liefert Distanz-/Zoom-abhängige Rumble-Loops (moduliert über die XACT-Variablen `CameraDistance`/`ZoomPercent`).
+- **Music**: `lua.scd → lua/UserMusic.lua`. Two cue lists from bank `Music`: `BattleCues = { Sound{Cue='Battle', Bank='Music'} }`, `PeaceCues = { Sound{Cue='Base_Building', Bank='Music'} }`. Logic: `NotifyBattle()` counts combat events; ≥ `BattleEventThreshold = 20` events (reset if > `BattleCounterReset = 30` ticks pause) ⇒ `StartBattleMusic()` (hard cut, `StopSound(Music,true)`); after `PeaceTimer = 200` ticks (20 s) without a fight ⇒ `StartPeaceMusic()` (fade-out via `StopSound(Music)` + `WaitFor(Music)`, 3 s pause, then peace cue). Cues rotate cyclically. `Music.xwb` = 250 MB streaming bank, 12 waves, 44.1 kHz stereo PCM; `Music.xsb` cues: `Main_Menu`, `Base_Building`, `Battle`.
+- **Ambient**: `AmbientTest.xsb/.xwb` (Cues: `AMB_Menu_Loop`, `Gen_Fire_Loop`, `Gen_Fire_Start`, `Gen_Tree_Crush`, `AMB_Planet_Rumble_zoom`, `AMB_SER_OP_Briefing`); `gamedata/ambience.scd` is **empty** (just a directory entry) — so ambient loops run via the normal bank/cue paths + `mAmbientEngine` in the `CUserSoundManager`.
+- **Unit Ambient Loops**: `bp.Audio.AmbientMove` etc. → `Entity:SetAmbientSound(params)` or sim-side `PlayLoop(self, params)`; `HSound` is the loop handle with intrusive list in `CSimSoundManager`, `UpdateLoopCompletionState()` signals end. `UnitRumble.xsb/.xwb` provides distance/zoom dependent rumble loops (modulated via the XACT variables `CameraDistance`/`ZoomPercent`).
 - **UI**: `Interface.xsb` (119 Cues: `UI_Menu_Accept_01`, `UI_Menu_Rollover`, `UEF_Select_Tank`, …). Fraktions-Select-Bänke: `AEONSelect.xwb`, `CYBRANSelect.xwb`, `UEFSelect.xwb`, `SeraphimSelect.xwb/.xsb`.
 
 ## Refs
-- C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\resource\blueprints\REmitterBlueprint.h:144 (REmitterBlueprint, 21 Kurven + Flags + Texturen, size 0x284)
-- C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\resource\blueprints\RTrailBlueprint.h:28 (RTrailBlueprint, size 0x80)
-- C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\resource\blueprints\RBeamBlueprint.h:28 (RBeamBlueprint, size 0x84)
-- C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\resource\blueprints\REffectBlueprint.h:23 (Basis: BlueprintId + High/Med/LowFidelity)
+- C:\Users\Marti\Documents\02Projects\faf\Draiget\faf-re\src\sdk\moho\resource\blueprints\REmitterBlueprint.h:144 (REmitterBlueprint, 21 curves + flags + textures, size 0x284)
+- C:\Users\Marti\Documents\02Projects\faf\Draiget\faf-re\src\sdk\moho\resource\blueprints\RTrailBlueprint.h:28 (RTrailBlueprint, size 0x80)
+- C:\Users\Marti\Documents\02Projects\faf\Draiget\faf-re\src\sdk\moho\resource\blueprints\RBeamBlueprint.h:28 (RBeamBlueprint, size 0x84)
+- C:\Users\Marti\Documents\02Projects\faf\Draiget\faf-re\src\sdk\moho\resource\blueprints\REffectBlueprint.h:23 (Base: BlueprintId + High/Med/LowFidelity)
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\effects\rendering\SEfxCurve.cpp:319 (SEfxCurve::GetValue — Interpolation + Zufalls-Spread)
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\effects\rendering\SEfxCurve.h:29
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\effects\rendering\CEfxEmitter.h:52 (CEfxEmitter, size 0x6F8)
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\effects\rendering\CEfxTrailEmitter.h:29 (size 0x1B8)
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\effects\rendering\CEfxBeam.h:15 (size 0x298)
-- C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\effects\rendering\EffectLuaStartupRegistrations.cpp:53-106 (alle Create*-Lua-Signaturen), :1940/:2253/:2273/:2293/:2313 (SetEmitterParam/ScaleEmitter/ResizeEmitterCurve/SetEmitterCurveParam/OffsetEmitter)
+- C:\Users\Marti\Documents\02Projects\faf\Draiget\faf-re\src\sdk\moho\effects\rendering\EffectLuaStartupRegistrations.cpp:53-106 (all Create*-Lua signatures), :1940/:2253/:2273/:2293/:2313 (SetEmitterParam/ScaleEmitter/ResizeEmitterCurve/SetEmitterCurveParam/OffsetEmitter)
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\effects\rendering\CEffectManagerImpl.h:47-165 (CreateEmitter/CreateAttachedEmitter/CreateEmitterAtBone/CreateTrail/CreateBeam/CreateLightParticle)
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\render\EEmitterCurve.h (21 Kurven-Lanes), EEmitterParam.h (26 Skalar-Lanes), EBeamParam.h (21 Beam-Lanes)
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\particles\SWorldParticle.h:19 (Runtime-Partikel, size 0x8C)
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\particles\SWorldBeam.h:20 (size 0xCC)
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\particles\CWorldParticles.cpp:443 (BlendMode -> Technique-Suffix Mapping), :510 (time = tick + frameDelta)
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\particles\BeamRenderHelpers.cpp:2024-2048 (TBeam_OneTexture/TwoTexture Technique-Auswahl)
-- C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\audio\CSndParams.h:117 (mBank/mCue/mLodCutoff/mBankId/mCueId), :168 (cfunc_SoundL baut CSndParams aus {Cue,Bank,LodCutoff})
+- C:\Users\Marti\Documents\02Projects\faf\Draiget\faf-re\src\sdk\moho\audio\CSndParams.h:117 (mBank/mCue/mLodCutoff/mBankId/mCueId), :168 (cfunc_SoundL builds CSndParams from {Cue,Bank,LodCutoff})
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\audio\AudioEngine.cpp:3618 (func_LoadSoundPath: *.xwb + *.xsb enumerieren), :4099 (/sounds/SupCom.xgs)
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\audio\AudioEngine.h:38-205 (IXACTSoundBank/IXACTCue/IXACTEngine ABI), :493 GetBankIndex, :503 GetCueIndex, :590 Calculate3D
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\audio\CUserSoundManager.cpp:55-67 (Lua-Hilfetexte PlaySound/StopSound/SetVolume/PlayVoice), :1239 (AudioEngine::Create("/sounds"))
@@ -380,14 +380,14 @@ Entity-Methoden (`Entity.cpp`): `PlaySound`, `SetAmbientSound`. Weapon (`UnitWea
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\entity\Entity.cpp:237 (Entity:PlaySound / Entity:SetAmbientSound)
 - ZIP: C:\Program Files (x86)\Steam\steamapps\common\Supreme Commander Forged Alliance\gamedata\effects.scd -> effects/Emitters/*.bp (2724), effects/particle.fx, effects/Entities/*, effects/Explosion|Nuke|QuantumWarhead|EMPFluxWarhead
 - ZIP: gamedata/effects.scd -> effects/Emitters/adisruptor_cannon_muzzle_01_emit.bp (EmitterBlueprint-Referenzbeispiel), adjacency_uef_beam_01_emit.bp (BeamBlueprint), aeon_cannon_trail_emit.bp (TrailEmitterBlueprint)
-- ZIP: gamedata/mohodata.scd -> lua/system/Blueprints.lua (EmitterBlueprint/BeamBlueprint/TrailEmitterBlueprint Registrierung, LoadBlueprints)
+- ZIP: gamedata/mohodata.scd -> lua/system/Blueprints.lua (EmitterBlueprint/BeamBlueprint/TrailEmitterBlueprint registration, LoadBlueprints)
 - ZIP: gamedata/mohodata.scd -> lua/sim/DefaultProjectiles.lua (FxTrails/PolyTrails/Beams), lua/sim/defaultweapons.lua:169 PlayFxMuzzleSequence, lua/sim/CollisionBeam.lua
 - ZIP: gamedata/lua.scd -> lua/EffectTemplates.lua (180 KB, ~586 Templates), lua/EffectUtilities.lua (56 KB), lua/defaultexplosions.lua, lua/defaultcollisionbeams.lua, lua/UserMusic.lua
-- ZIP: gamedata/textures.scd -> textures/particles/ (747 Dateien, inkl. ramp_*.dds)
+- ZIP: gamedata/textures.scd -> textures/particles/ (747 files, incl. ramp_*.dds)
 - ZIP: gamedata/units.scd -> units/UEL0201/UEL0201_unit.bp (Audio = { ... Sound{Bank,Cue,LodCutoff} })
-- Dateien: C:\Program Files (x86)\Steam\steamapps\common\Supreme Commander Forged Alliance\sounds\ (78 x .xwb, 80 x .xsb, SupCom.xgs, Voice/US, Voice/DE) — hex-geprüft: Explosions.xwb, Music.xwb, UEL.xwb, Explosions.xsb, Music.xsb, SupCom.xgs
+- Files: C:\Program Files (x86)\Steam\steamapps\common\Supreme Commander Forged Alliance\sounds\ (78 x .xwb, 80 x .xsb, SupCom.xgs, Voice/US, Voice/DE) — hex checked: Explosions.xwb, Music.xwb, UEL.xwb, Explosions.xsb, Music.xsb, SupCom.xgs
 - Web: https://wiki.multimedia.cx/index.php/XACT (WBND/SDBK Formatdoku)
 - Web: https://github.com/fesh0r/xnb_parse/blob/master/xnb_parse/xact/xwb.py (Python XWB/XSB Parser)
 - Web: https://github.com/microsoft/DirectXTK/wiki/XWBTool (offizielles XWB-Tool)
 - Web: https://github.com/MonoGame/MonoGame/issues/2661 (MonoGame XactImporter/XactProcessor Status)
-- Scratchpad-Extrakte: C:\Users\Marti\AppData\Local\Temp\claude\c--Users-Marti-Documents-02Projekte-Claude-Commander-Forged-Alliance\795d25b0-6aed-4269-81c5-1f3b66283dbf\scratchpad\{particle.fx, EffectTemplates.lua, EffectUtilities.lua, defaultexplosions.lua, defaultcollisionbeams.lua, DefaultProjectiles.lua, CollisionBeam.lua, Blueprints.lua, UserMusic.lua}
+- Scratchpad extracts: C:\Users\Marti\AppData\Local\Temp\claude\c--Users-Marti-Documents-02Projects-Claude-Commander-Forged-Alliance\795d25b0-6aed-4269-81c5-1f3b66283dbf\scratchpad\{particle.fx, EffectTemplates.lua, EffectUtilities.lua, defaultexplosions.lua, defaultcollisionbeams.lua, DefaultProjectiles.lua, CollisionBeam.lua, Blueprints.lua, UserMusic.lua}

@@ -43,7 +43,7 @@ class Parser {
           this.pos = end < 0 ? s.length : end + 1
         }
       } else if (c === '#') {
-        // FA-Blueprints nutzen teils '#' als Zeilenkommentar
+        // FA blueprints sometimes use '#' as a line comment
         const end = s.indexOf('\n', this.pos)
         this.pos = end < 0 ? s.length : end + 1
       } else {
@@ -58,7 +58,7 @@ class Parser {
   }
 
   private expect(ch: string): void {
-    if (this.peek() !== ch) this.error(`"${ch}" erwartet, gefunden "${this.peek() || 'EOF'}"`)
+    if (this.peek() !== ch) this.error(`"${ch}" expected, found "${this.peek() || 'EOF'}"`)
     this.pos++
   }
 
@@ -105,10 +105,10 @@ class Parser {
         this.pos++
       }
     }
-    this.error('String nicht geschlossen')
+    this.error('String not closed')
   }
 
-  // --- Ausdrücke (Zahlen mit + - * / und Klammern) ---------------------------
+  // --- Expressions (numbers with + - * / and parentheses) --------------------------
 
   private readNumberLiteral(): number {
     this.skipWs()
@@ -171,7 +171,7 @@ class Parser {
     }
   }
 
-  // --- Werte & Tabellen -------------------------------------------------------
+  // --- Values ​​& Tables -------------------------------------------------------
 
   parseValue(): BpValue {
     const c = this.peek()
@@ -186,14 +186,14 @@ class Parser {
       if (ident === 'false') return false
       if (ident === 'nil') return null
       if (this.peek() === '{') {
-        // Konstruktor wie Sound { ... } → Tabelle mit __type
+        // Constructor like Sound { ... } → table with __type
         const table = this.parseTable()
         if (Array.isArray(table)) return { __type: ident, values: table }
         return { __type: ident, ...(table as BpObject) }
       }
       if (this.peek() === '(') {
-        // Funktionsaufruf wie STRING('x') oder Vector(x, y, z):
-        // ein Argument → der Wert selbst, mehrere → Array
+        // Function call like STRING('x') or Vector(x, y, z):
+        // one argument → the value itself, several → array
         this.pos++
         const args: BpValue[] = []
         while (this.peek() !== ')') {
@@ -204,7 +204,7 @@ class Parser {
         this.pos++
         return args.length === 1 ? args[0]! : args
       }
-      // nackter Bezeichner (selten) → als String behandeln
+      // naked identifier (rare) → treat as string
       return ident
     }
     this.error(`Unerwartetes Zeichen "${c}"`)
@@ -259,7 +259,7 @@ class Parser {
     return object
   }
 
-  /** Top-Level: Folge von `Ident { ... }`-Deklarationen. */
+  /** Top level: sequence of `Ident { ... }` declarations. */
   parseFile(): BpObject[] {
     const out: BpObject[] = []
     while (!this.atEnd()) {
@@ -274,7 +274,7 @@ class Parser {
     return out
   }
 
-  /** Top-Level: Folge von `name = value`-Zuweisungen (z. B. _scenario.lua). */
+  /** Top level: Sequence of `name = value` assignments (e.g. _scenario.lua). */
   parseAssignments(): BpObject {
     const out: BpObject = {}
     while (!this.atEnd()) {
@@ -286,25 +286,25 @@ class Parser {
   }
 }
 
-/** Parst eine .bp-Datei; liefert alle Top-Level-Blueprints. */
+/** Parses a .bp file; provides all top level blueprints. */
 export function parseBlueprints(source: string): BpObject[] {
   return new Parser(source).parseFile()
 }
 
-/** Parst Lua-Dateien aus Top-Level-Zuweisungen (z. B. `version = 3` + `ScenarioInfo = {...}`). */
+/** Parses Lua files from top level allocations (e.g. `version = 3` + `ScenarioInfo = {...}`). */
 export function parseLuaAssignments(source: string): BpObject {
   return new Parser(source).parseAssignments()
 }
 
-/** Bequemer Zugriff: erster Blueprint der Datei. */
+/** Convenient access: first blueprint of the file. */
 export function parseBlueprint(source: string): BpObject {
   const all = parseBlueprints(source)
   const first = all[0]
-  if (!first) throw new Error('Blueprint: Datei enthält keine Deklaration')
+  if (!first) throw new Error('Blueprint: File contains no declaration')
   return first
 }
 
-/** Pfad-Zugriff wie bpGet(bp, 'Defense.Health') mit Typprüfung per Aufrufer. */
+/** Path access like bpGet(bp, 'Defense.Health') with type checking per caller. */
 export function bpGet(bp: BpValue | undefined, path: string): BpValue | undefined {
   let cur: BpValue | undefined = bp
   for (const seg of path.split('.')) {
@@ -314,7 +314,7 @@ export function bpGet(bp: BpValue | undefined, path: string): BpValue | undefine
   return cur
 }
 
-/** Entfernt Lokalisierungs-Tags wie "<LOC uel0001_name>Armored Command Unit". */
+/** Removes localization tags such as "<LOC uel0001_name>Armored Command Unit". */
 export function stripLoc(value: BpValue | undefined): string | undefined {
   if (typeof value !== 'string') return undefined
   return value.replace(/^<[^>]*>/, '')

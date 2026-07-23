@@ -40,12 +40,12 @@ const host = await LuaHost.create(files, (level, msg) => {
 })
 const engine = installEngine(host)
 setTerrainSource(host, () => 20)
-// Blueprint UND Skelett — beides braucht die Sim, bevor die erste Unit entsteht.
+// Blueprint AND skeleton — the sim needs both before the first unit is created.
 for (const id of ['uel0001', 'ueb0101', 'uel0101']) await game.giveUnit(host, id)
 
 console.log('\n== Fabrik + ACU stehen ==')
-// Die ACU liefert der Armee ihren Startvorrat (GiveInitialResources); ohne
-// Vorrat baut die Fabrik nichts — das ist keine Testkulisse, das ist das Spiel.
+// The ACU provides the Army with its starting supplies (GiveInitialResources); without
+// The factory doesn't build anything in stock - it's not a test setting, it's the game.
 const acu = spawnLuaUnit(host, 'uel0001', { x: 100, y: 20, z: 100 }, 1)
 const factory = spawnLuaUnit(host, 'ueb0101', { x: 120, y: 20, z: 120 }, 1)
 for (let i = 0; i < 8; i++) beat(engine)
@@ -62,7 +62,7 @@ check(
   'Die Warteschlange trägt { id = uel0101, count = 2 } (Form aus construction.lua:1620)',
 )
 
-// Ein Beat: __factoryTick setzt die erste Einheit auf.
+// A beat: __factoryTick sets up the first unit.
 beat(engine)
 const tank1 = Number(
   host.eval(`
@@ -96,15 +96,15 @@ check(t1.fraction >= 1, `Panzer fertig nach ${ticks} Beats (${(ticks / 10).toFix
 check(t1.health === t1.maxHealth, `Volles Leben: ${t1.health}`)
 check(engine.economy.army(1).mass < massBefore, `Masse bezahlt: ${massBefore.toFixed(0)} → ${engine.economy.army(1).mass.toFixed(0)}`)
 
-// FactoryUnit.OnStopBuild → RollOffUnit → IssueMove: der Panzer bekommt ein Ziel.
-// Das ist der Beweis, dass die ORIGINAL-Lua den Befehl gegeben hat — die Engine
-// setzt hier von sich aus keine Bewegung.
+// FactoryUnit.OnStopBuild → RollOffUnit → IssueMove: the tank gets a target.
+// This is proof that the ORIGINAL Lua gave the command — the engine
+// does not make any movement here on its own.
 check(
   host.eval(`return __units[${tank1}].__goal ~= nil and __units[${tank1}].__goal ~= false`) === true,
   'Er hat ein Bewegungsziel (FactoryUnit.RollOffUnit → IssueMove, defaultunits.lua:571)',
 )
 
-// Und die Fabrik nimmt sich den zweiten Panzer.
+// And the factory takes the second tank.
 for (let i = 0; i < 3; i++) beat(engine)
 const tanks = Number(
   host.eval(`

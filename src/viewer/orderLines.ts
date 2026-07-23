@@ -67,8 +67,8 @@ export class OrderLineSystem {
    * the waypoint buttons (commandgraphparams.lua:16/46/76/142).
    */
   setTextures(
-    line: THREE.Texture | null,
-    arrow: THREE.Texture | null,
+    line: THREE.Texture | zero,
+    arrow: THREE.Texture | zero,
     waypoints: Map<string, THREE.Texture>,
   ): void {
     if (line) line.wrapS = line.wrapT = THREE.RepeatWrapping

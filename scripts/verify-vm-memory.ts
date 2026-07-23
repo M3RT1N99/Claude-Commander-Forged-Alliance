@@ -44,8 +44,8 @@ const check = (ok: boolean, label: string): void => {
 
 const game = await GameFiles.open()
 
-// --- Die UI-VM: 1000 Frames rendern ----------------------------------------
-console.log('\n== UI-VM: 1000 Frames (der Renderer zieht den maui-Snapshot) ==')
+// --- The UI VM: Render 1000 frames ---------------------------------------
+console.log('\n== UI-VM: 1000 frames (the renderer pulls the maui snapshot) ==')
 const dims = new Map<string, [number, number]>()
 for (const key of game.paths) {
   if (!key.startsWith('textures/ui/') || !key.endsWith('.dds')) continue
@@ -53,7 +53,7 @@ for (const key of game.paths) {
     const d = parseDds(await game.read(key))
     dims.set(key, [d.width, d.height])
   } catch {
-    // Kaputte DDS: nicht raten.
+    // Broken DDS: don't guess.
   }
 }
 const fonts = new FontBook()
@@ -82,7 +82,7 @@ const heapMb = (h: LuaHost): number => {
   return Number(h.eval('return collectgarbage("count")')) / 1024
 }
 
-// Einlaufen lassen (die ersten Frames legen Caches an), dann messen.
+// Let it run in (the first frames create caches), then measure.
 for (let i = 0; i < 50; i++) {
   ui.eval('__mauiFrame(0.016)')
   ui.pull('__mauiSnapshotJson()')
@@ -95,14 +95,14 @@ for (let i = 0; i < 1000; i++) {
 const uiAfter = heapMb(ui)
 const uiGrowth = uiAfter - uiBefore
 console.log(`  · Lua-Heap ${uiBefore.toFixed(1)} MB → ${uiAfter.toFixed(1)} MB`)
-// Ein bisschen Rauschen ist normal (Caches, Strings). Ein LECK sieht anders aus:
-// die alte Fassung wuchs pro 1000 Frames um ~78 MB.
+// A bit of noise is normal (caches, strings). A LEAK looks different:
+// the old version grew by ~78 MB per 1000 frames.
 check(uiGrowth < 5, `UI-VM wächst über 1000 Frames um ${uiGrowth.toFixed(1)} MB (Grenze: 5)`)
 
 const snapshot = ui.pull<{ id: number }[]>('__mauiSnapshotJson()')
 check(snapshot.length > 50, `Der JSON-Snapshot trägt ${snapshot.length} Controls (er ist echt)`)
 
-// --- Die Sim-VM: 1000 Beats -------------------------------------------------
+// --- The Sim VM: 1000 Beats -------------------------------------------------
 console.log('\n== Sim-VM: 1000 Beats (der Worker zieht den Unit-Zustand) ==')
 const sim = await LuaHost.create(game.luaFiles, () => {})
 const engine = installEngine(sim)

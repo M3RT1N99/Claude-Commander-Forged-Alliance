@@ -46,13 +46,13 @@ for (const archive of ['mohodata.scd', 'lua.scd']) {
     if (key.endsWith('.lua')) files.set(key, await zip.read(entry))
   }
 }
-// Ein echtes Unit-Blueprint (aus units.scd) für die Pipeline verfügbar machen
+// Make a real unit blueprint (from units.scd) available to the pipeline
 const unitsFile = await NodeFile.open(`${GAME}/gamedata/units.scd`)
 openFiles.push(unitsFile)
 const unitsZip = await ZipArchive.open(unitsFile)
 const bpKey = 'units/uel0001/uel0001_unit.bp'
 files.set(bpKey, await unitsZip.read(unitsZip.get(bpKey)!))
-console.log(`${files.size} Module vorgeladen (inkl. 1 Unit-Blueprint)`)
+console.log(`${files.size} modules preloaded (incl. 1 unit blueprint)`)
 
 let failures = 0
 const check = (ok: boolean, label: string): void => {
@@ -65,22 +65,22 @@ const host = await LuaHost.create(files, (level, msg) => {
   if (level === 'WARN') warnings.push(msg)
 })
 
-// utils.lua global laden (liefert sortedpairs + table.deepcopy/merged, die die
-// Pipeline braucht). Läuft im globalen Env → Funktionen werden global.
+// Load utils.lua globally (provides sortedpairs + table.deepcopy/merged, which the
+// pipeline needs). Runs in global Env → functions become global.
 host.loadGlobal('/lua/system/utils.lua')
 
-// Die ECHTE Pipeline — kein Nachbau im Test (sonst fehlt z. B. Sound{}).
+// The REAL pipeline - no replica in the test (otherwise Sound{} is missing, for example).
 installEngine(host)
-// Flaches Testgelaende — EXPLIZIT, weil die Engine ohne Karte knallt (kein stiller 0-Wert).
+// Flat test area - EXPLICIT because the engine crashes without a map (no silent 0 value).
 setTerrainSource(host, FLAT_TEST_TERRAIN)
 
-// Discovery-Trap: die Blueprint-DSL nutzt Engine-Konstruktoren (Sound{},
-// Vector{}, ...). Wir entdecken sie, statt zu raten.
+// Discovery Trap: the Blueprint DSL uses engine constructors (Sound{},
+// Vector{}, ...). We discover them instead of guessing.
 const missing = new Set<string>()
 
-console.log('\n== Original-Pipeline: LoadBlueprints() ==')
-// Die echte LoadBlueprints() fährt Init -> doscript(bp) -> ExtractAllMesh ->
-// ModBlueprints -> RegisterAllBlueprints — nur gefüttert mit unserem einen
+console.log('\n== Original pipeline: LoadBlueprints() ==')
+// The real LoadBlueprints() drives Init -> doscript(bp) -> ExtractAllMesh ->
+// ModBlueprints -> RegisterAllBlueprints — just fed with our one
 // Blueprint (DiskFindFiles oben).
 host.eval(`__bpFiles = { '/${bpKey}' }; LoadBlueprints()`)
 
@@ -92,7 +92,7 @@ check(typeof storedId === 'string' && storedId.length > 0, `Blueprint registrier
 
 console.log('\n== Ergebnis ==')
 const faction = host.eval(`return __registered.Unit['${storedId}'].General.FactionName`)
-check(faction === 'UEF', `FactionName aus Original-bp: ${faction}`)
+check(faction === 'UEF', `FactionName from original bp: ${faction}`)
 const hp = host.eval(`return __registered.Unit['${storedId}'].Defense.MaxHealth`)
 check(hp === 12000, `Defense.MaxHealth: ${hp}`)
 const meshBp = host.eval(`return __registered.Unit['${storedId}'].Display.MeshBlueprint`)

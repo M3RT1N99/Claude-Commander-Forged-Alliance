@@ -61,7 +61,7 @@ function mipSize(format: DdsFormat, width: number, height: number): number {
   return Math.max(1, Math.ceil(width / 4)) * Math.max(1, Math.ceil(height / 4)) * blockBytes(format)
 }
 
-/** Die Kanal-Beschreibung eines unkomprimierten DDS (aus dem Pixelformat-Block). */
+/** The channel description of an uncompressed DDS (from the pixel format block). */
 interface RawLayout {
   bytesPerPixel: number
   rMask: number
@@ -102,7 +102,7 @@ function expandToBgra(src: Uint8Array, count: number, layout: RawLayout): Uint8A
   const scale = (value: number, bits: number): number => {
     if (bits === 8) return value
     if (bits === 0) return 0
-    // Bit-Replikation: die oberen Bits werden in die unteren wiederholt.
+    // Bit replication: the upper bits are repeated into the lower ones.
     return (value << (8 - bits)) | (value >> (2 * bits - 8))
   }
 
@@ -133,15 +133,15 @@ export function parseDds(data: Uint8Array): DdsImage {
   if (pfFlags & DDPF_FOURCC) {
     const cc = fourCc(view, 84)
     if (cc !== 'DXT1' && cc !== 'DXT3' && cc !== 'DXT5') {
-      throw new Error(`DDS: FourCC "${cc}" nicht unterstützt`)
+      throw new Error(`DDS: FourCC "${cc}" not supported`)
     }
     format = cc
   } else {
-    // Unkomprimiert: Bit-Tiefe und Kanal-Masken stehen im Header (Offset 88-104).
-    // Alles, was im Spiel vorkommt (32/24/16/8 Bit), wird nach BGRA8 aufgeweitet.
+    // Uncompressed: Bit depth and channel masks are in the header (offset 88-104).
+    // Everything that appears in the game (32/24/16/8 bit) is expanded to BGRA8.
     const bits = view.getUint32(88, true)
     if (bits !== 8 && bits !== 16 && bits !== 24 && bits !== 32) {
-      throw new Error(`DDS: ${bits}-bit unkomprimiert nicht unterstützt`)
+      throw new Error(`DDS: ${bits}-bit uncompressed not supported`)
     }
     format = 'BGRA8'
     raw = {
@@ -163,7 +163,7 @@ export function parseDds(data: Uint8Array): DdsImage {
       const size = raw ? pixels * raw.bytesPerPixel : mipSize(format, w, h)
       if (offset + size > data.byteLength) break
       const slice = data.subarray(offset, offset + size)
-      // 32-Bit-BGRA liegt schon richtig; alles andere wird aufgeweitet.
+      // 32-bit BGRA is correct; everything else is expanded.
       const bytes = raw && raw.bytesPerPixel !== 4 ? expandToBgra(slice, pixels, raw) : slice
       mips.push({ data: bytes, width: w, height: h })
       offset += size
@@ -189,7 +189,7 @@ export function parseDds(data: Uint8Array): DdsImage {
   }
 
   const { mips } = readChain(128)
-  if (mips.length === 0) throw new Error('DDS: keine Mip-Daten')
+  if (mips.length === 0) throw new Error('DDS: no mip data')
 
   return { width, height, format, mips, cubeFaces: null }
 }

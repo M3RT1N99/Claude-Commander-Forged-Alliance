@@ -1,24 +1,24 @@
-# Dateiformate (verifiziert gegen die Installation)
+# File formats (verified against installation)
 
-Alle Angaben wurden gegen die echte Steam-Installation geprüft
-(`scripts/verify.ts`); Byte-Layouts wurden zusätzlich mit Hex-Proben der
-Original-Dateien abgeglichen. Quellen: GPG-Mod-SDK-Dokumentation,
+All information has been checked against the real Steam installation
+(`scripts/verify.ts`); Byte layouts were additionally provided with hex samples
+Original files compared. Sources: GPG Mod SDK documentation,
 FAF-Community-Tools, eigene Verifikation.
 
 ## SCD — Archive (`gamedata/*.scd`)
 
 Normale **Zip-Archive** (Magic `PK\x03\x04`). Einträge überwiegend
-*Stored* (unkomprimiert), teils *Deflate*. Kein Zip64 (alle < 4 GB).
-→ [src/vfs/zipArchive.ts](../src/vfs/zipArchive.ts) liest nur das Central
-Directory und lädt Einträge einzeln (Random-Access über Blob/HTTP-Range).
-Pfade sind case-insensitiv zu behandeln (`UEL0001_NormalsTS.DDS` vs.
+*Stored* (uncompressed), partly *Deflate*. No Zip64 (all < 4GB).
+→ [src/vfs/zipArchive.ts](../src/vfs/zipArchive.ts) only reads the central
+Directory and loads entries individually (random access via Blob/HTTP range).
+Paths must be treated case-insensitively (`UEL0001_NormalsTS.DDS` vs.
 `uel0001_lod1_normalsts.dds`).
 
-## SCM — Modelle (`*_lod0.scm`)
+## SCM — Models (`*_lod0.scm`)
 
-Little-endian, Magic `MODL`, Version 5. Sektionen mit `0xC5` gepolstert,
-je ein 4-Byte-Marker (`NAME`, `SKEL`, `VTXL`, `TRIS`, `INFO`) direkt vor dem
-Offset-Ziel. Vollständiges Layout im Header-Kommentar von
+Little-endian, Magic `MODL`, version 5. Sections padded with `0xC5`,
+one 4-byte marker each (`NAME`, `SKEL`, `VTXL`, `TRIS`, `INFO`) directly in front of the
+Offset target. Full layout in header comment by
 [src/formats/scm.ts](../src/formats/scm.ts).
 
 Referenz UEL0001_LOD0.scm: 5807 Vertices, 10458 Indizes (3486 Tris),
@@ -28,37 +28,37 @@ Referenz UEL0001_LOD0.scm: 5807 Vertices, 10458 Indizes (3486 Tris),
   uv1 ²f · boneIdx ⁴u8
 - Bone (108 B): restPoseInverse 4×4f · pos ³f · rot (Quaternion) ⁴f ·
   nameOffset u32 · parentIndex i32 · 8 B reserviert
-- UVs sind DirectX-Konvention (Ursprung oben links) — passt ohne Flip zu
-  nicht geflippten (compressed) WebGL-Texturen.
+- UVs are DirectX convention (top left origin) — fits without flip
+  non-flipped (compressed) WebGL textures.
 
 ## SCA — Animationen (`*_A*.sca`)
 
-Magic `ANIM`, Version 5. Header (verifiziert an UEL0001_A001.sca und dem
+Magic `ANIM`, version 5. Header (verified on UEL0001_A001.sca and the
 rekonstruierten Loader `RScaResource::LoadScaFile` in faf-re):
 numFrames u32 · duration f32 · numBones u32 · namesOffset u32 ·
 linksOffset u32 · animDataOffset u32 · frameSize u32.
 
-- Ab animDataOffset: ein 28-Byte-**Root-Delta**-Record, dann pro Frame:
+- From animDataOffset: a 28-byte **root delta** record, then per frame:
   8-Byte-Header (f32 time, u32 flags) + numBones × 28-Byte-Keys
   {pos ³f, quat ⁴f (w,x,y,z)}
-- Version < 5: Quaternion-Komponenten [a,b,c,d]→[d,a,b,c] rotieren
-- Playback (Original): 10-Hz-Sim-Ticks, `framePos = (frames-1)/duration * t`,
-  Position-LERP + Quaternion-LERP zwischen Nachbarframes
-- Skelett kommt aus der SCM-Datei (Bones + Parents + Bindpose)
+- Version < 5: Rotate quaternion components [a,b,c,d]→[d,a,b,c].
+- Playback (original): 10 Hz sim ticks, `framePos = (frames-1)/duration * t`,
+  Position LERP + Quaternion LERP between neighboring frames
+- Skeleton comes from SCM file (Bones + Parents + Bindpose)
 
-**Parser noch nicht implementiert (M3).**
+**Parser not yet implemented (M3).**
 
 ## Blueprints (`*_unit.bp`, Lua)
 
 Deklaratives Lua: `UnitBlueprint { ... }` mit verschachtelten Konstruktoren
-(`Sound { ... }`), Strings, Zahlen, Booleans, einfacher Arithmetik und
+(`Sound { ... }`), strings, numbers, booleans, simple arithmetic and
 `--`/`#`-Kommentaren. → [src/formats/blueprint.ts](../src/formats/blueprint.ts)
-(kein vollständiges Lua nötig; 568/568 Unit-BPs parsen).
+(no need for full Lua; parse 568/568 unit BPs).
 
 ## DDS — Texturen
 
-Unit-Texturen: DXT5, 1024², volle Mip-Kette. Bedeutung der Kanäle (aus dem
-Original-Shader `effects/mesh.fx` in effects.scd):
+Unit textures: DXT5, 1024², full mip chain. Meaning of the channels (from the
+Original shader `effects/mesh.fx` in effects.scd):
 
 | Textur | Inhalt |
 | ------ | ------ |
@@ -68,35 +68,35 @@ Original-Shader `effects/mesh.fx` in effects.scd):
 
 Team-Color (mesh.fx): `albedo.rgb = lerp(teamColor, albedo.rgb, 1 - specular.a)`
 
-## SCMAP — Karten (`maps/*/*.scmap`)
+## SCMAP — Maps (`maps/*/*.scmap`)
 
-Magic `Map\x1a`, Version major 2, minor 56 (FA) / 60 (FAF-Editor;
-Original-Steam-Karten sind teils ebenfalls 60). Vollständiges Layout in
-[src/formats/scmap.ts](../src/formats/scmap.ts); Parser verifiziert gegen
-alle 60 Karten der Installation. Quellen: Neroxis `SCMapImporter.java`,
+Magic `Map\x1a`, version major 2, minor 56 (FA) / 60 (FAF editor;
+Original Steam cards are sometimes also 60). Full layout in
+[src/formats/scmap.ts](../src/formats/scmap.ts); Parser verifies against
+all 60 cards of the installation. Sources: Neroxis `SCMapImporter.java`,
 ozonex FAF Map Editor (HazardX-Loader), faf-re (`CWldMap::MapLoad`).
 
 Kernfakten:
 
 - Heightmap: u16-Grid mit (w+1)×(h+1) Samples, Welthöhe = wert × 1/128,
-  1 Sample pro Weltmeter
+  1 sample per world meter
 - 10 Albedo-Strata (Lower, Stratum0–7, Upper) + 9 Normal-Strata, je
-  Pfad (case-insensitiv in env.scd!) + Kachelgröße in Weltmetern
+  Path (case-insensitive in env.scd!) + tile size in world meters
 - Splat-Masken: 2 eingebettete unkomprimierte BGRA-DDS (Stratum 0-3 in
-  RGBA von UtilityA, 4-7 in UtilityB), Dekodierung `saturate(tex*2-1)`.
-  **Achtung:** Der `terrainShader`-String der Karte wählt im Original die
+  RGBA from UtilityA, 4-7 in UtilityB), decoding `saturate(tex*2-1)`.
+  **Attention:** The `terrainShader` string of the card originally selects the
   Shader-Technique (faf-re: `StratumMaterial::mShaderName`, Default
-  `TTerrain`). `TTerrain`-Karten (z. B. SCMP_001) sampeln UtilityB **nie**
-  — die zweite Maske enthält dort Junk (Duplikat von UtilityA). Unsere
-  Lösung: Masken nur für Strata mit nicht-leerem Texturpfad anwenden
+  `TTerrain`). `TTerrain` cards (e.g. SCMP_001) **never** sample UtilityB
+  — the second mask contains junk there (duplicate of UtilityA). Our
+  Solution: Apply masks only to strata with non-empty texture path
   (`stratumEnable`-Uniforms), verhaltensäquivalent für beide Techniques.
-- Eingebettete Bilder (Masken/Watermap/Preview) haben dieselbe
-  Zeilen-Orientierung wie die Heightmap — kein V-Flip (numerisch bewiesen:
+- Embedded images (masks/watermap/preview) have the same
+  Line orientation like the heightmap — no V-flip (proven numerically:
   `scripts/check-orientation.ts`, Korrelation 0,998)
 - Watermap (UtilityC, DXT5, halbe Auflösung): R = über Wasser,
   **G = Wassertiefe**, B = Flatness, A = Foam
 - Wasser-Settings: elevation/deep/abyss, SurfaceColor, WaterRamp-Textur
 - Lighting: Sonnenrichtung/-farbe, Ambience, ShadowFill, Specular,
-  LightingMultiplier, Fog — 1:1 an den Terrain-Shader durchgereicht
+  LightingMultiplier, Fog — passed through 1:1 to the terrain shader
 - Danach: WaveGenerators, Decals, TerrainType-Bytes, (v60: Skybox), Props
-  (Blueprint-Pfad + Position + 3×3-Rotationsmatrix)
+  (Blueprint path + position + 3×3 rotation matrix)

@@ -86,7 +86,7 @@ for (let i = 0; i < 10; i++) {
   const p = s.albedoPath.replace(/^\//, '')
   const entry = env.get(p) ?? tex.get(p)
   if (!entry) {
-    console.log(`${label}: FEHLT im Archiv! ${s.albedoPath}`)
+    console.log(`${label}: MISSING in the archive! ${s.albedoPath}`)
     layers.push({ rgba: null, w: 0, h: 0, scale: s.albedoScale || 4, avg: [0, 0, 0, 0] })
     continue
   }
@@ -100,7 +100,7 @@ for (let i = 0; i < 10; i++) {
     )
     layers.push({ rgba, w, h, scale: s.albedoScale || 4, avg })
   } catch (err) {
-    console.log(`${label}: PARSE-FEHLER ${err instanceof Error ? err.message : err}  ${s.albedoPath}`)
+    console.log(`${label}: PARSE ERROR ${err instanceof Error ? err.message : err} ${s.albedoPath}`)
     layers.push({ rgba: null, w: 0, h: 0, scale: s.albedoScale || 4, avg: [0, 0, 0, 0] })
   }
 }

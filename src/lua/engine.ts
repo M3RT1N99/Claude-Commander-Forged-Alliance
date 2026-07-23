@@ -66,25 +66,25 @@ export function installEngine(
   installMoho(host)
   host.loadGlobal('/lua/system/utils.lua')
   // globalInit.lua:19 lädt repr.lua direkt nach utils — simcallbacks.lua:18
-  // ruft `repr(name)` im Fehlerpfad, unit.lua nutzt es in Debug-Zweigen.
-  // Die UI-VM hatte es (uiEngine.ts), die Sim-VM nicht: gefunden, als der
-  // SimCallback-Dispatcher statt "No callback named …" an `repr == nil` starb.
+  // calls `repr(name)` in the error path, unit.lua uses it in debug branches.
+  // The UI VM had it (uiEngine.ts), the Sim VM didn't: found it when the
+  // SimCallback dispatcher died instead of "No callback named..." to `repr == nil`.
   host.loadGlobal('/lua/system/repr.lua')
   installBlueprintPipeline(host)
   installUnitFactory(host)
-  // Kampf: Schaden, Projektile, Props, Waffen-Tasks. Nach der UnitFactory, weil
-  // die Löschwarteschlange und die Projektile auf __units/__nextUnitId aufsetzen.
+  // Combat: Damage, Projectiles, Props, Weapon Tasks. After the UnitFactory because
+  // set the delete queue and projectiles to __units/__nextUnitId.
   installCombat(host)
-  // Original-Lua, nicht nachgebaut: SimInit.lua:45 fährt `doscript
-  // '/lua/SimSync.lua'`. Sie legt die Sim→UI-Brücke an (Sync, UnitData) —
-  // ohne sie scheitert Unit:OnPreCreate an SyncMeta (unit.lua:23-40 schreibt
-  // in UnitData). Das ist der erste Baustein der echten Boot-Kette.
+  // Original Lua, not recreated: SimInit.lua:45 runs `doscript
+  // '/lua/SimSync.lua'`. She creates the Sim→UI bridge (Sync, UnitData) —
+  // without it, Unit:OnPreCreate fails at SyncMeta (unit.lua:23-40 writes
+  // in UnitData). This is the first building block of the real boot chain.
   //
-  // Und zwar über `doscript`, nicht über loadGlobal: nur doscript fährt die
-  // HOOKS mit (boot.lua, `hook = {'/schook'}` aus bin/SupComDataPath.lua).
-  // `schook/lua/simsync.lua:61` definiert `RemoveAllUnitEnhancements` — und
-  // genau die ruft unit.lua:1287 beim Tod JEDER Einheit (OnDestroy). Ohne den
-  // Hook stirbt der Todes-Pfad, und kein Wrack bleibt liegen.
+  // And via `doscript`, not via loadGlobal: only doscript drives it
+  // HOOKS with (boot.lua, `hook = {'/schook'}` from bin/SupComDataPath.lua).
+  // `schook/lua/simsync.lua:61` defines `RemoveAllUnitEnhancements` — and
+  // That's exactly what unit.lua:1287 calls when EVERY unit dies (OnDestroy). Without that
+  // Hook dies the death path, and no wreck remains.
   host.eval(`doscript('/lua/SimSync.lua')`)
   host.eval('ResetSyncTable()')
   // Original Lua: the global TerrainTypes list that GetTerrainType() serves
@@ -105,9 +105,9 @@ export function installEngine(
  */
 export function beat(engine: Engine): void {
   const h = engine.host
-  // Phase 0 — Fabriken mit Warteschlange setzen die nächste Einheit auf. Das
-  // muss VOR dem Bedarf laufen, sonst hängt der frische Auftrag einen Beat lang
-  // in der Luft.
+  // Phase 0 — Queued Factories deploy the next unit. The
+  // must run BEFORE the demand, otherwise the fresh order will hang for a beat
+  // in the air.
   factoryTick(h)
   // Phase 1 — everyone who wants resources this tick registers demand.
   buildCollect(h)
@@ -117,10 +117,10 @@ export function beat(engine: Engine): void {
   // Phase 3 — consumers read back their granted LimitingRate and advance.
   buildApply(h)
   h.eval('__econEventsApply()')
-  // Phase 4 — die Waffen-Tasks der Engine (CArmyImpl::OnTick, Cfile:1018024):
-  // Zielsuche (alle TargetCheckInterval·10 Ticks) und Feuertakt (jeden Tick).
-  // Sie laufen VOR der Thread-Stage: `OnFire` wechselt nur den Zustand der
-  // Salven-FSM — geschossen wird im Coroutinen-Slice desselben Beats.
+  // Phase 4 — the engine's weapon tasks (CArmyImpl::OnTick, Cfile:1018024):
+  // Target search (every TargetCheckInterval·10 ticks) and firing cycle (every tick).
+  // They run BEFORE the thread stage: `OnFire` only changes the state of the
+  // Salvo FSM — shooting takes place in the coroutine slice of the same beat.
   weaponTick(h)
   // Phase 5 — Lua coroutines (CTaskStage::DoFrame), then movement.
   simTick(h)
@@ -128,9 +128,9 @@ export function beat(engine: Engine): void {
   // Site decay is part of Unit::OnTick (same engine phase as motion,
   // Cfile:952824-952840): unfinished units lose build fraction every tick.
   h.eval('__decayTick()')
-  // Phase 6 — Projektile fliegen (Projectile::MotionTick) und schlagen ein.
+  // Phase 6 — Projectiles fly (Projectile::MotionTick) and impact.
   projectileTick(h)
-  // Phase 7 — die Löschwarteschlange (Sim::AdvanceBeat, Cfile:1076638): erst
-  // hier laufen die OnDestroy-Callbacks. Entity:Destroy() löscht NICHT sofort.
+  // Phase 7 — the delete queue (Sim::AdvanceBeat, Cfile:1076638): first
+  // This is where the OnDestroy callbacks run. Entity:Destroy() does NOT delete immediately.
   flushDeletions(h)
 }

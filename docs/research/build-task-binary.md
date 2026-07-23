@@ -1,15 +1,15 @@
-# Bau-Task-Ablauf — aus Binary + faf-re
+# Build task flow — from Binary + faf-re
 
 Quellen: `CBuildTaskHelper::UpdateWorkProgress` (faf-re rekonstruiert,
 0x5F5BF0) + `ComputeBuildProgressDelta` (faf-re) + `Unit::Materialize`
-(IDA @ 0x6A9F40, in faf-re als Lücke markiert). Als Spezifikation destilliert.
+(IDA @ 0x6A9F40, marked as gap in faf-re). Distilled as specification.
 
-Jeder Bauhelfer (Ingenieur/Fabrik/ACU beim Bauen, Assist, Reclaim, Repair)
-hält einen `CBuildTaskHelper` mit `mFocus` (das Bauobjekt), `mFractionComplete`,
-`mActionName`. Pro Tick ruft der Task `UpdateWorkProgress()`; Rückgabe `true`
-= Task fertig.
+Any construction assistant (engineer/factory/ACU during construction, assist, reclaim, repair)
+holds a `CBuildTaskHelper` with `mFocus` (the building object), `mFractionComplete`,
+`mActionName`. The task calls `UpdateWorkProgress()` per tick; Return `true`
+= Task completed.
 
-## Bau-Fortschritt pro Tick (Kernformel)
+## Construction progress per tick (core formula)
 
 ```
 resourceConsumed = builder.ResourceConsumed   # = LimitingRate (0..1) aus der Econ-Verteilung
@@ -17,13 +17,13 @@ timeToBuild      = focus.BuildTime / builder.buildRate     # Sekunden bei voller
 delta            = (1 / timeToBuild) * resourceConsumed * 0.1
                  = (builder.buildRate / focus.BuildTime) * resourceConsumed * 0.1
 ```
-`0.1` = Sekunden pro Tick (10 Hz). Bei voller Versorgung (`resourceConsumed=1`)
-dauert der Bau also exakt `BuildTime / buildRate` Sekunden. Die
-`resourceConsumed`-Ratio kommt **pro Bauwerk** aus der zweistufigen
-Econ-Verteilung ([economy-binary.md](economy-binary.md)) — das ist der
-FA-Stall: knappe Ressourcen verlangsamen jeden Bau anteilig.
+`0.1` = seconds per tick (10 Hz). At full supply (`resourceConsumed=1`)
+So construction takes exactly `BuildTime / buildRate` seconds. The
+`resourceConsumed` ratio comes **per building** from the two-stage
+Econ distribution ([economy-binary.md](economy-binary.md)) — this is the one
+FA stable: scarce resources slow down every construction proportionately.
 
-## `Unit::Materialize(delta)` — was der Delta bewirkt
+## `Unit::Materialize(delta)` — what the delta does
 
 ```
 if delta > 0:   # Bauen
@@ -43,30 +43,30 @@ if wasBeingBuilt and FractionComplete == 1.0:   # FERTIG
 ```
 
 **Wichtige Befunde:**
-- **HP wachsen linear mit dem Baufortschritt** (`maxHealth * delta` je Tick) —
-  nicht erst am Ende. Deckt sich mit unserer Übergangslösung.
-- **Fertigstellung ruft `OnStopBeingBuilt` in Lua** — dort läuft das
-  unit-spezifische Verhalten (Intel an, Animation, Effekte).
-- **Adjacency**: Sobald ein Gebäude fertig ist, feuert `OnAdjacentTo` für alle
-  überlappenden Nachbarn → das ist der Einstieg für Adjacency-Buffs
+- **HP grow linearly with construction progress** (`maxHealth * delta` per tick) —
+  not just at the end. Consistent with our interim solution.
+- **Completion calls `OnStopBeingBuilt` in Lua** — that's where it works
+  unit-specific behavior (Intel on, animation, effects).
+- **Adjacency**: As soon as a building is finished, `OnAdjacentTo` fires for everyone
+  overlapping neighbors → this is the entry point for adjacency buffs
   (`AdjacencyBuffs.lua`, 59 KB).
 
-## Sonderfälle in `UpdateWorkProgress` (alle im Original)
+## Special cases in `UpdateWorkProgress` (all in the original)
 
-| Fall | Verhalten |
+| case | behavior |
 | --- | --- |
 | **Pausiert** | `Materialize(0)` — Fokus behalten, Fortschritt einfroren; WorkProgress spiegelt Fokus |
 | **Enhancement** (Upgrade) | Fortschritt über Lua `WorkProgress`/`WorkItemBuildTime`, gleiche Delta-Formel |
 | **Silo** (Nuke/TML-Munition) | `SiloAssistWithResource(requested * resourceConsumed)` |
-| **Schild bauen/reparieren** | zusätzlich `AdjustHealth(regenRate*buildRate / RegenAssistMult)`; beschädigt → `regenAssistMult*2`, `delta*0.5` |
+| **Build/Repair Shield** | additionally `AdjustHealth(regenRate*buildRate / RegenAssistMult)`; damaged → `regenAssistMult*2`, `delta*0.5` |
 | **Fuel** (Air) | `FuelRatio += (FuelRechargeRate/FuelUseTime)*0.1`; beschädigt → halbe Rate |
-| **Repair** | `WorkProgress = focus.Health/MaxHealth`; fertig wenn HP voll (+ Fuel/Schild voll) |
-| **Progress-Bänder** | überschreitet der Fortschritt eine Schwelle → `OnBuildProgress`/`OnBeingBuiltProgress` in Lua |
+| **Repair** | `WorkProgress = focus.Health/MaxHealth`; done when HP full (+ fuel/shield full) |
+| **Progress Tapes** | if the progress exceeds a threshold → `OnBuildProgress`/`OnBeingBuiltProgress` in Lua |
 
-## Für den Nachbau (Phase C)
-- `resourceConsumed` = `LimitingRate` des Bauwerks aus der Econ-Verteilung —
-  **beide Systeme greifen ineinander**, deshalb zusammen bauen.
+## For reconstruction (Phase C)
+- `resourceConsumed` = `LimitingRate` of the structure from the Econ distribution —
+  **both systems interlock**, so build them together.
 - `Materialize` in TS: FractionComplete + HP-Kopplung + `OnStopBeingBuilt`-
   Lua-Callback + Adjacency-Scan.
-- Verifikation: Bauzeit bei voller Versorgung == `BuildTime/buildRate` s;
-  bei Masse-Stall verlangsamt sich *nur* der masseabhängige Bau.
+- Verification: Construction time with full supply == `BuildTime/buildRate` s;
+  With mass stall, *only* the mass-dependent construction slows down.

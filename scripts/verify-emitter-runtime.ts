@@ -18,9 +18,9 @@ const check = (ok: boolean, label: string): void => {
 }
 const nah = (a: number, b: number, eps = 1e-9): boolean => Math.abs(a - b) < eps
 
-/** Konstante Kurve ohne Spread: ein Key, Wert v. */
+/** Constant curve without spread: a key, value v. */
 const konst = (v: number) => ({ XRange: 10, Keys: [{ x: 5, y: v, z: 0 }] })
-/** rand fest auf 0.5 → der Spread-Term (rand−0.5)·z fällt weg. */
+/** rand fixed to 0.5 → the spread term (rand−0.5) z is omitted. */
 const rand05 = (): number => 0.5
 
 const ruhend: EmitterState = {
@@ -37,14 +37,14 @@ const ruhend: EmitterState = {
 
 console.log('\n== EmitRate-Akkumulator (Cfile:894662-894679) ==')
 {
-  // Rate 0.25 → genau 1 Partikel alle 4 Ticks, Bruchteile tragen über.
+  // Rate 0.25 → exactly 1 particle every 4 ticks, fractions carry over.
   const rt = new EmitterRuntime({ Lifetime: -1, EmitRateCurve: konst(0.25), LifetimeCurve: konst(10) }, rand05)
   const je: number[] = []
   for (let i = 0; i < 8; i++) je.push(rt.tick(ruhend, i).length)
-  check(je.join(',') === '0,0,0,1,0,0,0,1', `Rate 0.25 → Spawn alle 4 Ticks (${je.join(',')})`)
+  check(je.join(',') === '0,0,0,1,0,0,0,1', `Rate 0.25 → Spawn every 4 ticks (${je.join(',')})`)
 }
 {
-  // Rate 2.5 → abwechselnd 2 und 3.
+  // Rate 2.5 → alternating 2 and 3.
   const rt = new EmitterRuntime({ Lifetime: -1, EmitRateCurve: konst(2.5), LifetimeCurve: konst(10) }, rand05)
   const je: number[] = []
   for (let i = 0; i < 4; i++) je.push(rt.tick(ruhend, i).length)
@@ -60,7 +60,7 @@ console.log('\n== Spawn-Mapping (Cfile:894567-894932 / Upload 4480-4512) ==')
       LifetimeCurve: konst(20),
       XDirectionCurve: konst(3),
       YDirectionCurve: konst(0),
-      ZDirectionCurve: konst(4), // |dir| = 5 — und BLEIBT 5 (kein normalize!)
+      ZDirectionCurve: konst(4), // |you| = 5 — and STAY 5 (no normalize!)
       VelocityCurve: konst(2),
       XAccelCurve: konst(1),
       StartSizeCurve: konst(2),
@@ -78,19 +78,19 @@ console.log('\n== Spawn-Mapping (Cfile:894567-894932 / Upload 4480-4512) ==')
     rand05,
   )
   const p = rt.tick(ruhend, 100)[0]!
-  check(nah(p.vx, 6) && nah(p.vz, 8), `Velocity = Dir·Scale·v, NICHT normalisiert (${p.vx}, ${p.vz})`)
-  check(nah(p.ax, 1) && nah(p.ay, -0.02), `Gravity: ay −= 0.02 pro Tick² (ay=${p.ay})`)
+  check(nah(p.vx, 6) && nah(p.vz, 8), `Velocity = Dir Scale v, NOT normalized (${p.vx}, ${p.vz})`)
+  check(nah(p.ax, 1) && nah(p.ay, -0.02), `Gravity: ay −= 0.02 per tick² (ay=${p.ay})`)
   check(nah(p.angle, 90 * 0.017453292), `InitialRotation in Grad → rad ×0.017453292 (${p.angle.toFixed(6)})`)
   check(nah(p.rotRate, 180 * 0.017453292), 'RotationRate ebenso Grad → rad')
   check(nah(p.beginSize, 2) && nah(p.sizeRate, (6 - 2) / 20), `sizeRate = (End−Begin)/Lifetime (${p.sizeRate})`)
   check(nah(p.dragX, 4) && nah(p.dragY, 0.25) && nah(p.dragZ, 0.0625), 'dragCoeff = (r, 1/r, 1/r²)')
   check(nah(p.frameSize, 1 / 8) && nah(p.rowHeight, 1 / 4), 'frameSize = 1/Framecount, Zeilenhöhe = 1/Stripcount')
   check(nah(p.texRow, 2 * 0.25), `TextureSelection: floor(2.7)·(1/Stripcount) = 0.5 (${p.texRow})`)
-  check(nah(p.rampV, 0.5), 'RampSelection roh, keine Normalisierung')
-  check(nah(p.birth, 100), 'birth = Sim-Tick des Spawns')
+  check(nah(p.rampV, 0.5), 'RampSelection raw, no normalization')
+  check(nah(p.birth, 100), 'birth = spawn sim tick')
 }
 
-console.log('\n== ScaleEmitter: multipliziert NUR die belegten Kanäle ==')
+console.log('\n== ScaleEmitter: ONLY multiplies the occupied channels ==')
 {
   const bp = {
     Lifetime: -1,
@@ -109,15 +109,15 @@ console.log('\n== ScaleEmitter: multipliziert NUR die belegten Kanäle ==')
   check(nah(p.vx, 3), `Dir/Velocity × Scale (vx=${p.vx})`)
   check(nah(p.ax, 3), `Accel × Scale (ax=${p.ax})`)
   check(nah(p.beginSize, 6), `Start/EndSize × Scale (${p.beginSize})`)
-  // PosCurve skaliert (1·3), OffsetEmitter NICHT (0.5) → x = 100 + 3 + 0.5.
+  // PosCurve scales (1 3), OffsetEmitter NOT (0.5) → x = 100 + 3 + 0.5.
   check(nah(p.px, 103.5), `PosCurve skaliert, OffsetEmitter unskaliert (px=${p.px})`)
-  check(nah(p.rotRate, 90 * 0.017453292), 'RotationRate NICHT skaliert')
-  check(nah(p.lifetime, 10), 'Lifetime NICHT skaliert')
+  check(nah(p.rotRate, 90 * 0.017453292), 'RotationRate NOT scaled')
+  check(nah(p.lifetime, 10), 'Lifetime NOT scaled')
 }
 
 console.log('\n== LocalVelocity: Bone-Drehung EINMALIG beim Spawn ==')
 {
-  // 90° um Y (w=cos45, y=sin45): lokal +Z zeigt in Welt +X.
+  // 90° around Y (w=cos45, y=sin45): local +Z points in world +X.
   const s = Math.SQRT1_2
   const gedreht: EmitterState = { ...ruhend, qw: s, qy: s, qx: 0, qz: 0 }
   const bp = {
@@ -130,24 +130,24 @@ console.log('\n== LocalVelocity: Bone-Drehung EINMALIG beim Spawn ==')
   const mit = new EmitterRuntime({ ...bp, LocalVelocity: true }, rand05).tick(gedreht, 0)[0]!
   const ohne = new EmitterRuntime({ ...bp, LocalVelocity: false }, rand05).tick(gedreht, 0)[0]!
   check(nah(mit.vx, 1, 1e-6) && nah(mit.vz, 0, 1e-6), `LocalVelocity: +Z → Welt +X (${mit.vx.toFixed(3)})`)
-  check(nah(ohne.vz, 1, 1e-6), 'ohne LocalVelocity: Kurven wirken in Welt-Achsen')
+  check(nah(ohne.vz, 1, 1e-6), 'without LocalVelocity: Curves work in world axes')
 }
 
-console.log('\n== InterpolateEmission: Geburt um j/N gestaffelt (Cfile:894712-894717) ==')
+console.log('\n== InterpolateEmission: Birth staggered by y/N (Cfile:894712-894717) ==')
 {
   const rt = new EmitterRuntime(
     { Lifetime: -1, EmitRateCurve: konst(4), LifetimeCurve: konst(10), InterpolateEmission: true },
     rand05,
   )
   const p = rt.tick(ruhend, 50)
-  check(p.length === 4, `4 Partikel bei Rate 4`)
+  check(p.length === 4, `4 particles at rate 4`)
   check(
     nah(p[0]!.birth, 50) && nah(p[1]!.birth, 50.25) && nah(p[3]!.birth, 50.75),
     `Geburten 50, 50.25, …, 50.75 (${p.map((q) => q.birth).join(',')})`,
   )
 }
 
-console.log('\n== Emitter-Lifetime: nach Ablauf keine Emission mehr ==')
+console.log('\n== Emitter lifetime: no more emission after expiry ==')
 {
   const rt = new EmitterRuntime({ Lifetime: 3, EmitRateCurve: konst(1), LifetimeCurve: konst(10) }, rand05)
   const je: number[] = []

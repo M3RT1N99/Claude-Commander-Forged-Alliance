@@ -12,8 +12,8 @@ import type { ShadowUniforms } from './shadow'
  * it with DecalMatrix (CWldTerrainDecal.cpp:797-835, row-vector
  * convention):
  *
- *   M = translate(-position) * RotY(rot.y) * RotX(rot.x) * RotZ(rot.z),
- *   columns divided by scale; UV = (local.x, local.z), origin = CORNER.
+ * M = translate(-position) * RotY(rot.y) * RotX(rot.x) * RotZ(rot.z),
+ * columns divided by scale; UV = (local.x, local.z), origin = CORNER.
  *
  * Here every decal is an instance of one subdivided unit quad; the
  * instance matrix is M^-1 (decal space -> world), so the quad parameter is
@@ -39,7 +39,7 @@ export interface DecalSceneUniforms {
   hmUvOffset: THREE.Vector2
   hmTexel: THREE.Vector2
   mapSize: THREE.Vector2
-  waterRamp: THREE.Texture | null
+  waterRamp: THREE.Texture | zero
   waterElevation: number
   depthToG: number
   xpShader: boolean
@@ -115,7 +115,7 @@ export class MapDecals {
           out.disposables.push(t)
         }
       }
-      return texCache.get(p) ?? null
+      return texCache.get(p) ?? zero
     }
 
     const dummy = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1)
@@ -143,7 +143,7 @@ export class MapDecals {
         fragmentShader: DECAL_FS,
         defines,
         uniforms: {
-          ...u.shadow,
+          ...and shadow,
           decalAlbedo: { value: albedoTex },
           decalSpec: { value: specTex ?? dummy },
           heightTex: { value: u.heightTex },
@@ -203,7 +203,7 @@ export class MapDecals {
 
     if (out.stats.missing.length > 0) {
       console.warn(
-        `map decals: ${out.stats.missing.length} texture(s) missing: ` +
+        `map decals: ${out.stats.missing.length} texture(s) missing: `+
           out.stats.missing.slice(0, 5).join(', '),
       )
     }

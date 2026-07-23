@@ -64,7 +64,7 @@ const host = await LuaHost.create(files, (level, msg) => {
 })
 
 installEngine(host)
-// Flaches Testgelaende — EXPLIZIT, weil die Engine ohne Karte knallt (kein stiller 0-Wert).
+// Flat test area - EXPLICIT because the engine crashes without a map (no silent 0 value).
 setTerrainSource(host, FLAT_TEST_TERRAIN)
 
 // Blueprint-Pipeline (A2) — registriert uel0001
@@ -91,7 +91,7 @@ host.loadGlobal('/lua/system/Blueprints.lua')
 const missing = new Set<string>()
 host.eval(`LoadBlueprints()`)
 
-console.log('\n== Unit über echte Unit.lua instanziieren + OnCreate ==')
+console.log('\n== Instantiate unit via real Unit.lua + OnCreate ==')
 try {
   const result = host.eval(`
     local Unit = import('/lua/sim/Unit.lua').Unit
@@ -104,9 +104,9 @@ try {
     u:OnCreate()
     return { name = u.__bp.BlueprintId, hp = u:GetMaxHealth(), created = (u.__onCreateRan ~= nil) }
   `) as { name?: string; hp?: number } | undefined
-  check(!!result, 'OnCreate() lief ohne Fehler durch')
-  check(result?.name === 'uel0001', `Instanz kennt ihr Blueprint: ${result?.name}`)
-  check(result?.hp === 12000, `GetMaxHealth() aus Original-bp: ${result?.hp}`)
+  check(!!result, 'OnCreate() ran without errors')
+  check(result?.name === 'uel0001', `Instance knows your blueprint: ${result?.name}`)
+  check(result?.hp === 12000, `GetMaxHealth() from original bp: ${result?.hp}`)
 } catch (err) {
   check(false, `OnCreate: ${(err as Error).message.slice(0, 200)}`)
 }

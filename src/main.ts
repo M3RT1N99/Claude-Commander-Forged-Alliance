@@ -44,7 +44,7 @@ import { CommandFeedbackSystem, type BlipAssets } from './viewer/commandFeedback
 
 const $ = <T extends HTMLElement>(sel: string): T => {
   const el = document.querySelector<T>(sel)
-  if (!el) throw new Error(`UI-Element fehlt: ${sel}`)
+  if (!el) throw new Error(`UI element missing: ${sel}`)
   return el
 }
 
@@ -54,23 +54,23 @@ const btnPickDir = $<HTMLButtonElement>('#btn-pick-dir')
 const btnResume = $<HTMLButtonElement>('#btn-resume')
 const btnFallback = $<HTMLButtonElement>('#btn-fallback')
 const inputDir = $<HTMLInputElement>('#input-dir')
-const unitPanel = $('#unit-panel')
+const unitPanel = $('#unit panel')
 const mapPanel = $('#map-panel')
 const sandboxPanel = $('#sandbox-panel')
 const startPanel = $('#start-panel')
 const menuItems = [...document.querySelectorAll<HTMLButtonElement>('#menu .menu-item')]
-const badgeUnits = $('#badge-units')
+const badgeUnits = $('#badge units')
 const badgeMaps = $('#badge-maps')
 const btnCollapse = $<HTMLButtonElement>('#btn-collapse')
 const btnSandboxStart = $<HTMLButtonElement>('#btn-sandbox-start')
 const sandboxInfo = $('#sandbox-info')
 const mapSelect = $<HTMLSelectElement>('#map-select')
 const mapInfo = $('#map-info')
-const unitSearch = $<HTMLInputElement>('#unit-search')
+const unitSearch = $<HTMLInputElement>('#unit search')
 const unitSelect = $<HTMLSelectElement>('#unit-select')
 const teamColorInput = $<HTMLInputElement>('#team-color')
 const animSelect = $<HTMLSelectElement>('#anim-select')
-const unitInfo = $('#unit-info')
+const unitInfo = $('#unit info')
 
 function log(msg: string): void {
   logEl.textContent += msg + '\n'
@@ -100,9 +100,9 @@ async function connect(src: GameSource): Promise<void> {
       .find((p) => /^units\/[^/]+\/[^/]+_unit\.bp$/.test(p))
       .map((p) => p.split('/')[1]!)
       .sort()
-    log(`${unitIds.length} Einheiten gefunden`)
+    log(`${unitIds.length} units found`)
 
-    // Ab jetzt sind alle Menüpunkte erreichbar; die Zähler zeigen, was die
+    // From now on all menu items are accessible; the counters show what the
     // Spieldaten hergeben.
     for (const item of menuItems) item.disabled = false
     badgeUnits.textContent = String(unitIds.length)
@@ -111,8 +111,8 @@ async function connect(src: GameSource): Promise<void> {
     await populateMapList(src)
 
     const params = new URLSearchParams(location.search)
-    // ?frontend — direkt ins echte Hauptmenü (menus/main.lua), ohne Umweg über
-    // den Launcher. Derselbe Weg, den der Menüpunkt nimmt.
+    // ?frontend — directly to the real main menu (menus/main.lua), without a detour
+    // the launcher. The same path that the menu item takes.
     if (params.has('frontend')) {
       await startFrontEndUi()
       return
@@ -143,7 +143,7 @@ async function connect(src: GameSource): Promise<void> {
       await loadUnit(wanted.toLowerCase())
     }
   } catch (err) {
-    log(`FEHLER: ${err instanceof Error ? err.message : err}`)
+    log(`ERROR: ${err instanceof Error ? err.message : err}`)
   }
 }
 
@@ -159,9 +159,9 @@ async function populateMapList(src: GameSource): Promise<void> {
     }
     badgeMaps.textContent = String(mapSelect.options.length)
     badgeMaps.hidden = false
-    log(`${mapSelect.options.length} Karten gefunden`)
+    log(`${mapSelect.options.length} cards found`)
   } catch (err) {
-    log(`Karten-Liste nicht verfügbar: ${err instanceof Error ? err.message : err}`)
+    log(`Card list not available: ${err instanceof Error ? err.message : err}`)
   }
 }
 
@@ -196,9 +196,9 @@ async function startFrontEndUi(): Promise<void> {
     gameUi.attachEvents()
     setIngame(true)
 
-    // GameUi.render() fängt Lua-Fehler selbst ab und meldet jeden genau einmal
-    // (wie die Engine: CMauiControl::Frame → RunScript → Fehler loggen,
-    // weiterlaufen). Die Schleife darf deshalb einfach weiterlaufen.
+    // GameUi.render() catches Lua errors itself and reports each one exactly once
+    // (like the engine: CMauiControl::Frame → RunScript → log errors,
+    // continue running). The loop can therefore simply continue to run.
     let last = performance.now()
     const tick = (now: number): void => {
       const delta = Math.min((now - last) / 1000, 0.1)
@@ -210,7 +210,7 @@ async function startFrontEndUi(): Promise<void> {
     frontEndFrame = requestAnimationFrame(tick)
     log('Hauptmenü läuft (menus/main.lua)')
   } catch (err) {
-    log(`FEHLER im Hauptmenü: ${err instanceof Error ? err.message : err}`)
+    log(`ERROR in the main menu: ${err instanceof Error ? err.message : err}`)
     setIngame(false)
     setMode('start')
   }
@@ -229,7 +229,7 @@ function renderUnitList(filter: string): void {
 }
 
 // ---------------------------------------------------------------------------
-// Unit laden
+// Load unit
 // ---------------------------------------------------------------------------
 
 function currentTeamColor(): THREE.Color {
@@ -257,11 +257,11 @@ async function loadUnitAssets(
 
   const paths = resolveUnitPaths(id, bp, (p) => vfs!.exists(p))
   if (!paths) {
-    log(`${id.toUpperCase()} hat kein Mesh (Platzhalter-Unit)`)
+    log(`${id.toUpperCase()} has no mesh (placeholder unit)`)
     return null
   }
   if (!vfs.exists(paths.mesh)) {
-    log(`Mesh nicht gefunden für ${id.toUpperCase()}: ${paths.mesh}`)
+    log(`Mesh not found for ${id.toUpperCase()}: ${paths.mesh}`)
     return null
   }
   const model = parseScm(await vfs.read(paths.mesh))
@@ -271,7 +271,7 @@ async function loadUnitAssets(
   const specTeam = await loadFirstTexture(paths.specTeam)
   const lookup = paths.shader === 'Seraphim' ? await loadFirstTexture(paths.lookup) : null
 
-  if (!albedo) log(`Keine Albedo-Textur für ${id.toUpperCase()} — rendere grau`)
+  if (!albedo) log(`No albedo texture for ${id.toUpperCase()} — render gray`)
   const fallbackAlbedo = new THREE.DataTexture(new Uint8Array([140, 140, 145, 255]), 1, 1)
   fallbackAlbedo.needsUpdate = true
 
@@ -315,7 +315,7 @@ async function loadUnit(id: string): Promise<void> {
       }
     }
   } catch (err) {
-    log(`FEHLER beim Laden von ${id}: ${err instanceof Error ? err.message : err}`)
+    log(`ERROR loading ${id}: ${err instanceof Error ? err.message : err}`)
   }
 }
 
@@ -346,12 +346,12 @@ async function playSelectedAnimation(): Promise<void> {
     )
     log(`Animation: ${path.split('/').pop()} (${anim.numFrames} Frames, ${anim.duration.toFixed(2)}s)`)
   } catch (err) {
-    log(`FEHLER bei Animation: ${err instanceof Error ? err.message : err}`)
+    log(`ERROR during animation: ${err instanceof Error ? err.message : err}`)
   }
 }
 
 // ---------------------------------------------------------------------------
-// Karte laden
+// Load map
 // ---------------------------------------------------------------------------
 
 async function loadMap(folder: string): Promise<void> {
@@ -361,7 +361,7 @@ async function loadMap(folder: string): Promise<void> {
     hud?.dispose()
     hud = null
     viewer.setRtsControls(false)
-    log(`Lade Karte ${folder}…`)
+    log(`Loading card ${folder}…`)
     const files = await source.list(`maps/${folder}`)
     const scenarioFile = files.find((f) => f.name.toLowerCase().endsWith('_scenario.lua'))
     if (scenarioFile) {
@@ -373,12 +373,12 @@ async function loadMap(folder: string): Promise<void> {
       const desc = stripLoc(bpGet(info, 'description')) ?? ''
       const size = bpGet(info, 'size')
       const sizeStr = Array.isArray(size) ? `${size[0]}×${size[1]}` : '?'
-      mapInfo.innerHTML = `<strong>${name}</strong><br>${desc}<br>Größe: <strong>${sizeStr}</strong>`
+      mapInfo.innerHTML = `<strong>${name}</strong><br>${desc}<br>Size: <strong>${sizeStr}</strong>`
     }
 
     const scmapFile = files.find((f) => f.name.toLowerCase().endsWith('.scmap'))
     if (!scmapFile) {
-      log(`Keine .scmap-Datei in maps/${folder}`)
+      log(`No .scmap file in maps/${folder}`)
       return
     }
     const raf = await source.open(`maps/${folder}/${scmapFile.name}`)
@@ -387,12 +387,12 @@ async function loadMap(folder: string): Promise<void> {
     currentScmap = scmap
     log(
       `${scmapFile.name}: ${scmap.width}×${scmap.height}, ` +
-        `${scmap.strata.length} Texturlagen, Wasser ${scmap.water.hasWater ? 'ja' : 'nein'}`,
+        `${scmap.strata.length} texture layers, water ${scmap.water.hasWater ? 'ja' : 'nein'}`,
     )
     await viewer.setMap(scmap, vfs)
-    log(`Karte ${folder} geladen`)
+    log(`Card ${folder} loaded`)
   } catch (err) {
-    log(`FEHLER beim Laden der Karte: ${err instanceof Error ? err.message : err}`)
+    log(`ERROR loading map: ${err instanceof Error ? err.message : err}`)
   }
 }
 
@@ -412,16 +412,16 @@ let gameUi: GameUi | null = null
  */
 function conVarChanged(name: string, value: string | number | boolean): void {
   viewer.setConVar(name, value)
-  // Die Lebensbalken sind eine ENGINE-Einstellung, kein UI-Element: die Aktion
-  // `toggle_lifebars` (Alt-L, defaultkeymap.lua:11) schaltet die ConVar
-  // `UI_RenderUnitBars` (keyactions.lua:14). Der Renderer liest sie — er
-  // entscheidet nicht selbst, ob Balken erscheinen.
+  // The life bars are an ENGINE setting, not a UI element: the action
+  // `toggle_lifebars` (Alt-L, defaultkeymap.lua:11) switches the ConVar
+  // `UI_RenderUnitBars` (keyactions.lua:14). The renderer reads them - he
+  // does not decide for itself whether bars appear.
   if (!hud) return
   const an = value === true || value === 'true' || value === 1
   if (name.toLowerCase() === 'ui_renderunitbars') hud.renderBars = an
-  // „Strategische Icons immer zeigen" ist ebenfalls eine ConVar der Engine
-  // (ui_AlwaysRenderStrategicIcons, Cfile:421748) und im Optionen-Dialog
-  // schaltbar. Ohne sie erscheinen die Icons erst ab Display.Mesh.IconFadeInZoom.
+  // “Always show strategic icons” is also a ConVar of the engine
+  // (ui_AlwaysRenderStrategicIcons, Cfile:421748) and in the options dialog
+  // switchable. Without it, the icons only appear from Display.Mesh.IconFadeInZoom.
   if (name.toLowerCase() === 'ui_alwaysrenderstrategicicons') hud.alwaysIcons = an
 }
 let buildPreview: BuildPreview | null = null
@@ -430,12 +430,12 @@ let spawnPoint = new THREE.Vector3(20, 0, 20)
 let massSpots: { x: number; z: number }[] = []
 const sandboxAssetCache = new Map<string, SandboxUnitAssets>()
 
-// --- Projektile: die fliegenden Schüsse der Sim, mit ihrem echten Mesh -------
+// --- Projectiles: the Sim's flying shots, with their real mesh -------
 //
-// Die Engine rendert jede Sim-Entity (CUIWorldView) — auch Projektile, mit
-// Mesh aus dem Blueprint (Display.Mesh.LODs, UniformScale; Shader TMeshGlow).
-// Manche Projektile haben KEIN Mesh (nur Emitter) — die zeichnet erst das
-// Partikelsystem; bis dahin sind sie unsichtbar, wie im Original ohne Effekte.
+// The engine renders every sim entity (CUIWorldView) - including projectiles
+// Mesh from the Blueprint (Display.Mesh.LODs, UniformScale; Shader TMeshGlow).
+// Some projectiles have NO mesh (only emitters) - that's what draws them
+// particle system; Until then they are invisible, as in the original without effects.
 interface ProjectileAssets {
   model: ScmModel
   albedo: THREE.Texture | null
@@ -450,17 +450,17 @@ function loadProjectileAssets(bpId: string): Promise<ProjectileAssets | null> {
   if (!p) {
     p = (async (): Promise<ProjectileAssets | null> => {
       if (!vfs) return null
-      // bpId aus der Sim: '/projectiles/tdfgauss01/tdfgauss01_proj.bp'
+      // bpId from the sim: '/projectiles/tdfgauss01/tdfgauss01_proj.bp'
       const path = bpId.replace(/^\//, '')
-      // Projektile UND die Effekt-Entities (Trümmer beim Tod, Nuke-Controller:
+      // Projectiles AND the effect entities (debris upon death, nuke controller:
       // /effects/entities/**_proj.bp — defaultexplosions.lua:285).
       const m = path.match(/^((?:projectiles|effects\/entities)\/[^/]+\/[^/]+)_proj\.bp$/)
       if (!m) return null
       const base = m[1]!
       const meshPath = `${base}_lod0.scm`
-      // KEIN Mesh ist bei vielen Projektilen die Wahrheit (ACU-Laser,
-      // Maschinengewehr, Bau-Effekte): sie sind reine Emitter/Trail-Effekte
-      // und werden erst mit dem Partikelsystem sichtbar.
+      // NO mesh is the truth for many projectiles (ACU laser,
+      // Machine Gun, Construction Effects): they are pure emitter/trail effects
+      // and only become visible with the particle system.
       if (!vfs.exists(meshPath)) return null
       const model = parseScm(await vfs.read(meshPath))
       const albedo = await loadFirstTexture([`${base}_albedo.dds`])
@@ -473,13 +473,13 @@ function loadProjectileAssets(bpId: string): Promise<ProjectileAssets | null> {
   return p
 }
 
-// --- Partikel: die Emitter der Sim, gespawnt nach den Original-Kurven --------
+// --- Particles: the Sim's emitters, spawned according to the original curves --------
 //
-// Pro Sim-Tick tickt jede Emitter-Laufzeit (CEfxEmitter::Tick, 1:1 in
-// src/effects/emitterRuntime.ts) und spawnt Partikel in die Batches des
-// Partikelsystems (src/viewer/particles.ts — der particle.fx-Port). Emitter,
-// die die Sim nicht mehr meldet, hören auf; ihre Partikel leben im
-// Vertex-Shader weiter, wie im Original.
+// Each emitter runtime ticks per Sim tick (CEfxEmitter::Tick, 1:1 in
+// src/effects/emitterRuntime.ts) and spawns particles into the batches of the
+// particle system (src/viewer/particles.ts — the particle.fx port). emitter,
+// those who no longer report the sim stop; their particles live in
+// Vertex shader continues as in the original.
 let particles: ParticleSystem | null = null
 let trails: TrailSystem | null = null
 let beams: BeamSystem | null = null
@@ -499,8 +499,8 @@ async function prepareEmitterBatch(bpId: string): Promise<void> {
   const bp = (await luaSim.emitterBlueprint(bpId)) as
     | (EmitterBpData & { RepeatTexture?: string; TextureName?: string })
     | null
-  if (!bp) return // kein Emitter-BP unter dieser Id — bleibt aus
-  // Polytrails (TrailEmitterBlueprint: RepeatTexture statt Texture) sind eine
+  if (!bp) return // no emitter BP under this ID - remains off
+  // Polytrails (TrailEmitterBlueprint: RepeatTexture instead of Texture) are one
   // EIGENE Render-Familie (TPolyTrail_* — Ribbons, src/viewer/trails.ts).
   if (typeof bp.RepeatTexture === 'string') {
     const t = bp as TrailBpData
@@ -548,12 +548,12 @@ function updateEmitters(): void {
   const seen = new Set<number>()
   for (const e of luaSim.allEmitters()) {
     seen.add(e.id)
-    // Polytrails: pro Tick ein Segment-Punkt an der gemeldeten Position.
+    // Polytrails: one segment point per tick at the reported position.
     if (trails?.hasBp(e.bp)) {
       trails.point(e.id, e.bp, e.x, e.y, e.z, tick, e.scale)
       continue
     }
-    // Beams: das Quad zwischen den Endpunkten nachziehen.
+    // Beams: drag the quad between the end points.
     if (beams?.hasBp(e.bp)) {
       beams.set(e.id, e.bp, e, tick)
       continue
@@ -562,8 +562,8 @@ function updateEmitters(): void {
     if (!rt) {
       const bp = emitterBpData.get(e.bp)
       if (!bp || !particles.hasBatch(e.bp)) {
-        // Blueprint/Texturen laden asynchron; der Emitter beginnt, sobald
-        // sie da sind (einmal pro Typ — danach kommt alles aus dem Cache).
+        // Blueprint/textures load asynchronously; the emitter starts as soon as
+        // they are there (once per type - after that everything comes from the cache).
         void prepareEmitterBatch(e.bp)
         continue
       }
@@ -594,7 +594,7 @@ function updateEmitters(): void {
   }
 }
 
-/** Die Projektil-Meshes dem Sim-Zustand nachziehen (pro Frame, aus dem Cache). */
+/** Track the projectile meshes to the sim state (per frame, from cache). */
 function updateProjectiles(): void {
   if (!luaSim) return
   const list = luaSim.allProjectiles()
@@ -608,8 +608,8 @@ function updateProjectiles(): void {
         void loadProjectileAssets(p.bp).then((assets) => {
           projPending.delete(p.id)
           if (!assets) return
-          // Der Schuss kann schon eingeschlagen sein, während das Mesh lud —
-          // dann KEIN Geist in der Szene.
+          // The shot may have hit while the mesh was loading —
+          // then NO ghost in the scene.
           if (!luaSim?.allProjectiles().some((q) => q.id === p.id)) return
           projMeshes.set(p.id, viewer.addProjectile(assets.model, assets.albedo, assets.scale))
         })
@@ -617,7 +617,7 @@ function updateProjectiles(): void {
       continue
     }
     mesh.position.set(p.x, p.y, p.z)
-    // Die Sim liefert (w,x,y,z) — three.js will (x,y,z,w).
+    // The sim delivers (w,x,y,z) — three.js wants (x,y,z,w).
     mesh.quaternion.set(p.qx, p.qy, p.qz, p.qw)
   }
   for (const [id, mesh] of projMeshes) {
@@ -628,18 +628,18 @@ function updateProjectiles(): void {
   }
 }
 
-// --- Props: die Wracks der Sim, mit dem echten Wreckage-Shader ---------------
+// --- Props: the wreckage of the sim, with the real wreckage shader ---------------
 //
-// Unit.OnKilled → CreateWreckageProp (unit.lua:1090) läuft komplett in der
-// Original-Lua: CreateProp + SetMesh(Display.MeshBlueprintWrecked) +
-// SetScale(UniformScale) + AssociatedBP. Der Renderer zeichnet das Unit-Mesh
-// mit dem Wreckage-Material (mesh.fx:2334 — Noise über Albedo, verbeult im VS).
+// Unit.OnKilled → CreateWreckageProp (unit.lua:1090) runs completely in the
+// Original Lua: CreateProp + SetMesh(Display.MeshBlueprintWrecked) +
+// SetScale(UniformScale) + AssociatedBP. The renderer draws the unit mesh
+// with the wreckage material (mesh.fx:2334 — noise over albedo, dented in the VS).
 const propMeshes = new Map<number, THREE.Mesh>()
 const propPending = new Set<number>()
 const propSkipLogged = new Set<string>()
 let wreckNoise: Promise<THREE.Texture | null> | null = null
-// Das UEF-Bau-Gitter (SecondaryName aus ExtractBuildMeshBlueprint,
-// lua/system/blueprints.lua:221) — einmal geladen, von allen Baustellen geteilt.
+// The UEF construction grid (SecondaryName from ExtractBuildMeshBlueprint,
+// lua/system/blueprints.lua:221) — loaded once, shared by all construction sites.
 let uefBuildSpecular: Promise<THREE.Texture | null> | null = null
 
 // Shared cache for the faction build textures (build speculars, the Cybran
@@ -660,10 +660,10 @@ function buildTexture(path: string, repeat: boolean): Promise<THREE.Texture | nu
 
 async function addPropMesh(p: LuaPropSnapshot): Promise<void> {
   const assets = await loadSandboxAssets(p.assoc!)
-  // Das Noise ist der SpecularName, den ExtractWreckageBlueprint
-  // (lua/system/blueprints.lua:201) in JEDES Wrack-Mesh-BP schreibt.
+  // The noise is the SpecularName, the ExtractWreckageBlueprint
+  // (lua/system/blueprints.lua:201) writes to EVERY wreck mesh BP.
   wreckNoise ??= loadFirstTexture(['env/common/props/wreckage_noise.dds']).then((t) => {
-    // Der Shader sampelt UV * 5.15 mit Zeit-Offset — die Textur muss kacheln.
+    // The shader samples UV * 5.15 with time offset — the texture must tile.
     if (t) t.wrapS = t.wrapT = THREE.RepeatWrapping
     return t
   })
@@ -676,7 +676,7 @@ async function addPropMesh(p: LuaPropSnapshot): Promise<void> {
     }
     return
   }
-  // Das Prop kann schon wieder weg sein (Reclaim), während das Mesh lud.
+  // The prop can be gone again (reclaim) while the mesh was loading.
   if (!luaSim?.allProps().some((q) => q.id === p.id)) return
   const mesh = viewer.addWreck(assets.model, assets.textures, noise, p.scale, p.spawn / 10)
   mesh.position.set(p.x, p.y, p.z)
@@ -690,8 +690,8 @@ function updateProps(): void {
   for (const p of luaSim.allProps()) {
     seen.add(p.id)
     if (propMeshes.has(p.id) || propPending.has(p.id)) continue
-    // Props ohne Mesh/Unit-Bezug (Karten-Props kommen mit dem scmap-Parser-
-    // Schwanz): einmal je Blueprint sagen, nicht raten.
+    // Props without mesh/unit reference (map props come with the scmap parser
+    // Tail): say blueprint once per blueprint, don't guess.
     if (!p.meshBp || !p.assoc) {
       if (!propSkipLogged.has(p.bp)) {
         propSkipLogged.add(p.bp)
@@ -742,8 +742,8 @@ async function loadSandboxAssets(id: string): Promise<SandboxUnitAssets | null> 
 function setIngame(on: boolean): void {
   if (document.body.classList.contains('ingame') === on) return
   document.body.classList.toggle('ingame', on)
-  // Der Viewer bemisst sich am Fenster, die UI-VM am Root-Frame — beide müssen
-  // den neuen Platz sehen.
+  // The viewer is measured by the window, the UI VM by the root frame - both have to be
+  // see the new place.
   window.dispatchEvent(new Event('resize'))
   gameUi?.resize(window.innerWidth, window.innerHeight)
 }
@@ -756,9 +756,9 @@ async function startSandbox(mapFolder: string): Promise<void> {
     setIngame(true)
     await loadMap(mapFolder)
 
-    // Läuft schon eine Sim? Dann zurücksetzen, statt eine zweite ACU auf die
-    // alte Sitzung zu stapeln (mit doppeltem Startvorrat aus
-    // GiveInitialResources) — und mit dem Gelände der NEUEN Karte.
+    // Is a sim already running? Then reset, instead of a second ACU on the
+    // old session to stack (with double starting supply
+    // GiveInitialResources) — and with the terrain of the NEW map.
     if (luaSim && currentScmap) {
       luaUnits.length = 0
       knownSceneUnits.clear()
@@ -772,7 +772,7 @@ async function startSandbox(mapFolder: string): Promise<void> {
       log('Lua-Sim zurückgesetzt (neue Karte)')
     }
 
-    // Spawn-Punkt der Armee 1 aus der _save.lua
+    // Army 1 spawn point from the _save.lua
     const files = await source.list(`maps/${mapFolder}`)
     const saveFile = files.find((f) => f.name.toLowerCase().endsWith('_save.lua'))
     if (saveFile) {
@@ -787,7 +787,7 @@ async function startSandbox(mapFolder: string): Promise<void> {
         log(`Spawn ARMY_1: ${spawnPoint.x.toFixed(0)}, ${spawnPoint.z.toFixed(0)}`)
       }
 
-      // Mass-Punkte aus den Markern
+      // Measurement points from the markers
       const allMarkers = bpGet(save, 'Scenario.MasterChain._MASTERCHAIN_.Markers')
       if (allMarkers && typeof allMarkers === 'object' && !Array.isArray(allMarkers)) {
         const spots: { x: number; z: number }[] = []
@@ -805,35 +805,35 @@ async function startSandbox(mapFolder: string): Promise<void> {
       }
     }
 
-    // Die Maße des Auswahlrings kommen aus der Original-Datei
-    // lua/renderselectparams.lua (die Engine liest genau sie, Cfile:1215033).
+    // The dimensions of the selection ring come from the original file
+    // lua/renderselectparams.lua (the engine reads exactly them, Cfile:1215033).
     await loadSelectParams()
     sandbox = new SandboxController(viewer)
-    // massSpots werden NICHT mehr als erfundene Ringe gezeichnet. Sie bleiben
-    // geparst (Struktur der Karte), bis der Session-Start sie als echte
-    // Ressourcen-Vorkommen über ScenarioUtilities.lua anlegt und die Engine
-    // ihre Original-Icons rendert.
+    // massSpots are NO longer drawn as made-up rings. They stay
+    // parsed (structure of the map) until the session start it as real
+    // Resource occurrences are created via ScenarioUtilities.lua and the engine
+    // renders their original icons.
     if (currentScmap) {
       hud = new Hud(vfs, viewer, hudSource)
     }
 
-    // Die ECHTE lua/ui in einer zweiten Lua-VM (wie im Original: Sim und UI
-    // haben getrennte States). Sie baut das Eco-Panel aus economy.lua — der
-    // TS-Nachbau in hud.ts ist dafür raus.
+    // The REAL lua/ui in a second Lua VM (like the original: Sim and UI
+    // have separate states). She builds the Eco-Panel from economy.lua — the
+    // TS replica in hud.ts is out for this.
     gameUi?.dispose()
-    // Die SESSION geht in beide VMs: die Sim bekommt sie über setupSession
-    // (ScenarioInfo + Brains), die UI über dieselben Angaben — GetArmiesTable()
-    // und SessionGetScenarioInfo() sind die Engine-Sicht darauf. Ohne sie
-    // knallen die Session-Globals ehrlich mit „no active session".
+    // The SESSION goes into both VMs: the sim gets it via setupSession
+    // (ScenarioInfo + Brains), the UI has the same information — GetArmiesTable()
+    // and SessionGetScenarioInfo() are the engine view of it. Without her
+    // the session globals honestly say “no active session”.
     const session: SessionInfo = { ...SANDBOX_SESSION, map: mapFolder }
     gameUi = await GameUi.create(vfs, await loadGameFonts(), log, 'game', conVarChanged, session)
     gameUi.attachEvents()
     // Strategic icons are tinted with the army's iconColor from the
     // armiesTable (gamecolors.lua ArmyColors, Cfile:1267023-1267111).
     hud?.setArmyColors(gameUi.armyIconColors())
-    // Die Audio-Ausgabe: die XACT-Banks aus <FA>/sounds/ — StartSound in der
-    // UI-VM landet als PCM im Lautsprecher (StopSound beendet über die
-    // Handle-ID, z. B. die Menümusik beim Sitzungsstart).
+    // The audio output: the XACT banks from <FA>/sounds/ — StartSound in the
+    // UI-VM ends up as PCM in the speaker (StopSound ends via the
+    // Handle ID, e.g. B. the menu music at the start of the session).
     if (!gameAudio) gameAudio = await GameAudio.create(vfs, log)
     if (gameAudio) {
       const audio = gameAudio
@@ -845,17 +845,17 @@ async function startSandbox(mapFolder: string): Promise<void> {
       // XACT category gains; boot-time values are replayed by connectVolume.
       gameUi.connectVolume((cat, vol) => audio.setVolume(cat, vol))
     }
-    // Der Pause-Reiter der Original-UI (tabs.lua:425/428) hält die WELT an —
-    // die Sim, nicht die UI.
+    // The pause tab of the original UI (tabs.lua:425/428) pauses the WORLD —
+    // the sim, not the UI.
     gameUi.connectPause((paused) => {
       luaSim?.setPaused(paused)
       log(paused ? 'Session pausiert' : 'Session läuft weiter')
     })
-    // Die Bau-Vorschau (Geistergebäude am Raster) — Engine-Rendering mit den
-    // echten Blueprint-Modellen.
+    // The construction preview (ghost buildings on the grid) — engine rendering with the
+    // real blueprint models.
     buildPreview = new BuildPreview(viewer, loadSandboxAssets)
-    // Das Partikelsystem — frisch pro Sitzung (setMap → clearContent wirft
-    // die Helper-Meshes weg, also auch die Batches).
+    // The particle system — fresh per session (setMap → clearContent throws
+    // the helper meshes are gone, and so are the batches).
     particles?.dispose()
     particles = new ParticleSystem((mesh) => viewer.addHelper(mesh))
     trails?.dispose()
@@ -902,7 +902,7 @@ async function startSandbox(mapFolder: string): Promise<void> {
         (meshName, blueprintId, textureName, shaderName, uniformScale, x, y, z, duration) => {
           // BlueprintID branch (Cfile:1281792-1830): LOD0 mesh of the unit
           // blueprint, scale OVERRIDDEN by Display.UniformScale.
-          void (async () => {
+          void(async() => {
             let meshPath = meshName
             let texPath = textureName
             let scale = uniformScale
@@ -946,65 +946,65 @@ async function startSandbox(mapFolder: string): Promise<void> {
     }
     emitterRuntimes.clear()
     lastEmitterTick = -1
-    // Die Naht, über die Befehle der UI in die Sim gehen. Ohne sie KNALLT jeder
-    // Befehl — statt still zu verpuffen (ui-globals.lua: __uiSimCommand).
+    // The seam through which UI commands go into the sim. Without them, everyone BANGS
+    // Command - instead of just fizzling out (ui-globals.lua: __uiSimCommand).
     gameUi.connectSim((name, ids, value) => {
-      // SetLexical-Verhalten der Engine (Cfile:1381888-1381946): Enum-Namen
-      // sind case-insensitiv, das "UNITCOMMAND_"-Praefix ist optional —
-      // GetUnitCommandFromCommandCap liefert z. B. 'Stop' ohne Praefix.
+      // Engine SetLexical Behavior (Cfile:1381888-1381946): Enum names
+      // are case-insensitive, the "UNITCOMMAND_" prefix is ​​optional —
+      // GetUnitCommandFromCommandCap returns e.g. B. 'Stop' without a prefix.
       const cmd = name.replace(/^UNITCOMMAND_/i, '').toLowerCase()
       const v = value as { blueprint?: string; count?: number; index?: number } | undefined
       if (cmd === 'stop') {
-        // Der Stop-Knopf (orders.lua:205): Bewegungsabbruch über den
-        // Navigator (AbortMove) — der volle Befehls-Dispatch (Task-Abbruch,
-        // Queue leeren) ist Teil des offenen Command-Dispatch-Blocks.
+        // The stop button (orders.lua:205): stop movement via the
+        // Navigator (AbortMove) — the full command dispatch (task abort,
+        // Empty Queue) is part of the open command dispatch block.
         for (const id of ids) luaSim?.stop(id)
         return
       }
       if (name === 'UNITCOMMAND_BuildFactory' && v?.blueprint) {
-        // Die Fabrik baut: die Einheit geht in ihre Warteschlange (die Sim spawnt
-        // sie selbst, sobald sie an der Reihe ist).
+        // The factory builds: the unit goes into its queue (the Sim spawns
+        // herself as soon as it is her turn).
         for (const id of ids) void luaSim?.factoryBuild(id, v.blueprint, v.count ?? 1)
         log(`Fabrik ${ids.join(',')}: ${v.count ?? 1}× ${v.blueprint}`)
         return
       }
-      // Increase/DecreaseBuildCountInQueue der Original-UI (Rechtsklick aufs
-      // Queue-Icon nimmt weg, Linksklick legt drauf — construction.lua:895/988).
+      // Increase/DecreaseBuildCountInQueue of the original UI (right click on the
+      // Queue icon takes away, left click puts on it — construction.lua:895/988).
       if ((name === 'ISSUE_IncreaseCommandCount' || name === 'ISSUE_DecreaseCommandCount') && v?.index !== undefined) {
         const delta = (name === 'ISSUE_IncreaseCommandCount' ? 1 : -1) * (v.count ?? 1)
         for (const id of ids) luaSim?.adjustBuildQueue(id, v.index, delta)
         return
       }
-      log(`Befehl an die Sim: ${name}(${ids.join(',')}) — noch kein Weg dorthin`)
+      log(`Command to the sim: ${name}(${ids.join(',')}) — noch kein Weg dorthin`)
     })
     // SimCallback (Ctrl-K-Selbstzerstörung, Kontrollgruppen, Diplomatie):
-    // die UI ruft eine Funktion aus lua/simcallbacks.lua in der Sim.
+    // the UI calls a function from lua/simcallbacks.lua in the sim.
     gameUi.connectSimCallback((func, argsLua, unitIds) => {
       luaSim?.simCallback(func, argsLua, unitIds)
     })
     // RestartSession (Menü → Neustart, tabs.lua:218): Teardown + Neustart mit
-    // denselben Session-Infos (func_DoPreload, Cfile:1320748) — exakt der
-    // Sandbox-Startpfad. Erst diese Naht macht SessionCanRestart() wahr.
+    // the same session info (func_DoPreload, Cfile:1320748) — exactly that
+    // Sandbox start path. Only this seam makes SessionCanRestart() true.
     gameUi.connectRestart(() => {
       log('RestartSession: Session startet neu')
       void startSandbox(mapFolder)
     })
 
-    // Beide Frame-Hooks an EINER Stelle registrieren, nach dem Karten-Laden
-    // (setMap → clearContent wirft alle Hooks weg). Sie vorher oder verteilt zu
-    // setzen war schon einmal die Ursache dafür, dass sich ab dem zweiten
-    // Sandbox-Start nichts mehr bewegte.
+    // Register both frame hooks in ONE place after loading the map
+    // (setMap → clearContent throws away all hooks). You before or distributed to
+    // was already the reason for this from the second
+    // Sandbox start didn't move anything anymore.
     viewer.onUpdate(luaSimUpdate)
     viewer.onUpdate(() => {
       gameUi?.render()
-      // Die Original-Lua sagt, WO die Weltansichten liegen: die Hauptansicht
-      // (gamemain.lua:142) und die Minimap (minimap.lua:115, kartografisch).
-      // Die 3D-Seite rendert in genau diese Rechtecke — sie legt sie nicht fest.
+      // The original Lua says WHERE the worldviews lie: the main view
+      // (gamemain.lua:142) and the minimap (minimap.lua:115, cartographic).
+      // The 3D page renders into exactly these rectangles — it doesn't specify them.
       if (gameUi) viewer.setWorldViews(gameUi.worldViews())
     })
-    // ACU über die ECHTE Original-Lua-Sim spawnen (Engine-Pfad) statt als
-    // SimWorld-Platzhalter. Nicht awaiten, damit die Karte sofort bedienbar ist
-    // (die Lua-VM bootet einmalig im Hintergrund).
+    // ACU spawn via the REAL original Lua sim (engine path) instead of as
+    // SimWorld placeholder. Do not await so that the card can be used immediately
+    // (the Lua VM boots once in the background).
     void spawnViaLua('uel0001')
     const params = new URLSearchParams(location.search)
     const zoomParam = Number(params.get('zoom'))
@@ -1021,10 +1021,10 @@ async function startSandbox(mapFolder: string): Promise<void> {
 }
 
 /**
- * Selbsttest über die URL (`?selftest=ueb0101`): wählt die ACU und baut das
- * angegebene Gebäude neben ihr — über GENAU denselben Weg wie ein Klick
- * (SelectUnits → commandmode → worldClick). Damit ist der Browser-Pfad prüfbar,
- * ohne dass jemand mit der Maus danebentippt.
+ * Self-test via the URL (`?selftest=ueb0101`): selects the ACU and builds that
+ * specified buildings next to her — via EXACTLY the same path as a click
+ * (SelectUnits → commandmode → worldClick). This allows the browser path to be checked
+ * without anyone mistyping with the mouse.
  */
 async function runSelftest(blueprintId: string): Promise<void> {
   const deadline = Date.now() + 60000
@@ -1045,12 +1045,12 @@ async function runSelftest(blueprintId: string): Promise<void> {
   log(`SELFTEST: ACU ${acu.id} ausgewählt`)
   await new Promise((r) => setTimeout(r, 800))
   {
-    // Was zeigt die Original-UI wirklich? Zählt, was im DOM ankommt — Bilder
-    // inklusive. „Ohne Bild" heißt: das Bitmap WILL eine Textur (backgroundImage
-    // gesetzt, mauiRenderer:195), sie ließ sich aber nicht auflösen — UND es ist
-    // sichtbar (Alpha > 0). SolidColor-Bitmaps (nur `background`) und Alpha-0-
-    // Platzhalter sind Original-Verhalten (window.lua:106-115 versteckt seine
-    // Resize-Griffe genau so) — sie zu zählen meldete ewig Phantome.
+    // What does the original UI really show? Counts what arrives in the DOM — images
+    // including. "Without image" means: the bitmap WANTS a texture (backgroundImage
+    // set, mauiRenderer:195), but it couldn't be resolved - AND it is
+    // visible (alpha > 0). SolidColor bitmaps (`background` only) and Alpha 0
+    // Placeholders are original behavior (window.lua:106-115 hides its
+    // Resize handles exactly the same) — counting them always reported phantoms.
     const divs = [...document.querySelectorAll<HTMLDivElement>('#maui-root div')]
     const sichtbar = divs.filter((d) => d.style.display !== 'none')
     const bitmaps = sichtbar.filter((d) => d.dataset.kind === 'bitmap')
@@ -1071,24 +1071,24 @@ async function runSelftest(blueprintId: string): Promise<void> {
   const s = luaSim.state(acu.id)
   if (!s) return
 
-  // Die Bau-Vorschau muss VOR dem Setzen stehen — und exakt dort, wo das Gebäude
-  // landet. Beides prüft der Selbsttest.
+  // The construction preview must be BEFORE it is placed - and exactly where the building is
+  // lands. The self-test checks both.
   const ziel = { x: s.x + 9, z: s.z + 9 }
   const fp = gameUi.footprint(blueprintId)
   await buildPreview?.show(blueprintId, ziel, fp)
   await new Promise((r) => setTimeout(r, 600))
   log(`SELFTEST: Bau-Vorschau ${buildPreview?.debugPosition() ?? 'FEHLT'} (Footprint ${fp[0]}×${fp[1]})`)
 
-  // KEIN Re-Select mehr: seit DoInitializing hinter dem ersten Sync-Beat
-  // liegt (gameUi.beat), sieht gamemain.OnFirstUpdate seine Avatare und der
-  // 3-s-Fork ruft SelectUnits(acu) statt SelectUnits(nil). Bleibt die Auswahl
-  // hier trotzdem leer, ist das ein FUND — der Selftest meldet ihn.
+  // NO more re-select: since DoInitializing behind the first sync beat
+  // lies (gameUi.beat), gamemain.OnFirstUpdate sees its avatars and the
+  // 3-s fork calls SelectUnits(acu) instead of SelectUnits(nil). The choice remains
+  // Still empty here, it's a FOUND - the self-test reports it.
   const auswahl = gameUi.selectionCount()
-  if (auswahl === 0) log('SELFTEST: FUND — Auswahl vor dem Klick leer (Regression der Init-Reihenfolge?)')
+  if (auswahl === 0) log('SELF TEST: FOUND — selection empty before clicking (regression of the init order?)')
   log(`SELFTEST: vor dem Klick — commandMode=${JSON.stringify(gameUi.commandMode())}, Auswahl=${auswahl}`)
   await issueWorldCommand(ziel, false)
 
-  // Wächst der Bau? Die Zahlen kommen aus der Sim, nicht von hier.
+  // Is the building growing? The numbers come from the sim, not from here.
   let factoryId = 0
   for (let round = 0; round < 90 && factoryId === 0; round++) {
     await new Promise((r) => setTimeout(r, 1000))
@@ -1107,8 +1107,8 @@ async function runSelftest(blueprintId: string): Promise<void> {
   }
   if (factoryId === 0) return
 
-  // Die Fabrik produziert: Auswahl → IssueBlueprintCommand (genau der Weg, den
-  // ein Klick aufs Bau-Icon in der Original-construction.lua nimmt).
+  // The factory produces: Selection → IssueBlueprintCommand (exactly the way
+  // a click on the construction icon in the Original-construction.lua takes).
   gameUi.select([factoryId])
   gameUi.issueBlueprintCommand('UNITCOMMAND_BuildFactory', 'uel0101', 2)
   for (let round = 0; round < 60; round++) {
@@ -1119,7 +1119,7 @@ async function runSelftest(blueprintId: string): Promise<void> {
     const e = luaSim.economySnapshot()
     log(
       `SELFTEST: Fabrik baut uel0101 — ${tanks.length} Stück, ${done} fertig ` +
-        `(${(tanks[0]!.fraction * 100).toFixed(0)} %) — Masse ${e?.mass.toFixed(0)}/${e?.massStorage.toFixed(0)} ` +
+        `(${(tanks[0]!.fraction * 100).toFixed(0)} %) — Masse ${e?.mass.toFixed(0)}/${e?.massStorage.toFixed(0)} `+
         `+${e?.massIncome.toFixed(1)} −${e?.massExpense.toFixed(1)}, Energie ${e?.energy.toFixed(0)} +${e?.energyIncome.toFixed(1)}`,
     )
     if (done >= 2) {
@@ -1143,12 +1143,12 @@ async function selftestKampf(): Promise<void> {
   const s = luaSim.state(acu.id)
   if (!s) return
   try {
-    // Auf die FREIE Seite (der Bauplatz der Fabrik liegt bei +9/+9): ein
-    // Panzer mitten im Gebäude-Footprint kommt nicht zum Schuss.
+    // On the FREE side (the building site of the factory is at +9/+9): one
+    // Tank in the middle of the building footprint will not fire.
     const feind = await luaSim.spawn('uel0201', { x: s.x - 14, y: s.y, z: s.z - 14 }, 2)
-    // Dazu ein EIGENER Panzer: das Gauss-Duell (TDFGauss01 hat ein Mesh,
-    // TDFGauss01_proj.bp:29) — der ACU-Laser ist ein reiner Emitter-Effekt
-    // und erst mit dem Partikelsystem sichtbar.
+    // Plus an OWN tank: the Gauss Duel (TDFGauss01 has a mesh,
+    // TDFGauss01_proj.bp:29) — the ACU laser is a pure emitter effect
+    // and only visible with the particle system.
     const eigener = await luaSim.spawn('uel0201', { x: s.x - 8, y: s.y, z: s.z - 8 }, 1)
     log(`SELFTEST-KAMPF: Feind ${feind} + eigener Panzer ${eigener} — Gauss-Duell`)
   } catch (err) {
@@ -1169,8 +1169,8 @@ async function selftestKampf(): Promise<void> {
       ? `SELFTEST-KAMPF: Projektile sichtbar — max. ${maxProj} gemeldet, ${maxMeshes} Mesh(es) in der Szene`
       : `SELFTEST-KAMPF: KEIN Projektil-Mesh (gemeldet: ${maxProj}) — der Sichtweg ist unterbrochen`,
   )
-  // Das WRACK des Verlierers: Unit.OnKilled → CreateWreckageProp läuft in der
-  // Original-Lua; hier zählt, dass es als Mesh mit Wreckage-Shader ankommt.
+  // The loser's WRECK: Unit.OnKilled → CreateWreckageProp runs in the
+  // original Lua; What matters here is that it arrives as a mesh with wreckage shader.
   for (let round = 0; round < 10 && propMeshes.size === 0; round++) {
     await new Promise((r) => setTimeout(r, 500))
   }
@@ -1180,8 +1180,8 @@ async function selftestKampf(): Promise<void> {
       ? `SELFTEST-WRACK: ${nProps} Prop(s) gemeldet, ${propMeshes.size} Wrack-Mesh(es) in der Szene`
       : `SELFTEST-WRACK: KEIN Wrack-Mesh (gemeldet: ${nProps}) — der Props-Sichtweg ist unterbrochen`,
   )
-  // Das Partikelsystem: Mündungsfeuer/Einschläge/Bau-Glow müssen als
-  // Instanzen in den Batches gelandet sein.
+  // The particle system: muzzle flash/impacts/construction glow must be used as
+  // Instances ended up in the batches.
   const nPartikel = particles?.totalParticles() ?? 0
   log(
     nPartikel > 0
@@ -1194,8 +1194,8 @@ async function selftestKampf(): Promise<void> {
       ? `SELFTEST-TRAILS: ${nTrails} Poly-Trail(s) im Bild — die Spuren leben`
       : 'SELFTEST-TRAILS: kein Poly-Trail entstanden (im Gauss-Duell erwartbar: gauss_cannon_polytrail)',
   )
-  // Beams: der Bau-Strahl (build_beam_01) lief während der Bau-Phase; hier
-  // zählt maxBeams über den ganzen Selftest (der Kampf hat meist keine).
+  // Beams: the build beam (build_beam_01) ran during the build phase; here
+  // counts maxBeams throughout the entire self-test (combat usually doesn't have any).
   log(`SELFTEST-BEAMS: max. ${maxBeamsGesehen} Beam(s) gleichzeitig im Bild`)
   const nCues = gameAudio?.playedCount ?? -1
   log(
@@ -1208,7 +1208,7 @@ async function selftestKampf(): Promise<void> {
 /** Höchststand gleichzeitiger Beams — gepflegt in luaSimUpdate. */
 let maxBeamsGesehen = 0
 
-// --- SupCom-Steuerung ------------------------------------------------------
+// --- SupCom control ------------------------------------------------------
 // Linksklick = Auswahl, Links-Drag = Box-Selektion, Rechtsklick = Move
 // (Shift = Warteschlange), Leertaste + Maus = Kamera drehen
 const viewportEl = $<HTMLCanvasElement>('#viewport')
@@ -1226,17 +1226,17 @@ window.addEventListener('pointermove', (e) => {
   if (spaceHeld && sandbox) {
     viewer.rotateAroundTarget(e.movementX, e.movementY)
   }
-  // Die Einheit UNTER DEM CURSOR an die UI melden. Genau daraus baut
+  // Report the unit to the UI UNDER THE CURSOR. That's exactly what builds from
   // `unitview.lua` seine Rollover-Anzeige (GetRolloverInfo, unitview.lua:90) —
-  // Name, Leben, Ökonomie der überfahrenen Einheit. Ohne diese Meldung zeigt
-  // die Original-UI schlicht nichts an: sie WEISS nicht, worüber die Maus steht.
+  // Name, life, economy of the unit being run over. Without this message shows
+  // The original UI simply has nothing to do with it: it doesn't KNOW what the mouse is on.
   if (sandbox && gameUi && luaSim) {
     const hit = viewer.pickUnit(e.clientX, e.clientY)
     const u = hit ? luaUnits.find((x) => x.scene === hit) : undefined
     gameUi.setRollover(u ? u.id : null)
   }
-  // Bau-Modus: das Geistergebäude folgt dem Cursor — auf dem Raster, mit dem
-  // die Sim es gleich setzt (src/ui/buildPreview.ts).
+  // Construction mode: the ghost building follows the cursor — on the grid, with the
+  // the sim sets it the same (src/ui/buildPreview.ts).
   if (sandbox && gameUi && buildPreview) {
     const cm = gameUi.commandMode()
     if (cm.mode === 'build' || cm.mode === 'buildanchored') {
@@ -1271,9 +1271,9 @@ window.addEventListener('pointerup', (e) => {
   const moved = Math.hypot(e.clientX - start.x, e.clientY - start.y)
   if (moved > 5 || !luaSim) return
 
-  // Was ein Linksklick in der Welt bedeutet, entscheidet die UI-Lua, nicht wir:
-  // steht ein Command-Mode an (Bau-Icon geklickt, Move-Button gedrückt), ist der
-  // Klick ein BEFEHL. Sonst ist er eine Auswahl.
+  // What a left click means in the world is decided by the UI Lua, not us:
+  // If a command mode is active (construction icon clicked, move button pressed), that is
+  // Click COMMAND. Otherwise it is a selection.
   if (gameUi && gameUi.commandMode().mode !== false) {
     const hit = viewer.pickTerrain(e.clientX, e.clientY)
     if (hit) void issueWorldCommand(hit, e.shiftKey, zielUnter(e.clientX, e.clientY))
@@ -1289,7 +1289,7 @@ viewportEl.addEventListener('contextmenu', (e) => {
   e.preventDefault()
   if (!luaSim || !gameUi) return
   // Rechtsklick im Command-Mode bricht ihn ab (commandmode.lua:113
-  // EndCommandMode(true)) — genau wie im Original.
+  // EndCommandMode(true)) — just like the original.
   if (gameUi.commandMode().mode !== false) {
     gameUi.cancelCommandMode()
     buildPreview?.hide()
@@ -1333,14 +1333,14 @@ async function issueWorldCommand(
   try {
     const msg = await gameUi.worldClick(luaSim, hit, (x, z) => viewer.heightAt(x, z), queue, ziel)
     if (msg) log(msg)
-    // Gesetzt (oder Befehl erteilt) → der Geist hat ausgedient, bis der nächste
-    // Bau-Modus startet.
+    // Set (or given an order) → the spirit has served its purpose until the next one
+    // Build mode starts.
     if (gameUi.commandMode().mode === false) buildPreview?.hide()
   } catch (err) {
-    log(`FEHLER Befehl: ${err instanceof Error ? err.message : err}`)
+    log(`ERROR Command: ${err instanceof Error ? err.message : err}`)
   }
-  // Die entstandene Baustelle bekommt ihr Modell über den generischen Nachzug in
-  // luaSimUpdate — die Sim meldet sie im nächsten Beat.
+  // The resulting construction site receives its model via the generic follow-up
+  // luaSimUpdate — the sim reports it in the next beat.
 }
 
 window.addEventListener('keydown', (e) => {
@@ -1353,13 +1353,13 @@ window.addEventListener('keydown', (e) => {
     spaceHeld = true
     e.preventDefault()
   }
-  // ESC verlässt den Spielmodus und bringt den Launcher zurück. Ein
-  // Übergangsweg: sobald das echte Hauptmenü läuft (lua/ui/menus/main.lua),
-  // gehört ESC der Original-UI.
+  // ESC exits game mode and brings the launcher back. A
+  // Transition path: as soon as the real main menu is running (lua/ui/menus/main.lua),
+  // ESC belongs to the original UI.
   if (e.code === 'Escape' && document.body.classList.contains('ingame')) {
-    // Im Hauptmenü gehört ESC eigentlich der Original-UI (uimain.SetEscapeHandler,
-    // main.lua:805) — bis der Tasten-Weg steht (M3), bringt es den Launcher
-    // zurück. Die Bild-Pumpe muss dabei aufhören, sonst rechnet das Menü im
+    // In the main menu, ESC actually belongs to the original UI (uimain.SetEscapeHandler,
+    // main.lua:805) — until the key travel stops (M3), it brings up the launcher
+    // back. The image pump must stop, otherwise the menu will calculate
     // Hintergrund weiter.
     if (frontEndFrame) {
       cancelAnimationFrame(frontEndFrame)
@@ -1369,12 +1369,12 @@ window.addEventListener('keydown', (e) => {
       setMode('start')
     }
     setIngame(false)
-    log('Launcher (ESC) — die Sandbox läuft weiter')
+    log('Launcher (ESC) — the sandbox continues to run')
   }
 })
 
-// Die Fenstergröße ändert sich → der Root-Frame der UI-VM zieht nach, sonst
-// bleibt die Original-UI auf der Größe von vorhin stehen.
+// The window size changes → the root frame of the UI VM follows suit, otherwise
+// the original UI remains at the same size as before.
 window.addEventListener('resize', () => {
   gameUi?.resize(window.innerWidth, window.innerHeight)
 })
@@ -1382,8 +1382,8 @@ window.addEventListener('keyup', (e) => {
   if (e.code === 'Space') spaceHeld = false
 })
 
-// --- Original-Kamera: Rad-Zoom zum Cursor, Mitteltasten-Pan, ------------
-// --- Kanten-Scroll und Pfeiltasten ---------------------------------------
+// --- Original camera: wheel zoom to cursor, middle button pan, ------------
+// --- Edge scroll and arrow keys ---------------------------------------
 let midDrag = false
 const keyPan = { x: 0, z: 0 }
 const edgePan = { x: 0, z: 0 }
@@ -1419,9 +1419,9 @@ viewportEl.addEventListener('auxclick', (e) => e.preventDefault())
 window.addEventListener('pointermove', (e) => {
   if (!sandbox) return
   if (midDrag) viewer.rtsDragPan(e.movementX, e.movementY)
-  // Kanten-Scroll innerhalb des Viewports — aber nur, wenn die Option es
-  // erlaubt. Die Engine fragt an genau dieser Stelle `ui_ScreenEdgeScrollView`
-  // (Cfile:1300036, in der WorldView-Schleife); das ist die Option
+  // Edge scroll within the viewport — but only if the option is there
+  // allowed. The engine asks `ui_ScreenEdgeScrollView` at exactly this point
+  // (Cfile:1300036, in WorldView loop); that is the option
   // „Bildschirmrand verschiebt Hauptansicht" (options.lua:170-184).
   if (!viewer.edgeScroll()) {
     edgePan.x = 0
@@ -1439,13 +1439,13 @@ window.addEventListener('pointermove', (e) => {
 })
 
 window.addEventListener('keydown', (e) => {
-  // STRG beschleunigt Schwenken und Drehen — die Engine fragt dafür
-  // MAUI_KeyIsDown(MKEY_CONTROL) (Cfile:1300005) und multipliziert mit
-  // ui_KeyboardPanAccelerateMultiplier. Das ist die Option „Beschleunigte
+  // CTRL speeds up panning and rotating — the engine asks for it
+  // MAUI_KeyIsDown(MKEY_CONTROL) (Cfile:1300005) and multiplied by
+  // ui_KeyboardPanAccelerateMultiplier. This is the “Accelerated” option
   // Schwenkgeschwindigkeit" (options.lua:214-227).
   viewer.setCtrlDown(e.ctrlKey)
   if (!sandbox || e.target instanceof HTMLInputElement) return
-  // Die Pfeiltasten schwenken nur, wenn die Option es erlaubt
+  // The arrow keys only pan if the option allows it
   // (ui_ArrowKeysScrollView, options.lua:185-199).
   if (!viewer.arrowKeysPan()) return
   if (e.code === 'ArrowLeft') keyPan.x = -1
@@ -1472,9 +1472,9 @@ function showUnitInfo(id: string, bp: BpObject): void {
   unitInfo.innerHTML = `
     <strong>${name || id.toUpperCase()}</strong><br>
     ${desc}<br>
-    Fraktion: <strong>${faction}</strong> ·
+    Faction: <strong>${faction}</strong> ·
     HP: <strong>${health}</strong> ·
-    Bauzeit: <strong>${buildTime}</strong>
+    Construction time: <strong>${buildTime}</strong>
   `
 }
 
@@ -1489,7 +1489,7 @@ btnPickDir.addEventListener('click', async () => {
     await connect(new FsaGameSource(handle))
   } catch (err) {
     if ((err as Error).name !== 'AbortError') {
-      log(`FEHLER: ${err instanceof Error ? err.message : err}`)
+      log(`ERROR: ${err instanceof Error ? err.message : err}`)
     }
   }
 })
@@ -1497,7 +1497,7 @@ btnPickDir.addEventListener('click', async () => {
 btnResume.addEventListener('click', async () => {
   const handle = await loadDirHandle()
   if (!handle) {
-    log('FEHLER: gemerktes Verzeichnis nicht mehr lesbar — bitte neu wählen')
+    log('ERROR: Saved directory can no longer be read - please select again')
     return
   }
   // Chrome's permission prompt offers "Allow on every visit" — once the
@@ -1532,8 +1532,8 @@ for (const item of menuItems) {
     setMode(mode)
   })
 }
-// Seitenleiste einklappen (mehr Platz für die Sandbox). Der Viewer bemisst sich
-// am Fenster — nach dem Umklappen einmal `resize` feuern, damit er nachzieht.
+// Collapse sidebar (more space for the sandbox). The viewer measures himself
+// on the window - fire `resize` once after folding it down so that it follows suit.
 btnCollapse.addEventListener('click', () => {
   const collapsed = document.body.classList.toggle('sidebar-collapsed')
   btnCollapse.textContent = collapsed ? '⟩ Seitenleiste' : '⟨ Seitenleiste'
@@ -1543,12 +1543,12 @@ mapSelect.addEventListener('change', () => void loadMap(mapSelect.value))
 btnSandboxStart.addEventListener('click', () => {
   void startSandbox(mapSelect.value || 'SCMP_037')
 })
-// Das frühere Spawn-Menü (Buttons je Unit) ist bewusst WEG: Einheiten entstehen
-// im Spiel wie in SCFA — über das Bau-Menü der ACU und die Fabrik. Für Tests
-// gibt es die URL-Parameter ?spawn=<ids> und ?selftest=<bp>.
+// The previous spawn menu (buttons per unit) is deliberately GONE: units are created
+// in the game like in SCFA — via the ACU's build menu and the factory. For testing
+// there are the URL parameters ?spawn=<ids> and ?selftest=<bp>.
 
-// Engine-Sim (Original-Lua): Units werden über ihre echte Unit.lua gespawnt,
-// pro Beat getickt/bewegt und hier selektierbar/gerendert.
+// Engine Sim (Original Lua): Units are spawned via their real Unit.lua,
+// ticked/moved per beat and selectable/rendered here.
 interface LuaSceneUnit {
   id: number
   bpId: string
@@ -1560,9 +1560,9 @@ interface LuaSceneUnit {
   strategicIcon: string
   fadeZoom: number
   caps: ReadonlySet<string>
-  /** Der Szenen-Eintrag mit Skelett-Animator (für die Laufanimation). */
+  /** The scene entry with skeleton animator (for the walking animation). */
   scene: SceneUnit
-  /** Halbachsen + Versatz des Auswahlrings (aus dem Blueprint, siehe ringExtents). */
+  /** Semi-axes + selection ring offset (from the blueprint, see ringExtents). */
   ringExtents: { x: number; z: number; ox: number; oz: number }
   /**
    * Läuft die Gehanimation gerade? Die SIM sagt, ob die Einheit fährt
@@ -1596,9 +1596,9 @@ async function getLuaSim(): Promise<LuaSimClient> {
   if (!luaSimBoot) {
     if (!currentScmap) throw new Error('Sim ohne Karte: kein Gelände, kein Spawn')
     log('Boote Original-Lua-Sim (Lua-VM)…')
-    // Das Gelände geht MIT in den Boot: die Original-Lua liest GetSurfaceHeight
-    // schon beim Erzeugen einer Unit, und die Engine liefert dafür keine stille
-    // 0 mehr.
+    // The terrain goes along with MIT: the original Lua reads GetSurfaceHeight
+    // already when creating a unit, and the engine does not provide any silent information for this
+    // 0 more.
     const terrain: HeightfieldData = {
       data: currentScmap.heightmap,
       width: currentScmap.width,
@@ -1616,11 +1616,11 @@ async function getLuaSim(): Promise<LuaSimClient> {
   return luaSimBoot
 }
 const luaUnits: LuaSceneUnit[] = []
-/** Welche Sim-Units bereits ein Modell in der Szene haben (Ladevorgang läuft asynchron). */
+/** Which Sim Units already have a model in the scene (loading process is asynchronous). */
 const knownSceneUnits = new Set<number>()
 
-// Beat-Interpolation (M6): je Unit der letzte und der aktuelle Sim-Zustand —
-// der Renderer blendet innerhalb der 100 ms eines Beats dazwischen.
+// Beat interpolation (M6): the last and current SIM state per unit —
+// the renderer fades in between within 100 ms of a beat.
 interface UnitLerp {
   px: number
   py: number
@@ -1635,11 +1635,11 @@ const unitLerp = new Map<number, UnitLerp>()
 let lastLerpTick = -1
 let lastLerpWall = 0
 
-// Solange die Sim nicht läuft, gibt es nichts — keine erfundenen Startwerte.
-// Vorrat und Lager entstehen ausschließlich in der Sim: das Lager aus den
-// Storage*-Feldern der Units, der Startvorrat aus GiveInitialResources der ACU
-// (uel0001_script.lua:159). Die 150/650/400/4000, die hier standen, waren frei
-// erfunden — und haben die echten Werte im HUD überdeckt.
+// As long as the sim isn't running, there's nothing - no invented starting values.
+// Supplies and warehouses are created exclusively in the Sim: the warehouse from the
+// Storage* fields of the units, the starting supply from GiveInitialResources of the ACU
+// (uel0001_script.lua:159). The 150/650/400/4000 that were standing here were free
+// invented — and covered up the real values ​​in the HUD.
 const EMPTY_ECO: EcoSnapshot = {
   mass: 0, massStorage: 0, massIncome: 0, massExpense: 0,
   energy: 0, energyStorage: 0, energyIncome: 0, energyExpense: 0,
@@ -1669,7 +1669,7 @@ async function loadGameFonts(): Promise<Uint8Array[]> {
   return out
 }
 
-/** RULEUCC_*-Fähigkeiten aus General.CommandCaps (bestimmt die Order-Buttons). */
+/** RULEUCC_* capabilities from General.CommandCaps (determines the order buttons). */
 function readCaps(bp: BpObject): ReadonlySet<string> {
   const caps = new Set<string>()
   const raw = bpGet(bp, 'General.CommandCaps')
@@ -1679,8 +1679,8 @@ function readCaps(bp: BpObject): ReadonlySet<string> {
   return caps
 }
 
-// Datenquelle für Minimap und strategische Icons. Ökonomie, Orders, Unit-View
-// und Bau-Menü stehen NICHT mehr drin — die zeigt die echte lua/ui an
+// Data source for minimap and strategic icons. Economics, Orders, Unit View
+// and build menu are no longer there - they show the real lua/ui
 // (src/ui/gameUi.ts).
 const hudSource: HudSource = {
   units(): HudUnitInfo[] {
@@ -1692,9 +1692,9 @@ const hudSource: HudSource = {
       out.push({
         id: u.bpId, name: u.name, health: s.health, maxHealth: s.maxHealth, selected: u.selected,
         x: s.x, y: s.y, z: s.z, army: u.army, strategicIcon: u.strategicIcon, fadeZoom: u.fadeZoom,
-        // Baufortschritt (< 1 = Baustelle) und die halbe Breite der Einheit —
-        // beides braucht die Lebensbalken-Schicht: der Balken schwebt über der
-        // Einheit und zeigt bei einer Baustelle den Fortschritt statt der HP.
+        // Construction progress (< 1 = construction site) and half the width of the unit —
+        // The life bar layer needs both: the bar floats above the
+        // Unit and shows progress instead of HP on a construction site.
         fraction: s.fraction,
         halfWidth: u.ringExtents.x,
       })
@@ -1725,7 +1725,7 @@ const luaRingGeo = (() => {
   return g
 })()
 
-/** Die Werte aus `lua/renderselectparams.lua` (Original-Datei, kein Nachbau). */
+/** The values ​​from `lua/renderselectparams.lua` (original file, not a replica). */
 let selectParams = { sizeFudge: 1.85, heightFudge: 0.12, unitScale: 0.75 }
 async function loadSelectParams(): Promise<void> {
   if (!vfs || !vfs.exists('lua/renderselectparams.lua')) return
@@ -1742,7 +1742,7 @@ async function loadSelectParams(): Promise<void> {
   }
 }
 
-/** Die Halbachsen des Auswahlrings einer Einheit (Weltmeter). */
+/** The semi-axes of the selection ring of a unit (world meter). */
 function ringExtents(bp: BpObject): { x: number; z: number; ox: number; oz: number } {
   const n = (path: string): number => {
     const v = bpGet(bp, path)
@@ -1758,7 +1758,7 @@ function ringExtents(bp: BpObject): { x: number; z: number; ox: number; oz: numb
   }
 }
 
-/** Links-Klick: Lua-Unit unter dem Cursor auswählen (oder Auswahl leeren). */
+/** Left-click: Select Lua unit under the cursor (or empty selection). */
 /**
  * Selektion. Das Picking (Bildschirmpunkt → Unit) ist Engine-Arbeit; die
  * AUSWAHL selbst gehört der UI: `SelectUnits` in der UI-VM ruft
@@ -1780,41 +1780,41 @@ function selectLua(clientX: number, clientY: number): string | null {
   return name ? `Ausgewählt: ${name}` : null
 }
 
-/** Ob mindestens eine Lua-Unit selektiert ist. */
+/** Whether at least one Lua unit is selected. */
 function hasLuaSelection(): boolean {
   return luaUnits.some((u) => u.selected)
 }
 
-// Übernimmt Position/Heading + Auswahlring der Lua-Units pro Frame aus dem
-// Worker-Zustands-Cache — der Beat läuft im Worker-Thread, hier wird nur
-// gerendert (kein VM-Aufruf, kein Freeze).
+// Adopts position/heading + selection ring of the Lua units per frame from the
+// Worker state cache — the beat runs in the worker thread, here only
+// rendered (no VM call, no freeze).
 function luaSimUpdate(): void {
   if (!luaSim) return
-  // Der Sim-Zustand geht in die UI-VM; die Original-_BeatFunction (economy.lua:251)
-  // rechnet daraus die Anzeige.
+  // The sim state goes into the UI VM; the original _BeatFunction (economy.lua:251)
+  // the display calculates from this.
   const eco = luaSim.economySnapshot()
   const states = luaSim.allStates()
   if (eco && gameUi) gameUi.beat(eco, states, luaSim.gameTick)
 
-  // Neue Units aus der Sim (Baustelle, Fabrik-Produkt) bekommen ihr Modell. Die
-  // Sim erzeugt sie; die Szene zieht nach — nicht umgekehrt.
+  // New units from the sim (construction site, factory product) get their model. The
+  // Sim creates them; the scene follows suit — not the other way around.
   for (const s of states) {
     if (knownSceneUnits.has(s.id)) continue
     knownSceneUnits.add(s.id)
-    // Fehler LAUT machen: ein still verworfenes Promise ließ Einheiten ohne
-    // Modell zurück (Lebensbalken ohne Mesh darunter) — ohne eine Log-Zeile.
+    // Making mistakes LOUD: a silently rejected promise left units without
+    // Model back (life bar without mesh underneath) — without a log line.
     addLuaUnitToScene(s.id, s.name, { x: s.x, y: s.y, z: s.z }, s.fraction < 1).catch((e) => {
       log(`FEHLER Modell für ${s.name} (Unit ${s.id}): ${e instanceof Error ? e.message : e}`)
     })
   }
 
-  // TOTE Units verlassen die Szene: die Sim meldet sie nicht mehr (OnDestroy
-  // nach dem DeathThread), ihr Wrack steht als Prop bereits da. Vorher blieb
-  // das tote Mesh ewig stehen — und verdeckte exakt das Wrack, das an
-  // derselben Stelle entsteht (Szene-Debug: Unit 34 visible auf der
-  // Wrack-Position, obwohl längst gestorben). NUR wenn die Sim schon Zustände
-  // gemeldet hat — vor dem ersten Beat ist die Liste leer, und die frisch
-  // gespawnte ACU würde sonst sofort wieder entfernt.
+  // DEAD units leave the scene: the sim no longer reports them (OnDestroy
+  // after the DeathThread), her wreck is already there as a prop. Previously stayed
+  // the dead mesh stood forever - and covered exactly the wreck that was on
+  // same place (scene debug: Unit 34 visible on the
+  // wreck position, although long since dead). ONLY if the sim already has states
+  // reported - before the first beat the list is empty, and the fresh
+  // Otherwise the spawned ACU would be removed immediately.
   if (states.length > 0) {
     for (let i = luaUnits.length - 1; i >= 0; i--) {
       const u = luaUnits[i]!
@@ -1826,14 +1826,14 @@ function luaSimUpdate(): void {
     }
   }
 
-  // Die fliegenden Projektile — die Engine zeichnet jede Sim-Entity.
+  // The flying projectiles — the engine draws each sim entity.
   updateProjectiles()
 
-  // Die Props (Wracks) — auch sie sind Sim-Entities mit eigenem Mesh.
+  // The props (wrecks) — they are also sim entities with their own mesh.
   updateProps()
 
-  // Die Emitter: pro neuem Sim-Tick spawnen, pro Frame die Partikel-Uhr
-  // stellen (uTime = Sim-Tick + Frame-Anteil; die Kurven zählen in Ticks).
+  // The emitters: spawn per new Sim tick, the particle clock per frame
+  // (uTime = Sim tick + frame share; the curves count in ticks).
   updateEmitters()
   if (luaSim) {
     const frac = Math.min((performance.now() - lastTickWall) / 100, 1)
@@ -1844,10 +1844,10 @@ function luaSimUpdate(): void {
     maxBeamsGesehen = Math.max(maxBeamsGesehen, beams?.totalBeams() ?? 0)
   }
 
-  // BEAT-INTERPOLATION: die Sim tickt mit 10 Hz, das Bild mit 60+ — die Engine
-  // zeichnet Entities zwischen zwei Beats interpoliert (sonst ruckelt jede
-  // Bewegung im 100-ms-Raster). Beim NEUEN Beat wird der bisherige Zielwert
-  // zum Startwert; innerhalb des Beats läuft alpha 0→1 über die Wanduhr.
+  // BEAT INTERPOLATION: the sim ticks at 10 Hz, the image at 60+ — the engine
+  // draws entities interpolated between two beats (otherwise each one will stutter
+  // Movement in 100 ms increments). With the NEW beat, the previous target value
+  // to the starting value; Within the beat, alpha 0→1 runs over the wall clock.
   if (luaSim.gameTick !== lastLerpTick) {
     lastLerpTick = luaSim.gameTick
     lastLerpWall = performance.now()
@@ -1866,7 +1866,7 @@ function luaSimUpdate(): void {
         l.cy = s.y
         l.cz = s.z
         l.ch = s.heading
-        // Sprung (Spawn/Teleport/Reset): nicht über die Karte gleiten.
+        // Jump (spawn/teleport/reset): do not slide across the map.
         if (Math.hypot(l.cx - l.px, l.cz - l.pz) > 5) {
           l.px = l.cx
           l.py = l.cy
@@ -1885,9 +1885,9 @@ function luaSimUpdate(): void {
   for (const u of luaUnits) {
     const s = luaSim.state(u.id)
     if (!s) continue
-    // Die Y-Koordinate kommt aus der SIM (motion.lua schreibt sie über
-    // GetSurfaceHeight fort). Vorher rechnete der Renderer seine eigene Höhe —
-    // zwei Wahrheiten, die dauerhaft auseinanderliefen.
+    // The Y coordinate comes from the SIM (motion.lua overwrites it
+    // GetSurfaceHeight). Before, the renderer calculated its own height —
+    // two truths that permanently diverged.
     const l = unitLerp.get(u.id)
     let x = s.x
     let y = s.y
@@ -1897,7 +1897,7 @@ function luaSimUpdate(): void {
       x = l.px + (l.cx - l.px) * lerpAlpha
       y = l.py + (l.cy - l.py) * lerpAlpha
       z = l.pz + (l.cz - l.pz) * lerpAlpha
-      // Drehung über den KURZEN Weg (−π..π), sonst wirbelt jede Wende einmal
+      // Rotation via the SHORT path (−π..π), otherwise every turn spins once
       // falsch herum.
       const dh = ((l.ch - l.ph + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI
       heading = l.ph + dh * lerpAlpha
@@ -1930,8 +1930,8 @@ function luaSimUpdate(): void {
     }
     u.ring.visible = u.selected
     if (u.selected) {
-      // Die Ellipse aus dem Blueprint (siehe ringExtents), am Heading gedreht,
-      // um den Selection-Offset versetzt, auf ren_SelectionHeightFudge angehoben.
+      // The ellipse from the blueprint (see ringExtents), rotated at the heading,
+      // offset by the selection offset, raised to ren_SelectionHeightFudge.
       const e = u.ringExtents
       const cos = Math.cos(heading)
       const sin = Math.sin(heading)
@@ -1962,9 +1962,9 @@ function luaSimUpdate(): void {
       u.scene.animator.setAimOverrides([])
     }
 
-    // BAUSTELLE: die Build-Technique lebt von drei Uniforms — Baufortschritt
-    // (material.y), Unit-Alter und Weltzeit in Sekunden (mesh.fx `time`).
-    // Bei Fertigstellung kommt das normale Unit-Material zurück.
+    // CONSTRUCTION SITE: the build technique lives from three uniforms - construction progress
+    // (material.y), unit age and world time in seconds (mesh.fx `time`).
+    // When completed, the normal unit material returns.
     if (u.build) {
       const sek = (luaSim.gameTick + lerpAlpha) / 10
       if (s.fraction >= 1) {
@@ -1985,14 +1985,14 @@ function luaSimUpdate(): void {
       }
     }
 
-    // Die LAUFANIMATION. Die Sim sagt, ob die Einheit fährt (`moving` kommt aus
-    // `__readAllUnitsJson`, gespeist vom Navigator) — der Renderer spielt sie
-    // dann ab. Die Animation selbst ist die Original-SCA des Blueprints
-    // (`Display.AnimationWalk`, geladen in loadSandboxAssets); ihre
-    // Geschwindigkeit steht ebenfalls dort (`Display.AnimationWalkRate`).
+    // The RUNNING ANIMATION. The sim says if the unit is running (`moving` comes out
+    // `__readAllUnitsJson`, fed by the navigator) — the renderer plays them
+    // then off. The animation itself is the original SCA of the blueprint
+    // (`Display.AnimationWalk`, loaded into loadSandboxAssets); her
+    // Speed ​​is also there (`Display.AnimationWalkRate`).
     //
-    // Bisher wurde sie GELADEN und nie gestartet: jede Einheit glitt bewegungslos
-    // über die Karte.
+    // So far it has been LOADED and never started: each unit glided motionless
+    // via the map.
     if (s.moving !== u.walking) {
       u.walking = s.moving
       const assets = sandboxAssetCache.get(u.bpId)
@@ -2019,7 +2019,7 @@ async function addLuaUnitToScene(
   uid: number,
   bpId: string,
   pos: { x: number; y: number; z: number },
-  /** Baustelle (fraction < 1): startet mit den Build-Materialien (UEFBuild). */
+  /** Construction site (fraction < 1): starts with the build materials (UEFBuild). */
   building = false,
 ): Promise<void> {
   knownSceneUnits.add(uid)
@@ -2136,8 +2136,8 @@ async function spawnViaLua(id: string): Promise<void> {
   if (!vfs) return
   try {
     const sim = await getLuaSim()
-    // Exakt auf den Spawn-Marker der Karte. Der frühere Versatz von +6/+6 war
-    // erfunden; im Original steht die ACU auf dem ARMY_n-Marker.
+    // Exactly on the spawn marker on the map. The previous offset was +6/+6
+    // invented; invented In the original, the ACU is on the ARMY_n marker.
     const x = spawnPoint.x
     const z = spawnPoint.z
     const y = viewer.heightAt(x, z)
@@ -2149,8 +2149,8 @@ async function spawnViaLua(id: string): Promise<void> {
   }
 }
 
-// Debug-Sicht auf die Szene (nur DEV): welcher Sim-Unit gehört welches Mesh,
-// wo steht es, ist es sichtbar — für die Fehlersuche per DevTools/CDP.
+// Debug view of the scene (DEV only): which Sim unit belongs to which mesh,
+// Where is it located, is it visible — for troubleshooting using DevTools/CDP.
 if (import.meta.env.DEV) {
   ;(window as unknown as Record<string, unknown>).__cfaSzene = () =>
     luaUnits.map((u) => ({
@@ -2160,7 +2160,7 @@ if (import.meta.env.DEV) {
       visible: u.mesh.visible,
       scale: Math.round(u.mesh.scale.x * 1000) / 1000,
     }))
-  // Die Props (Wracks) der Szene — gleiche Sicht wie __cfaSzene.
+  // The props (wrecks) of the scene — same view as __cfaScene.
   ;(window as unknown as Record<string, unknown>).__cfaProps = () =>
     [...propMeshes.entries()].map(([id, m]) => ({
       id,
@@ -2180,15 +2180,15 @@ if (import.meta.env.DEV) {
     sky: viewer.skyInfo,
     stats: viewer.propStats,
   })
-  // Kamera per CDP auf einen Weltpunkt richten (Sicht-Abnahmen ohne Maus).
+  // Aim the camera at a point in the world via CDP (view without mouse).
   ;(window as unknown as Record<string, unknown>).__cfaFokus = (x: number, z: number, dist = 30) => {
     viewer.focusOn(new THREE.Vector3(x, viewer.heightAt(x, z), z), dist)
     return 'ok'
   }
-  // Lua in der UI-VM auswerten (Fehlersuche der Tastatur-/Keymap-Wege).
+  // Evaluate Lua in the UI VM (troubleshooting keyboard/keymap paths).
   ;(window as unknown as Record<string, unknown>).__cfaUiEval = (code: string) =>
     gameUi ? gameUi.debugEval(code) : 'keine UI'
-  // Einen Move-Befehl absetzen (Bewegungs-/Interpolations-Abnahmen per CDP).
+  // Issue a move command (movement/interpolation decreases via CDP).
   ;(window as unknown as Record<string, unknown>).__cfaMove = (id: number, x: number, z: number) => {
     luaSim?.move(id, x, z)
     return 'ok'

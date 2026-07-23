@@ -1,29 +1,29 @@
 # Claude Commander: Forged Alliance
 
-Eine Neuimplementierung von **Supreme Commander: Forged Alliance** für den
-Browser (später Mobile, Linux und Windows) — als offene Engine nach dem
+A new implementation of **Supreme Commander: Forged Alliance** for the
+Browser (later Mobile, Linux and Windows) — as an open engine after the
 **Bring-your-own-assets**-Prinzip.
 
-> Dieses Projekt liefert **keinerlei Spieldaten** aus. Es liest Modelle,
-> Texturen, Blueprints und Karten direkt aus der **eigenen, gekauften
-> Installation** des Spiels (Steam/GOG). Ohne Original-Spiel keine Assets.
+> This project does not provide **any game data**. It reads models,
+> Textures, blueprints and maps directly from the **own, purchased
+> Install** the game (Steam/GOG). Without original game, no assets.
 
-## Status: M1 Viewer ✅ · M2 Karten ✅ · M3 Animationen ✅ · M4 Sim-Basis ✅
+## Status: M1 Viewer ✅ · M2 Maps ✅ · M3 Animations ✅ · M4 Sim Base ✅
 
-Die App mountet die komplette Spielinstallation als virtuelles Dateisystem im
-Browser und rendert Original-Einheiten mit Original-Texturen in WebGL:
+The app mounts the entire game installation as a virtual file system
+Browser and renders original entities with original textures in WebGL:
 
-- **SCD-Archive** (Zip) mit wahlfreiem Zugriff — auch die 1,3-GB-Archive
-  werden nie komplett in den Speicher geladen
+- **SCD archives** (Zip) with random access — including the 1.3 GB archives
+  are never completely loaded into memory
 - **SCM-Meshes** (Format `MODL` v5): Vertices, Normals, Tangents, UV0/UV1,
   Bones, Skinning-Indizes
-- **Blueprints** (.bp, deklaratives Lua): eigener Parser, verifiziert gegen
-  alle 568 Unit-Blueprints des Spiels
-- **DDS-Texturen** (DXT1/3/5): nativer GPU-Upload, Software-Dekoder als
+- **Blueprints** (.bp, declarative Lua): own parser, verified against
+  all 568 unit blueprints in the game
+- **DDS textures** (DXT1/3/5): native GPU upload, software decoder as
   Fallback für Mobile
-- **Original-Shader-Look**: Port des FA-Unit-Shaders (`mesh.fx`,
-  NormalMappedPS) inkl. Team-Color-Maske, tangent-space Normal-Mapping aus
-  den G/A-Kanälen, Spec/Glow
+- **Original shader look**: Port of the FA unit shader (`mesh.fx`,
+  NormalMappedPS) including team color mask, tangent-space normal mapping
+  the G/A channels, Spec/Glow
 
 ## Schnellstart (Entwicklung)
 
@@ -32,19 +32,19 @@ npm install
 npm run dev
 ```
 
-Dann <http://localhost:5173> öffnen und das FA-Installationsverzeichnis
-wählen — oder mit lokal laufendem Dev-Server direkt
-<http://localhost:5173/?http=1> (serviert die Installation aus
-`CFA_GAME_DIR`, Standard: Steam-Pfad).
+Then open <http://localhost:5173> and the FA installation directory
+choose — or directly with a locally running dev server
+<http://localhost:5173/?http=1> (serves the installation
+`CFA_GAME_DIR`, default: Steam path).
 
-Verify-Suiten gegen die echte Installation (keine Mocks):
+Verify suites against real installation (no mocks):
 
 ```bash
 npm test
 ```
 
-Einzelne Suite (der `--import`-Loader ist nötig, weil die Engine-Lua aus echten
-`.lua`-Dateien geladen wird):
+Single suite (the `--import` loader is necessary because the engine Lua is made from real
+`.lua` files are loaded):
 
 ```bash
 npx tsx --import ./scripts/register-lua.mjs scripts/verify-spawn.ts
@@ -52,28 +52,28 @@ npx tsx --import ./scripts/register-lua.mjs scripts/verify-spawn.ts
 
 ## Rechtliches
 
-- Der Quellcode dieses Repos ist eine Eigenentwicklung (TypeScript); er
-  enthält keinen Original-Code, keine Original-Assets und keine aus der
+- The source code of this repo is an in-house development (TypeScript); he
+  contains no original code, no original assets and none from the
   Binary kopierten Daten.
-- Assets werden ausschließlich lokal aus der Installation des Users gelesen,
-  niemals hochgeladen, gebündelt oder verteilt (`.gitignore` blockiert
+- Assets are only read locally from the user's installation,
+  never uploaded, bundled or distributed (`.gitignore` blocked
   Asset-Formate).
-- Als Besitznachweis dient die vorhandene lokale Installation; eine optionale
-  Steam-/GOG-Verifikation ist geplant (siehe `docs/LEGAL.md`).
+- The existing local installation serves as proof of ownership; an optional one
+  Steam/GOG verification is planned (see `docs/LEGAL.md`).
 
-Gleiches Prinzip wie bei OpenRA, OpenMW, openage oder OpenSAGE.
+Same principle as OpenRA, OpenMW, openage or OpenSAGE.
 
 ## Roadmap
 
 Siehe [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Kurzfassung:
 
-1. ✅ **Unit-Viewer** — Formate, VFS, Rendering-Grundlage
-2. ✅ **Karten-Renderer** — SCMAP-Terrain-Splatting, Wasser (einfach)
+1. ✅ **Unit Viewer** — Formats, VFS, Rendering Base
+2. ✅ **Map Renderer** — SCMAP terrain splatting, water (basic)
 3. ✅ **Animationen** — SCA-Parser, GPU-Skinning, Walk-Cycles
 4. ✅ **Sim-Basis** — deterministischer 10-Hz-Kern (bit-identische Läufe),
-   Befehlsqueues, Bewegungsmodell aus Blueprint-Werten, Mehrfach-Einheiten
-   mit Auswahl in der Sandbox
+   Command queues, movement model from blueprint values, multiple units
+   with selection in the sandbox
 5. **Sim-Ausbau** — Pathfinding, Kollision, Waffen/Schaden, Wirtschaft,
    Fabriken; Referenz: rekonstruierte Moho-Engine-Quellen (faf-re)
-6. **Spielbarkeit** — Steuerung, UI, Fog of War, KI-Skirmish
+6. **Playability** — Controls, UI, Fog of War, AI Skirmish
 7. **Plattformen** — Mobile (Touch-UI), Desktop-Builds (Tauri), Multiplayer

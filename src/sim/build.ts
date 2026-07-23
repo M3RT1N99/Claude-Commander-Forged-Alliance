@@ -17,7 +17,7 @@ import BUILD_LUA from '../engine-lua/build.lua?raw'
  */
 
 
-/** Installiert das Bau-System (Bau-Tasks + Fortschritts-Fortschreibung). */
+/** Installs the construction system (construction tasks + progress updates). */
 export function installBuild(host: LuaHost): void {
   host.eval(BUILD_LUA)
 }
@@ -31,7 +31,7 @@ export function factoryTick(host: LuaHost): void {
   host.eval('__factoryTick()')
 }
 
-/** Phase 1 des Beats: Bau-Bedarf anmelden (vor dem Ökonomie-Tick). */
+/** Phase 1 of the beat: Register construction needs (before the economic tick). */
 export function buildCollect(host: LuaHost): void {
   host.eval('__buildCollect()')
 }
@@ -54,12 +54,12 @@ export function queueFactoryBuild(
   )
 }
 
-/** Phase 2 des Beats: gewährte Rate anwenden (nach dem Ökonomie-Tick). */
+/** Phase 2 of the beat: apply granted rate (after the economy tick). */
 export function buildApply(host: LuaHost): void {
   host.eval('__buildApply()')
 }
 
-/** Erteilt einen Bau-Auftrag; liefert die Task-ID (oder -1). */
+/** Issues a construction order; returns the task ID (or -1). */
 export function issueBuildTask(
   host: LuaHost,
   builderId: number,
@@ -75,7 +75,7 @@ export function issueBuildTask(
   return Number(host.eval(`return __issueBuildTask(${builderId}, ${targetId}, nil, ${clear})`))
 }
 
-/** Anzahl offener Bau-Aufgaben. */
+/** Number of open construction tasks. */
 export function buildTaskCount(host: LuaHost): number {
   return Number(host.eval('return __buildTaskCount()'))
 }

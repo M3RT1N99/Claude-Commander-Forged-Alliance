@@ -1,7 +1,7 @@
-// Port des Seraphim-Unit-Shaders (mesh.fx, UnitFalloffPS):
+// Seraphim unit shader port (mesh.fx, UnitFalloffPS):
 // Falloff-Ramp-Lookup über pow(1−N·V, 0.6) (v = fractionComplete = 1),
 // Rim-Glow = fallOff.rgb · diffuse.a, Sonnenanteil 0 (shadow=0 im
-// Original), Phong (0.5,0.6,0.7)·spec.g⁹, Environment ≈ konstant · spec.r
+// Original), Phong (0.5,0.6,0.7)·spec.g⁹, Environment ≈ constant · spec.r
 // · fallOff.a.
 
   precision highp float;
@@ -43,7 +43,7 @@
     vec3 environment = mix(vec3(0.15, 0.17, 0.2), vec3(0.5, 0.55, 0.6), fresnel)
       * specular.r * fallOff.a;
 
-    // Original: shadow = 0 -> Sonnenanteil entfällt
+    // Original: shadow = 0 -> sun share is omitted
     vec3 light = sunAmbience;
     light = light + (1.0 - light) * shadowFillColor;
 

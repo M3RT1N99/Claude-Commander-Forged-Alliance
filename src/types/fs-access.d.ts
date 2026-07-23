@@ -1,4 +1,4 @@
-// Ergänzungen zur File System Access API, die in lib.dom (noch) fehlen.
+// Additions to the File System Access API that are (still) missing from lib.dom.
 
 interface FileSystemDirectoryHandle {
   entries(): AsyncIterableIterator<[string, FileSystemHandle]>

@@ -20,7 +20,7 @@ export interface UnitAssetPaths {
   normals: string[]
   specTeam: string[]
   lookup: string[]
-  /** LOD0-ShaderName ('Unit', 'Seraphim', 'Insect', 'Aeon', …) */
+  /** LOD0 shader name ('Unit', 'Seraphim', 'Insect', 'Aeon', …) */
   shader: string
 }
 
@@ -40,12 +40,12 @@ function normalizePath(p: string): string {
   return out.join('/')
 }
 
-/** RES_CompletePath: absolut ab VFS-Wurzel oder relativ zum Quellverzeichnis. */
+/** RES_CompletePath: absolute from the VFS root or relative to the source directory. */
 function completePath(name: string, sourceDir: string): string[] {
   if (name.startsWith('/')) return [normalizePath(name)]
   const joined = normalizePath(`${sourceDir}/${name}`)
-  // Namen mit Verzeichnisanteil zusätzlich wurzel-relativ probieren —
-  // einzelne Original-BPs (z. B. XRL0403) schreiben 'Units/xrl0404/…'
+  // Additionally, try names with a directory share in a root-relative manner —
+  // individual original BPs (e.g. XRL0403) write 'Units/xrl0404/…'
   return name.includes('/') ? [joined, normalizePath(name)] : [joined]
 }
 
@@ -112,7 +112,7 @@ export function resolveUnitPaths(
   const direct = resolve(source)
   if (direct) return direct
 
-  // Platzhalter-Mesh einer anderen Unit (Kampagnen-Units)
+  // Placeholder mesh of another unit (campaign units)
   const placeholder = bpGet(bp, 'Display.PlaceholderMeshName')
   if (typeof placeholder === 'string' && placeholder) {
     return resolve(sourceFor(placeholder.toLowerCase()))

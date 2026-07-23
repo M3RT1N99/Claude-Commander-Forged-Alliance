@@ -1,13 +1,13 @@
 -- =====================================================================
--- PROJEKTILE — die Engine-Seite.
+-- PROJEKTILE — the engine page.
 --
--- Aufteilung wie im Original (docs/research/combat-projectiles.md §1):
---   Engine: erzeugen, fliegen (Moho::Projectile::MotionTick), Treffer erkennen
+-- Division as in the original (docs/research/combat-projectiles.md §1):
+--   Engine: generate, fly (Moho::Projectile::MotionTick), detect hits
 --           (Projectile::CheckCollision), Einschlag melden (RunScript "OnImpact")
---   Lua:    /lua/sim/Projectile.lua + das <id>_script.lua des Blueprints —
+--   Lua: /lua/sim/Projectile.lua + the blueprint's <id>_script.lua —
 --           Effekte, Schaden anrichten (DoDamage), Sound
 --
--- Die Lua entscheidet NICHTS ueber Flugbahn und Treffer. Sie bekommt sie gesagt.
+-- The Lua decides NOTHING about trajectory and hits. She gets told them.
 --
 -- Belege (Cfile = IDA-Decomp):
 --   PROJ_Create                       Cfile:946751-946800
@@ -18,12 +18,12 @@
 --   EImpactType                       Cfile:640486-640525
 --   func_FindBlueprintScriptModule    Cfile:914189-914360
 --
--- STANDARD-LUA 5.4 (geht roh in host.eval, nicht durch den FA-Transpiler).
+-- STANDARD LUA 5.4 (goes raw in host.eval, not through the FA transpiler).
 -- =====================================================================
 
 __projectiles = {}
 
--- EImpactType (Cfile:640486-640525) — die Strings, die Projectile.lua:310-345
+-- EImpactType (Cfile:640486-640525) — the strings containing Projectile.lua:310-345
 -- abfragt (ENT_GetImpactTypeString, Cfile:917363-917400).
 local IMPACT_TERRAIN = 'Terrain'
 local IMPACT_WATER = 'Water'
@@ -33,15 +33,15 @@ local IMPACT_UNIT = 'Unit'
 local IMPACT_UNIT_AIR = 'UnitAir'
 local IMPACT_UNIT_UNDERWATER = 'UnitUnderwater'
 
---- Welche Lua-Klasse ein Blueprint bekommt (func_FindBlueprintScriptModule,
---- Cfile:914189-914360). Fuer Projektile:
----   1. Default: /lua/sim/projectile.lua, Klasse "Projectile"
----   2. bp.ScriptModule, sonst aus bp.Source: bis zum LETZTEN '_' abschneiden
----      und '_script.lua' anhaengen
+--- Which Lua class gets a blueprint (func_FindBlueprintScriptModule,
+--- Cfile:914189-914360). For projectiles:
+--- 1. Default: /lua/sim/projectile.lua, class "Projectile"
+--- 2. bp.ScriptModule, otherwise from bp.Source: truncate to the LAST '_'
+--- and append '_script.lua'
 ---      /projectiles/TDFGauss01/TDFGauss01_proj.bp
 ---        -> /projectiles/TDFGauss01/TDFGauss01_script.lua
----   3. Klassenname: bp.ScriptClass, sonst "TypeClass"
----   4. Datei fehlt -> Default aus (1)
+--- 3. Class name: bp.ScriptClass, otherwise "TypeClass"
+--- 4th file is missing -> default off (1)
 local function projectileClass(bp)
   local path = bp.ScriptModule
   if not path or path == '' then
@@ -59,27 +59,27 @@ local function projectileClass(bp)
   return import('/lua/sim/Projectile.lua').Projectile
 end
 
---- Gleichverteilung um einen Mittelwert (der Ctor zieht TurnRate/MaxSpeed/
+--- Uniform distribution around an average (the Ctor draws TurnRate/MaxSpeed/
 --- Acceleration/InitialSpeed je mit ±Range, Cfile:943520-943660).
 local function jitter(mid, range)
   if not range or range == 0 then return mid or 0 end
   return (mid or 0) + (Random() * 2 - 1) * range
 end
 
---- Moho::PROJ_Create — ein Projektil in die Welt setzen.
+--- Moho::PROJ_Create — put a projectile into the world.
 ---
---- launcher: die Entity, die schiesst (Unit oder Waffe -> deren Unit)
---- pos/quat: Startpose in der WELT
---- speed:    Betrag der Anfangsgeschwindigkeit (nil = InitialSpeed aus dem bp)
---- ignoresAlly: das Projektil fliegt durch VERBUENDETE hindurch. PROJ_Create
----   bekommt es als Parameter (Cfile:946751); Entity:CreateProjectile uebergibt
----   fest 1 (Cfile:930895), die Waffe ihr Blueprint-Feld IgnoresAlly (Default 1,
----   weapons.md:599). nil heisst hier: ignorieren (der Engine-Default).
+--- launcher: the entity that shoots (unit or weapon -> its unit)
+--- pos/quat: starting pose in the WORLD
+--- speed: amount of the initial speed (nil = InitialSpeed ​​from the bp)
+--- ignoresAlly: the projectile flies through ALLIES. PROJ_Create
+--- gets it as a parameter (Cfile:946751); Entity:CreateProjectile passes
+--- fixed 1 (Cfile:930895), the weapon's blueprint field IgnoresAlly (Default 1,
+--- weapons.md:599). Here nil means: ignore (the engine default).
 function __projCreate(launcher, bpId, pos, quat, speed, damage, damageRadius, damageType, target, ignoresAlly)
   local key = string.lower(tostring(bpId))
   local bp = __registered.Projectile[key]
   if not bp then
-    -- Genau die Meldung der Engine (Cfile:930793) — kein stiller Fehlschlag.
+    -- Exactly what the engine reported (Cfile:930793) — not a silent failure.
     error('CreateProjectile: Invalid blueprint ' .. tostring(bpId), 2)
   end
 
@@ -102,8 +102,8 @@ function __projCreate(launcher, bpId, pos, quat, speed, damage, damageRadius, da
   p.__health = 1
   p.__fraction = 1
 
-  -- Flugparameter aus dem Blueprint (die Defaults setzt die Engine im
-  -- Struct-Ctor, siehe blueprints.lua __projDefaults).
+  -- Flight parameters from the blueprint (the defaults are set by the engine
+  -- Struct Ctor, see blueprints.lua __projDefaults).
   p.__turnRate = jitter(phys.TurnRate, phys.TurnRateRange)       -- GRAD/Sekunde
   p.__maxSpeed = jitter(phys.MaxSpeed, phys.MaxSpeedRange)
   p.__accel = jitter(phys.Acceleration, phys.AccelerationRange)
@@ -113,23 +113,23 @@ function __projCreate(launcher, bpId, pos, quat, speed, damage, damageRadius, da
   p.__collideSurface = phys.CollideSurface ~= false
   p.__collideEntity = phys.CollideEntity ~= false
   p.__destroyOnWater = phys.DestroyOnWater == true
-  -- Verbuendete ueberfliegen (PROJ_Create-Parameter, Default 1). Ohne diesen
-  -- Filter starb jeder Schuss einer bauenden ACU in ihrer EIGENEN Baustelle,
-  -- die direkt neben ihr steht — der Feind blieb unversehrt.
+  -- Fly over allies (PROJ_Create parameter, default 1). Without this
+  -- Filter died every shot of a building ACU in their OWN construction site,
+  -- which is right next to her - the enemy remained unharmed.
   p.__ignoresAlly = ignoresAlly ~= false
   p.__target = target
   p.__damage = damage or 0
   p.__damageRadius = damageRadius or 0
   p.__damageType = damageType or 'Normal'
 
-  -- mBallisticAcc = Gravitation * UseGravity (Cfile:943663-943668). Die
-  -- Gravitationskonstante der Sim: 4.9 Weltmeter/s^2 (PhysConstants).
+  -- mBallisticAcc = Gravitation * UseGravity (Cfile:943663-943668). The
+  -- Sim gravity constant: 4.9 world meters/s^2 (PhysConstants).
   p.__ballistic = { 0, (phys.UseGravity ~= false) and -__simGravity or 0, 0 }
 
   -- Lebensdauer in TICKS (Cfile:943680: curTick + (Lifetime ± Range) * 10).
   p.__lifetimeEnd = __gameTick + math.floor(jitter(phys.Lifetime, phys.LifetimeRange) * 10)
 
-  -- Startgeschwindigkeit: Vorwaertsachse der Startpose * InitialSpeed
+  -- Starting speed: Forward axis of the starting pose * InitialSpeed
   -- (Cfile:943842-943854).
   local v0 = speed
   if not v0 then v0 = jitter(phys.InitialSpeed, phys.InitialSpeedRange) end
@@ -140,7 +140,7 @@ function __projCreate(launcher, bpId, pos, quat, speed, damage, damageRadius, da
   p.Trash = TrashBag()
   __projectiles[id] = p
 
-  -- OnPreCreate, dann OnCreate(inWater) — EIN Argument (Cfile:943988). Genau das
+  -- OnPreCreate, then OnCreate(inWater) — ONE argument (Cfile:943988). Exactly that
   -- erwartet z. B. TDFGauss01_script.lua:OnCreate(self, inWater).
   local inWater = p.__pos[2] < __waterLevel()
   if inWater and p.__destroyOnWater then
@@ -153,13 +153,13 @@ function __projCreate(launcher, bpId, pos, quat, speed, damage, damageRadius, da
   return p
 end
 
---- Der Wasserspiegel der Karte. Ohne geladene Karte: 0 (kein Wasser).
+--- The water level of the map. Without map loaded: 0 (no water).
 function __waterLevel()
   return __mapWaterLevel or 0
 end
 
 -- ---------------------------------------------------------------------
--- Der Einschlag (Moho::Projectile::Impact, Cfile:944692-944745)
+-- The Impact (Moho::Projectile::Impact, Cfile:944692-944745)
 -- ---------------------------------------------------------------------
 local function impact(p, kind, target)
   p.__impactType = false
@@ -172,27 +172,27 @@ local function impact(p, kind, target)
 end
 
 -- ---------------------------------------------------------------------
--- Kollision (Projectile::CheckCollision, @0x69D1D0 — NICHT dekompilierbar).
+-- Collision (Projectile::CheckCollision, @0x69D1D0 — NOT decompilable).
 --
--- Was gesichert ist (Aufrufliste der Funktion): ein GESWEEPTER Strecken-Test von
--- der alten zur neuen Position (COGrid::GetEntityCollisionsInLine +
--- Wm3::DistVector3Segment3f::GetSquared), Terrain aus dem Heightfield
--- (CHeightField::Intersection), und der Lua-Filter self:OnCollisionCheck(other)
--- mit EINEM Argument.
+-- What is secured (call list of the function): a SWEEPED route test of
+-- the old to the new position (COGrid::GetEntityCollisionsInLine +
+-- Wm3::DistVector3Segment3f::GetSquared), terrain from the heightfield
+-- (CHeightField::Intersection), and the Lua filter self:OnCollisionCheck(other)
+-- with ONE argument.
 --
--- ANNAHME, ausdruecklich benannt: wir pruefen Abstand Strecke<->Mittelpunkt gegen
--- den Bounding-Radius der Unit (aus SizeX/SizeY/SizeZ). Ob die Engine das
--- Kollisionsvolumen (Box/Sphere) nimmt, ist nicht belegt
+-- ASSUMPTION, expressly stated: we check the distance between the route and the center point
+-- the bounding radius of the unit (from SizeX/SizeY/SizeZ). Whether the engine
+-- Collision volume (box/sphere) is not occupied
 -- (docs/research/combat-projectiles.md §9).
 -- ---------------------------------------------------------------------
---- Die Kollisionskugel einer Unit: Mittelpunkt = KOERPERMITTE (Fuesse + SizeY/2),
---- Radius aus dem Kollisionsquader SizeX/Y/Z (Weltmeter, uel0001: 1/2/0.7).
+--- The collision sphere of a unit: center point = BODY CENTER (feet + SizeY/2),
+--- Radius from the collision box SizeX/Y/Z (world meter, uel0001: 1/2/0.7).
 ---
---- Der Mittelpunkt ist nicht Kosmetik: `u.__pos` sind die FUESSE der Einheit.
---- Ein Schuss, der auf Koerperhoehe vorbeifliegt, war von den Fuessen weiter
---- entfernt als der Radius — Punkt-Blank-Schuesse gingen "durch" die Einheit.
---- (Die Engine sweept gegen das Kollisionsvolumen, CheckCollision @0x69D1D0 ist
---- nicht dekompilierbar — die Kugel um die Koerpermitte ist die benannte
+--- The focus is not cosmetic: `u.__pos` are the FEET of unity.
+--- A shot that flies past at body height was further from the feet
+--- removed as the radius - point-blank shots went "through" the unit.
+--- (The engine sweeps against the collision volume, CheckCollision is @0x69D1D0
+--- cannot be decompiled - the sphere around the center of the body is the named one
 --- Naeherung, combat-projectiles.md §9.)
 function __unitCollision(u)
   local bp = u.__bp
@@ -202,7 +202,7 @@ function __unitCollision(u)
   return { p[1], p[2] + sy * 0.5, p[3] }, math.max(r, 0.5)
 end
 
---- Quadrierter Abstand Punkt <-> Strecke.
+--- Squared distance point <-> distance.
 local function distSqSegment(a, b, c)
   local abx, aby, abz = b[1] - a[1], b[2] - a[2], b[3] - a[3]
   local acx, acy, acz = c[1] - a[1], c[2] - a[2], c[3] - a[3]
@@ -218,16 +218,16 @@ local function distSqSegment(a, b, c)
   return dx * dx + dy * dy + dz * dz
 end
 
---- Trifft das Projektil auf seinem Weg von `from` nach `to` etwas?
---- Liefert Art des Einschlags + getroffene Entity (oder nil).
+--- Does the projectile hit anything on its way from `from` to `to`?
+--- Returns type of impact + entity hit (or nil).
 local function checkCollision(p, from, to)
-  -- 1. Entities. Die Engine fragt die Lua VOR der Kollision: OnCollisionCheck.
+  -- 1. Entities. The engine asks the Lua BEFORE the collision: OnCollisionCheck.
   if p.__collideEntity then
     -- VERBUENDETE ueberfliegen: PROJ_Create bekommt `ignoresAlly` (Default 1,
-    -- Cfile:930895; Waffen-Blueprint IgnoresAlly, weapons.md:599). Nur wenn die
+    -- Cfile:930895; Weapon Blueprint IgnoresAlly, weapons.md:599). Only if the
     -- DamageData ausdruecklich CollideFriendly sagt (weapon.lua:294, Default
-    -- false; die Engine fragt Projectile.lua:407 GetCollideFriendly), kollidiert
-    -- das Projektil doch mit eigenen Einheiten.
+    -- false; the engine asks Projectile.lua:407 GetCollideFriendly), collides
+    -- the projectile with its own units.
     local hitsAllies = not p.__ignoresAlly
       or (p.DamageData and p.DamageData.CollideFriendly == true)
     local army = p.__army
@@ -237,16 +237,16 @@ local function checkCollision(p, from, to)
         and (hitsAllies or not IsAlly(u.__army, army)) then
         local center, r = __unitCollision(u)
         if distSqSegment(from, to, center) <= r * r then
-          -- Der Lua-Filter (func_OnCollisionCheck, Cfile:945766): gefragt wird
-          -- die ZIEL-UNIT — unit.lua:972 OnCollisionCheck(self, other,
+          -- The Lua filter (func_OnCollisionCheck, Cfile:945766): is asked
+          -- the TARGET UNIT — unit.lua:972 OnCollisionCheck(self, other,
           -- firingWeapon): DisallowCollisions, Ally -> GetCollideFriendly,
-          -- DoNotCollideList beidseitig. projectile:OnCollisionCheck ist die
-          -- PROJEKTIL-gegen-PROJEKTIL-Abwehr (projectile.lua:89-105 prueft
-          -- other:GetTrackingTarget — das haben nur Projektile) und darf hier
-          -- NICHT laufen: seine MISSILE-x-DIRECTFIRE-Regel liesse jede Rakete
-          -- jeden DIRECTFIRE-Panzer ignorieren. (Die Waffe des Schuetzen
-          -- fuehrt unser Projektil nicht mit — nil; der Rumpf 972-1000 liest
-          -- firingWeapon nicht.)
+          -- DoNotCollideList on both sides. projectile:OnCollisionCheck is the
+          -- PROJECTIL-versus-PROJECTIL defense (projectile.lua:89-105 checks
+          -- other:GetTrackingTarget — only projectiles have that) and is allowed here
+          -- NOT run: his MISSILE x DIRECTFIRE rule would let any missile
+          -- ignore any DIRECTFIRE tank. (The shooter's weapon
+          -- does not carry our projectile with us - nil; the hull 972-1000 reads
+          -- firing weapon not.)
           local pass = true
           if u.OnCollisionCheck then
             local ok, res = pcall(function() return u:OnCollisionCheck(p, nil) end)
@@ -264,7 +264,7 @@ local function checkCollision(p, from, to)
     end
   end
 
-  -- 2. Boden/Wasser. Terrain kommt aus dem Heightfield, Wasser aus der Ebene.
+  -- 2. Soil/Water. Terrain comes from the heightfield, water from the plain.
   if p.__collideSurface then
     local ground = GetSurfaceHeight(to[1], to[3])
     if to[2] <= ground then return IMPACT_TERRAIN, nil end
@@ -277,24 +277,24 @@ local function checkCollision(p, from, to)
 end
 
 -- ---------------------------------------------------------------------
--- Moho::Projectile::MotionTick (Cfile:944040-944290) — pro Tick, dt = 0.1 s.
+-- Moho::Projectile::MotionTick (Cfile:944040-944290) — per tick, dt = 0.1 s.
 --
--- Zwei Dinge, die man nicht raten darf:
---   * die Integration ist TRAPEZFOERMIG: pos += (v_alt + v_neu) * 0.05
---     (Cfile:944219-944228). Naives Euler verschiebt jede Flugbahn.
---   * TurnRate ist GRAD/Sekunde und wirkt auch OHNE TrackTarget: sie begrenzt,
---     wie schnell sich die Ausrichtung an die Geschwindigkeit anpasst
+-- Two things not to advise:
+--   * the integration is TRAPEZOERMIG: pos += (v_old + v_new) * 0.05
+--     (Cfile:944219-944228). Naive Euler shifts every trajectory.
+--   * TurnRate is DEGREES/second and also works WITHOUT TrackTarget: it limits,
+--     how quickly the orientation adapts to the speed
 --     (mTurnRateDeg * 0.0017453292 = deg * pi/180 * 0.1 rad/Tick).
 -- ---------------------------------------------------------------------
 local DEG_PER_SEC_TO_RAD_PER_TICK = 0.0017453292
 
---- Eine Quaternion zur Flugrichtung drehen, hoechstens `maxAngle` je Tick.
+--- Rotate a quaternion to the direction of flight, at most `maxAngle` per tick.
 local function alignToVelocity(q, v, maxAngle)
   local len = math.sqrt(v[1] * v[1] + v[2] * v[2] + v[3] * v[3])
   if len < 1e-6 then return q end
   local want = __orientFromDir({ v[1] / len, v[2] / len, v[3] / len })
   if maxAngle <= 0 then return want end
-  -- Winkel zwischen den Quaternionen (dot -> cos(theta/2)).
+  -- Angle between the quaternions (dot -> cos(theta/2)).
   local dot = q[1] * want[1] + q[2] * want[2] + q[3] * want[3] + q[4] * want[4]
   if dot < 0 then
     want = { -want[1], -want[2], -want[3], -want[4] }
@@ -315,14 +315,14 @@ local function alignToVelocity(q, v, maxAngle)
 end
 
 -- ---------------------------------------------------------------------
--- GELENKTE MUNITION — Moho::Projectile::UpdateTracking (@944367) mit den
--- Quaternion-Helfern der Engine (alles belegt, docs/research/
+-- GUIDED AMMO — Moho::Projectile::UpdateTracking (@944367) with the
+-- Quaternion helpers of the engine (all documented, docs/research/
 -- verified-facts.md "Gelenkte Munition"):
---   QuatCrossAdd  (@0x44F880): die Rotation v1 -> v2 (Halbwinkel-Quat).
---   RotateQuatByAngle (@0x4EB740): begrenzt ein Delta-Quat auf `rads`;
---     ist das Ziel NAEHER als das Limit, bleibt es unveraendert.
---   QuatFromVecRot (@0x69AA50): forward aus dem Quat, Delta bauen,
---     begrenzen, dann PRE-multipliziert (quat = delta * quat).
+--   QuatCrossAdd (@0x44F880): the rotation v1 -> v2 (half angle quat).
+--   RotateQuatByAngle (@0x4EB740): limits a delta quat to `rads`;
+--     If the target is CLOSER than the limit, it remains unchanged.
+--   QuatFromVecRot (@0x69AA50): forward from the Quat, build Delta,
+--     limit, then PRE-multiplied (quat = delta * quat).
 -- ---------------------------------------------------------------------
 local function quatCrossAdd(v1x, v1y, v1z, v2x, v2y, v2z)
   local l1 = math.sqrt(v1x * v1x + v1y * v1y + v1z * v1z)
@@ -331,7 +331,7 @@ local function quatCrossAdd(v1x, v1y, v1z, v2x, v2y, v2z)
   if l2 > 1e-9 then v2x, v2y, v2z = v2x / l2, v2y / l2, v2z / l2 end
   local ax, ay, az = v1x + v2x, v1y + v2y, v1z + v2z
   local al = math.sqrt(ax * ax + ay * ay + az * az)
-  if al <= 1e-9 then return { 0, v1x, v1y, v1z } end -- antiparallel (belegt)
+  if al <= 1e-9 then return { 0, v1x, v1y, v1z } end -- antiparallel (occupied)
   ax, ay, az = ax / al, ay / al, az / al
   return {
     ax * v1x + ay * v1y + az * v1z, -- w = dot(half, v1)
@@ -347,7 +347,7 @@ local function rotateQuatByAngle(q, rads)
   local qw, qx, qy, qz = q[1], q[2], q[3], q[4]
   local sinHalf = math.sin(half)
   local axisSq = qx * qx + qy * qy + qz * qz
-  -- Ziel naeher als das Limit -> Delta bleibt (volle Drehung).
+  -- Target closer than the limit -> Delta remains (full rotation).
   if axisSq <= sinHalf * sinHalf then return q end
   if qw < 0 then sinHalf = -sinHalf end
   local al = math.sqrt(axisSq)
@@ -368,18 +368,18 @@ local function quatFromVecRot(q, rx, ry, rz, rads)
   }
 end
 
---- UpdateTracking (@944367): Zielposition holen (Koerpermitte), bei totem
---- Ziel EINMAL OnLostTarget und auf die letzte Position weiterfliegen;
---- Lead-Vorhaltung zweischrittig; die Nase dreht hoechstens
---- TurnRate·0.1 Grad pro Tick; VelocityAlign setzt v auf die neue Nase.
---- (Noch offen wie dokumentiert: ZigZag und StayUnderwater — kein Vanilla-
---- Projektil unserer Testpfade nutzt sie; sie folgen mit eigenem Beleg-Test.)
+--- UpdateTracking (@944367): Get target position (center of body), while dead
+--- Target ONLostTarget ONCE and continue flying to the last position;
+--- Lead retention in two steps; the nose turns at most
+--- TurnRate·0.1 degrees per tick; VelocityAlign puts v on the new nose.
+--- (Still open as documented: ZigZag and StayUnderwater — no vanilla
+--- Projectile of our test paths uses them; they follow with their own evidence test.)
 local function updateTracking(p)
   local tgt = p.__target
   if tgt and not tgt.__destroyed and not tgt.__destroyQueued then
     local mitte = __unitCollision(tgt)
-    -- Ziel-Geschwindigkeit aus der ECHTEN Positionsdifferenz des letzten
-    -- Ticks (im Original GetVelocity aus dem Motion-Zustand).
+    -- Target speed from the REAL position difference of the last one
+    -- Ticks (in the original GetVelocity from the Motion state).
     local prev = p.__tgtPrev
     if prev then
       p.__tgtVel = {
@@ -391,7 +391,7 @@ local function updateTracking(p)
     p.__tgtPrev = mitte
     p.__goalPos = mitte
   elseif p.__trackTarget then
-    -- Ziel verloren: RunScript('OnLostTarget') + TrackTarget aus (@944379).
+    -- Target lost: RunScript('OnLostTarget') + TrackTarget off (@944379).
     if p.OnLostTarget then p:OnLostTarget() end
     p.__trackTarget = false
     p.__tgtVel = nil
@@ -400,7 +400,7 @@ local function updateTracking(p)
   if not goal then return end
 
   local gx, gy, gz = goal[1], goal[2], goal[3]
-  -- Lead-Vorhaltung (@944470-944500): zweischrittig ueber die
+  -- Lead retention (@944470-944500): two-step via the
   -- Zielgeschwindigkeit, Zeitmass = Distanz / (MaxSpeed·0.1) Ticks.
   local tv = p.__tgtVel
   if p.__leadTarget and tv and p.__maxSpeed and p.__maxSpeed > 0 then
@@ -430,13 +430,13 @@ local function updateTracking(p)
   end
 end
 
---- Eine Quaternion, deren +Z-Achse in Richtung `d` zeigt (COORDS_Orient).
+--- A quaternion whose +Z axis points in the direction of `d` (COORDS_Orient).
 function __orientFromDir(d)
   local dx, dy, dz = d[1], d[2], d[3]
-  -- Rotation von (0,0,1) nach d.
+  -- Rotation from (0,0,1) to d.
   local dot = dz -- (0,0,1) . d
   if dot > 0.999999 then return { 1, 0, 0, 0 } end
-  if dot < -0.999999 then return { 0, 0, 1, 0 } end -- 180 Grad um Y
+  if dot < -0.999999 then return { 0, 0, 1, 0 } end -- 180 degrees around Y
   -- Achse = (0,0,1) x d
   local ax, ay = -dy, dx
   local w = 1 + dot
@@ -449,7 +449,7 @@ function __projectileTick()
     if p.__destroyed then
       __projectiles[id] = nil
     elseif p.__impactType then
-      -- Der Aufschlag wird im NAECHSTEN Tick aufgeloest (mImpactInterp >= 0,
+      -- The impact is resolved in the NEXT tick (mImpactInterp >= 0,
       -- Cfile:944110-944116).
       local kind, target = p.__impactType, p.__impactTarget
       p.__impactTarget = nil
@@ -463,13 +463,13 @@ function __projectileTick()
         v[2] = v[2] + p.__ballistic[2] * 0.1
         v[3] = v[3] + p.__ballistic[3] * 0.1
       else
-        -- GELENKT: die Nase dreht Richtung Ziel (UpdateTracking @944367),
-        -- danach beschleunigt das Projektil entlang der Nase — der
-        -- Tracking-Zweig hat KEINE ballistische Beschleunigung
+        -- GUIDED: the nose turns towards the target (UpdateTracking @944367),
+        -- then the projectile accelerates along the nose — the
+        -- Tracking branch does NOT have ballistic acceleration
         -- (Cfile:944155-944211).
         updateTracking(p)
       end
-      -- Beschleunigung entlang der eigenen Achse.
+      -- Acceleration along its own axis.
       if p.__accel ~= 0 then
         local f = __quatForward(p.__orient)
         v[1] = v[1] + f[1] * p.__accel * 0.1
@@ -511,9 +511,9 @@ function __projectileTick()
   end
 end
 
---- Der Zustand aller Projektile als JSON — der Renderer zeichnet sie.
---- (Kein Rueckgabewert nach JS: eine Lua-Tabelle bliebe im wasmoon-Registry
---- haengen, siehe units.lua.)
+--- The state of all projectiles as JSON — the renderer draws them.
+--- (No return value according to JS: a Lua table would remain in the wasmoon registry
+--- hang, see units.lua.)
 function __readAllProjectilesJson()
   local parts = {}
   local n = 0

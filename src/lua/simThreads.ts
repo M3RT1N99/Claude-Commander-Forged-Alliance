@@ -19,12 +19,12 @@ import SCHEDULER_LUA from '../engine-lua/threads.lua?raw'
  */
 
 
-/** Installiert den Thread-Scheduler + die Zeit-Globals in den Lua-Host. */
+/** Installs the thread scheduler + time globals into the Lua host. */
 export function installSimThreads(host: LuaHost): void {
   host.eval(SCHEDULER_LUA)
 }
 
-/** Ein Sim-Tick: rückt die Spielzeit vor und resümiert fällige Lua-Threads. */
+/** A Sim-Tick: advances the game time and summarizes Lua threads that are due. */
 export function simTick(host: LuaHost): void {
   host.eval('__simTick()')
 }
@@ -34,7 +34,7 @@ export function currentTick(host: LuaHost): number {
   return Number(host.eval('return __gameTick')) || 0
 }
 
-/** Anzahl aktiver Lua-Threads. */
+/** Number of active Lua threads. */
 export function threadCount(host: LuaHost): number {
   return Number(host.eval('return __threadCount()')) || 0
 }

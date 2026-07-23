@@ -46,7 +46,7 @@ const check = (ok: boolean, label: string): void => {
   if (!ok) failures++
 }
 
-// --- VFS + alle DDS-Maße (die UI misst ihre Bitmaps an den Texturen) --------
+// --- VFS + all DDS measurements (the UI measures its bitmaps by the textures) --------
 const files = new Map<string, Uint8Array>()
 const allPaths = new Set<string>()
 const ddsBytes = new Map<string, Uint8Array>()
@@ -62,20 +62,20 @@ for (const archive of archives) {
     const k = key.toLowerCase()
     allPaths.add(k)
     if (key.endsWith('.lua') && !files.has(key)) files.set(key, await zip.read(entry))
-    // Nur die UI-Texturen vorladen — die Lua fragt ihre Maße synchron ab.
+    // Only preload the UI textures — the Lua queries their dimensions synchronously.
     if (k.startsWith('textures/ui/') && k.endsWith('.dds') && !ddsBytes.has(k)) {
       ddsBytes.set(k, await zip.read(entry))
     }
   }
 }
-console.log(`${files.size} Lua-Dateien, ${ddsBytes.size} UI-Texturen`)
+console.log(`${files.size} Lua files, ${ddsBytes.size} UI textures`)
 
 const dims = new Map<string, [number, number]>()
 const textureSize = (p: string): [number, number] | null => {
   const hit = dims.get(p)
   if (hit) return hit
   const bytes = ddsBytes.get(p)
-  if (!bytes) return null // die Skin-Kette fragt auch nach Dateien, die es nicht gibt
+  if (!bytes) return null // the skin chain also asks for files that don't exist
   const dds = parseDds(bytes)
   const out: [number, number] = [dds.width, dds.height]
   dims.set(p, out)
@@ -90,10 +90,10 @@ installUiEngine(host, {
   exists: (p) => allPaths.has(p),
   find: (dir, pattern) => findFiles(allPaths, dir, pattern),
   textureSize,
-  // Ohne Schriftmetrik kein Text-Layout. Die Breite ist hier ein fester Wert
-  // pro Zeichen — der Test misst KEINE Textbreiten, er prüft Textinhalte.
+  // Without font metrics, there is no text layout. The width is a fixed value here
+  // per character — the test does NOT measure text widths, it checks text content.
   stringAdvance: (text, _family, size) => text.length * size * 0.5,
-  // Test-Metrik: der Test prueft TEXTINHALTE, keine Textmasse.
+  // Test metric: the test checks TEXT CONTENT, not text mass.
   fontMetrics: (_family, size) => [size * 0.8, size * 0.2],
 })
 createRootFrame(host, 1920, 1080)
@@ -113,8 +113,8 @@ check(err === null, err === null ? 'CreateEconomyBar() lief durch' : `CreateEcon
 
 if (err === null) {
   console.log('\n== Sim-Zahlen rein, Original-Lua rechnet, Text raus ==')
-  // Genau der Zustand nach dem ACU-Spawn (verify-econ-lua): volles Lager,
-  // 20 E/s + 1 M/s Einkommen, kein Verbrauch.
+  // Exactly the state after the ACU spawn (verify-econ-lua): full warehouse,
+  // 20 E/s + 1 M/s income, no consumption.
   host.eval(`__uiSetEconomy(650, 4000, 650, 4000, 1, 20, 0, 0, 0, 0)`)
   host.eval(`Economy._BeatFunction()`)
 
@@ -137,13 +137,13 @@ if (err === null) {
   check(h === 72, `panel.Height() = ${h}`)
 
   console.log('\n== Der BALKEN bewegt sich mit dem Vorrat (StatusBar) ==')
-  // statusbar.lua:57-63 setzt `_bar.Right` als LazyVar-FUNKTION, die
-  // `_CalcRangePercent()` liest — der Balken ist also nur so breit wie der
-  // Füllstand. Wer die Breite nicht neu auswertet, hat einen Balken, der zwar
-  // Zahlen zeigt, sich aber nie bewegt.
-  // Gemessen wird das RECHTECK (Right − Left), nicht `Width()`: bitmap.lua:67-70
-  // pinnt Width fest auf die TEXTURBREITE. Genau daran ist der Balken hängen
-  // geblieben — der Renderer las Width, und die ändert sich nie.
+  // statusbar.lua:57-63 sets `_bar.Right` as the LazyVar FUNCTION, the
+  // `_CalcRangePercent()` reads - so the bar is only as wide as that
+  // level. If you don't re-evaluate the width, you'll have a bar that is
+  // Shows numbers but never moves.
+  // The RECTANGLE (Right − Left) is measured, not `Width()`: bitmap.lua:67-70
+  // pins Width firmly to the TEXTURE WIDTH. That's exactly what the beam is hanging on
+  // remained — the renderer read Width, and that never changes.
   const barWidth = (): number =>
     Number(
       host.eval(`
@@ -153,7 +153,7 @@ if (err === null) {
     )
   const barPinnedWidth = Number(host.eval(`return Economy.GUI.mass.storageBar._bar.Width()`))
 
-  // __uiSetEconomy(maxM, maxE, storedM, storedE, …) — das LAGER zuerst.
+  // __uiSetEconomy(maxM, maxE, storedM, storedE, …) — the WAREHOUSE first.
   host.eval(`__uiSetEconomy(650, 4000, 650, 4000, 1, 20, 0, 0, 0, 0)`)
   host.eval(`Economy._BeatFunction()`)
   const full = barWidth()
@@ -174,43 +174,43 @@ if (err === null) {
   check(empty === 0, `Leeres Lager: Balken ${empty.toFixed(0)} px`)
   check(
     barPinnedWidth > full,
-    `Und Width() bleibt dabei die TEXTURBREITE (${barPinnedWidth}) — deshalb muss ` +
-      'der Renderer das Rechteck nehmen (bitmap.lua:67-70)',
+    `And Width() remains the TEXTURE WIDTH (${barPinnedWidth}) — that's why it has to ` +
+      'the renderer takes the rectangle (bitmap.lua:67-70)',
   )
 
-  // Und dasselbe, wie es der RENDERER sieht: der Snapshot muss die Breite aus
-  // dem Rechteck liefern, nicht aus Width().
+  // And the same as the RENDERER sees: the snapshot must have the width
+  // from the rectangle, not from Width().
   const snapBar = host.eval(`
     for _, c in ipairs(__mauiSnapshot()) do
       if __mauiControls[c.id] == Economy.GUI.mass.storageBar._bar then
         return string.format('%.0f', c.width)
       end
     end
-    return 'nicht im Snapshot'
+    return 'not in snapshot'
   `) as string
   check(
     snapBar === '0',
-    `Der Snapshot meldet dem Renderer die echte Balkenbreite: ${snapBar} px (Lager leer)`,
+    `The snapshot reports the real bar width to the renderer: ${snapBar} px (stock empty)`,
   )
 }
 
-console.log('\n== Event-Pump: Hit-Test + Original-Bubbling ==')
-// Das Eco-Panel sitzt bei (16,3) und ist 324x72 gross (economy_mini.lua).
-// Ein Klick mittendrin muss ein Control treffen; ein Klick weit daneben nicht.
+console.log('\n== Event pump: hit test + original bubbling ==')
+// The Eco panel is located at (16.3) and is 324x72 (economy_mini.lua).
+// A click in the middle must hit a control; not a click far away.
 const MODS = `{ Shift = false, Ctrl = false, Alt = false, Left = true, Middle = false, Right = false }`
-// Klick INS Panel: gehoert der UI — die Welt darf ihn nicht sehen.
+// Click INS panel: belongs to the UI — the world is not allowed to see it.
 const onPanel = host.eval(`return __mauiMouse('ButtonPress', 100, 40, ${MODS})`)
-// Klick weit daneben: nur der Root-Frame — die Welt bekommt ihn.
+// Click far away: just the root frame — the world gets it.
 const onWorld = host.eval(`return __mauiMouse('ButtonPress', 900, 900, ${MODS})`)
-check(onPanel === true, 'Klick aufs Eco-Panel gehört der UI (kein Bewegungsbefehl)')
-check(onWorld === false, 'Klick daneben trifft nur den Root-Frame → die Welt bekommt ihn')
+check(onPanel === true, 'Click on the eco panel belongs to the UI (no movement command)')
+check(onWorld === false, 'Clicking next to it only hits the root frame → the world gets it')
 
-// Bubbling: ein Kind, das false liefert, reicht das Event an den Parent hoch
-// (Cfile:1124525). Kommt es dort an, ist die Kette richtig.
-// Das Kind ist ein BITMAP, kein Group: der Hit-Test trifft nur, was auch
-// ZEICHNET (sonst würden die unsichtbaren Vollbild-Container der Original-UI
-// jeden Klick fressen — siehe verify-ui-panels). Das Bubbling selbst ist davon
-// unberührt: das Event geht vom getroffenen Control die Eltern-Kette hoch.
+// Bubbling: a child that returns false passes the event up to the parent
+// (Cfile:1124525). If it gets there, the chain is correct.
+// The child is a BITMAP, not a group: the hit test only hits whatever
+// DRAWS (otherwise the invisible full-screen containers of the original UI
+// eat every click — see verify-ui-panels). The bubbling itself is from it
+// untouched: the event goes up the parent chain from the hit control.
 const bubbled = host.eval(`
   local Group = import('/lua/maui/group.lua').Group
   local Bitmap = import('/lua/maui/bitmap.lua').Bitmap

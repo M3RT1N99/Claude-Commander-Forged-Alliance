@@ -23,7 +23,7 @@ export class Heightfield {
     this.stride = hf.width + 1
   }
 
-  /** Höhe an der Weltposition (bilinear zwischen den vier Nachbar-Samples). */
+  /** Height at world position (bilinear between the four neighboring samples). */
   at(x: number, z: number): number {
     const { data, width, height, scale } = this.hf
     const cx = Math.min(Math.max(x, 0), width - 0.001)

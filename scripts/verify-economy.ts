@@ -15,42 +15,42 @@ const check = (ok: boolean, label: string): void => {
 }
 const near = (a: number, b: number, eps = 1e-3): boolean => Math.abs(a - b) < eps
 
-// ── Zwei-Ratio: Masse-Engpass drosselt Doppel-, nicht Einzel-Verbraucher ──
+// ── Two-ratio: mass bottleneck throttles double, not single consumers ──
 console.log('\n== Zwei-Ratio-Verteilung (r1 Doppel, r2 Einzel) ==')
 {
-  const both = { mass: 10, energy: 10, rate: 1 } // braucht E und M
-  const energyOnly = { mass: 0, energy: 10, rate: 1 } // braucht nur E
+  const both = { mass: 10, energy: 10, rate: 1 } // needs E and M
+  const energyOnly = { mass: 0, energy: 10, rate: 1 } // only needs E
   // Masse knapp (5), Energie reichlich (1000)
   const { spentMass } = distribute(5, 1000, [both, energyOnly])
   check(near(both.rate, 0.5), `Doppel-Verbraucher r1 = ${both.rate.toFixed(3)} (Masse-Engpass 5/10)`)
   check(near(energyOnly.rate, 1), `Einzel-Energie-Verbraucher r2 = ${energyOnly.rate.toFixed(3)} (läuft voll)`)
-  check(energyOnly.rate > both.rate, 'Einzel-Energie-Verbraucher läuft schneller als der masse-gedrosselte Doppel')
-  check(near(spentMass, 5, 1e-2), `Masse-Ausgabe = ${spentMass.toFixed(2)} (nicht mehr als verfügbar)`)
+  check(energyOnly.rate > both.rate, 'Single energy consumer runs faster than the ground-throttled double')
+  check(near(spentMass, 5, 1e-2), `Mass Output = ${spentMass.toFixed(2)} (no longer available)`)
 }
 
 // ── Produktion fließt ins Lager (Floating, gedeckelt) ──
-console.log('\n== ArmyEconomy: Produktion akkumuliert bis Lagerkapazität ==')
+console.log('\n== ArmyEconomy: Production accumulates until storage capacity ==')
 {
   const a = new ArmyEconomy()
-  // Wie die ACU: produziert 20 E/s UND bringt 4000 E Lager mit. Ohne Lager
-  // gäbe es nichts zu speichern — die Armee selbst hat keinen Sockel
+  // Like the ACU: produces 20 E/s AND brings 4000 E of bearings. Without stock
+  // there would be nothing to save — the army itself has no base
   // (SSTIArmyVariableData-Ctor: mMaxStorage = 0/0).
   a.register(1, { prodM: 0, prodE: 20, consM: 0, consE: 0, storeM: 0, storeE: 4000, complete: true, prodActive: true, consActive: true })
   const e0 = a.energy
   for (let i = 0; i < 10; i++) a.tick()
   check(near(a.energy, e0 + 20, 1e-1), `Energie ${a.energy.toFixed(1)} (Start ${e0} + 20 über 1 s)`)
   check(a.incomeEnergy === 20, `Einkommen = ${a.incomeEnergy}/s`)
-  check(a.maxEnergy === 4000, `Lager = ${a.maxEnergy} (nur aus der Unit)`)
+  check(a.maxEnergy === 4000, `Bearing = ${a.maxEnergy} (only from the unit)`)
 
-  // Ohne Lager-Unit: kein Lager, der Vorrat kann nicht wachsen.
+  // Without a storage unit: no warehouse, the stock cannot grow.
   const b = new ArmyEconomy()
   b.register(1, { prodM: 0, prodE: 20, consM: 0, consE: 0, storeM: 0, storeE: 0, complete: true, prodActive: true, consActive: true })
   for (let i = 0; i < 10; i++) b.tick()
-  check(b.energy === 0 && b.maxEnergy === 0, `ohne Lager-Unit: Vorrat ${b.energy}, Lager ${b.maxEnergy}`)
+  check(b.energy === 0 && b.maxEnergy === 0, `without storage unit: stock ${b.energy}, stock ${b.maxEnergy}`)
 }
 
 // ── Stall: hoher Verbrauch, Vorrat bleibt >= 0, Ausgabe gedrosselt ──
-console.log('\n== Stall: Vorrat klemmt bei 0, LimitingRate < 1 ==')
+console.log('\n== Stall: Supply stuck at 0, LimitingRate < 1 ==')
 {
   const a = new ArmyEconomy()
   a.energy = 0
@@ -58,7 +58,7 @@ console.log('\n== Stall: Vorrat klemmt bei 0, LimitingRate < 1 ==')
   a.register(2, { prodM: 0, prodE: 0, consM: 0, consE: 1000, storeM: 0, storeE: 0, complete: true, prodActive: true, consActive: true }) // 1000/s Bedarf
   for (let i = 0; i < 5; i++) a.tick()
   check(a.energy >= 0, `Energie bleibt >= 0 (${a.energy.toFixed(2)})`)
-  check(a.expenseEnergy > 0 && a.expenseEnergy <= a.incomeEnergy + 1e-2, `Ausgabe auf Einkommen gedrosselt (${a.expenseEnergy.toFixed(1)}/s)`)
+  check(a.expenseEnergy > 0 && a.expenseEnergy <= a.incomeEnergy + 1e-2, `Output on income throttled (${a.expenseEnergy.toFixed(1)}/s)`)
 }
 
 // ── Determinismus ──
@@ -86,7 +86,7 @@ console.log('\n== Mex-Stall (Produktion × LimitingRate des Verbrauchs) ==')
     complete: true, prodActive: true, consActive: true,
     naturalProducer: false, lastRate: 1,
   })
-  // No energy income, empty storage -> the upkeep request starves.
+  // No energy income, empty storage -> the upkeep request stars.
   for (let i = 0; i < 5; i++) a.tick()
   check(
     a.incomeMass < 0.2,
@@ -103,7 +103,7 @@ console.log('\n== Mex-Stall (Produktion × LimitingRate des Verbrauchs) ==')
 {
   const a = new ArmyEconomy()
   // The ACU (NaturalProducer) never throttles its own production, even
-  // while its consumption starves.
+  // while its consumption stars.
   a.register(1, {
     prodM: 1, prodE: 20, consM: 0, consE: 500, storeM: 100, storeE: 100,
     complete: true, prodActive: true, consActive: true,

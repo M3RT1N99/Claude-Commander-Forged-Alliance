@@ -1,49 +1,49 @@
 __active_mods = {}
 __registered = { Unit={}, Mesh={}, Prop={}, Projectile={}, Emitter={}, TrailEmitter={}, Beam={} }
 local function collector(g) return function(bp) __registered[g][bp.BlueprintId or '?'] = bp end end
--- Blueprint-Defaults: die Engine liest ein .bp NICHT in eine rohe Tabelle,
--- sondern in ein getyptes Struct (Moho::RUnitBlueprint). Dessen Ctor
--- (@0x51E480, Cfile ~655645, plus die Sub-Ctors fuer Physics/Economy/AI)
--- initialisiert JEDES Feld mit einem Default; die Lua sieht das
--- reflektierte Struct. Darum darf Unit.lua ungeprueft auf
--- bp.Defense.Shield.ShieldSize (unit.lua:1572) oder bp.Footprint.SizeX
--- (unit.lua:243) zugreifen, obwohl die .bp-Datei diese Sektionen gar nicht
--- enthaelt. Werte 1:1 aus den Ctors — nichts geschaetzt.
+-- Blueprint defaults: the engine does NOT read a .bp into a raw table,
+-- but into a typed struct (Moho::RUnitBlueprint). Its Ctor
+-- (@0x51E480, Cfile ~655645, plus the sub-ctors for Physics/Economy/AI)
+-- initializes EVERY field with a default; the Lua sees this
+-- reflected struct. That's why Unit.lua is allowed to run unchecked
+-- bp.Defense.Shield.ShieldSize (unit.lua:1572) or bp.Footprint.SizeX
+-- (unit.lua:243) even though the .bp file does not contain these sections
+-- contains. Values ​​1:1 from the ctors - nothing estimated.
 __bpDefaults = {
-  -- Die Upgrade-Felder sind KEINE leeren Strings: der Ctor setzt sie auf den
+  -- The upgrade fields are NOT empty strings: the ctor sets them to the
   -- String "none" (Cfile:656076-656077, func_StringInitFilename("none", ...));
-  -- nur UpgradesTo startet leer (str_empty, Cfile:656075).
+  -- only UpgradesTo starts empty (str_empty, Cfile:656075).
   --
-  -- Das ist kein Detail: construction.lua:863 fragt
+  -- This is not a detail: construction.lua:863 asks
   --   elseif blueprint.General.UpgradesFromBase != "none" then
   --       ... elseif blueprint.General.UpgradesFromBase == unitBp.General.UpgradesFromBase then
   --           performUpgrade = true
-  -- Fehlt der Default, sind BEIDE Seiten nil — nil == nil ist wahr, und die UI
-  -- haelt JEDES Gebaeude fuer ein Upgrade der ausgewaehlten Unit. Der Klick aufs
-  -- Bau-Icon schickte dann ein UNITCOMMAND_Upgrade an die Sim, statt den
-  -- Bau-Modus zu starten — nichts liess sich mehr bauen.
+  -- If the default is missing, BOTH sides are nil - nil == nil is true, and the UI
+  -- EVERY building counts as an upgrade to the selected unit. The click on
+  -- Bau-Icon then sent a UNITCOMMAND_Upgrade to the sim instead of the
+  -- Start construction mode - nothing could be built anymore.
   General = {
     UpgradesFrom = 'none',
     UpgradesFromBase = 'none',
     UpgradesTo = '',
-    -- Der Ctor (Cfile:656079-656081): mQuickSelectPriority = 0, mCapCost = 1.0,
-    -- mSelectionPriority = 1. QuickSelectPriority > 0 macht eine Unit zum
-    -- AVATAR (rechte Leiste; in Vanilla setzen es nur die vier ACU-.bp auf 1).
+    -- The Ctor (Cfile:656079-656081): mQuickSelectPriority = 0, mCapCost = 1.0,
+    -- mSelectionPriority = 1. QuickSelectPriority > 0 makes a unit the
+    -- AVATAR (right bar; in vanilla only the four ACU-.bp set it to 1).
     QuickSelectPriority = 0,
     CapCost = 1.0,
     SelectionPriority = 1,
   },
-  -- IdleEffects: Tabellen-Feld im Struct -> leer, nie nil. unit.lua:2463
+  -- IdleEffects: Table field in the struct -> empty, never nil. unit.lua:2463
   -- indiziert es ungeprueft (bpTable[layer]).
   Display = {
     UniformScale = 1.0, SpawnRandomRotation = false, HideLifebars = false,
     IdleEffects = {}, MovementEffects = {},
-    -- Der Ctor legt mDisplay.mIconName als LEEREN String an (Cfile:655662-655664:
-    -- _Mysize = 0, Buf[0] = 0). KEIN einziges .bp setzt das Feld — trotzdem
-    -- verkettet gamecommon.lua:17 es ungeprueft zu einem Pfad. Er wird dadurch
-    -- '/textures/ui/common/icons/units/_icon.dds', DiskGetFileInfo liefert false,
-    -- und die Lua faellt auf default_icon.dds zurueck (gamecommon.lua:22-24).
-    -- Genau so ist es gemeint: das leere Feld IST der Standard-Weg.
+    -- The Ctor creates mDisplay.mIconName as an EMPTY string (Cfile:655662-655664:
+    -- _Mysize = 0, Buf[0] = 0). NOT a single .bp sets the field — still
+    -- gamecommon.lua:17 concatenates it unchecked into a path. He will through this
+    -- '/textures/ui/common/icons/units/_icon.dds', DiskGetFileInfo returns false,
+    -- and the Lua falls back to default_icon.dds (gamecommon.lua:22-24).
+    -- That's exactly what it means: the empty field IS the standard way.
     IconName = '',
   },
   Intel = {
@@ -51,9 +51,9 @@ __bpDefaults = {
     OmniRadius = 0, RadarStealth = false, SonarStealth = false, Cloak = false,
     ShowIntelOnSelect = false, RadarStealthFieldRadius = 0,
     SonarStealthFieldRadius = 0, CloakFieldRadius = 0, JammerBlips = 0,
-    -- Range-Structs (Ctor: mJamRadius.min/.max); RType-Feldnamen sind
-    -- 'Min'/'Max' (Cfile:442519). unit.lua:1876 iteriert sie direkt —
-    -- fehlen sie, laeuft das generische for auf nil.
+    -- Range Structs (Ctor: mJamRadius.min/.max); RType field names are
+    -- 'Min'/'Max' (Cfile:442519). unit.lua:1876 iterates it directly —
+    -- If they are missing, the generic for runs to nil.
     JamRadius = { Min = 0, Max = 0 },
     SpoofRadius = { Min = 0, Max = 0 },
   },
@@ -94,11 +94,11 @@ __bpDefaults = {
     LayerTransitionDuration = 0.0, FuelUseTime = 0.0, FuelRechargeRate = 0.0,
     GroundCollisionOffset = 0.0,
   },
-  -- Footprint-Felder sind uchar (AddField_uchar "SizeX", Cfile:642465) -> 0.
+  -- Footprint fields are uchar (AddField_uchar "SizeX", Cfile:642465) -> 0.
   Footprint = { SizeX = 0, SizeZ = 0 },
 }
 
--- Defaults einmischen: vorhandene Werte des .bp gewinnen immer.
+-- Mix in defaults: existing values ​​of the .bp always win.
 local function fillDefaults(target, defaults)
   for k, v in pairs(defaults) do
     if type(v) == 'table' then
@@ -110,27 +110,27 @@ local function fillDefaults(target, defaults)
   end
 end
 
--- PROJEKTIL-Blueprints haben ihren eigenen Struct-Ctor
--- (RProjectileBlueprintPhysics, Cfile:653667-653712). Auch hier gilt: die Engine
--- belegt JEDES Feld vor, und die Original-Lua greift ungeprueft darauf zu.
+-- PROJECTIL Blueprints have their own Struct Ctor
+-- (RProjectileBlueprintPhysics, Cfile:653667-653712). The same applies here: the engine
+-- EVERY field is pre-occupied, and the original Lua accesses it unchecked.
 --
--- Zwei Werte, die man nicht raten darf:
---   UseGravity = true   — ohne ihn fliegt jede Kugel schnurgerade weiter
---   Lifetime   = 15     — ohne ihn lebt sie ewig (oder gar nicht)
+-- Two values ​​​​that should not be guessed:
+--   UseGravity = true — without it, every ball flies straight
+--   Lifetime = 15 — without him she lives forever (or not at all)
 --
--- Und eine Eigenheit: das Projektil-Blueprint hat GAR KEINE Defense-Sektion
--- (RProjectileBlueprintTypeInfo::AddFields, Cfile:654222-654240 kennt nur
+-- And a peculiarity: the projectile blueprint has NO defense section AT ALL
+-- (RProjectileBlueprintTypeInfo::AddFields, Cfile:654222-654240 only knows
 -- DevStatus/Display/Economy/Physics). Projectile.lua:75 liest trotzdem
--- `bp.Defense.MaxHealth or 1` — das laeuft nur dank der LuaPlus-nil-Metatable
--- (boot.lua). Deshalb wird hier KEINE Defense-Sektion erfunden.
--- Die FELDNAMEN sind die des PARSERS (AddFields, Cfile:653990-654175), nicht die
--- internen Member-Namen. Zwei davon hatte ich falsch — mit dem Member-Namen statt
--- dem .bp-Namen:
---   CollideEntity (NICHT CollisionEntity): die Kollision mit Einheiten. Ein .bp
---     mit `CollideEntity = false` (Nukes, Strat-Raketen) flog bei uns trotzdem in
---     die erste ueberflogene Einheit — der echte Wert wurde nie gelesen.
---   BounceVelDamp (NICHT BounceVelocityDamping).
--- Werte aus dem Struct-Ctor (Cfile:653667-653712), Feldliste aus AddFields.
+-- `bp.Defense.MaxHealth or 1` — this only works thanks to the LuaPlus-nil metatable
+-- (boot.lua). That's why NO defense section is being invented here.
+-- The FIELD NAMES are those of the PARSER (AddFields, Cfile:653990-654175), not that
+-- internal member name. I had two of them wrong - with the member name instead
+-- the .bp name:
+--   CollideEntity (NOT CollisionEntity): the collision with entities. A .bp
+--     with `CollideEntity = false` (nukes, strat rockets) still flew in with us
+--     the first unit flown over — the real value was never read.
+--   BounceVelDamp (NOT BounceVelocityDamping).
+-- Values ​​from the Struct Ctor (Cfile:653667-653712), field list from AddFields.
 __projDefaults = {
   Physics = {
     Lifetime = 15.0, LifetimeRange = 0.0,
@@ -143,8 +143,8 @@ __projDefaults = {
     TrackTarget = false, LeadTarget = true,
     VelocityAlign = true, StayUpright = false, StayUnderwater = false,
     UseGravity = true,
-    -- Start-Offset (PositionX/Y/Z ± Range) — die Engine versetzt das Projektil
-    -- damit von der Muendung (Ctor Cfile:653700-653707).
+    -- Start Offset (PositionX/Y/Z ± Range) — the engine offsets the projectile
+    -- thus from the mouth (Ctor Cfile:653700-653707).
     PositionX = 0.0, PositionXRange = 0.0,
     PositionY = 0.0, PositionYRange = 0.0,
     PositionZ = 0.0, PositionZRange = 0.0,
@@ -152,7 +152,7 @@ __projDefaults = {
     DirectionXRange = 1.5, DirectionYRange = 0.0, DirectionZRange = 1.5,
     DestroyOnWater = false,
     BounceVelDamp = 0.5, MinBounceCount = 0, MaxBounceCount = 0,
-    -- Detonationshoehen und ZigZag (Lenkwaffen) — vom Ctor mit 0 belegt.
+    -- Detonation heights and ZigZag (guided weapons) - assigned 0 by the Ctor.
     DetonateAboveHeight = 0.0, DetonateBelowHeight = 0.0,
     MaxZigZag = 0.0, ZigZagFrequency = 0.0,
     RealisticOrdinance = false, StraightDownOrdinance = false,
@@ -161,29 +161,29 @@ __projDefaults = {
   Display = { UniformScale = 1.0 },
 }
 
--- WAFFEN-Defaults. Jede Waffe eines Units ist ein eigenes Struct
+-- WEAPON defaults. Each unit weapon is its own struct
 -- (RUnitBlueprintWeapon, 0x184 Bytes, RUnitBlueprintWeaponTypeInfo::Init
--- Cfile:658191). Seine Felder registriert AddFields (Cfile:658290-658520) mit
--- TYP und Offset — 23 float, 26 bool, 7 string. Das Struct wird wertinitialisiert:
+-- Cfile:658191). Its fields are registered with AddFields (Cfile:658290-658520).
+-- TYPE and offset — 23 float, 26 bool, 7 string. The struct is value initialized:
 -- float -> 0.0, bool -> false, string -> "".
 --
--- Das ist kein Feinschliff: die ACU-Waffe „RightZephyr" (uel0001_unit.bp:880ff)
--- setzt KEIN DamageRadius — sie ist Einzelziel. `weapon.lua:287` rechnet aber
--- ungeprueft `weaponBlueprint.DamageRadius + (self.DamageRadiusMod or 0)`, und
--- ohne Default steht dort nil. Ergebnis: die ACU schiesst nicht (der Thread
--- stirbt in schook/lua/sim/weapon.lua:17). Genau so gefunden — im Durchlauf.
+-- This is not a finishing touch: the ACU weapon “RightZephyr” (uel0001_unit.bp:880ff)
+-- does NOT set DamageRadius - it is single target. But `weapon.lua:287` does the math
+-- untested `weaponBlueprint.DamageRadius + (self.DamageRadiusMod or 0)`, and
+-- without default it says nil. Result: the ACU does not fire (the thread
+-- dies in schook/lua/sim/weapon.lua:17). Found exactly that way — in transit.
 --
--- Die Feldliste ist die der Engine, nicht eine geratene Auswahl.
--- Die NICHT-NULL-Defaults kommen aus dem Struct-Ctor. Der ist im Retail-Binary
--- nicht als eigene Funktion dekompilierbar; die beste Quelle ist faf-re
+-- The field list is that of the engine, not a guessed selection.
+-- The NOT-NULL defaults come from the Struct-Ctor. It's in the retail binary
+-- cannot be decompiled as a separate function; the best source is faf-re
 -- (RUnitBlueprint.cpp:1015-1086, dokumentiert in weapons.md:1001):
 --   FiringTolerance 0.01, MaxHeightDiff inf, RateOfFire 1.0, TrackingRadius 1.0,
 --   HeadingArcRange 180, IgnoresAlly 1, LeadTarget 1, TargetCheckInterval 3.0
--- Sie sind nicht kosmetisch: IgnoresAlly=1 laesst Projektile durch Verbuendete
--- fliegen (sonst stirbt der Schuss einer bauenden ACU in der eigenen
--- Baustelle), und TargetCheckInterval=0 hiesse „jeden Tick Ziele suchen".
+-- They are not cosmetic: IgnoresAlly=1 lets projectiles pass through allies
+-- fly (otherwise the shot of a building ACU dies in its own
+-- construction site), and TargetCheckInterval=0 would mean “search for targets every tick”.
 __weaponDefaults = {
-  -- float (Feldliste: Cfile:658290-658520; Nicht-Null-Werte: weapons.md:1001)
+  -- float (field list: Cfile:658290-658520; non-zero values: weapons.md:1001)
   BombDropThreshold = 0.0, Damage = 0.0, DamageRadius = 0.0, EffectiveRadius = 0.0,
   FiringRandomness = 0.0, FiringTolerance = 0.01, HeadingArcCenter = 0.0,
   HeadingArcRange = 180.0, MaxHeightDiff = math.huge, MaxRadius = 0.0,
@@ -214,7 +214,7 @@ __weaponDefaults = {
 
 function RegisterUnitBlueprint(bp)
   fillDefaults(bp, __bpDefaults)
-  -- Jeder Waffen-Eintrag ist ein eigenes Struct — also auch eigene Defaults.
+  -- Each weapon entry is its own struct - including its own defaults.
   for _, w in ipairs(bp.Weapon or {}) do
     fillDefaults(w, __weaponDefaults)
   end
@@ -231,12 +231,12 @@ RegisterPropBlueprint=collector('Prop')
 RegisterEmitterBlueprint=collector('Emitter'); RegisterTrailEmitterBlueprint=collector('TrailEmitter')
 RegisterBeamBlueprint=collector('Beam')
 
--- Ein EMITTER-Blueprint als JSON — der Renderer (Partikelsystem im
--- Main-Thread) holt die geparsten Daten aus der Sim, statt die 2724
--- _emit.bp-Dateien selbst noch einmal zu laden. Emitter-BPs sind reine
--- Daten: Zahlen, Strings, Booleans und Tabellen (die 21 Kurven mit
--- XRange + Keys). Arrays (fortlaufende 1..n) werden als JSON-Array
--- serialisiert, alles andere als Objekt.
+-- An EMITTER blueprint as JSON — the renderer (particle system in
+-- Main thread) fetches the parsed data from the sim, instead of the 2724
+-- _emit.bp files yourself to load again. Emitter BPs are pure
+-- Data: numbers, strings, booleans and tables (which contain 21 curves
+-- XRange + Keys). Arrays (consecutive 1..n) are saved as a JSON array
+-- serialized, anything but object.
 local function jsonVal(v)
   local t = type(v)
   if t == 'number' then
@@ -263,11 +263,11 @@ local function jsonVal(v)
   return 'null'
 end
 
--- Auch fuer andere Engine-Lua-Dateien (props.lua serialisiert Mesh-BPs).
+-- Also for other engine Lua files (props.lua serializes mesh BPs).
 __jsonVal = jsonVal
 
---- Liefert das Emitter-/Trail-/Beam-Blueprint zur Id als JSON-String —
---- oder den String 'null', wenn es keines gibt (der Aufrufer prueft).
+--- Delivers the emitter/trail/beam blueprint to the ID as a JSON string —
+--- or the string 'null' if there is none (the caller checks).
 function __emitterBpJson(bpId)
   local bp = __registered.Emitter[bpId]
     or __registered.TrailEmitter[bpId]

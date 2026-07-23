@@ -25,7 +25,7 @@ import { GameFiles } from './gameFiles'
 
 const zeigeAlle = process.argv.includes('--alle')
 
-// --- Die Engine-Liste einlesen (generiert aus der Decomp) -------------------
+// --- Read the engine list (generated from the decomp) -------------------
 const md = await readFile('docs/research/engine-api.md', 'utf-8')
 
 interface Abschnitt {
@@ -72,7 +72,7 @@ function parse(md: string): Abschnitt[] {
 
 const abschnitte = parse(md)
 
-// --- Beide VMs booten, exakt wie im Spiel -----------------------------------
+// --- Both VMs boot, exactly like in the game -----------------------------------
 const game = await GameFiles.open()
 
 const sim = await LuaHost.create(game.luaFiles, () => {})
@@ -90,7 +90,7 @@ installUiEngine(ui, {
 createRootFrame(ui, 1920, 1080)
 setupUi(ui)
 
-// Die NO-OP-Funktion von moho.lua ist EIN Objekt — daran ist ein No-Op erkennbar.
+// The NO-OP function of moho.lua is ONE object - this indicates a no-op.
 for (const h of [sim, ui]) {
   h.eval(`
     __mohoNoop = false
@@ -100,8 +100,8 @@ for (const h of [sim, ui]) {
     end
   `)
 }
-// Und die Liste der bewusst NICHT implementierten UI-Globals (sie werfen).
-// Der strenge _G wirft beim Lesen unbekannter Globals — deshalb rawget.
+// And the list of deliberately NOT implemented UI globals (they throw).
+// The strict _G throws when reading unknown globals — hence rawget.
 const uiFehlt = new Set(
   ui.pull<string[]>(`(function()
     local out = {}
@@ -113,13 +113,13 @@ const uiFehlt = new Set(
 type Stand = 'ECHT' | 'NO-OP' | 'FEHLT'
 
 const globalStand = (h: LuaHost, name: string, istUi: boolean): Stand => {
-  if (istUi && uiFehlt.has(name)) return 'FEHLT'
+  if (isUi && uiMissing.has(name)) return 'FEHLT'
   const t = String(h.eval(`return type(rawget(_G, '${name}'))`))
   if (t === 'nil') return 'FEHLT'
   return 'ECHT'
 }
 
-// moho-Klassenname aus der Decomp → unsere moho.<x>_methods
+// moho class name from the decomp → our moho.<x>_methods
 const klassenKarte: Record<string, string> = {
   Entity: 'entity_methods',
   Unit: 'unit_methods',
@@ -143,27 +143,27 @@ const klassenKarte: Record<string, string> = {
 }
 
 /**
- * `UserUnit` ist KEINE moho-Klasse: die Engine gibt der UI eigene Objekte
- * (35 Bindungen, engine-api.md). Bei uns sind es die Methoden von
+ * `UserUnit` is NOT a moho class: the engine gives the UI its own objects
+ * (35 bindings, engine-api.md). For us it is the methods of
  * `__userUnitMethods` (ui-globals.lua).
  */
-const userUnitStand = (methode: string): Stand => {
+const userUnitStand = (method: string): Stand => {
   const t = String(
     ui.eval(`
       local m = rawget(_G, '__userUnitMethods')
       if not m then return 'FEHLT' end
-      -- UserUnitMeta ist die Metatable; die Methoden liegen in ihrem __index.
+      -- UserUnitMeta is the metatable; the methods are in their __index.
       local idx = m.__index or m
       if type(idx) ~= 'table' then return 'FEHLT' end
       return idx['${methode}'] ~= nil and 'ECHT' or 'FEHLT'
     `),
   )
-  return t as Stand
+  return t as stand
 }
 
-const methodenStand = (h: LuaHost, klasse: string, methode: string): Stand => {
-  if (klasse === 'UserUnit') return userUnitStand(methode)
-  const key = klassenKarte[klasse]
+const methodStand = (h: LuaHost, class: string, method: string): Stand => {
+  if (class === 'UserUnit') return userUnitStand(method)
+  const key = classMap[class]
   if (!key) return 'FEHLT'
   const r = String(
     h.eval(`
@@ -178,7 +178,7 @@ const methodenStand = (h: LuaHost, klasse: string, methode: string): Stand => {
   return r as Stand
 }
 
-// --- Der Bericht ------------------------------------------------------------
+// --- The report ------------------------------------------------------------
 interface Zeile {
   bereich: string
   name: string
@@ -188,21 +188,21 @@ interface Zeile {
 const zeilen: Zeile[] = []
 
 for (const a of abschnitte) {
-  const h = a.vm === 'UI' ? ui : sim
-  const istUi = a.vm === 'UI'
+  const h = a.vm === 'UI' ? ui: sim
+  const isUi = a.vm === 'UI'
   for (const g of a.globals) {
-    zeilen.push({ bereich: `${a.vm}-Globals`, name: g, stand: globalStand(h, g, istUi), vm: a.vm })
+    lines.push({ range: `${a.vm}-Globals`, name: g, stand: globalStand(h, g, istUi), vm: a.vm })
   }
-  for (const k of a.klassen) {
-    for (const m of k.methoden) {
-      zeilen.push({ bereich: k.name, name: m, stand: methodenStand(h, k.name, m), vm: a.vm })
+  for (const k of a.classes) {
+    for (const m of k.methods) {
+      lines.push({ range: k.name, name: m, stand: methodsstand(h, k.name, m), vm: a.vm })
     }
   }
 }
 
-const bereiche = [...new Set(zeilen.map((z) => z.bereich))]
-const zaehle = (b: string, s: Stand): number =>
-  zeilen.filter((z) => z.bereich === b && z.stand === s).length
+const ranges = [...new Set(rows.map((z) => z.range))]
+const count = (b: string, s: stand): number =>
+  lines.filter((z) => z.area === b && z.stand === s).length
 
 console.log('\n' + '='.repeat(78))
 console.log('ABGLEICH GEGEN DIE ENGINE — was von jeder Bindung bei uns wirklich da ist')
@@ -219,17 +219,17 @@ const sortiert = bereiche.sort((a, b) => {
   return fb - fa
 })
 
-let gesGesamt = 0
-let gesEcht = 0
-for (const b of sortiert) {
-  const gesamt = zeilen.filter((z) => z.bereich === b).length
-  const echt = zaehle(b, 'ECHT')
+let totalTotal = 0
+let face = 0
+for (const b of sorted) {
+  const total = rows.filter((z) => z.range === b).length
+  const real = count(b, 'ECHT')
   const noop = zaehle(b, 'NO-OP')
-  const fehlt = zaehle(b, 'FEHLT')
-  gesGesamt += gesamt
-  gesEcht += echt
-  const pct = gesamt > 0 ? Math.round((echt / gesamt) * 100) : 0
-  const balken = '█'.repeat(Math.round(pct / 5)).padEnd(20, '·')
+  const missing = count(b, 'FEHLT')
+  totalTotal += total
+  face += real
+  const pct = total > 0 ? Math.round((real / total) * 100) : 0
+  const bar = '█'.repeat(Math.round(pct / 5)).padEnd(20, '·')
   console.log(
     `${b.padEnd(22)}${String(gesamt).padStart(7)}${String(echt).padStart(7)}` +
       `${String(noop).padStart(7)}${String(fehlt).padStart(7)}   ${balken} ${pct}%`,
@@ -243,15 +243,15 @@ console.log(
     `${String(zeilen.filter((z) => z.stand === 'FEHLT').length).padStart(7)}   ${gesPct}%`,
 )
 
-// Details: was in den größten Lücken konkret fehlt.
+// Details: what is specifically missing in the biggest gaps.
 console.log('\nDie größten Lücken im Einzelnen:')
-for (const b of sortiert.slice(0, zeigeAlle ? sortiert.length : 8)) {
-  const offen = zeilen.filter((z) => z.bereich === b && z.stand !== 'ECHT')
+for (const b of sorted.slice(0, showAll ? sorted.length : 8)) {
+  const open = lines.filter((z) => z.area === b && z.state !== 'ECHT')
   if (offen.length === 0) continue
   console.log(`\n[${b}] ${offen.length} offen`)
   const noops = offen.filter((z) => z.stand === 'NO-OP').map((z) => z.name)
-  const fehlt = offen.filter((z) => z.stand === 'FEHLT').map((z) => z.name)
-  if (fehlt.length) console.log(`   FEHLT: ${fehlt.join(', ')}`)
+  const missing = open.filter((z) => z.stand === 'FEHLT').map((z) => z.name)
+  if (missing.length) console.log(` MISSING: ${missing.join(', ')}`)
   if (noops.length) console.log(`   NO-OP: ${noops.join(', ')}`)
 }
 

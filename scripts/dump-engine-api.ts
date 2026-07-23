@@ -48,11 +48,11 @@ const section = (init: string, title: string, note: string): string => {
   const total = [...bucket.values()].reduce((n, s) => n + s.size, 0)
 
   let out = `## ${title}\n\n${note}\n\n`
-  out += `**${total} Bindungen** — ${globals.length} Globals, ${classes.length} Klassen.\n\n`
+  out += `**${total} bindings** — ${globals.length} globals, ${classes.length} classes.\n\n`
   out += `### Globals (${globals.length})\n\n`
   out += globals.map((g) => `\`${g}\``).join(', ') + '\n\n'
   if (classes.length > 0) {
-    out += `### Klassen (${classes.length})\n\n`
+    out += `### Classes (${classes.length})\n\n`
     for (const c of classes) {
       const methods = sortedList(bucket.get(c))
       out += `**${c}** (${methods.length}): ${methods.map((x) => `\`${x}\``).join(', ')}\n\n`
@@ -76,8 +76,8 @@ Engine **zwei getrennte Lua-States** hat:
 | \`scr_UserInits\` | nur die **UI**-VM |
 | \`sim_SimInits\` | nur die **Sim**-VM |
 
-Darum kennt die Sim kein \`_c_CreateCursor\` und die UI kein \`CreateUnit\`. Wer
-beides in eine VM wirft, baut etwas, das es im Original nie gab.
+Darum kennt die Sim kein \`_c_CreateCursor\` und die UI kein \`CreateUnit\`. Who
+Throwing both into a VM builds something that never existed in the original.
 
 ${section('scr_CoreInits', 'Core — in beiden VMs', 'Vektor-Mathematik, Kategorien, Threads, Blueprint-Registrierung, Dateizugriff.')}
 ${section('scr_UserInits', 'User — nur die UI-VM', 'maui-Controls, Kommandos, Selektion, Kamera, Session, Preferences.')}

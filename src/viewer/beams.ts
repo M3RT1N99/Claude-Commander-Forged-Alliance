@@ -42,7 +42,7 @@ export interface BeamBpData {
 const VERTEX = /* glsl */ `
   attribute vec3 bDir;    // Beam-Richtung (Welt, normiert)
   attribute float bSide;  // ±Thickness (Vorzeichen = Quadseite)
-  attribute vec4 bColor;  // Start-/EndColor je Ende
+  attribute vec4 bColor;  // Start/EndColor per end
   attribute vec2 bUv;     // UV-Basis (U längs, V quer)
 
   uniform float uTime;
@@ -52,7 +52,7 @@ const VERTEX = /* glsl */ `
   varying vec2 vUv0;
 
   void main() {
-    // BeamVS (particle.fx:300-327): Punkt und Richtung in den View-Space,
+    // BeamVS (particle.fx:300-327): point and direction in the view space,
     // Quer-Versatz = normalize(cross((0,0,1), dirView)) * Size.w.
     vec3 posView = (viewMatrix * vec4(position, 1.0)).xyz;
     vec3 dirView = mat3(viewMatrix) * bDir;
@@ -158,7 +158,7 @@ export class BeamSystem {
 
   registerBp(bpId: string, bp: BeamBpData, tex: THREE.Texture): void {
     if (this.shared.has(bpId)) return
-    // ParticleSampler0Wrap: die Beam-Textur wickelt in beiden Achsen.
+    // ParticleSampler0Wrap: the beam texture wraps in both axes.
     tex.wrapS = THREE.RepeatWrapping
     tex.wrapT = THREE.RepeatWrapping
     const material = new THREE.ShaderMaterial({
@@ -202,7 +202,7 @@ export class BeamSystem {
     let ey = s.y2
     let ez = s.z2
     if (ex === undefined || ey === undefined || ez === undefined) {
-      // (0,0,Length) um die Bone-Orientierung gedreht.
+      // (0,0,Length) rotated around the bone orientation.
       const L = shared.bp.Length ?? 10
       const { qw, qx, qy, qz } = s
       const tx = 2 * (qy * L - qz * 0)
@@ -215,7 +215,7 @@ export class BeamSystem {
     inst.setEndpoints(s.x, s.y, s.z, ex, ey, ez)
   }
 
-  /** Uhr stellen + Beams abräumen, die die Sim nicht mehr meldet. */
+  /** Set the clock + clear beams that the sim no longer reports. */
   update(timeTicks: number): void {
     for (const sh of this.shared.values()) {
       sh.material.uniforms.uTime!.value = timeTicks

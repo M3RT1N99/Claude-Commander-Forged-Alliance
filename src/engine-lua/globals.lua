@@ -1,23 +1,23 @@
--- === Sound-Parameter-Objekte ===
+-- === Sound Parameter Objects ===
 --
--- Beides sind CORE-Globals (scr_CoreInits) — sie stehen in BEIDEN Lua-States,
--- und das ist der Punkt:
+-- Both are CORE globals (scr_CoreInits) — they are in BOTH Lua states,
+-- and that's the point:
 --
 --   Sound( {cue,bank,cutoff} ) - Make a sound parameters object   Cfile:608456
 --   RPCSound( {cue,bank,cutoff} )                                 Cfile:608507
 --
--- In der Sim ist `Sound{}` der EINZIGE DSL-Konstruktor in den .bp-Dateien
--- (3445 Vorkommen; fehlt er, bricht die Blueprint-Auswertung mittendrin ab und
--- das bp landet halbfertig unter dem Schluessel 'null'). In der UI baut
--- main.lua:231 damit die Menuemusik. Lag die Definition nur bei den Blueprints,
--- kannte die UI-VM ihn nicht — obwohl die Engine ihn dort genauso registriert.
+-- In the sim, `Sound{}` is the ONLY DSL constructor in the .bp files
+-- (3445 occurrences; if it is missing, the blueprint evaluation stops in the middle and
+-- the bp ends up half-finished under the key 'zero'). Builds in the UI
+-- main.lua:231 with it the menu music. If the definition was only in the blueprints,
+-- the UI VM didn't know it - even though the engine registered it there the same way.
 function Sound(t) return t end
 function RPCSound(t) return t end
 
--- "cue,bank = GetCueBank(params)" (mHelp, Cfile:608558) — eine KERN-Bindung
--- (scr_CoreInits, also beide VMs). Sie zerlegt ein Sound-Objekt in seine beiden
--- Bestandteile. aibrain.lua:924 (PlayVOSound) ruft sie beim Tod jeder Einheit —
--- ohne sie stirbt dort der Thread.
+-- "cue,bank = GetCueBank(params)" (mHelp, Cfile:608558) — a CORE binding
+-- (scr_CoreInits, i.e. both VMs). It breaks a sound object into its two
+-- components. aibrain.lua:924 (PlayVOSound) calls them when each unit dies -
+-- Without them the thread dies there.
 function GetCueBank(sound)
   if type(sound) ~= 'table' then return nil, nil end
   return sound.Cue, sound.Bank
@@ -26,14 +26,14 @@ end
 -- === MATH_Lerp (Core-Global, Cfile:598170) ===
 --
 -- mHelp: "MATH_Lerp(s, a, b) or MATH_Lerp(s, sMin, sMax, a, b) -> number".
--- Der Rumpf (Cfile:598228-598258) rechnet:
+-- The body (Cfile:598228-598258) calculates:
 --
 --   3 Argumente:  a + (b - a) * s
 --   5 Argumente:  a + (b - a) * ((s - sMin) / (sMax - sMin))
 --
--- KEIN Klemmen auf [0,1] — die Engine laesst den Wert ueberschiessen. Wer hier
--- ein math.min/max dazuerfindet, macht die Ein-/Ausblendungen der UI (die genau
--- damit rechnen, effecthelpers.lua:446) an den Raendern falsch.
+-- NO clamping to [0,1] — the engine allows the value to overshoot. Who here
+-- Invents a math.min/max to do the showing/hiding of the UI (which exactly
+-- expect that, effecthelpers.lua:446) is wrong on the edges.
 function MATH_Lerp(s, a, b, c, d)
   if d == nil then
     return a + (b - a) * s
@@ -71,14 +71,14 @@ function VAdd(a, b) local ax,ay,az = vxyz(a); local bx,by,bz = vxyz(b); return {
 function VSub(a, b) local ax,ay,az = vxyz(a); local bx,by,bz = vxyz(b); return { ax-bx, ay-by, az-bz } end
 function VDiff(a, b) return VSub(a, b) end
 function VMult(a, s) local ax,ay,az = vxyz(a); return { ax*s, ay*s, az*s } end
--- Ein Engine-Vektor traegt BEIDE Zugriffe — und das ist kein Komfort, sondern
--- Voraussetzung: die Original-Lua benutzt wirklich beide Formen.
+-- One engine vector carries BOTH accesses - and that's not a convenience, but rather
+-- Prerequisite: the original Lua really uses both forms.
 --
 --   aeonweapons.lua:105     VDist2(unitPos[1], unitPos[3], …)     -- Index
---   effectutilities.lua:274 2 * (endVec2.x - endVec1.x)           -- Feld
+--   effectutilities.lua:274 2 * (endVec2.x - endVec1.x) -- Field
 --
--- Ein Vektor nur mit Indizes laesst jeden Bau-Effekt an "attempt to perform
--- arithmetic on a nil value" sterben (genau das stand im Log).
+-- A vector with only indices allows every construction effect to "attempt to perform
+-- arithmetic on a nil value" (that's exactly what was in the log).
 function Vector(x, y, z)
   return { x or 0, y or 0, z or 0, x = x or 0, y = y or 0, z = z or 0 }
 end
@@ -89,9 +89,9 @@ end
 
 -- === Entity-Praedikate (cfunc_IsDestroyed/IsUnit/…) ===
 --
--- Die Praedikate muessen die ARTEN unterscheiden, nicht nur „hat ein Blueprint":
--- ein Projektil hat auch eines. Solange IsUnit(projektil) true lieferte, waere
--- jeder Kollisions- und Schadensfilter geraten (unit.lua:934, shield.lua:151).
+-- The predicates must distinguish the TYPES, not just "has a blueprint":
+-- a projectile also has one. As long as IsUnit(projectile) returned true,
+-- Any collision and damage filter is recommended (unit.lua:934, shield.lua:151).
 function IsDestroyed(e)
   if not e then return true end
   if type(e) ~= 'table' then return true end
@@ -160,17 +160,17 @@ function IsEnemy(a, b) return __allianceRow(__resolveArmy(a)).enemies[__resolveA
 function IsNeutral(a, b) return __allianceRow(__resolveArmy(a)).neutrals[__resolveArmy(b)] == true end
 
 -- === Random (Cfile:758FB0) ===
--- Ohne Argument ein Float [0,1), sonst wie math.random. config.lua:43 setzt
--- `math.random = Random` — die Sim wuerfelt also ueber die Engine (im Original
--- deterministisch fuer alle Clients; unsere Sim ist noch nicht lockstep).
+-- Without argument a float [0,1), otherwise like math.random. config.lua:43 sets
+-- `math.random = Random` — the sim rolls the dice via the engine (in the original
+-- deterministic for all clients; our sim is not yet lockstep).
 --
--- Ohne dieses Global stirbt jeder Todes-Thread: unit.lua:1200 DeathThread ruft
+-- Without this global, every death thread dies: unit.lua:1200 DeathThread calls
 -- GetRandomFloat (utils.lua) -> Random().
 --
--- ACHTUNG: config.lua:42 setzt spaeter `math.random = Random`. Im Original ist
--- Random eine C-Bindung — hier ist es Lua, und wer dann ueber `math.random`
--- geht, ruft SICH SELBST (endlose Tail-Rekursion: die VM haengt, kein
--- Stack-Overflow). Also das echte math.random VOR dem Alias festhalten.
+-- ATTENTION: config.lua:42 later sets `math.random = Random`. In the original is
+-- Random a C binding - here it is Lua, and then whoever has `math.random`
+-- goes, calls ITSELF (infinite tail recursion: the VM hangs, no
+-- Stack Overflow). So capture the real math.random BEFORE the alias.
 local mathRandom = math.random
 function Random(a, b)
   if a == nil then return mathRandom() end
@@ -178,9 +178,9 @@ function Random(a, b)
   return mathRandom(math.floor(a), math.floor(b))
 end
 
--- Warp(unit, location, [orientation]) — eine Entity SOFORT versetzen
--- (mHelp Cfile:1089605). Die Explosions-Entities werden so an den Ort des Todes
--- gesetzt (defaultexplosions.lua:121); ohne Warp stirbt der Todes-Thread.
+-- Warp(unit, location, [orientation]) — IMMEDIATELY relocate an entity
+-- (mHelp Cfile:1089605). The explosion entities are thus brought to the place of death
+-- set (defaultexplosions.lua:121); without warp the death thread dies.
 function Warp(entity, location, orientation)
   if not entity then return end
   local p = __vec3(location)
@@ -188,20 +188,20 @@ function Warp(entity, location, orientation)
   if orientation then entity.__orient = orientation end
 end
 
--- === Physik-Konstanten der Sim (Moho::SPhysConstants) ===
--- Der Ctor setzt mGravity = { 0, -4.9, 0 } (Cfile:699A90 / sub_699A90:
--- result[1] = -1063465779 = float -4.9). Daran haengt JEDE ballistische
--- Flugbahn — ein geschaetzter Wert waere ein anderes Spiel.
+-- === Sim physics constants (Moho::SPhysConstants) ===
+-- The ctor sets mGravity = { 0, -4.9, 0 } (Cfile:699A90 / sub_699A90:
+-- result[1] = -1063465779 = float -4.9). EVERY ballistic depends on this
+-- Trajectory — an estimated value would be a different game.
 __simGravity = 4.9
 
--- Der Wasserspiegel der geladenen Karte (aus der .scmap). Ohne Karte: kein
+-- The water level of the loaded map (from the .scmap). Without card: none
 -- Wasser.
 __mapWaterLevel = 0
 function __setWaterLevel(y) __mapWaterLevel = y or 0 end
 
--- === Kategorie-System (EntityCategory, categories, ParseEntityCategory) ===
--- Eine EntityCategory ist ein Ausdrucksbaum ueber Kategorie-Tokens; getestet
--- wird gegen die Categories-Liste des Blueprints (wie EntityCategoryContains).
+-- === Category system (EntityCategory, categories, ParseEntityCategory) ===
+-- An EntityCategory is an expression tree over category tokens; tested
+-- will be against the blueprint's Categories list (like EntityCategoryContains).
 local CatMeta = {}
 local function mkcat(kind, a, b) return setmetatable({ __cat = true, kind = kind, a = a, b = b }, CatMeta) end
 CatMeta.__add = function(x, y) return mkcat('or', x, y) end
@@ -229,8 +229,8 @@ categories = setmetatable({}, {
 })
 categories.ALLUNITS = mkcat('all')
 
--- ParseEntityCategory('BUILTBYCOMMANDER UEF'): Leerzeichen = UND (wie in den
--- Blueprint-BuildableCategory-Termen); '+'/'-'/'*' werden ebenfalls erkannt.
+-- ParseEntityCategory('BUILTBYCOMMANDER UEF'): Space = AND (as in the
+-- Blueprint BuildableCategory terms); '+'/'-'/'*' are also recognized.
 function ParseEntityCategory(expr)
   if type(expr) ~= 'string' then return expr end
   local cur = nil
@@ -259,18 +259,18 @@ local function bpCategorySet(bp)
   return set
 end
 
--- Das Blueprint hinter einem Kategorie-Argument. Die Engine prueft Kategorien
--- auf ALLEN Objektarten (cfunc_EntityCategoryContains): Sim-Entities, die
--- UserUnit-Spiegel der UI und nackte Blueprint-Tabellen. Diese Datei laeuft in
--- BEIDEN VMs — die Sim-Pfade (__bp) bleiben unangetastet, __registered.Unit
--- ist in beiden VMs dieselbe Ablage (uiEngine.ts aliast __blueprints darauf).
+-- The blueprint behind a category argument. The engine checks categories
+-- on ALL object types (cfunc_EntityCategoryContains): Sim entities that
+-- UserUnit mirrors of the UI and bare blueprint tables. This file runs in
+-- BOTH VMs — the sim paths (__bp) remain untouched, __registered.Unit
+-- is the same storage in both VMs (uiEngine.ts aka __blueprints on it).
 local function entityBp(e)
   if type(e) == 'table' then
     -- Sim-Entity: traegt ihr Blueprint direkt.
     if e.__bp then return e.__bp end
-    -- UI-UserUnit (der Sim-Spiegel aus ui-globals.lua): traegt nur die ID.
+    -- UI UserUnit (the Sim mirror from ui-globals.lua): only carries the ID.
     if e.blueprintId then return __registered and __registered.Unit[e.blueprintId] end
-    -- Eine Blueprint-TABELLE selbst (Rueckgabe von GetBlueprint()).
+    -- A Blueprint TABLE itself (returned from GetBlueprint()).
     if e.Categories then return e end
   end
   if type(e) == 'string' then return __registered and __registered.Unit[string.lower(e)] end
@@ -280,7 +280,7 @@ end
 function EntityCategoryContains(cat, e)
   local bp = entityBp(e)
   if not bp then
-    -- auch ein Blueprint-Name ist erlaubt
+    -- a blueprint name is also allowed
     if type(e) == 'string' and __registered then bp = __registered.Unit[string.lower(e)] end
   end
   if not bp or not cat then return false end
@@ -313,7 +313,7 @@ function EntityCategoryEmpty(cat, list)
   return EntityCategoryCount(cat, list) == 0
 end
 
--- Alle registrierten Blueprint-IDs, die die Kategorie erfuellen.
+-- All registered Blueprint IDs that meet the category.
 function EntityCategoryGetUnitList(cat)
   local out = {}
   local n = 0
@@ -328,7 +328,7 @@ function EntityCategoryGetUnitList(cat)
 end
 
 -- === Manipulatoren (CreateRotator/CreateSlider/… ) ===
--- Im Original C++-Objekte, die die Unit im Trash sammelt (brauchen :Destroy()).
+-- In the original C++ objects that the unit collects in the trash (need :Destroy()).
 local ManipMeta = {}
 ManipMeta.__index = ManipMeta
 function ManipMeta:SetGoal(...) self.__goal = { ... }; return self end
@@ -337,23 +337,23 @@ function ManipMeta:SetTargetSpeed(s) self.__targetSpeed = s; return self end
 function ManipMeta:SetAccel(a) self.__accel = a; return self end
 function ManipMeta:SetPrecedence(p) self.__precedence = p; return self end
 function ManipMeta:SetSpinDown(v) self.__spinDown = v; return self end
--- unit.lua:1660 dokumentiert die Signatur selbst:
+-- unit.lua:1660 documents the signature itself:
 -- BuilderArmManipulator:SetAimingArc(minHeading, maxHeading, headingMaxSlew, minPitch, maxPitch, pitchMaxSlew)
 function ManipMeta:SetAimingArc(minH, maxH, slewH, minP, maxP, slewP)
   self.__arc = { minH, maxH, slewH, minP, maxP, slewP }
   return self
 end
--- CAimManipulator: der Turm einer Waffe. weapon.lua:139 setzt seinen Schwenk-
--- und Neigungsbereich aus dem Blueprint (TurretYawMin/Max/Speed,
--- TurretPitchMin/Max/Speed) — dieselben sechs Zahlen wie beim BuilderArm, nur
--- unter dem Namen, den die Engine fuer Waffen fuehrt.
+-- CAimManipulator: the turret of a weapon. weapon.lua:139 sets its swivel
+-- and inclination range from the blueprint (TurretYawMin/Max/Speed,
+-- TurretPitchMin/Max/Speed) — same six numbers as the BuilderArm, only
+-- under the name that the engine uses for weapons.
 function ManipMeta:SetFiringArc(minH, maxH, slewH, minP, maxP, slewP)
   self.__arc = { minH, maxH, slewH, minP, maxP, slewP }
   return self
 end
 function ManipMeta:SetEnabled(on) self.__enabled = on ~= false; return self end
--- Zeit, bis der Turm ohne Ziel in die Ruhelage zurueckschwenkt (weapon.lua:94:
--- Gebaeude bekommen 9999999 — sie schwenken nie zurueck).
+-- Time until the tower swings back to its rest position without a target (weapon.lua:94:
+-- Buildings get 9999999 — they never swing back).
 function ManipMeta:SetResetPoseTime(t) self.__resetPoseTime = t; return self end
 function ManipMeta:SetHeadingPitch(h, p) self.__heading = h; self.__pitch = p; return self end
 function ManipMeta:GetHeadingPitch() return self.__heading or 0, self.__pitch or 0 end
@@ -424,9 +424,9 @@ function CreateAimController(weapon, label, yawBone, pitchBone, muzzleBone)
   return m
 end
 
--- CollisionDetector: Engine-Objekt, das Bones auf Bodenkontakt ueberwacht
--- (unit.lua:2660 CreateCollisionDetector(self) -> :WatchBone(bone); landet im
--- Trash, braucht also Destroy()). Fussstapfen-/Aufschlag-Effekte haengen daran.
+-- CollisionDetector: Engine object that monitors bones for ground contact
+-- (unit.lua:2660 CreateCollisionDetector(self) -> :WatchBone(bone); ends up in
+-- Trash, so needs Destroy()). Footstep/impact effects depend on this.
 local DetectorMeta = {}
 DetectorMeta.__index = DetectorMeta
 function DetectorMeta:WatchBone(bone)
@@ -444,9 +444,9 @@ function CreateFootPlantController(unit, footBone, kneeBone, hipBone, straightLe
 end
 
 -- === Armeen / Brains ===
--- GetArmyBrain(army) ist ein echtes Engine-Global (defaultunits.lua:442 u. a.).
--- Als Stub lieferte es die Identitaet — also die ARMEE-ZAHL statt des Brains,
--- worauf defaultunits.lua:443 eine Zahl indizierte.
+-- GetArmyBrain(army) is a real engine global (defaultunits.lua:442 and others).
+-- As a stub it provided the identity - i.e. the ARMY NUMBER instead of the brain,
+-- whereupon defaultunits.lua:443 indexed a number.
 function GetArmyBrain(army) return __getBrain(army) end
 -- brain:GetListOfUnits(cat, needToBeIdle) -> living units of that army.
 function __armyUnits(army, cat)
@@ -463,13 +463,13 @@ __focusArmy = 1
 function GetFocusArmy() return __focusArmy end
 function SetFocusArmy(a) __focusArmy = a end
 
--- Sim-Global: Enhancements je Entity-Id. Die Sim fuellt es, die UI liest es
--- ueber Sync.UserUnitEnhancements (simuistate.lua:44). unit.lua:576/2085
--- indizieren es ungeprueft, es muss also immer eine Tabelle sein.
+-- Sim-Global: Enhancements per entity ID. The sim fills it, the UI reads it
+-- via Sync.UserUnitEnhancements (simuistate.lua:44). unit.lua:576/2085
+-- index it unchecked, so it always has to be a table.
 SimUnitEnhancements = {}
 
--- _c_CreateEntity(self, spec): der C-Konstruktor hinter Entity (entity.lua:11).
--- Er verwandelt die Lua-Tabelle in eine Engine-Entity — Id, Armee, Position.
+-- _c_CreateEntity(self, spec): the C constructor behind Entity (entity.lua:11).
+-- It turns the Lua table into an engine entity — id, army, position.
 __nextEntityId = 1000000
 function _c_CreateEntity(self, spec)
   spec = spec or {}
@@ -514,11 +514,11 @@ local function newEmitter(owner, bone, army, spec)
   return e
 end
 
---- Der Zustand aller lebenden Emitter als JSON — der Renderer (Partikelsystem)
---- zeichnet sie. Die Weltposition rechnet die SIM (Owner + Knochen,
---- __boneWorld) — der Renderer kennt die Skelette nicht. Zerstoerte Emitter
---- und Emitter toter Owner werden dabei aus der Liste kompaktiert.
---- (String statt Rueckgabetabelle — wasmoon-Registry, siehe units.lua.)
+--- The state of all living emitters as JSON — the renderer (particle system)
+--- draws her. The world position is calculated by the SIM (owner + bones,
+--- __boneWorld) — the renderer doesn't know the skeletons. Destroyed emitters
+--- and emitters of dead owners are compacted from the list.
+--- (String instead of return table — wasmoon registry, see units.lua.)
 function __readAllEmittersJson()
   local parts, n = {}, 0
   local kompakt, k = {}, 0
@@ -528,22 +528,22 @@ function __readAllEmittersJson()
     if lebt then
       k = k + 1
       kompakt[k] = e
-      -- Position UND Rotation des Knochens: LocalVelocity/LocalAcceleration
-      -- drehen die Spawn-Richtungen EINMALIG beim Spawn in den Bone-Raum
-      -- (CEfxEmitter::Tick, Cfile:894849-894859) — dafuer braucht der
-      -- Spawner die Bone-Orientierung, nicht nur den Ort.
+      -- Position AND rotation of the bone: LocalVelocity/LocalAcceleration
+      -- rotate the spawn directions ONCE when spawning into bone space
+      -- (CEfxEmitter::Tick, Cfile:894849-894859) — that's what you need
+      -- Spawner the bone orientation, not just the location.
       local pos, rot = __boneWorld(o, e.__bone)
       local off = e.__offset
-      -- Beam-Emitter mit zweitem Ende (AttachBeamEntityToEntity): die
-      -- Zielposition wandert mit — stirbt das Ziel, endet der Beam
-      -- (CEfxBeam::Update prueft die Attachments genauso).
+      -- Beam emitter with second end (AttachBeamEntityToEntity): the
+      -- Target position moves with it - if the target dies, the beam ends
+      -- (CEfxBeam::Update checks the attachments in the same way).
       local zwei = ''
       local other = e.__other
       if other and not other.__destroyed and not other.__destroyQueued then
         local p2 = __boneWorld(other, e.__otherBone)
         zwei = string.format(',"x2":%.6g,"y2":%.6g,"z2":%.6g', p2[1], p2[2], p2[3])
       elseif other then
-        -- Ziel weg -> Beam-Emitter ist tot (im Original zerstoert ihn Update).
+        -- Aim gone -> Beam emitter is dead (in the original update destroys it).
         e.__destroyed = true
       end
       n = n + 1
@@ -564,21 +564,21 @@ function CreateAttachedEmitter(owner, bone, army, spec) return newEmitter(owner,
 function CreateEmitterAtBone(owner, bone, army, spec) return newEmitter(owner, bone, army, spec) end
 function CreateEmitterAtEntity(owner, army, spec) return newEmitter(owner, -1, army, spec) end
 function CreateEmitterOnEntity(owner, army, spec) return newEmitter(owner, -1, army, spec) end
--- CreateTrail(owner, bone, army, spec) — die Polytrail-Spur eines Projektils
--- (defaultprojectiles.lua:78/100/104 haengt sie ungeprueft an und ruft danach
--- :OffsetEmitter() darauf). Ohne Rueckgabewert stirbt jedes Projektil in seinem
+-- CreateTrail(owner, bone, army, spec) — the polytrail trail of a projectile
+-- (defaultprojectiles.lua:78/100/104 appends it without checking and calls for it
+-- :OffsetEmitter() on it). Without a return value, every projectile dies in its own right
 -- eigenen OnCreate.
 function CreateTrail(owner, bone, army, spec) return newEmitter(owner, bone, army, spec) end
 -- "CreateBeamEmitter(blueprint, army)" (EffectLuaStartupRegistrations,
--- effects-audio.md — KEIN Owner-Argument!): erzeugt den sichtbaren
+-- effects-audio.md — NO owner argument!): creates the visible one
 -- Beam-Effekt frei; AttachBeamToEntity haengt ihn an (CollisionBeam.lua:111f).
 function CreateBeamEmitter(spec, army) return newEmitter(nil, -1, army, spec) end
 
--- "AttachBeamToEntity(emitter, entity, tobone, army)": haengt einen
--- EXISTIERENDEN Beam-Emitter an eine Entity. Bei CollisionBeam-Entities
--- spannt der Strahl von Bone 0 (Anfang) zu Bone 1 (Treffpunkt) — beide an
--- derselben Entity; die Emitter-Meldung traegt dann x2/y2/z2 mit, und der
--- Beam-Renderer zeichnet Muendung -> Einschlag.
+-- "AttachBeamToEntity(emitter, entity, tobone, army)": attaches one
+-- EXISTING Beam Emitter to an Entity. For CollisionBeam entities
+-- the beam stretches from bone 0 (beginning) to bone 1 (meeting point) — both
+-- same entity; the emitter message then carries x2/y2/z2, and the
+-- Beam renderer draws muzzle -> impact.
 function AttachBeamToEntity(emitter, entity, tobone, army)
   emitter.__owner = entity
   emitter.__bone = tobone or 0
@@ -589,10 +589,10 @@ function AttachBeamToEntity(emitter, entity, tobone, army)
   return emitter
 end
 function CreateBeamEmitterOnEntity(owner, bone, army, spec) return newEmitter(owner, bone, army, spec) end
--- Beam ZWISCHEN zwei Entities (CEfxBeam::AttachEntityToEntity @0x655B50):
--- Start = sourceBone, Ende = targetBone — der Bau-Strahl der Ingenieure
--- (build_beam_01, EffectUtilities) haengt genau so zwischen Bauer und
--- Baustelle. Der zweite Endpunkt wandert mit in die Emitter-Meldung.
+-- Beam BETWEEN two entities (CEfxBeam::AttachEntityToEntity @0x655B50):
+-- Start = sourceBone, End = targetBone — the engineers' construction beam
+-- (build_beam_01, EffectUtilities) hangs exactly like this between Bauer and
+-- Construction site. The second end point is included in the emitter message.
 function AttachBeamEntityToEntity(a, ab, b, bb, army, spec)
   local e = newEmitter(a, ab, army, spec)
   e.__other = b
@@ -674,16 +674,16 @@ function WaitFor(obj)
   end
 end
 
--- === Buff-Blueprints (BuffBlueprint{...}) ===
+-- === Buff Blueprints (BuffBlueprint{...}) ===
 __buffs = {}
 function BuffBlueprint(spec)
   if type(spec) == 'table' and spec.Name then __buffs[spec.Name] = spec end
   return spec
 end
 
--- === Datei-/Pfad-Helfer ===
--- DiskToLocal steht in boot.lua (Kern, beide VMs): es nimmt den /mod-Praefix des
--- Hosts wieder weg. Blueprints.lua leitet daraus die BlueprintId ab.
+-- === File/Path Helper ===
+-- DiskToLocal is in boot.lua (core, both VMs): it takes the /mod prefix of
+-- Hosts gone again. Blueprints.lua derives the BlueprintId from this.
 function DiskGetFileInfo(path) return false end
 
 -- === Terrain ===
@@ -710,14 +710,14 @@ function GetTerrainType(x, z)
   return TerrainTypes and TerrainTypes[1]
 end
 
--- === Befehle an Units (sim_SimInits) ===
+-- === Commands to units (sim_SimInits) ===
 --
--- Die Sim-Lua erteilt selbst Befehle: FactoryUnit.RollOffUnit (defaultunits.lua:571)
--- schickt die frisch gebaute Einheit mit IssueMove vom Hof. Die Befehle laufen
--- ueber denselben Navigator, den auch ein Spielerbefehl benutzt — es gibt keinen
+-- The Sim-Lua issues commands itself: FactoryUnit.RollOffUnit (defaultunits.lua:571)
+-- sends the freshly built unit from the yard with IssueMove. The commands are running
+-- via the same navigator that a player command uses - there is none
 -- zweiten Bewegungspfad.
 --
--- Rueckgabe ist ein Kommando-Objekt; die Lua haelt es (self.MoveCommand) und
+-- Return is a command object; the Lua holds it (self.MoveCommand) and
 -- kann es spaeter loeschen.
 __nextCommand = 1
 
@@ -739,17 +739,17 @@ function IssueMove(units, pos)
   end)
 end
 
---- IsCommandDone(command) -> true, wenn der Befehl abgearbeitet ist
---- (cfunc_IsCommandDoneL, Cfile:1007814: die Engine prueft, ob der
---- CUnitCommandOpt noch existiert — `pushboolean(opt == 0)`).
+--- IsCommandDone(command) -> true if the command has been processed
+--- (cfunc_IsCommandDoneL, Cfile:1007814: the engine checks whether the
+--- CUnitCommandOpt still exists — `pushboolean(opt == 0)`).
 ---
---- Die FABRIK haengt daran: defaultunits.lua:643 (RolloffBody) wartet in einer
---- Schleife, bis die frisch gebaute Einheit vom Hof gefahren ist —
+--- The FACTORY depends on it: defaultunits.lua:643 (RolloffBody) is waiting in one
+--- Loop until the freshly built unit has left the yard —
 --- `while ... and self.MoveCommand and not IsCommandDone(self.MoveCommand) do`.
---- Fehlt das Global, stirbt der Thread, die Fabrik bleibt BUSY und baut nie
---- wieder etwas. Genau so sah es im Browser aus.
+--- If the global is missing, the thread dies, the factory remains BUSY and never builds
+--- something again. This is exactly what it looked like in the browser.
 ---
---- Fertig ist der Befehl, wenn keine Einheit mehr ein Ziel hat.
+--- The order is finished when no unit has a target left.
 function IsCommandDone(cmd)
   if not cmd or not cmd.units then return true end
   for _, u in ipairs(cmd.units) do
@@ -768,12 +768,12 @@ end
 
 -- === Befehls-Dispatch (IAiCommandDispatchImpl::DispatchTask @0x608EF0) ===
 --
--- Ein NEUER Befehl ohne Shift ERSETZT die Arbeit einer Unit: der laufende
--- Bau bricht mit der vollen Kette ab (__abortBuildTasks, Cfile:814989),
--- die Attack-Order faellt weg, das Bewegungsziel wird neu gesetzt. Genau
--- daran hing der Nutzer-Befund "bauende Einheiten lassen sich nicht
--- wegbewegen": ohne Task-Abbruch setzte approach() (build.lua) das
--- Fahrziel jeden Beat aufs Bau-Ziel zurueck.
+-- A NEW command without shift REPLACES the work of a unit: the current one
+-- Construction aborts with the full chain (__abortBuildTasks, Cfile:814989),
+-- the attack order is no longer applicable and the movement target is reset. Exactly
+-- This was the reason for the user finding that “units cannot be built
+-- move away": approach() (build.lua) set this without terminating the task
+-- The aim is to return to the building target every beat.
 __attackOrders = {}
 
 -- === Command queue (CUnitCommandQueue) ===
@@ -883,8 +883,8 @@ function __ordersTick()
   end
 end
 
---- Stop (Dispatch 0x01): Bau-Tasks (mit Abbruch-Hooks), Attack-Order,
---- Bewegungsziel, Dreh-Ziel UND die Befehls-Queue — alles weg.
+--- Stop (Dispatch 0x01): Build tasks (with abort hooks), attack order,
+--- Move target, turn target AND the command queue — all gone.
 function __dispatchStop(unitId)
   local u = __units[unitId]
   if not u then return end
@@ -902,9 +902,9 @@ function __dispatchMove(unitId, x, z, clear)
   __issueOrder(unitId, { type = 'Move', x = x, z = z }, clear)
 end
 
---- Attack (Dispatch 0x0A, CAttackTargetTask): die Order merken — der
---- Task-Tick faehrt in Waffenreichweite und die Zielerfassung bevorzugt
---- das Befehlsziel (weapons.lua).
+--- Attack (Dispatch 0x0A, CAttackTargetTask): remember the order — the
+--- Task tick moves into weapon range and target acquisition is preferred
+--- the command target (weapons.lua).
 function __dispatchAttack(unitId, targetId, clear)
   __issueOrder(unitId, { type = 'Attack', target = targetId }, clear)
 end
@@ -913,7 +913,7 @@ end
 --- construction (ctor Cfile:817427, UpdateWorkProgress 0x5F5BF0) — on an
 --- UNFINISHED target it resumes construction; on a FINISHED damaged target
 --- Materialize only raises health (AdjustHealth, Cfile:953468) at the same
---- rate and FULL build cost per second (unit.lua:712-726). A full-HP
+--- rate and FULL build cost per second (unit.lua:712-726). A full HP
 --- finished target ends the task immediately (TaskTick -1, Cfile:817856).
 function __dispatchRepair(unitId, targetId, clear)
   __issueOrder(unitId, { type = 'Repair', target = targetId }, clear)
@@ -938,9 +938,9 @@ local function maxWeaponRange(u)
   return best
 end
 
---- Pro Beat (Anfang von __weaponTick): jede Attack-Order faehrt ihre Unit
---- in Waffenreichweite und stoppt dort; totes/fehlendes Ziel beendet den
---- Task (CAttackTargetTask ueber die AiAttacker-Events).
+--- Per Beat (beginning of __weaponTick): each attack order moves its unit
+--- within weapon range and stops there; dead/missing target ends the
+--- Task (CAttackTargetTask via the AiAttacker events).
 function __attackTick()
   for unitId, targetId in pairs(__attackOrders) do
     local u = __units[unitId]
@@ -968,23 +968,23 @@ function __attackTick()
 end
 
 -- FlattenMapRect(x, z, w, h, y): Gebaeude planieren ihr Baufeld
--- (defaultunits.lua:72, StructureUnit:FlattenSkirt). Die Engine deformiert die
--- Hoehenkarte; solange keine Karte geladen ist, werden die Rechtecke
--- gesammelt (der Renderer/die Karte wenden sie an).
+-- (defaultunits.lua:72, StructureUnit:FlattenSkirt). The engine deforms them
+-- elevation map; as long as no map is loaded, the rectangles
+-- collected (the renderer/map applies them).
 __flattenRects = {}
 function FlattenMapRect(x, z, w, h, y)
   __flattenRects[#__flattenRects + 1] = { x = x, z = z, w = w, h = h, y = y }
   if __terrainFlatten then __terrainFlatten(x, z, w, h, y) end
 end
 
--- === SimCallback — der Empfaenger (Moho::Sim::LuaSimCallback) ===
+-- === SimCallback — the recipient (Moho::Sim::LuaSimCallback) ===
 --
--- Die UI schickt {Func, Args, EntityIds} durch den Befehlsstrom (CMarshaller::
--- LuaSimCallback, Cfile:999094-999136); die Sim-Seite (Cfile:1076180-1076287)
--- baut aus den Ids eine Tabelle von Sim-Unit-Objekten — NUR existierende,
--- leeres Set -> nil (Cfile:1076219-1076251) — und ruft
+-- The UI sends {Func, Args, EntityIds} through the command stream (CMarshaller::
+-- LuaSimCallback, Cfile:999094-999136); the Sim page (Cfile:1076180-1076287)
+-- builds a table of Sim-Unit objects from the IDs - ONLY existing ones
+-- empty set -> nil (Cfile:1076219-1076251) — and calls
 -- import('/lua/simcallbacks.lua').DoCallback(name, args, units).
--- Fehler im Callback werden geloggt, nicht geworfen (gpg::Warnf-Verhalten).
+-- Errors in the callback are logged, not thrown (gpg::Warnf behavior).
 function __simCallback(func, args, unitIds)
   local units = nil
   if unitIds then

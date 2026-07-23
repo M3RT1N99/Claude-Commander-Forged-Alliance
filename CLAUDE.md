@@ -1,120 +1,120 @@
 # Claude Commander: Forged Alliance
 
-Browser-Reimplementierung von Supreme Commander: Forged Alliance — **1:1**.
-Assets kommen aus der Installation des Nutzers (bring your own assets).
+Browser reimplementation of Supreme Commander: Forged Alliance — **1:1**.
+Assets come from the user's installation (bring your own assets).
 
-**Das Ziel-Erlebnis:** Spielverzeichnis verbinden → das **echte FA-Hauptmenü**
-(`lua/ui/menus/main.lua`) → Skirmish über die echte Lobby → Session mit der
-echten Spiel-UI. **Keine Web-Menüs im Spiel, keine nachgebauten Panels.** Der
-Web-Rahmen (Start/Sandbox/Unit-Viewer/Karten-Viewer) ist nur Werkzeug und
-Launcher, bis das Original-Front-End läuft.
+**The Destination Experience:** Connect game directory → the **real FA main menu**
+(`lua/ui/menus/main.lua`) → Skirmish over the real lobby → Session with the
+real game UI. **No web menus in the game, no recreated panels.** The
+Web Framework (Start/Sandbox/Unit Viewer/Map Viewer) is just tool and
+Launcher until the original front end is running.
 
-## Das Kernprinzip — hier wird nicht verhandelt
+## The core principle — there is no negotiation here
 
-**Die Original-Lua IST das Spiel. Die Engine führt sie aus.**
+**The original Lua IS the game. The engine executes them.**
 
-Die Engine (TypeScript/WebGL) ist zuständig für: **Berechnungen** (Physik,
-Ökonomie-Mathematik, Pathfinding, Kategorien), **Rendering** und **Lua laden
-und ausführen** (`lua/sim/**`, `lua/ui/**`, Blueprints). Sie ist **nicht**
-zuständig für Spiellogik: `Unit.lua`, `defaultunits.lua`, `aibrain.lua`,
-`construction.lua` werden **ausgeführt, nicht nachgebaut**.
+The engine (TypeScript/WebGL) is responsible for: **Calculations** (physics,
+Economics-Mathematics, Pathfinding, Categories), **Rendering** and **Load Lua
+and execute** (`lua/sim/**`, `lua/ui/**`, Blueprints). She is **not**
+responsible for game logic: `Unit.lua`, `defaultunits.lua`, `aibrain.lua`,
+`construction.lua` are **executed, not recreated**.
 
 ### Verboten
 
-- ❌ **Spiellogik in TS nachbauen.** Wenn die Antwort in `lua/sim/` oder
-  `lua/ui/` steht, wird diese Datei ausgeführt — kein TS-, kein HTML-Nachbau.
-- ❌ **Zahlen erfinden.** Jeder Wert kommt aus einem Blueprint, der
-  Original-Lua oder der Decomp. Kein „das fühlt sich richtig an".
-- ❌ **Stubs im Produktivpfad.** Fehlende Engine-Teile müssen **knallen**,
-  nicht still Unsinn liefern. (Der alte Stub-Trap hat monatelang jeden grünen
-  Test wertlos gemacht. Er kommt nicht zurück.)
-- ❌ **Halbe Engines.** Genau ein Sim-Boot: `installEngine()`
-  ([src/lua/engine.ts](src/lua/engine.ts)); genau ein UI-Boot:
+- ❌ **Recreate game logic in TS.** If the answer is in `lua/sim/` or
+  `lua/ui/` is written, this file is executed - no TS, no HTML replica.
+- ❌ **Invent numbers.** Each value comes from a blueprint that
+  Original Lua or the Decomp. No "that feels right."
+- ❌ **Stubs in the production path.** Missing engine parts have to **pop**,
+  don't silently deliver nonsense. (The old stub trap has every green one for months
+  Test rendered worthless. He's not coming back.)
+- ❌ **Half engines.** Exactly one sim boat: `installEngine()`
+  ([src/lua/engine.ts](src/lua/engine.ts)); exactly one UI boot:
   `installUiEngine()` + `setupGameUi()` ([src/lua/uiEngine.ts](src/lua/uiEngine.ts),
-  Reihenfolge = `gamemain.lua:132-154`). Wer sich die Engine selbst
-  zusammensetzt, lässt Teile weg und merkt es nicht.
-- ❌ **Lua/C++ in TS-Template-Literals.** Lua gehört in `.lua`-Dateien unter
-  [src/engine-lua/](src/engine-lua/); die TS-Dateien daneben sind nur
+  Order = `gamemain.lua:132-154`). Anyone who owns the engine
+  puts things together, leaves parts out and doesn't notice it.
+- ❌ **Lua/C++ in TS template literals.** Lua belongs in `.lua` files under
+  [src/engine-lua/](src/engine-lua/); the TS files next to it are just
   Loader + Bridge.
 
-Zwei **Auto-Vivifier** stehen bewusst im Produktivpfad (dort knallt nichts):
-`moho.<x>` erzeugt leere Klassen ([moho.lua](src/engine-lua/moho.lua)),
+Two **Auto-Vivifiers** are deliberately in the productive path (nothing pops there):
+`moho.<x>` creates empty classes ([moho.lua](src/engine-lua/moho.lua)),
 `__getBrain(army)` legt still Brains an ([brain.lua](src/engine-lua/brain.lua)).
 
-## Quellen der Wahrheit — in dieser Reihenfolge
+## Sources of Truth — in that order
 
 1. **IDA-Decompilation:** `Cfile/ForgedAlliance.exe.c` (~2 Mio. Zeilen, volle
    `Moho::`-Symbole, gitignored). Zusätzlich MCP-Zugriff (`mcp__ida__*`).
-   Bei jeder Frage „wie macht die Engine das?" → hier suchen.
-2. **Original-Lua + Blueprints:** `npx tsx scripts/peek-lua.ts <pfad> <von> <bis>`
-   oder `--grep <regex>` (sucht lua.scd, mohodata.scd, units.scd inkl. `.bp`).
-3. **faf-re / Community / Web** — nur wenn 1 und 2 nichts hergeben.
+   For every question “how does the engine do this?” → search here.
+2. **Original Lua + Blueprints:** `npx tsx scripts/peek-lua.ts <pfad> <von> <bis>`
+   or `--grep <regex>` (searches lua.scd, mohodata.scd, units.scd incl. `.bp`).
+3. **faf-re / Community / Web** — only if 1 and 2 don't give anything away.
 
-Nichts halluzinieren. Erst recherchieren, dann implementieren, dann gegen
-echte Daten verifizieren.
+Don't hallucinate anything. First research, then implement, then counteract
+verify real data.
 
-## Architektur in einem Absatz
+## Architecture in one paragraph
 
-`src/engine-lua/*.lua` ist das, was die C++-Engine in die Lua-States legt
-(moho-Klassen, Globals, Scheduler, maui-Substrat, ui-globals); TS daneben nur
+`src/engine-lua/*.lua` is what the C++ engine puts into the Lua states
+(moho-classes, globals, scheduler, maui-substrate, ui-globals); TS next to it only
 Loader/Bridges. Sim läuft im Worker (`src/sim/luaSimWorker.ts`, 10-Hz-Beat),
 UI-VM im Main-Thread (`src/ui/gameUi.ts` → maui-Baum → DOM via
-`src/ui/mauiRenderer.ts`). Klick in die Welt: `src/ui/worldCommands.ts` fragt
-`commandmode.lua` — die Engine entscheidet nichts.
+`src/ui/mauiRenderer.ts`). Click into the world: `src/ui/worldCommands.ts` asks
+`commandmode.lua` — the engine doesn't decide anything.
 
-### Zwei Lua-VMs — nicht eine
+### Two Lua VMs — not one
 
-Jede Engine-Bindung ist über `mPrevDef` in genau einen State registriert
+Each engine binding is registered in exactly one state via `mPrevDef`
 ([docs/research/engine-api.md](docs/research/engine-api.md), generiert):
-`scr_CoreInits` = beide VMs (70), `scr_UserInits` = nur UI (453),
-`sim_SimInits` = nur Sim (626). Darum kennt die Sim kein `_c_CreateCursor`
-und die UI kein `CreateUnit`. Nie beides in eine VM booten.
+`scr_CoreInits` = both VMs (70), `scr_UserInits` = UI only (453),
+`sim_SimInits` = Sim only (626). That's why the sim doesn't know `_c_CreateCursor`
+and the UI no `CreateUnit`. Never boot both into a VM.
 
-### Boot-Reihenfolge ist nicht kosmetisch
+### Boot order is not cosmetic
 
-`installEngine()`: Engine-Primitive zuerst (SimThreads → Globals → Economy →
-Motion → Build), dann **`/lua/system/class.lua` NEU laden**, dann moho →
+`installEngine()`: Engine primitives first (SimThreads → Globals → Economy →
+Motion → Build), then **RELOAD `/lua/system/class.lua`**, then moho →
 utils → Blueprints → UnitFactory → SimSync → terrainTypes → `setupSession()`.
 `class.lua` lädt **zweimal**, weil `class.lua:78`
-`local ForkThread = ForkThread` snapshottet — beim Bootstrap ist das noch
-`nil`, und ohne Reload stirbt `class.lua:377` bei jedem State-Wechsel weit
-weg vom Verursacher. `globals.lua` enthält bewusst kein `Class(`.
+`local ForkThread = ForkThread` snapshotted — this is still the case with the bootstrap
+`nil`, and without reload `class.lua:377` dies with every state change
+away from the polluter. `globals.lua` deliberately does not contain `Class(`.
 
-### FA-Lua ist ein Dialekt (zwei sogar)
+### FA-Lua is one dialect (two in fact)
 
-- **LuaPlus:** `nil`/Zahlen/Strings haben Metatables; `nil.foo` liefert `nil`
-  statt zu knallen — FAs `config.lua:14-16` lässt das Lesen bewusst zu, und
-  die Original-UI **verlässt sich darauf** (uiutil.lua:343 beim ersten
+- **LuaPlus:** `nil`/Numbers/Strings have metatables; `nil.foo` delivers `nil`
+  instead of banging - FAs `config.lua:14-16` allows reading consciously, and
+  the original UI **relies on** (uiutil.lua:343 on the first
   `SetupUI()`). Hergestellt via `debug.setmetatable` in
   [boot.lua](src/engine-lua/boot.lua).
-- **`config.lua` bringt mit:** den **strengen `_G`** (Zugriff auf
-  nicht existierende Globals wirft; `x = nil` legt KEINEN Schlüssel an —
-  Engine-Globals mit `false` initialisieren), das **Thread-Objekt**
-  (Coroutine-Metatable mit `Destroy = KillThread`) und `iscallable`.
-- **Zwei Dialekte im Repo:** VFS-Dateien (Original-Lua, `.bp`) laufen durch
+- **`config.lua` brings:** the **strict `_G`** (access to
+  throws non-existent globals; `x = nil` does NOT create a key —
+  Initialize engine globals with `false`), the **Thread object**
+  (Coroutine metatable with `Destroy = KillThread`) and `iscallable`.
+- **Two dialects in the repo:** VFS files (original Lua, `.bp`) pass through
   `transpileFaLua` (`#` = Kommentar, `!=`→`~=`, `continue`, `for k,v in tbl do`);
-  Dateien aus `src/engine-lua/` sind **Standard-Lua 5.4** (`#t` =
-  Längenoperator!) und gehen roh in `host.eval()`. Eine Engine-Lua-Datei ins
-  VFS verschieben macht jedes `#t` still zum Kommentar.
+  Files from `src/engine-lua/` are **Standard Lua 5.4** (`#t` =
+  length operator!) and go raw into `host.eval()`. An Engine Lua file ins
+  Moving VFS makes every `#t` silently a comment.
 
-## Querschneidende Fakten (gelten immer)
+## Cross-cutting facts (always apply)
 
-- **Blueprint-Struct-Defaults:** der Engine-Ctor (`Moho::RUnitBlueprint`
-  @0x51E480) belegt **jedes Feld** vor — die Lua greift ungeprüft auf
-  `bp.Defense.Shield.ShieldSize` zu, auch ohne Shield-Sektion in der `.bp`.
-- **`class.lua` kopiert Basisklassen-Felder** (kein `__index`-Fallback): ein
-  Methodenname darf in genau **einer** moho-Namensliste stehen, sonst
-  überschattet ein No-Op die echte Implementierung.
-- **Produktion ≠ Verbrauch** (getrennte Schalter) und **Baustellen sind für
-  die Ökonomie unsichtbar**.
-- **Die Sim hat das Skelett der Unit** (Waffen validieren Knochen), und die
-  Engine ruft **`OnCreate` auf jeder Waffe** — Reihenfolge ist Semantik.
-- **wasmoon:** eine JS-Funktion darf nie `null` nach Lua geben
-  (`LuaHost.setGlobal` wandelt `null → undefined`), sonst stirbt die VM tief
+- **Blueprint-Struct-Defaults:** the engine ctor (`Moho::RUnitBlueprint`
+  @0x51E480) occupies **every field** - the Lua picks up without checking
+  `bp.Defense.Shield.ShieldSize` too, even without a shield section in the `.bp`.
+- **`class.lua` copies base class fields** (no `__index` fallback): on
+  Method name may appear in exactly **one** moho name list, otherwise
+  a no-op overshadows the real implementation.
+- **Production ≠ consumption** (separate switches) and **Construction sites are for
+  the economy invisible**.
+- **The sim has the skeleton of the unit** (weapons validate bones), and the
+  Engine calls **`OnCreate` on each weapon** — order is semantics.
+- **wasmoon:** a JS function must never give `null` to Lua
+  (`LuaHost.setGlobal` converts `null → undefined`), otherwise the VM dies deeply
   in fremder Lua.
 
-Alle weiteren belegten Fakten (Ökonomie, Snap, Fire-State, Schriften,
-usersync, MaxBrake …): **vor Arbeit am Thema
+All other proven facts (economy, snap, fire state, writings,
+usersync, MaxBrake ...): **before working on the topic
 [docs/research/verified-facts.md](docs/research/verified-facts.md) lesen.**
 
 ## Werkzeuge & Arbeitsweise
@@ -138,7 +138,7 @@ npx tsx scripts/peek-lua.ts --grep <regex>  # Original-Lua/Blueprints suchen
   `--virtual-time-budget`).
 - **Debuggen:** Fehler in Lua-Threads werden nur geloggt — zuerst nach
   `ForkThread-Fehler:` in den WARN-Zeilen suchen.
-- Commits auf ENGLISCH, Was + Warum, ein Meilenstein pro Commit.
+- Commits in ENGLISH: what and why, one milestone per commit.
 
 ## Arbeitsstil je Modell
 
