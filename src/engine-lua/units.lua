@@ -212,6 +212,10 @@ end
 local function activeOrder(id, u)
   local target = __attackOrders and __attackOrders[id]
   if target then
+    if type(target) == 'table' then
+      -- Ground attack: the position IS the target (AITARGET_Ground).
+      return 'Attack', target[1], target[3]
+    end
     local t = __units[target]
     if t and t.__pos then return 'Attack', t.__pos[1], t.__pos[3] end
   end
@@ -241,6 +245,8 @@ local function orderList(id, u)
     local x, z
     if cmd.type == 'Move' then
       x, z = cmd.x, cmd.z
+    elseif cmd.gx then
+      x, z = cmd.gx, cmd.gz -- queued ground attack
     else
       local t = __units[cmd.target]
       if t and t.__pos then x, z = t.__pos[1], t.__pos[3] end

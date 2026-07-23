@@ -805,6 +805,14 @@ local function __startOrder(unitId, cmd)
     u:GetNavigator():SetGoal({ cmd.x, 0, cmd.z })
     return true
   elseif cmd.type == 'Attack' then
+    if cmd.gx then
+      -- Ground attack: the SAME task with an AITARGET_Ground target.
+      -- CAiTarget::HasTarget returns true for Ground (Cfile:800284) and
+      -- NoTarget stays false without an entity (Cfile:800519) — the order
+      -- never completes on its own (task sleeps in TASKSTATE_Complete).
+      __attackOrders[unitId] = { cmd.gx, GetSurfaceHeight(cmd.gx, cmd.gz), cmd.gz }
+      return true
+    end
     local t = __units[cmd.target]
     if not t or t.__destroyed then return false end
     __attackOrders[unitId] = cmd.target
@@ -909,6 +917,18 @@ function __dispatchAttack(unitId, targetId, clear)
   __issueOrder(unitId, { type = 'Attack', target = targetId }, clear)
 end
 
+--- Ground attack (dispatch 0x0A with a position target): the CAiTarget
+--- carries mPosition instead of an entity (ctor copies both,
+--- Cfile:812553-812563). The unit closes to weapon range (SetWeaponGoal
+--- squares maxRadius around the position, Cfile:812691-812718), then the
+--- attacker hands the ground target to the weapons (UpdateAttacker ->
+--- SetDesiredTarget) and the task SLEEPS — a position never dies, so the
+--- order runs until replaced (queue ring rotation with follow-up commands
+--- is a named gap).
+function __dispatchAttackGround(unitId, x, z, clear)
+  __issueOrder(unitId, { type = 'Attack', gx = x, gz = z }, clear)
+end
+
 --- Repair (dispatch 0x14, CUnitRepairTask): the SAME CBuildTaskHelper as
 --- construction (ctor Cfile:817427, UpdateWorkProgress 0x5F5BF0) — on an
 --- UNFINISHED target it resumes construction; on a FINISHED damaged target
@@ -944,13 +964,18 @@ end
 function __attackTick()
   for unitId, targetId in pairs(__attackOrders) do
     local u = __units[unitId]
-    local t = __units[targetId]
+    -- A table target is AITARGET_Ground (a position, never an entity):
+    -- HasTarget is true for it (Cfile:800284), so the order has no
+    -- "target died" exit — only Stop or a replacing command ends it.
+    local ground = type(targetId) == 'table' and targetId or nil
+    local t = not ground and __units[targetId] or nil
     if not u or u.__dead or u.__destroyQueued
-      or not t or t.__dead or t.__destroyQueued then
+      or (not ground and (not t or t.__dead or t.__destroyQueued)) then
       __attackOrders[unitId] = nil
     else
       local range = maxWeaponRange(u)
-      local p, q = u.__pos, t.__pos
+      local p = u.__pos
+      local q = ground or t.__pos
       local dx, dz = q[1] - p[1], q[3] - p[3]
       local dist = math.sqrt(dx * dx + dz * dz)
       if range > 0 and dist > range then

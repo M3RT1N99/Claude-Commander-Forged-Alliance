@@ -403,6 +403,10 @@ export class LuaSimClient {
   attack(id: number, targetId: number, queue = false): void {
     this.worker.postMessage({ type: 'attack', id, targetId, queue })
   }
+  /** Ground attack: same task with an AITARGET_Ground position target. */
+  attackGround(id: number, x: number, z: number, queue = false): void {
+    this.worker.postMessage({ type: 'attackGround', id, x, z, queue })
+  }
   /** Repair (dispatch 0x14): resume building the unfinished `targetId`. */
   repair(id: number, targetId: number, queue = false): void {
     this.worker.postMessage({ type: 'repair', id, targetId, queue })

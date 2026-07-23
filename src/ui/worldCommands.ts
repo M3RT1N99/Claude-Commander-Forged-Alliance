@@ -37,6 +37,8 @@ export interface WorldCommandSim {
   move(id: number, x: number, z: number, queue?: boolean): void
   /** Attack (CAttackTargetTask): Unit `id` greift die Ziel-Unit an. */
   attack(id: number, targetId: number, queue?: boolean): void
+  /** Ground attack: same task with an AITARGET_Ground position target. */
+  attackGround(id: number, x: number, z: number, queue?: boolean): void
   /** Repair (dispatch 0x14): resume building the unfinished target. */
   repair(id: number, targetId: number, queue?: boolean): void
   /**
@@ -129,13 +131,15 @@ export async function worldClick(
 
   // Der Attack-Button (orders.lua:151 AttackOrderBehavior) setzt den
   // Command-Mode 'order' mit RULEUCC_Attack — der nächste Klick greift an.
-  // Attack auf BODEN (ohne Ziel-Unit) ist ein eigener Task (CFireAtTask)
-  // und noch nicht gebaut — das sagt der Rückgabetext, statt still zu enden.
+  // Ohne Unit unterm Cursor ist es ein BODEN-Angriff: derselbe Dispatch
+  // (0x0A, CUnitAttackTargetTask) mit AITARGET_Ground-Position statt Entity
+  // (Cfile:812553-812563); die Order endet nie von selbst (HasTarget bleibt
+  // true für Ground, Cfile:800284).
   if (cm.mode === 'order' && cm.name === 'RULEUCC_Attack') {
-    if (opts.enemyTargetId === undefined) return 'Attack auf Boden: noch kein Weg (CFireAtTask fehlt)'
     let n = 0
     for (const u of selection) {
-      sim.attack(u.id, opts.enemyTargetId, opts.queue)
+      if (opts.enemyTargetId === undefined) sim.attackGround(u.id, hit.x, hit.z, opts.queue)
+      else sim.attack(u.id, opts.enemyTargetId, opts.queue)
       n++
     }
     onCommandIssued(host, {
@@ -143,7 +147,9 @@ export async function worldClick(
       Position: { x: hit.x, y: elevation(hit.x, hit.z), z: hit.z },
       Clear: !opts.queue,
     })
-    return `Attack (${n}) → Unit ${opts.enemyTargetId}`
+    return opts.enemyTargetId === undefined
+      ? `Attack (${n}) → Boden ${hit.x.toFixed(1)}, ${hit.z.toFixed(1)}`
+      : `Attack (${n}) → Unit ${opts.enemyTargetId}`
   }
 
   if (cm.mode === 'build' || cm.mode === 'buildanchored') {

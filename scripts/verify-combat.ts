@@ -510,6 +510,59 @@ console.log('\n== Befehls-Dispatch: Stop, Move-bricht-Bau, Attack ==')
     `Attack über die Distanz: in Feuerreichweite (MaxRadius) fahren und töten` +
       (gestorben ? '' : ` — Lage: Jäger x=${lage.jx} HP=${lage.jhp}, Beute HP=${lage.bhp}, fährt=${lage.goal}`),
   )
+
+  // GROUND ATTACK (dispatch 0x0A with an AITARGET_Ground target,
+  // Cfile:812553-812563): the tank closes to weapon range, the weapon takes
+  // the POSITION as its target and fires; the order never self-completes
+  // (HasTarget stays true for Ground, Cfile:800284).
+  const schuetze = spawnLuaUnit(host, 'uel0201', { x: 400, y: 20, z: 340 }, 1)
+  host.eval(`__dispatchAttackGround(${schuetze}, 440, 340)`)
+  let bodenZiel = false
+  let gefeuert = false
+  for (let t = 0; t < 300 && !(bodenZiel && gefeuert); t++) {
+    beat(engine)
+    if (!bodenZiel) {
+      bodenZiel =
+        host.eval(
+          `local u = __units[${schuetze}] if not u then return false end
+           for _, w in ipairs(u.__weapons or {}) do
+             if w.__targetGround and w.__targetGround[1] == 440 then return true end
+           end
+           return false`,
+        ) === true
+    }
+    if (bodenZiel && !gefeuert) {
+      gefeuert =
+        host.eval(
+          `local u = __units[${schuetze}] if not u then return false end
+           for _, w in ipairs(u.__weapons or {}) do
+             if (w.__fireClock or 0) > 0 then return true end
+           end
+           return false`,
+        ) === true
+    }
+  }
+  check(bodenZiel, 'Ground attack: the weapon takes the position target (AITARGET_Ground)')
+  check(gefeuert, 'Ground attack: the weapon fires at the ground (fire clock running)')
+  check(
+    host.eval(`return __attackOrders[${schuetze}] ~= nil`) === true,
+    'Ground attack never self-completes (HasTarget true for Ground, Cfile:800284)',
+  )
+  {
+    const rows = host.pull<{ id: number; order?: { t: string; x: number; z: number } }[]>(
+      '__readAllUnitsJson()',
+    )
+    const s = rows.find((r) => r.id === schuetze)
+    check(
+      s?.order?.t === 'Attack' && s.order.x === 440,
+      `Snapshot carries the ground-attack order for the command graph (${JSON.stringify(s?.order)})`,
+    )
+  }
+  host.eval(`__dispatchStop(${schuetze})`)
+  check(
+    host.eval(`return __attackOrders[${schuetze}] == nil`) === true,
+    'Stop ends the ground attack (queue + order wiped)',
+  )
 }
 
 console.log('\n== Was die Sim dabei gemeldet hat ==')
