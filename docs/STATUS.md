@@ -44,13 +44,14 @@ Der Weg zur echten UI: [PLAN-UI.md](PLAN-UI.md); der 1:1-Gesamtfahrplan:
 - **Text input works** (CMauiEdit vtable-override port: typing, selection,
   MaxChars, OnTextChanged/OnEnterPressed/OnEscPressed/OnCharPressed,
   caret rendering); StartCommandMode console command and UI IsAlly exist.
-  Open follow-ups: the chat WINDOW never becomes VISIBLE in the DOM even
-  while ToggleChat has it shown (typing/sending works; suspects:
-  bg:SetAlpha(win_alpha) unimplemented in the renderer or the chat panel
-  textures — the 15 s auto-fade itself is original behavior,
-  chat.lua:1004-1009); clipboard is a VM-internal buffer (browser
-  clipboard is async — platform deviation); drag-selection and the exact
-  caret-blink math (CMauiEdit::DoRender undecoded) are named gaps.
+  The chat WINDOW renders completely (panel, title buttons, scrollbar,
+  localized "To all:" prompt, blinking caret) — the earlier
+  "invisible window" reading was CDP screenshot latency racing the
+  auto-fade toggle. Open: verify the fade duration matches the 15 s of
+  chat.lua:1004-1009 in real play; clipboard is a VM-internal buffer
+  (browser clipboard is async — platform deviation); drag-selection and
+  the exact caret-blink math (CMauiEdit::DoRender undecoded) are named
+  gaps.
 - **Command dispatch, remaining gaps:** Stop / Move-cancels-build / Attack
   (units AND ground, AITARGET_Ground) / Repair (incl. HP repair) /
   shift-queueing (CUnitCommandQueue) / Guard-Assist (queue sharing, build
