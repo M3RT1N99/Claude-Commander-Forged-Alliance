@@ -1,8 +1,8 @@
 -- =====================================================================
--- Die Prefs-Serialisierung der Engine.
+-- The engine's preferences serialization.
 --
--- Das Spiel schreibt seine Einstellungen als LUA-QUELLTEXT. Nachgesehen in der
--- Installation des Nutzers (%LOCALAPPDATA%/Gas Powered Games/Supreme Commander
+-- The game writes its settings as LUA SOURCE TEXT. Verified in the user's
+-- installation (%LOCALAPPDATA%/Gas Powered Games/Supreme Commander
 -- Forged Alliance/Game.prefs):
 --
 --     PreGameData = {
@@ -10,16 +10,15 @@
 --         IconReplacements = {
 --             { Identifier = 'redux strategic icons 1200', ... },
 --
--- Also wird hier genauso serialisiert: eine Lua-Tabelle als Text. Wo die Engine
--- die Datei schreibt, legt der Browser den Text in den localStorage — der Weg
--- ist derselbe, nur die Ablage ist anders.
+-- Therefore this serializes the same way: a Lua table as text. Where the engine
+-- writes a file, the browser puts the text in localStorage — the path is the
+-- same; only the storage differs.
 --
--- Ohne das war `SavePreferences()` ein Nullaufruf (`__uiSavePrefs` wurde nie
--- gesetzt): jede Einstellung, jedes Profil und jede Option war nach dem
--- Neuladen der Seite weg.
+-- Without this, `SavePreferences()` was a no-op (`__uiSavePrefs` was never
+-- set): every setting, profile, and option vanished after reloading the page.
 --
--- Diese Datei ist STANDARD-LUA 5.4 (sie geht roh in host.eval, nicht durch den
--- FA-Transpiler) — `#t` ist hier der Laengenoperator, kein Kommentar.
+-- This file is STANDARD LUA 5.4 (it goes raw into host.eval, not through the
+-- FA transpiler) — `#t` is the length operator here, not a comment.
 -- =====================================================================
 
 local function isIdent(k)
@@ -35,18 +34,17 @@ local function serialize(value, indent)
     return string.format('%q', value)
   end
   if t ~= 'table' then
-    -- Funktionen und Userdata haben in den Prefs nichts verloren. Sie still zu
-    -- verschlucken waere ein Stub — also fliegt der Eintrag mit Ansage raus.
-    WARN('Prefs: Wert vom Typ ' .. t .. ' laesst sich nicht speichern')
+    -- Functions and userdata do not belong in preferences. Silently swallowing
+    -- them would be a stub, so reject the entry with a diagnostic.
+    WARN('Prefs: value of type ' .. t .. ' cannot be saved')
     return 'nil'
   end
 
   local inner = indent .. '    '
   local parts = {}
 
-  -- Erst der Array-Teil (1..n), dann die benannten Schluessel — sortiert, damit
-  -- derselbe Zustand denselben Text ergibt (sonst sieht jeder Speichervorgang
-  -- nach einer Aenderung aus).
+  -- First the array part (1..n), then named keys — sorted so the same state
+  -- produces the same text (otherwise every save looks like a change).
   local n = 0
   for i, item in ipairs(value) do
     n = i
@@ -71,22 +69,22 @@ local function serialize(value, indent)
   return '{\n' .. table.concat(parts, ',\n') .. '\n' .. indent .. '}'
 end
 
---- Der komplette Prefs-Baum als Lua-Text (auswertbar mit __prefsLoad).
+--- The complete preferences tree as Lua text (evaluatable with __prefsLoad).
 function __prefsSerialize()
   return 'return ' .. serialize(__prefs, '')
 end
 
---- Den gespeicherten Text zurueck in __prefs holen.
+--- Load the saved text back into __prefs.
 function __prefsLoad(text)
   if not text or text == '' then return false end
   local chunk = load(text, 'prefs', 't', {})
   if not chunk then
-    WARN('Prefs: gespeicherter Text ist kein gueltiges Lua — wird verworfen')
+    WARN('Prefs: saved text is not valid Lua — discarding it')
     return false
   end
   local ok, value = pcall(chunk)
   if not ok or type(value) ~= 'table' then
-    WARN('Prefs: gespeicherter Text ergibt keine Tabelle — wird verworfen')
+    WARN('Prefs: saved text does not evaluate to a table — discarding it')
     return false
   end
   __prefs = value
