@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="de">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -24,46 +24,46 @@
         </button>
         <button class="menu-item" data-mode="sandbox" disabled>
           <span class="menu-label">Sandbox</span>
-          <span class="menu-sub">Techdemo spielen</span>
+          <span class="menu-sub">Play the tech demo</span>
         </button>
         <button class="menu-item" data-mode="units" disabled>
           <span class="menu-label">Units <span class="badge" id="badge-units" hidden></span></span>
           <span class="menu-sub">Models &amp; Animations</span>
         </button>
         <button class="menu-item" data-mode="maps" disabled>
-          <span class="menu-label">Cards <span class="badge" id="badge-maps" hidden></span></span>
+          <span class="menu-label">Maps <span class="badge" id="badge-maps" hidden></span></span>
           <span class="menu-sub">Terrain &amp; Preview</span>
         </button>
-        <button id="btn-collapse" title="Collapse/unfold sidebar">⟨ Seitenleiste</button>
+        <button id="btn-collapse" title="Collapse/expand sidebar">⟨ Sidebar</button>
       </nav>
 
       <aside id="sidebar">
         <section id="start-panel">
-          <h2>Spieldaten</h2>
+          <h2>Game data</h2>
           <p class="hint">
             Choose your installation directory
             <em>Supreme Commander: Forged Alliance</em> (Steam/GOG). The files
             remain local — nothing is uploaded.
           </p>
           <button id="btn-pick-dir" class="primary">Select game directory…</button>
-          <button id="btn-resume" hidden>Erneut verbinden</button>
+          <button id="btn-resume" hidden>Reconnect</button>
           <input id="input-dir" type="file" webkitdirectory hidden />
           <button id="btn-fallback" hidden>Select folder (fallback)…</button>
           <p class="hint">
-            Then on the left are Sandbox (the tech demo), the unit viewer and
-            the map viewer is ready.
+            The Sandbox (tech demo), Unit Viewer, and Map Viewer will then be
+            available in the sidebar.
           </p>
         </section>
 
         <section id="sandbox-panel" hidden>
           <h2>Sandbox</h2>
           <p class="hint">
-            Starts the tech demo on the selected map - in <strong>Vollbild</strong>,
-            like the game: the ACU is at the starting point of army 1, everything else
-            runs via the original UI (construction menu of the ACU, factory, production).<br />
-            <strong>Linksklick</strong> = Auswahl / Gebäude setzen ·
-            <strong>Rechtsklick</strong> = Bewegung / Abbrechen ·
-            <strong>Leertaste + Maus</strong> = Kamera · Mausrad = Zoom ·
+            Launch the tech demo on the selected map in <strong>fullscreen</strong>,
+            like the game: the ACU starts at army 1's starting position; everything else
+            runs through the original UI (the ACU construction menu, factory, and production).<br />
+            <strong>Left click</strong> = select / place buildings ·
+            <strong>Right click</strong> = move / cancel ·
+            <strong>Spacebar + mouse</strong> = camera · Mouse wheel = zoom ·
             <strong>ESC</strong> = back to the launcher
           </p>
           <button id="btn-sandbox-start" class="primary">Start sandbox</button>
@@ -81,13 +81,13 @@
           <input id="unit-search" type="search" placeholder="Search… (e.g. UEL0001)" />
           <select id="unit-select" size="12"></select>
           <label class="row">
-            Teamfarbe
+            Team color
             <input id="team-color" type="color" value="#2a6dbb" />
           </label>
           <label class="row">
             Animation
             <select id="anim-select" class="inline">
-              <option value="">— Bindpose —</option>
+              <option value="">— Bind pose —</option>
             </select>
           </label>
           <div id="unit-info"></div>

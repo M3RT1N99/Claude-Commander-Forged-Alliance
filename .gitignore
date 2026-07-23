@@ -3,9 +3,6 @@ dist/
 *.local
 .DS_Store
 .mcp.json
-/.translation-*
-.markdown-*
-.plan-hunks
 # IDA decompilation of the engine (derived from copyright binary — never check in)
 /cfile
 Cfile/
