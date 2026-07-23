@@ -40,17 +40,17 @@ for entity in entities:
     # Friendly Fire
     if !damage.mDamageFriendly and instigator and IsAlly(entity.army, instigator.army):
         continue
-    # NEU: Kategorie-Immunität gegen Flächenschaden
+# NEW: Category immunity to area damage
     if entity.IsInCategory("NOSPLASHDAMAGE"):
         continue
     # Schild-Abzug (0x736E40): jedes Schild, dessen Collision-Primitive die
-    # Zielposition enthält, zieht seinen absorbierten Betrag ab
-    amount = damage.mAmount - Σ shield.absorbed  (für deckende Schilde)
+# Contains target position, subtracts its absorbed amount
+amount = damage.mAmount - Σ shield.absorbed (for covering shields)
     if amount <= 0: continue
 
     d = copy(damage)
     d.mAmount = amount
-    d.mVector = entity.pos - damage.origin      # Richtung, NICHT für Falloff
+d.mVector = entity.pos - damage.origin # Direction, NOT for falloff
     d.mTarget = entity
     SIM_DoDamagePoint(sim, d)
 ```
@@ -64,7 +64,7 @@ Direction (for momentum/effects), it doesn't scale damage.
 ```
 if damage.mAmount == 0: return
 
-# Selbstschaden verhindern (Projektil -> Launcher auflösen)
+# Prevent self-damage (projectile -> resolve launcher)
 if !damage.mDamageSelf:
     inst = damage.mInstigator
     if inst is Projectile: inst = inst.launcher

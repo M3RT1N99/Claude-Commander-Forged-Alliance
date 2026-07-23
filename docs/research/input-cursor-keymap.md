@@ -3,7 +3,7 @@
 All input bindings are in `scr_UserInits` — input is **pure UI VM**
 ([engine-api.md](engine-api.md)). The sim sees no key or cursor.
 
-## 1. Überblick
+## 1. Overview
 
 The engine delivers three separate things that the original Lua puts together:
 
@@ -31,7 +31,7 @@ Events and hotkeys.
    `SetDefaultTexture(...)` + `ResetToDefault()`. `SetTexture` (cursor.lua:23-47)
    at `numFrames != 1` forks an **animation thread** that displays the file name
    `<basename>%02d.dds` increments (`WaitSeconds(1/fps)`) and via a LazyVar
-   (`_filename.OnDirty`) `SetNewTexture` auslöst.
+(`_filename.OnDirty`) `SetNewTexture` triggers.
 4. From then on everyone gets the *one* cursor object via the **Engine-Global**
    `GetCursor()` (`GetCursor()` @Cfile:1274426, mHelp `"GetCursor()"`) — not possible
    be confused with `UIUtil.GetCursor(id)`, which only reads the skin table.
@@ -64,7 +64,7 @@ HasHighlightCommand() → MOVE2PATROLCOMMAND oder HOVERCOMMAND       (:158-163)
 sonst GetRightMouseButtonOrder() → dieser Order-Cursor,
       ABER "RULEUCC_Move" → kein Cursor (Reset)                    (:165-180)
 ```
-Zusätzlich: `OnCommandDragBegin` → `DRAGCOMMAND` (:222-228),
+Additionally: `OnCommandDragBegin` → `DRAGCOMMAND` (:222-228),
 `MouseEnter/MouseMotion` → `GetCursor():SetTexture(unpack(self.Cursor))`,
 `MouseExit` → `GetCursor():Reset()` (:107-127).
 `worldview.lua:147/152` (Manager) joins `GetCursor():Hide()/:Show()`
@@ -117,7 +117,7 @@ The engine ignores other fields (`category`, `order`) — they are only for
 ### One keystroke (`sub_838D10` @0x838D10, Cfile:1258983-1259080)
 
 `CUIKeyHandler` is a `wxEvtHandler` that the engine sends per window
-`PushEventHandler` **vorn** einhängt (Cfile:1273505-1273516).
+`PushEventHandler` **front** mounts (Cfile:1273505-1273516).
 
 1. **Does any Control Keyboard have focus** (`Maui_CurrentFocusControl.mPrev`)?
    → **out immediately**, no hotkey (Cfile:1259003-1259007). That's the one
@@ -159,7 +159,7 @@ The event table is **the same** as the mouse — `func_CreateLuaEvent` @0x795BD0
 `Type, MouseX, MouseY, WheelRotation, WheelDelta, KeyCode, RawKeyCode,
 Modifiers{Shift,Ctrl,Alt,Left,Middle,Right}, Control`.
 
-`EMauiEventType` vollständig (Cfile:1136253-1136290):
+`EMauiEventType` complete (Cfile:1136253-1136290):
 `MouseMotion=1, MouseEnter=2, MouseHover=3, MouseExit=4, ButtonPress=5,
 ButtonDClick=6, ButtonRelease=7, WheelRotation=8, KeyUp=9, KeyDown=10, Char=11`.
 So far we only know 1,2,4,5,6,7,8 — **`KeyDown`, `KeyUp`, `Char`, `MouseHover` are missing**.
@@ -216,7 +216,7 @@ the hit test is not on the root frame, but on the **last entry**
 Modality. A Lua state change empties the stack and terminates the running dragger
 (Cfile:1273556-1273562).
 
-Nutzer: `uiutil.MakeInputModal` (uiutil.lua:615-646, hängt `RemoveInputCapture` an
+User: `uiutil.MakeInputModal` (uiutil.lua:615-646, appends `RemoveInputCapture`
 `OnDestroy`), splash.lua:30/49, score.lua, keybindings.lua:190/239, connectivity.lua,
 objectivedetail.lua, shareresources.lua, transmissionlog.lua, campaignmovies.lua,
 missiontext.lua — and `worldview.LockInput()` (worldview.lua:133-138), the one
@@ -261,7 +261,7 @@ We already have that (maui.lua:519).
 | `GetMouseScreenPos` / `GetMouseWorldPos` | — | worldview.lua:194 (Target-Decal) |
 | `CMauiControl:AcquireKeyboardFocus/AbandonKeyboardFocus/GetCurrentFocusControl` | Cfile:1124581/1124587/… | Edit fields, chat, console |
 
-Dazu für `console.lua`: `AddConsoleOutputReciever`, `RemoveConsoleOutputReciever`,
+For `console.lua`: `AddConsoleOutputReciever`, `RemoveConsoleOutputReciever`,
 `ConTextMatches` (3 weitere).
 
 **Incorrect/Temporary:** ESC and the arrow keys are stuck in `src/main.ts:651-680` and

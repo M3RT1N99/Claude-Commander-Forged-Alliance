@@ -396,11 +396,11 @@ check(
 )
 check(
   sampleCurve(def, 0, R05) === 0 && sampleCurve(def, 123, R0) === 0 && sampleCurve(def, 5, R1) === 0,
-  'Default-Kurve liefert überall exakt 0 (Spread 0)',
+  'Default curve delivers exactly 0 everywhere (spread 0)',
 )
 check(
   sampleCurve({ XRange: 1, Keys: [] }, 0, R05) === 0,
-  '0 Keys → 0.0 (GetValue-Frühausstieg, Cfile:649030-649031)',
+  '0 Keys → 0.0 (GetValue early exit, Cfile:649030-649031)',
 )
 check(EMITTER_CURVE_NAMES.length === 21, '21 curve names (REmitterBlueprint::Init)')
 

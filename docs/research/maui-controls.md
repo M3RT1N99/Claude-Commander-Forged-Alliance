@@ -5,7 +5,7 @@ what order it is built. Adds [engine-api.md](engine-api.md) (list of all
 Bindings per VM) and [frontend-menu.md](frontend-menu.md) (main menu boot chain);
 This is just about the **controls, events and the focus/capture path**.
 
-## 1. Überblick
+## 1. Overview
 
 The engine delivers exactly four things for the UI — nothing more:
 
@@ -169,7 +169,7 @@ are the opposite direction (buttons/mouse wheel → scrollable).
 | `ClearFrame(head)` | "destroy all controls in frame, nil head will clear all frames" | Cfile:1264066 | uimain on VM change |
 | `IsKeyDown(keyCode)`, `KeycodeMauiToMSW`, `KeycodeMSWToMaui`, `IN_AddKeyMapTable`, `FlushEvents` | Keyboard peripherals | Cfile:1141963 / 1142018 / 1142071 / 1259962 / 1274594 | keymap, construction (Shift/Ctrl), main.lua:992 |
 | `InternalCreateHistogram` (`moho.hostogram_methods` — **typo is in the original**, histogram.lua:19), `InternalCreateMesh` | instantiated by **no** `lua/ui/**` file | Cfile:1137793 / 1142596 | — (only `lua/maui/*.lua` itself) |
-| `InternalCreateWorldMesh` (16 Methoden), `InternalCreateWldUIProvider`, `CUIWorldView` (17), `ScriptedDecal`, `CPathDebugger` | Welt-Seite | Cfile:1296231 / 1295462 | worldview.lua:96, worldmesh.lua:26, rallypoint.lua:24 → gehört zu [worldview-camera.md](worldview-camera.md) |
+| `InternalCreateWorldMesh` (16 methods), `InternalCreateWldUIProvider`, `CUIWorldView` (17), `ScriptedDecal`, `CPathDebugger` | World Page | Cfile:1296231 / 1295462 | worldview.lua:96, worldmesh.lua:26, rallypoint.lua:24 → belongs to [worldview-camera.md](worldview-camera.md) |
 | `CLobby` (18), `CDiscoveryService` (3) | Multiplayer | Cfile:1168970 / 1168381 | lobby.lua, gameselect.lua |
 
 **Dead imports** (import a control but never create it — no reason to close them
@@ -228,7 +228,7 @@ Frame pump, snapshot. `control_methods` (25), `bitmap_methods` (18), `text_metho
 critical path — Economy, Orders, Construction, UnitView consist of Group/Bitmap/Text/
 Border/Dragger. What is missing there is the **WorldView** and the **Keyboard Path**.
 The **main menu** depends on exactly one control: **Movie** (main.lua:35). The way
-Hauptmenü → Skirmish → Session braucht zusätzlich **ItemList** (Combo), **Scrollbar**
+Main menu → Skirmish → Session also requires **ItemList** (Combo), **Scrollable**
 and **MapPreview**.
 
 ## 6. Offene Fragen

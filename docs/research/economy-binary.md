@@ -15,7 +15,7 @@ i.e. **once per army per tick**, after emptying the consumer batteries.
 - Per consumer: `mResources = {ENERGY, MASS}` (this tick requested) and
   a `granted` field (cumulates what has been granted so far).
 - Army pools: `mResources` = **Income of this tick**, `mTotals.mStored` =
-  **Vorrat/Lager**, `mTotals.mMaxStorage` = Lagerkapazität (double!).
+**Supply/Storage**, `mTotals.mMaxStorage` = storage capacity (double!).
 
 ## Algorithm (per tick)
 
@@ -27,7 +27,7 @@ Then count how many of the two resources he needs:
 
 `totalDemand = demandBoth + demandSingle` (je Ressource).
 
-### 2. Verfügbaren Pool bestimmen
+### 2. Determine available pool
 ```
 available[res] = mStored[res] + income[res] * (1 + handicap)
 ```
@@ -60,7 +60,7 @@ Consumers who **only need the abundant** resource get from the
 Rest their own (higher) ratio - they are not affected by the bottleneck of others
 Ressource ausgebremst.
 
-### 6. Verteilen (zweite Schleife über Verbraucher)
+### 6. Distribute (second loop via consumers)
 ```
 for consumer:
     demand = max(0, requested - granted)
@@ -75,12 +75,12 @@ for consumer:
 ### 7. Buchhaltung + Lager/Overflow
 ```
 mTotals.mLastUseRequested = totalDemand
-mTotals.mLastUseActual    = tatsächlich gewährt
+mTotals.mLastUseActual = actually granted
 mTotals.mIncome           = income (dieser Tick)
-overflow[res] = max(0, available[res] - mMaxStorage[res])   # über Lager -> Overflow
-if mResourceSharing: overflow an Verbündete verteilen
+overflow[res] = max(0, available[res] - mMaxStorage[res]) # over storage -> overflow
+if mResourceSharing: distribute overflow to allies
 mStored = min(available, mMaxStorage)
-income  = 0                                                 # Akku für nächsten Tick zurücksetzen
+income = 0 # Reset battery for next tick
 ```
 All `mStored/mReclaimed` writes run over `InterlockedCompareExchange`
 (atomic, because stats are read in parallel).
@@ -96,7 +96,7 @@ is **too simple**: a global stall factor. The original has:
 3. **`LimitingRate = granted/requested` per consumer** — the construction progress
    of a *single* building scales with *its* ratio, not with one
    Armee-Globalwert.
-4. **Handicap multipliziert Einkommen**, Overflow = Betrag über `mMaxStorage`.
+4. **Handicap multiplies income**, overflow = amount over `mMaxStorage`.
 
 → Reconstruction in Phase C: `EconRequest` list per army, this 7-step tick,
 Units consume via `LimitingRate`. Verification: 1 Energy Extractor +
@@ -110,14 +110,14 @@ with `EconRequest` list (maintenance of finished units + construction sites), r1
 Overflow with active `resourceSharing` via water filling in ascending order
 Army order to allies with free camp (rest lost); Encoder is stuck
 always at capacity. Verified in
-[`scripts/verify-economy.ts`](../../scripts/verify-economy.ts): Doc-Prüffall
+[`scripts/verify-economy.ts`](../../scripts/verify-economy.ts): Doc test case
 (mass bottleneck → double r1=0.5, pure energy construction r2=1), accounting,
 Overflow clamping, sharing cases and determinism.
 
 ## Correction: Production is NOT throttled
 
 Previous assumption (underpowered extractor produces less mass) is
-**binär widerlegt** (`func_ArmyProcessEconomy` @0x771B50, vollständig gelesen):
+**binary refuted** (`func_ArmyProcessEconomy` @0x771B50, read in full):
 the two-ratio distribution covers **only consumers** (`mConsumptionData`) —
 passive production (`mResources`) is unconditional income and will never
 linked to the grant ratio. `Unit::SetProductionActive` @0x6AAA90 only sets
@@ -131,12 +131,12 @@ here already 1:1; The lock test in verify-economy.ts ensures this.
 ## Builder-BuildRate: Mechanik umgesetzt
 
 The real construction formula is built in (`buildRequest` in simWorld.ts, binary
-bestätigt: `delta = buildRate/BuildTime · ratio · 0.1` je Bauer, CBuildTask
+confirmed: `delta = buildRate/BuildTime · ratio · 0.1` per pawn, CBuildTask
 Helper::UpdateWorkProgress @0x5f5f2c). `SimUnit.buildTarget` + `issueBuild`
 assign a completed builder to a construction site; several pawns have an **additive** effect
-(Assist), Reichweite über `Economy.MaxBuildDistance` gegatet. `BUILDER_RATE`
+(Assist), range gated via `Economy.MaxBuildDistance`. `BUILDER_RATE`
 only remains as a fallback for construction sites WITHOUT any assignment (holds the
-Sandbox lauffähig). Verifiziert (Timing, Assist-Stacking, Reichweiten-Gate).
+Sandbox executable). Verified (Timing, Assist Stacking, Range Gate).
 
 **Still open:** (1) Sandbox construction order instead of direct spawn - the farmer should be sent via
 Run the command to the construction site (approach state CUnitMobileBuildTask::Execute is

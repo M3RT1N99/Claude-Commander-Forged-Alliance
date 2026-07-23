@@ -7,12 +7,12 @@ Bezug: [engine-api.md](engine-api.md) (Bindungen je VM), [game-shell.md](game-sh
 [ui-complete.md](ui-complete.md). Current status: `src/lua/uiEngine.ts` (`setupGameUi`),
 `src/engine-lua/ui-globals.lua`, `src/engine-lua/ui-globals-missing.lua`.
 
-## 1. Überblick
+## 1. Overview
 
 The engine **doesn't** build the game UI itself. It calls exactly one entry point:
 `WldUIProvider.CreateGameInterface` (gamemain.lua:316) → `CreateUI(isReplay)`
 (gamemain.lua:116-192). Everything in it is original Lua. The engine just delivers
-Primitive: maui-Controls, Session-Auskünfte (`GetArmiesTable`, `SessionGetScenarioInfo`),
+Primitives: maui controls, session information (`GetArmiesTable`, `SessionGetScenarioInfo`),
 Selection, camera, sound — and **the beat** (frame pump + sim beat).
 
 Our `setupGameUi()` (uiEngine.ts:169-212) is a handheld subset of
@@ -72,7 +72,7 @@ depends on tabs.lua (menu) and `SimCallback`.
 **`score.CreateScoreUI()`** :88 (not in `CreateUI`!) · `PlaySound(...)` :90 ·
 `ForkThread`: `WaitSeconds(1.5)` → `UIZoomTo(avatars,1)` → `WaitSeconds(1.5)` →
 `SelectUnits(avatars)` → `FlushEvents()` → `worldview.UnlockInput()` :91-102 ·
-Fraktions-Skin über `Prefs.GetOption('skin_change_on_start')` :104-113.
+Faction skin via `Prefs.GetOption('skin_change_on_start')` :104-113.
 
 `SetLayout(layout)` (gamemain.lua:53-75) calls `SetLayout` on **15 modules** —
 u. a. `missiontext`, `helptext`, `score`, `avatars`, `tabs`, `controlgroups`, `chat`,
@@ -122,7 +122,7 @@ However, **per UI frame** (not per beat) runs: `OnFrame`/`SetNeedsFrameUpdate`
 userinit.lua:13-21 — the **LUA threads of the UI**: `WaitFrames = coroutine.yield`,
 `WaitSeconds(n)` polls `CurrentTime()`. So the UI VM has **no** tick scheduler.
 
-Weitere Engine→gamemain-Rückrufe: `OnSelectionChanged` (SelectionListener::Receive,
+More Engine→gamemain callbacks: `OnSelectionChanged` (SelectionListener::Receive,
 Cfile:1294170 → :1294453), `OnUserPause` (Cfile:1294560), `ReceiveChat`
 (func_ReceiveChat, Cfile:1263605 → :1263628), `OnDetectAdjacencyBonus`
 (Cfile:1263749), `OnFocusArmyUnitDamaged` (UserUnit::NotifyFocusArmyUnitDamaged,
@@ -162,9 +162,9 @@ in engine-api.md **and** missing from our gap list: **`EnableWorldSounds`**,
 | `GetCamera(name)` → CameraImpl (25 methods) | Camera by Name (`WorldCamera`, `MiniMap`) | Cfile:1151854; engine-api.md “CameraImpl” | minimap:128, chat:280/752, objectives2:337 |
 | `FlushEvents` | Discard mouse/keyboard events | Cfile:1274594 | gamemain:97/297/327 |
 | `GetCurrentUIState` | `'splash'`\|`'frontend'`\|`'game'` | Cfile:1265924 | borders:101 (SplitMapGroup) |
-| `SessionGetLocalCommandSource` / `SessionGetCommandSourceNames` / `GetSessionClients` | Netz-Identität | Cfile:1330573 / :1330491 / :1321819 | gamemain:383, tabs:721, chat:545/568 |
+| `SessionGetLocalCommandSource` / `SessionGetCommandSourceNames` / `GetSessionClients` | Network Identity | Cfile:1330573 / :1330491 / :1321819 | gamemain:383, tabs:721, chat:545/568 |
 | `SessionSendChatMessage([clients,] msg)` | → Engine → `gamemain.ReceiveChat` | Cfile:1322062 | chat:756/758, taunt:99, build_templates:89 |
-| `SessionRequestPause` / `SessionResume` / `SessionIsPaused` | Pause (bestätigt über `OnPause`) | Cfile:1330316/:1330361/:1330406 | tabs:425/428, missiontext:374 |
+| `SessionRequestPause` / `SessionResume` / `SessionIsPaused` | Pause (confirmed via `OnPause`) | Cfile:1330316/:1330361/:1330406 | tabs:425/428, missiontext:374 |
 | `GetGameSpeed` / `SetGameSpeed` | −10…+10 | Cfile:1322407 / :1322458 | gamemain:555, score |
 | `GenerateBuildTemplateFromSelection` | Construction template from selection | Cfile:1269110 | build_templates:14 |
 | `PlayVoice` / `StopSound` / `PauseSound` / `PauseVoice` | Audio | Cfile:1348652/:1348237/:1347882/:1347956 | taunt:87/88, gamemain:386-388 |
@@ -240,7 +240,7 @@ Each step can be verified individually.
    `GetGameTime`, `GameTime`, `GetArmyScore`, `IsObserver`, `EnableWorldSounds`,
    `FlushEvents`, `CurrentTime`. *Verify:* `import('/lua/ui/game/score.lua')` loads without
    Error (score.lua:28 is module level!).
-4. **`score.CreateScoreUI()`** — hängt an `GetFrame(0)` (score.lua:38), Layout
+4. **`score.CreateScoreUI()`** — attaches to `GetFrame(0)` (score.lua:38), layout
    `score_mini.lua`. *Verify:* Time text in maui snapshot, changes per beat.
 5. **`tabs.Create(mapGroup)`** — Checkbox/Bitmap/Group only. Menu buttons
    (`RestartSession`, `ExitApplication`…) are allowed to continue banging; they will only be when

@@ -44,7 +44,7 @@ Skalare / Flags:
 | field | Default | Meaning |
 |---|---|---|
 | `Lifetime` | 0 | Emitter-Lebensdauer in Ticks; `-1` = unendlich |
-| `Repeattime` | 0 | Zyklus-Länge (Kurven-XRange-Bezug) |
+| `Repeattime` | 0 | Cycle length (curve XRange reference) |
 | `TextureFramecount` | 0 | Frames im Textur-Strip (>1 ⇒ „Animate"-Technique) |
 | `TextureStripcount` | 1 | Number of lines (texture variants) in the texture |
 | `Blendmode` | 0 | 0..5 (siehe unten) |
@@ -74,7 +74,7 @@ Each curve:
 ```
 EmitRateCurve = { XRange = 4.00, Keys = { { x=2.044, y=25.643, z=0.000 }, ... } }
 ```
-- `XRange` = Zeitachsen-Länge (Ticks), meist == `Repeattime`.
+- `XRange` = timeline length (ticks), usually == `repeattime`.
 - Key: `x` = Zeitpunkt, `y` = Mittelwert, `z` = **Zufalls-Spread**.
 
 **Auswertung (SEfxCurve::GetValue, 1:1 nachbauen):**
@@ -117,7 +117,7 @@ Emitter runtime scalars (Enum `EEmitterParam`, settable via `effect:SetEmitterPa
 
 ### How the engine plays them (the crucial part for the replication)
 `effects/particle.fx` (in effects.scd) contains the complete simulation in the **vertex shader** `WorldVS`. The following vertex attributes are provided per particle quad:
-`Corner(float2 Quad-Ecke ±1)`, `Pos(float4: xyz=Spawn-Position, w=Startwinkel)`, `Size(float2: x=BeginSize, y=Size-Rate)`, `Velocity(float4: xyz=Geschwindigkeit, w=Rotationsrate)`, `Acceleration(float3)`, `inTime(float4: x=SpawnTime, y=Lifetime, z=Framerate, w=FrameSize)`, `inTexOffset(float3: x=Texturzeilen-Offset, y=Ramp-V, z=Zeilenhöhe)`, `dragCoeff(float3)`.
+`Corner(float2 quad corner ±1)`, `Pos(float4: xyz=spawn position, w=start angle)`, `Size(float2: x=BeginSize, y=Size-Rate)`, `Velocity(float4: xyz=speed, w=rotation rate)`, `Acceleration(float3)`, `inTime(float4: x=SpawnTime, y=Lifetime, z=Framerate, w=FrameSize)`, `inTexOffset(float3: x=Texture line offset, y=Ramp-V, z=Line height)`, `dragCoeff(float3)`.
 
 Global shader var `time = tick + frameDelta` (ticks!).
 ```
@@ -161,7 +161,7 @@ BeamBlueprint {
     # weitere: LODCutoff (default 200), RepeatRate (0), BlendMode (default 3)
 }
 ```
-Runtime `SWorldBeam`: Start/End-Transform (mit Last-Transform für Interpolation), Width, StartColor/EndColor (Vector4), 2 Texturen, UShift/VShift/RepeatRate, BlendMode.
+Runtime `SWorldBeam`: Start/End transform (with load transform for interpolation), Width, StartColor/EndColor (Vector4), 2 textures, UShift/VShift/RepeatRate, BlendMode.
 Lua: `CreateBeamEmitter(bp,army)`, `CreateBeamEmitterOnEntity(entity,bone,army,bp)`, `CreateBeamEntityToEntity(e,b,other,b,army,bp)`, `CreateAttachedBeam(entity,bone,army,length,thickness,texture)`, `AttachBeamEntityToEntity(...)`. Beam Params (`effect:SetBeamParam(name,v)`): `POSITION/ENDPOSITION (xyz), LENGTH, LIFETIME, STARTCOLOR(rgba), ENDCOLOR(rgba), THICKNESS, USHIFT, VSHIFT, REPEATRATE, LODCUTOFF`.
 
 ### Trails (Ketten-/Poly-Trails)
@@ -180,7 +180,7 @@ TrailEmitterBlueprint {
     RampTexture   = [[/textures/particles/ramp_trail_01.dds]],
 }
 ```
-Runtime `CEfxTrailEmitter` (size 0x1B8): `mTrailLength`, `mTotalTicks`, `mLife`, `mLength`. Render: `TPolyTrail_<BLEND>`, PS = `tex2D(Ramp, uv1) * tex2D(RepeatTex, uv0)`. Zusätzlich `EmitIfVisible`, `CatchupEmit`.
+Runtime `CEfxTrailEmitter` (size 0x1B8): `mTrailLength`, `mTotalTicks`, `mLife`, `mLength`. Render: `TPolyTrail_<BLEND>`, PS = `tex2D(Ramp, uv1) * tex2D(RepeatTex, uv0)`. Additionally `EmitIfVisible`, `CatchupEmit`.
 
 ## 2. Projectile trails
 `mohodata.scd → lua/sim/DefaultProjectiles.lua` — drei orthogonale Mechanismen, oft kombiniert:
@@ -190,7 +190,7 @@ Runtime `CEfxTrailEmitter` (size 0x1B8): `mTrailLength`, `mTotalTicks`, `mLife`,
 
 Class hierarchy: `Projectile` → `EmitterProjectile` → {`SingleBeamProjectile`, `MultiBeamProjectile`, `SinglePolyTrailProjectile`, `MultiPolyTrailProjectile`} → {`SingleCompositeEmitterProjectile`, `MultiCompositeEmitterProjectile`}; plus `OnWaterEntryEmitterProjectile` (trail change when water enters, `TrailDelay`, `EnterWaterSound`).
 
-## 3. Größenordnung
+## 3rd magnitude
 - **2,724** Emitter Family Blueprints (2437 Emitter / 184 Trail / 103 Beam) — all in `effects.scd`.
 - **747** Partikeltexturen (`textures.scd → textures/particles/`), inkl. `ramp_*.dds` Farbrampen.
 - **~586** top-level templates in `lua/EffectTemplates.lua` (180 KB), which bundle emitter paths into effect lists (e.g. `FireCloudMed01`, `ConcussionRingSml01`, `DefaultHitExplosion01`).
@@ -217,7 +217,7 @@ CreateLightParticleIntel(...)
 CreateDecal(position, heading, tex1, tex2, type, sizeX, sizeZ, lodParam, duration, army, fidelity)
 CreateSplat(position, heading, textureName, sizeX, sizeZ, lodParam, duration, army, fidelity)
 CreateSplatOnBone(boneName, offset, textureName, sizeX, sizeZ, lodParam, duration, army)
-# Methoden auf dem zurückgegebenen Effekt (chainbar):
+# Methods on the returned effect (chainbar):
 effect:SetEmitterParam('name', value)
 effect:SetBeamParam('name', value)
 effect:ScaleEmitter(scale)
@@ -244,7 +244,7 @@ effect:Destroy()
 - 78 × `*.xwb` — XACT Wave Banks (Magic `WBND`)
 - 80 × `*.xsb` — XACT Sound Banks (Magic `SDBK`)
 - 1 × `SupCom.xgs` —
-- `<FA>/sounds/Voice/{US,DE}/` — Sprachbänke.
+- `<FA>/sounds/Voice/{US,DE}/` — Voice banks.
 
 Engine (`AudioEngine.cpp:3618 func_LoadSoundPath`): `EnumerateFiles(voicePath, "*.xwb", false, …)` then `"*.xsb"`; `CUserSoundManager` ctor: `mVoiceEngine(AudioEngine::Create("/sounds"))`; `func_InitSound` loads `/sounds/SupCom.xgs` via the VFS. Other engines: `mAmbientEngine`, `mTutorialEngine`.
 
@@ -261,7 +261,7 @@ BANKDATA @0x34:
   0x3C char[64] szBankName    ("Explosions", "UEL", "Music")
   0x7C u32 dwEntryMetaDataElementSize = 24
   0x80 u32 dwEntryNameElementSize     = 64
-  0x84 u32 dwAlignment        (4 für in-memory, 2048 für Streaming-Bank)
+0x84 u32 dwAlignment (4 for in-memory, 2048 for streaming bank)
   0x88 u32 CompactFormat      = 0
   0x8C FILETIME BuildTime
 ENTRYMETADATA: 24 B je Eintrag:
@@ -275,7 +275,7 @@ MINIWAVEFORMAT Bitfelder: tag[1:0], channels[4:2], samplesPerSec[22:5], blockAli
 ```
 **Measured values:** ALL banks `tag=0` = **PCM**, `bits=1` = **16 bit**.
 - SFX/Explosions/Units: 1 channel, 32000 Hz, blockAlign 2 (e.g. `0x810FA004`).
-- Musik: 2 Kanäle, 44100 Hz, blockAlign 4 (`0x82158888`), Streaming-Bank, alignment 2048.
+- Music: 2 channels, 44100 Hz, blockAlign 4 (`0x82158888`), streaming bank, alignment 2048.
 - `ENTRYNAMES` segment is empty ⇒ Waves have **no names**, only indices; the names come from the `.xsb`.
 
 ⇒ **Extraction is trivial**: Bytes `[waveDataOffset + PlayRegion.dwOffset, +dwLength)` are raw PCM16-LE; just put a 44-byte RIFF/WAVE header in front of it. **No codec, no XMA/ADPCM/WMA.**
@@ -298,7 +298,7 @@ MINIWAVEFORMAT Bitfelder: tag[1:0], channels[4:2], samplesPerSec[22:5], blockAli
 0x1E  u32 cueNamesLength
 0x22  u32 simpleCuesOffset     (0xFFFFFFFF wenn keine)
 0x26  u32 complexCuesOffset
-0x2A  u32 cueNamesOffset       (null-getrennte ASCII-Liste, Länge = cueNamesLength)
+0x2A u32 cueNamesOffset (zero-separated ASCII list, length = cueNamesLength)
 0x2E  u32 unknownOffset
 0x32  u32 variationTablesOffset
 0x36  u32 unknownOffset2
@@ -352,7 +352,7 @@ Entity methods (`Entity.cpp`): `PlaySound`, `SetAmbientSound`. Weapon (`UnitWeap
 - **Music**: `lua.scd → lua/UserMusic.lua`. Two cue lists from bank `Music`: `BattleCues = { Sound{Cue='Battle', Bank='Music'} }`, `PeaceCues = { Sound{Cue='Base_Building', Bank='Music'} }`. Logic: `NotifyBattle()` counts combat events; ≥ `BattleEventThreshold = 20` events (reset if > `BattleCounterReset = 30` ticks pause) ⇒ `StartBattleMusic()` (hard cut, `StopSound(Music,true)`); after `PeaceTimer = 200` ticks (20 s) without a fight ⇒ `StartPeaceMusic()` (fade-out via `StopSound(Music)` + `WaitFor(Music)`, 3 s pause, then peace cue). Cues rotate cyclically. `Music.xwb` = 250 MB streaming bank, 12 waves, 44.1 kHz stereo PCM; `Music.xsb` cues: `Main_Menu`, `Base_Building`, `Battle`.
 - **Ambient**: `AmbientTest.xsb/.xwb` (Cues: `AMB_Menu_Loop`, `Gen_Fire_Loop`, `Gen_Fire_Start`, `Gen_Tree_Crush`, `AMB_Planet_Rumble_zoom`, `AMB_SER_OP_Briefing`); `gamedata/ambience.scd` is **empty** (just a directory entry) — so ambient loops run via the normal bank/cue paths + `mAmbientEngine` in the `CUserSoundManager`.
 - **Unit Ambient Loops**: `bp.Audio.AmbientMove` etc. → `Entity:SetAmbientSound(params)` or sim-side `PlayLoop(self, params)`; `HSound` is the loop handle with intrusive list in `CSimSoundManager`, `UpdateLoopCompletionState()` signals end. `UnitRumble.xsb/.xwb` provides distance/zoom dependent rumble loops (modulated via the XACT variables `CameraDistance`/`ZoomPercent`).
-- **UI**: `Interface.xsb` (119 Cues: `UI_Menu_Accept_01`, `UI_Menu_Rollover`, `UEF_Select_Tank`, …). Fraktions-Select-Bänke: `AEONSelect.xwb`, `CYBRANSelect.xwb`, `UEFSelect.xwb`, `SeraphimSelect.xwb/.xsb`.
+- **UI**: `Interface.xsb` (119 Cues: `UI_Menu_Accept_01`, `UI_Menu_Rollover`, `UEF_Select_Tank`, …). Faction select banks: `AEONSelect.xwb`, `CYBRANSelect.xwb`, `UEFSelect.xwb`, `SeraphimSelect.xwb/.xsb`.
 
 ## Refs
 - C:\Users\Marti\Documents\02Projects\faf\Draiget\faf-re\src\sdk\moho\resource\blueprints\REmitterBlueprint.h:144 (REmitterBlueprint, 21 curves + flags + textures, size 0x284)

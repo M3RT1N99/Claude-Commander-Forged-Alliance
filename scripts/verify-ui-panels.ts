@@ -171,7 +171,7 @@ check(
 )
 check(
   String(host.eval("return type(SessionGetScenarioInfo().Options)")) === 'table',
-  'SessionGetScenarioInfo().Options existiert (tabs.lua:21, diplomacy.lua:34 greifen ungeprüft zu)',
+  'SessionGetScenarioInfo().Options exists (tabs.lua:21, diplomacy.lua:34 access unchecked)',
 )
 check(Number(host.eval('return SessionGetLocalCommandSource()')) === 1, 'lokale Befehlsquelle = 1')
 
@@ -182,9 +182,9 @@ host.setGlobal('__uiPauseSink', (p: boolean) => {
   paused = p
 })
 host.eval('SessionRequestPause()')
-check(paused === true && host.eval('return SessionIsPaused()') === true, 'SessionRequestPause hält die Sim an')
+check(paused === true && host.eval('return SessionIsPaused()') === true, 'SessionRequestPause pauses the sim')
 host.eval('SessionResume()')
-check(paused === false && host.eval('return SessionIsPaused()') === false, 'SessionResume lässt sie weiterlaufen')
+check(paused === false && host.eval('return SessionIsPaused()') === false, 'SessionResume keeps it running')
 
 console.log('\n== Die vier Original-Panels aufbauen (gamemain.lua:145-153) ==')
 setupGameUi(host, log)
@@ -218,10 +218,10 @@ const outside = host.eval(`
 `) as string
 check(
   outside === '',
-  `kein Control fällt komplett aus dem Bild (1920×1080)${outside ? ' — draußen: ' + outside : ''}`,
+  `kein Control fällt komplett aus dem Bild (1920×1080)${outside ? '- outside:' + outside : ''}`,
 )
 
-console.log('\n== Die Reiter oben: Menü, Diplomatie, Pause (tabs.lua) ==')
+console.log('\n== The tabs at the top: Menu, Diplomacy, Pause (tabs.lua) ==')
 // Exactly the branch that died in the browser: tabs.lua:482 BuildContent builds
 // the content — 'main' from its own menu table, 'diplomacy' above
 // diplomacy.lua:CreateContent (which was already created during import SessionGetScenarioInfo()
@@ -231,10 +231,10 @@ const tabMenu = host.eval(`
   local ok, err = pcall(function() import('/lua/ui/game/tabs.lua').BuildContent('main') end)
   return tostring(ok) .. '|' .. tostring(err)
 `) as string
-check(tabMenu.startsWith('true'), `Reiter „Menü" öffnet sich${tabMenu.startsWith('true')?'' : ' — ' + tabMenu}`)
+check(tabMenu.startsWith('true'), `Reiter „Menü"opens${tabMenu.startsWith('true')?'' : ' — ' + tabMenu}`)
 check(
   Number(host.eval(`return table.getn(import('/lua/ui/game/tabs.lua').controls.contentGroup.Buttons)`)) === 7,
-  '7 Knöpfe im Spielmenü (Save/Load/Options/Restart/End/Exit/Close — tabs.lua:63-100)',
+  '7 buttons in the game menu (Save/Load/Options/Restart/End/Exit/Close — tabs.lua:63-100)',
 )
 
 // The opening is an ANIMATION over several images (tabs.lua:561-584: the
@@ -261,7 +261,7 @@ check(
   `Reiter „Diplomatie" baut seinen Inhalt (diplomacy.lua:34 liest Options.TeamLock): ${diplo}`,
 )
 
-console.log('\n== Hit-Test: die freie Spielfläche gehört der Welt ==')
+console.log('\n== Hit test: the free playing area belongs to the world ==')
 // In the original, the game world itself is a control (CUIWorldView) WITHIN the
 // mapGroup — in depth order ABOVE the invisible full-screen containers
 // (CreateScreenGroup does NOT disable its hit test, uiutil.lua:333). A
@@ -282,7 +282,7 @@ const worldHit = String(
 check(worldHit === 'worldview', `der Klick in die freie Fläche trifft die WorldView (${worldHit})`)
 check(
   host.eval(`return __mauiMouse('ButtonPress', 960, 500, { Left = true })`) === false,
-  'und die UI verbraucht ihn NICHT — er gehört der Welt',
+  'and the UI does NOT consume it — it belongs to the world',
 )
 
 console.log('\n== Auswahl: __uiSetUnit → SelectUnits → OnSelectionChanged ==')
@@ -295,14 +295,14 @@ host.setGlobal('__uiSimCommand', (name: string) => {
 })
 host.eval(`__uiSetUnit(1, 'uel0001', 1, 100, 20, 100, 12000, 12000, 1, true)`)
 const selected = Number(host.eval('return __uiSelectByIds({ 1 })'))
-check(selected === 1, 'SelectUnits({acu}) → 1 Einheit ausgewählt')
+check(selected === 1, 'SelectUnits({acu}) → 1 unit selected')
 check(
   Number(host.eval('local s = GetSelectedUnits() return s and table.getn(s) or 0')) === 1,
   'GetSelectedUnits() liefert die ACU (Cfile:1361395: nil bei leerer Auswahl)',
 )
 check(
   String(host.eval(`return GetSelectedUnits()[1]:GetBlueprint().BlueprintId`)) === 'uel0001',
-  'Das UserUnit-Objekt trägt den echten Blueprint',
+  'The UserUnit object carries the real blueprint',
 )
 
 console.log('\n== Kategorien + Avatare: die Engine-Sicht auf UserUnits ==')
@@ -312,7 +312,7 @@ console.log('\n== Kategorien + Avatare: die Engine-Sicht auf UserUnits ==')
 // Click destinations, orders special paths.
 check(
   host.eval(`return EntityCategoryContains(categories.COMMAND, GetSelectedUnits()[1])`) === true,
-  'EntityCategoryContains(COMMAND, userUnit) — die Kategorie-Brücke lebt',
+  'EntityCategoryContains(COMMAND, userUnit) — the category bridge is alive',
 )
 // The UEF-ACU carries PODSTAGINGPLATFORM (uel0001_unit.bp:125, drone upgrades)
 // — orders.lua:923-932 runs this path on EVERY ACU selection.
@@ -331,7 +331,7 @@ check(
 // If EMPTY, the engine returns nil, not an empty table (Cfile:1360921).
 check(
   host.eval(`return GetIdleEngineers() == nil`) === true,
-  'GetIdleEngineers() enthält die idle ACU NICHT (COMMAND-Ausschluss, nil bei leer)',
+  'GetIdleEngineers() does NOT contain the idle ACU (COMMAND exclusion, nil if empty)',
 )
 // ValidateUnitsList (Cfile:1360596-1360650): filters out dead/removed units
 // a saved list (Ctrl groups, controlgroups.lua:102); return is
@@ -345,7 +345,7 @@ check(
       return table.getn(ok)
     `),
   ) === 1,
-  'ValidateUnitsList behält die lebende ACU und wirft den Geist raus',
+  'ValidateUnitsList keeps the live ACU and throws out the ghost',
 )
 check(
   host.eval(`return table.getn(ValidateUnitsList(17)) == 0`) === true,
@@ -377,11 +377,11 @@ check(orderCount > 0, `${orderCount} Order-Buttons im Grid der Original-Lua`)
 check(host.eval(`return __t.orders['RULEUCC_Move'] == true`) === true, 'RULEUCC_Move existiert')
 check(
   host.eval(`return __t.enabled['RULEUCC_Move'] == true`) === true,
-  'RULEUCC_Move ist aktiv, sobald die ACU ausgewählt ist (Blueprint: CommandCaps)',
+  'RULEUCC_Move is active as soon as the ACU is selected (Blueprint: CommandCaps)',
 )
 check(
   host.eval(`return __t.enabled['RULEUCC_Nuke'] ~= true`) === true,
-  'RULEUCC_Nuke bleibt aus — die ACU hat die Fähigkeit nicht',
+  'RULEUCC_Nuke remains off — the ACU does not have the capability',
 )
 
 // The counter-check to the hit test above: the orders panel is only available WITH a selection
@@ -396,7 +396,7 @@ check(
   'Klick auf das Orders-Panel WIRD verbraucht (dort zeichnet ein Bitmap)',
 )
 
-console.log('\n== construction.lua: das Bau-Menü kommt aus dem Blueprint ==')
+console.log('\n== construction.lua: the build menu comes from the blueprint ==')
 // The ACU builds what its BuildableCategory provides (uel0001_unit.bp). The list
 // pulls construction.lua over EntityCategoryGetUnitList — not over one
 // handwritten table.
@@ -422,7 +422,7 @@ const inMenu = (bp: string): boolean =>
     end
     return false
   `) === true
-check(inMenu('ueb0101'), 'ueb0101 (T1-Landfabrik) steht im Bau-Menü der ACU')
+check(inMenu('ueb0101'), 'ueb0101 (T1-Landfabrik) is in the construction menu of the ACU')
 check(!inMenu('uel0101'), 'uel0101 (Panzer) steht NICHT drin — den baut die Fabrik')
 
 console.log('\n== Klick aufs Bau-Icon: der Bau-Modus startet, die Auswahl bleibt ==')
@@ -494,11 +494,11 @@ if (hasIcon) {
   )
   check(
     Number(host.eval('local s = GetSelectedUnits() return s and table.getn(s) or 0')) === 1,
-    'Die ACU ist NOCH ausgewählt (der Klick war kein Welt-Klick)',
+    'The ACU is STILL selected (the click was not a world click)',
   )
 }
 
-console.log('\n== Abwahl darf die UI nicht töten ==')
+console.log('\n== Deselecting must not kill the UI ==')
 // GetUnitCommandData returns EMPTY TABLES if the selection is empty (the engine sets
 // they always appear after the unit loop, Cfile:1264740). Our version was nil
 // back, orders.lua:891 died into the void at the first click.
@@ -508,7 +508,7 @@ try {
 } catch {
   deselectOk = false
 }
-check(deselectOk, 'SelectUnits({}) überlebt orders.lua/construction.lua')
+check(deselectOk, 'SelectUnits({}) survives orders.lua/construction.lua')
 check(
   host.eval('return GetSelectedUnits() == nil') === true,
   'GetSelectedUnits() ist danach nil (Cfile:1361395)',
@@ -524,7 +524,7 @@ const rollover = host.eval(`
 `)
 check(rollover === 'uel0001', 'GetRolloverInfo().blueprintId = uel0001')
 
-console.log('\n== score.lua: das Punkte-Panel steht, die Uhr läuft aus dem Sim-Tick ==')
+console.log('\n== score.lua: the points panel is set, the clock runs out of the sim tick ==')
 // CreateScoreUI lief im One-Shot-OnFrame (gamemain.OnFirstUpdate,
 // ui-boot.lua) for the first __mauiFrame after panel construction.
 check(
@@ -647,7 +647,7 @@ host.eval(`
 check(
   host.eval(`return __uiKeyMapExecute(80, true, true, false, false, 80)`) === true &&
     Number(host.eval('return __keyTest')) === 1,
-  'Ctrl-Shift-P: Keymap-Treffer -> ConExecute -> UI_Lua läuft (__keyTest = 1)',
+  'Ctrl-Shift-P: Keymap hits -> ConExecute -> UI_Lua running (__keyTest = 1)',
 )
 check(
   host.eval(`return __uiKeyMapExecute(80, true, true, false, true, 80)`) === false &&

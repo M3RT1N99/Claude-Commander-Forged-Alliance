@@ -108,7 +108,7 @@ if (setupErr === null) {
     `GetLayoutFilename('economy') = ${String(eco)}`,
   )
 
-  console.log('\n== UIUtil.UIFile: Skin-Fallback-Kette löst echte Texturen auf ==')
+  console.log('\n== UIUtil.UIFile: Skin fallback chain resolves real textures ==')
   const bmp = host.eval(
     `return import('/lua/ui/uiutil.lua').UIFile('/game/resource-panel/resources_panel_bmp.dds')`,
   )

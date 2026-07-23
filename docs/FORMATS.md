@@ -7,7 +7,7 @@ FAF-Community-Tools, eigene Verifikation.
 
 ## SCD — Archive (`gamedata/*.scd`)
 
-Normale **Zip-Archive** (Magic `PK\x03\x04`). Einträge überwiegend
+Normal **Zip archives** (Magic `PK\x03\x04`). Entries mostly
 *Stored* (uncompressed), partly *Deflate*. No Zip64 (all < 4GB).
 → [src/vfs/zipArchive.ts](../src/vfs/zipArchive.ts) only reads the central
 Directory and loads entries individually (random access via Blob/HTTP range).
@@ -78,7 +78,7 @@ ozonex FAF Map Editor (HazardX-Loader), faf-re (`CWldMap::MapLoad`).
 
 Kernfakten:
 
-- Heightmap: u16-Grid mit (w+1)×(h+1) Samples, Welthöhe = wert × 1/128,
+- Heightmap: u16 grid with (w+1)×(h+1) samples, world height = value × 1/128,
   1 sample per world meter
 - 10 Albedo-Strata (Lower, Stratum0–7, Upper) + 9 Normal-Strata, je
   Path (case-insensitive in env.scd!) + tile size in world meters
@@ -89,11 +89,11 @@ Kernfakten:
   `TTerrain`). `TTerrain` cards (e.g. SCMP_001) **never** sample UtilityB
   — the second mask contains junk there (duplicate of UtilityA). Our
   Solution: Apply masks only to strata with non-empty texture path
-  (`stratumEnable`-Uniforms), verhaltensäquivalent für beide Techniques.
+(`stratumEnable`-Uniforms), behavior equivalent for both techniques.
 - Embedded images (masks/watermap/preview) have the same
   Line orientation like the heightmap — no V-flip (proven numerically:
   `scripts/check-orientation.ts`, Korrelation 0,998)
-- Watermap (UtilityC, DXT5, halbe Auflösung): R = über Wasser,
+- Watermap (UtilityC, DXT5, half resolution): R = above water,
   **G = Wassertiefe**, B = Flatness, A = Foam
 - Wasser-Settings: elevation/deep/abyss, SurfaceColor, WaterRamp-Textur
 - Lighting: Sonnenrichtung/-farbe, Ambience, ShadowFill, Specular,

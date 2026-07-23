@@ -4,7 +4,7 @@ How the original starts a skirmish session, and what else our engine does for it
 owes. Receipts: `Cfile/ForgedAlliance.exe.c` (line numbers), original Lua
 (`<datei>:<zeile>`).
 
-## 1. Überblick
+## 1. Overview
 
 Today [src/main.ts](../../src/main.ts) parses the map itself (`_save.lua` → marker
 `ARMY_1`, lines 413-432) and leaves the ACU via `spawnViaLua('uel0001')` (main.ts:483)
@@ -90,7 +90,7 @@ Moho::Sim::Setup(info)                                    Cfile:1071723
   " Sim Setup 4"   Cfile:1071958   EntityDB, CommandDB, EffectManager
   " Sim Setup 5"   Cfile:1072012   Sim::CreateArmies(...)                        :1072015
   " Sim Setup 7"   Cfile:1072049   Props aus info->mProps via PROP_Create        :1072071
-                                   (übersprungen bei /noprops; " NUM PROPS = %d")
+(skipped at /noprops; " NUM PROPS = %d")
   " Sim Setup 8"   Cfile:1072086   BeginSession()   ← Lua                        :1072090
                                    Sim::PostInitialize(Options)                  :1072103
 ```
@@ -204,7 +204,7 @@ end
 ```
 
 `CreateInitialArmyUnit(army, bpId)` (Cfile:1025200): Position = `army:GetArmyStartPos()`
-(x,z), **`pos.y = 0.0`** (Cfile:1025261), Orientierung = Identität,
+(x,z), **`pos.y = 0.0`** (Cfile:1025261), orientation = identity,
 `mComplete = 1` (Cfile:1025269). The height is set by the unit controller.
 
 `ShouldCreateInitialArmyUnits()` is simply `not CFG_GetArgOption("/noinitialunits")`
@@ -281,11 +281,11 @@ Compared against [engine-api.md](engine-api.md) (`sim_SimInits`) and the current
 | `OrientFromDir(dir)` | Richtung → Quaternion | Core-Global | siminit.lua:213 |
 | `AddBuildRestriction(idx, cats)` | Kategorie-Sperre je Armee | Sim-Global | siminit.lua:190 |
 | `ArmyInitializePrebuiltUnits(name)` | Pre-built base | Cfile:1024702 | siminit.lua:129 |
-| `SetArmyFactionIndex(army, i)` | **0-basiert** (`mFaction`) | Cfile:1017289 (Gegenstück) | scenarioutilities.lua:541 (Kampagne) |
-| `SetArmyColorIndex` / `SetArmyAIPersonality` | Farbe / Persönlichkeit | Sim-Globals | scenarioutilities.lua:550/554 |
+| `SetArmyFactionIndex(army, i)` | **0-based** (`mFaction`) | Cfile:1017289 (counterpart) | scenarioutilities.lua:541 (Campaign) |
+| `SetArmyColorIndex` / `SetArmyAIPersonality` | Color / Personality | Sim Globals | scenarioutilities.lua:550/554 |
 | `SetArmyUnitCap` / `GetArmyUnitCap` | Unit cap | Sim Globals | simutils.lua:201 |
 | `SetAlliedVictory`, `SetArmyOutOfGame`, `ArmyIsOutOfGame`, `EndGame`, `IsGameOver` | Siegbedingungen | Sim-Globals | `/lua/victory.lua` (schook:27) |
-| `GetMapSize()` | Kartengröße in Zellen | Sim-Global | GenerateArmyStart, AI |
+| `GetMapSize()` | Map size in cells | Sim Global | GenerateArmyStart, AI |
 | `SetPlayableRect` / `SetIgnorePlayableRect` | Spielfeldgrenze | Sim-Globals | Optionen |
 
 Unit methods of the same chain (moho `unit_methods`): `SetCustomName`, `HideBone`,
@@ -365,7 +365,7 @@ called — with a counter spy on `CreateResourceDeposit`).
 
 **Step 3 — real SimInit boot.** `installEngine()`: instead of `SimSync.lua` +
 `ResetSyncTable()` by hand → `host.loadGlobal('/lua/simInit.lua')` (loads `globalInit`,
-`SimSync`, definiert `SetupSession`/`BeginSession`/`OnCreateArmyBrain`). Dafür müssen
+`SimSync`, defines `SetupSession`/`BeginSession`/`OnCreateArmyBrain`). For that we have to
 `CreatePrefetchSet` and `__active_mods` exist (simInit.lua:33/232).
 `session.ts` only publishes `ScenarioInfo` (from the real `_scenario.lua` +
 `teamInfo` according to the pattern `SetupCommandLineSkirmish`) and calls `SetupSession()`.

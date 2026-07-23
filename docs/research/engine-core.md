@@ -56,7 +56,7 @@ Basis of all Lua-coupled Sim objects (Unit ultimately inherits from this):
 → **Engine-Nachbau:** existiert im Ansatz (`src/lua/moho.ts` bindet
 entity_methods/unit_methods via Metatable; `unitFactory.ts` instantiated).
 Must align with the real CScriptObject model (Metatable based,
-C-Callbacks OnCreate/OnTick/OnDamage über RunScript).
+C callbacks OnCreate/OnTick/OnDamage via RunScript).
 
 ## Reference to the current repo
 

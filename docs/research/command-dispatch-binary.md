@@ -55,7 +55,7 @@ Befehls-Enum: `EUnitCommandType` (faf-re `command/SSTICommandIssueData.h`).
 Weitere Callees: `NewCallTransportCommand`, `IssueRefuelTask`,
 `IssueCallTeleportTask`, `IssueCallLandTransportTask`,
 `IssueCallAirStagingPlatformTask`, `CUnitCarrierLaunch`,
-`CUnitCarrierRetrieve` — Transport-/Träger-/Nachtank-Wege.
+`CUnitCarrierRetrieve` — transport/carrier/refuel routes.
 
 ## For reconstruction (Phase C)
 - Our `UnitCommand` only knows `move`. Target image: this enum as a command type,

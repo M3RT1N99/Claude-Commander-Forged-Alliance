@@ -77,7 +77,7 @@ setUnitBones(host, 'uel0001', await bonesFromBlueprint('uel0001', acuBp, readAss
 
 const beat = (): void => { eco.tick(); simTick(host) }
 
-console.log('\n== ACU spawnen — registriert ihre Blueprint-Ökonomie (ProdE=20, ProdM=1) ==')
+console.log('\n== Spawn ACU — registers its blueprint economy (ProdE=20, ProdM=1) ==')
 const acu = spawnLuaUnit(host, 'uel0001', { x: 128, y: 20, z: 128 }, 1)
 check(acu > 0, `spawned, Unit #${acu}`)
 const army = eco.army(1)

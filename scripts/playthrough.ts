@@ -169,13 +169,13 @@ const acu = spawnLuaUnit(sim, 'uel0001', { x: 100, y: 20, z: 100 }, 1)
 takt(10)
 console.log(`   ACU ${acu}, Masse ${engine.economy.army(1).mass.toFixed(0)}`)
 
-tue('Lade-Fade abwarten (das Fraktionsbild fängt sonst jeden Klick)')
+tue('Wait for the loading fade (otherwise the faction picture will catch every click)')
 // gamemain.lua:274-292: the faction image is at depth 200 above EVERYTHING and
 // faded only after 1.5 s over ~2 s - that's how long each hit test only hits
 // this bitmap. In the original, the player only clicks after the fade.
 uiFrame(260)
 
-tue('ACU auswählen (SelectUnits → gamemain.OnSelectionChanged)')
+tue('Select ACU (SelectUnits → gamemain.OnSelectionChanged)')
 spiegle()
 try {
   ui.eval(`__uiSelectByIds({ ${acu} })`)
@@ -212,7 +212,7 @@ const icon = ui.eval(`
   return erstes
 `) as string
 if (!icon) {
-  melde('UI', 'Kein Gebäude-Icon im Bau-Menü (construction.lua liefert nichts)')
+  melde('UI', 'No building icon in the construction menu (construction.lua provides nothing)')
 } else {
   const [bpId, mx, my] = icon.split('|')
   console.log(`   Icon ${bpId} bei ${mx},${my}`)
@@ -226,7 +226,7 @@ const cm = getCommandMode(ui)
 console.log(`   Command-Mode: ${JSON.stringify(cm)}`)
 if (cm.mode === false) melde('UI', 'Der Klick aufs Bau-Icon startet KEINEN Bau-Modus')
 
-tue('Gebäude setzen (worldClick → Baustelle + Bau-Auftrag)')
+tue('Set building (worldClick → construction site + construction order)')
 const simFassade = {
   move: (id: number, x: number, z: number): void => {
     sim.eval(`local u=__units[${id}] if u then u:GetNavigator():SetGoal({ ${x}, 0, ${z} }) end`)
@@ -265,7 +265,7 @@ if (!msg?.startsWith('Bau')) {
   issueBuildTask(sim, acu, site)
 }
 
-tue('Bauen bis fertig (Ökonomie zahlt, Bauer fährt hin)')
+tue('Build until finished (economy pays, farmer goes there)')
 // What is checked is the building that was REALLY clicked - not a solid one
 // wired. (The run takes the first clickable building icon.)
 const gebaut = (icon.split('|')[0] || 'ueb0101').toLowerCase()
@@ -280,7 +280,7 @@ console.log(fabrik ? `   ${gebaut} ${fabrik} fertig` : `   ${gebaut} NICHT ferti
 if (!fabrik) {
   const f2 = sim.pull<{ id: number; name: string; fraction: number }[]>('__readAllUnitsJson()')
     .find((u) => u.name === gebaut)
-  if (!f2 || f2.fraction <= 0) melde('SIM', 'Die Baustelle wächst nicht (Bau-Kette hängt)')
+  if (!f2 || f2.fraction <= 0) melde('SIM', 'The construction site is not growing (construction chain is hanging)')
   else console.log(`   Fortschritt: ${(f2.fraction * 100).toFixed(0)}% — Kette läuft`)
   // The construction is not finished (expensive + little income) — the FABRIK chain
   // (selection, collection point, queue, production) is not allowed
@@ -295,7 +295,7 @@ if (!fabrik) {
 }
 
 if (fabrik) {
-  tue('Fabrik auswählen + Sammelpunkt setzen')
+  tue('Select factory + set collection point')
   spiegle()
   ui.eval(`__uiSelectByIds({ ${fabrik} })`)
   uiFrame(2)
@@ -312,7 +312,7 @@ if (fabrik) {
   console.log(`   Befehl an die Sim: ${JSON.stringify(simBefehle[0] ?? null)}`)
   queueFactoryBuild(sim, fabrik, 'uel0201', 2)
 
-  tue('Bau-Warteschlange: der Wächter meldet, Decrease geht durch die Naht')
+  tue('Construction queue: the guard reports, Decrease goes through the seam')
   // The queue guard (UI_FactoryCommandQueueHandlerBeat, Cfile:1256904) must
   // report the new 2-queue as gamemain.OnQueueChanged — COUNTED on the module.
   ui.eval(`
@@ -323,7 +323,7 @@ if (fabrik) {
   `)
   spiegle() // Queue into the UI copy + guard is running (before OnBeat)
   const ev1 = Number(ui.eval('return __qtest.n'))
-  if (ev1 < 1) melde('UI', 'OnQueueChanged feuert nicht — der Queue-Wächter meldet die neue Warteschlange nicht')
+  if (ev1 < 1) melde('UI', 'OnQueueChanged does not fire — the queue guard does not report the new queue')
   else console.log(`   OnQueueChanged gefeuert (${ev1}×) — die Queue-Anzeige lebt`)
   // Rechtsklick aufs Queue-Icon = DecreaseBuildCountInQueue (construction.lua:895).
   simBefehle.length = 0
@@ -340,7 +340,7 @@ if (fabrik) {
   spiegle()
   const ev2 = Number(ui.eval('return __qtest.n'))
   const restCount = Number(ui.eval(`local q = __uiUnits[${fabrik}].buildQueue return (q[1] and q[1].count) or 0`))
-  if (ev2 <= ev1) melde('UI', 'Der Wächter meldet die geänderte Queue nicht (Decrease unsichtbar)')
+  if (ev2 <= ev1) melde('UI', 'The guard does not report the changed queue (Decrease invisible)')
   if (restCount !== 1) melde('SIM', `__adjustFactoryQueue: erwartet count=1, ist ${restCount}`)
   else console.log(`   nach Decrease: count=${restCount}, OnQueueChanged ${ev2}×`)
   // ... and Increase (left click, construction.lua:988) restores the tank
@@ -393,9 +393,9 @@ for (let i = 0; i < 400 && !tot; i++) {
   }
 }
 console.log(tot ? '   Der Feind ist gefallen' : 'The enemy is still alive (no fight?)')
-if (!tot) melde('SIM', 'Der Feind wurde nicht getötet — die Waffen greifen nicht')
+if (!tot) melde('SIM', 'The enemy was not killed - the weapons are not effective')
 if (maxEmitter > 0) console.log(`   Emitter gemeldet: max. ${maxEmitter} gleichzeitig (z. B. ${emitterBeispiel})`)
-else melde('SIM', 'KEIN Emitter während des Kampfes gemeldet — Mündungsfeuer/Einschläge erreichen den Renderer nicht')
+else melde('SIM', 'NO emitter reported during combat — muzzle flashes/impacts do not reach the renderer')
 if (emitterBp) {
   // The blueprint RPC for the particle system: the sim delivers the PARARED
   // Emitter BP as JSON (__emitterBpJson) — with texture and curves.
@@ -433,7 +433,7 @@ if (uv.indexOf('name=""') >= 0 || uv.indexOf('nicht erreichbar') >= 0) {
 ui.eval('__uiSetRollover(nil)')
 uiFrame(2)
 
-tue('Die Reiter oben (Menü, Diplomatie) + Abwahl')
+tue('The tabs at the top (menu, diplomacy) + deselect')
 try {
   ui.eval(`import('/lua/ui/game/tabs.lua').BuildContent('main')`)
   uiFrame(30)

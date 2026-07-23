@@ -29,12 +29,12 @@ faf-re contains the complete lockstep/session/replay/save system of the Moho eng
 ### Wire-Format (`CMessage`, `moho/net/CMessage.h`)
 ```
 byte 0    : u8   message type
-bytes 1-2 : u16 LE  gesamte Wire-Größe (Header 3 + Payload)
+bytes 1-2 : u16 LE total wire size (header 3 + payload)
 bytes 3.. : payload
 ```
 `CMessageStream` is a `gpg::Stream` view of the payload; Write/Read via `gpg::BinaryReader`. Strings are either NUL-terminated (`ReadString`) or u32-length-prefixed (`ReadLengthPrefixedString`). LuaObjects are serialized into a typed byte stream using `LuaObject::ToByteStream` (type tags: 0=float, 1=string, 2=nil, 3=bool, 4=table, 5=end).
 
-### Message-ID-Räume (`NetMessageRanges.h`, halboffene Bereiche)
+### Message ID spaces (`NetMessageRanges.h`, half-open areas)
 | Bereich | Enum | Zweck |
 |---|---|---|
 | 0-49 | `ECmdStreamOp` | Sim Command Stream (0-23 occupied only) |
@@ -42,7 +42,7 @@ bytes 3.. : payload
 | 100–119 | `ELobbyMsg` | Lobby-Handshake |
 | 200–209 | `ELobbyMsg` | Connection-Lifecycle-Events |
 
-**ECmdStreamOp (0–23)** — vollständig dokumentiert inkl. Payload in `ECmdStreamOp.h`:
+**ECmdStreamOp (0-23)** — fully documented including payload in `ECmdStreamOp.h`:
 `0 Advance(u32 beats)`, `1 SetCommandSource(u8)`, `2 CommandSourceTerminated()`, `3 VerifyChecksum(MD5Digest, u32 beat)`, `4 RequestPause`, `5 Resume`, `6 SingleStep`, `7 CreateUnit(u8 army, string bp, f x, f z, f heading)`, `8 CreateProp`, `9 DestroyEntity`, `10 WarpEntity`, `11 ProcessInfoPair`, `12 IssueCommand(u32 count, EntId[], CmdData, u8 clear)`, `13 IssueFactoryCommand`, `14/15 In/DecreaseCommandCount`, `16 SetCommandTarget`, `17 SetCommandType`, `18 SetCommandCells`, `19 RemoveCommandFromQueue`, `20 DebugCommand`, `21 ExecuteLuaInSim(string)`, `22 LuaSimCallback(string, LuaObject, EntId[])`, `23 EndGame`.
 
 **EClientMsg (50–57):** `50 Ack(u8 clientIndex, i32 beat)`, `51 Dispatched(i32)`, `52 Available(i32)`, `53 Ready`, `54 Eject(u8 requester, i32 afterBeat)`, `55 ReceiveChat(bytes)`, `56 AdjustSimSpeed(i32 clock, i32 rate)`, `57 IntParam(i32)`.
@@ -137,7 +137,7 @@ Header:
 ```
 strz      "Supreme Commander v1.50.3764"   (STR_Printf("Supreme Commander v%1.2f.%4i", 1.5, 3764))
 strz      (ignoriert; in echten Files 3 Bytes: "\r\n\0")
-char[13]  "Replay v1.9\r\n"                (strcmp-geprüft)
+char[13] "Replay v1.9\r\n" (strcmp checked)
 strz      map file  ("/maps/xxx/xxx.scmap")
 strz      (ignoriert; 4 Bytes)
 u32 len + bytes   GameMods       (Lua-Bytestream)
@@ -194,12 +194,12 @@ No separate writer! `CDecoder::ReceiveMessage` (`CDecoder.cpp:181`) copies the c
 - **Scope in the repo:** 240 `*TypeInfo.h`, 89 `*Serializer.h`, 30 `*Reflection.h`. The following are serialized: `Sim`, `CArmyImpl`, `CArmyStats`, `CEconomy`, `CMersenneTwister`/`CRandomStream` (RNG-State!), `COGrid`, `CInfluenceMap`, `CCommandDb`, all tasks/units/weapons, as well as **the complete one Lua state** (`WriteTThread/WriteTString/WriteTTable/WriteFunction/WriteUserdata/WriteCFunction` to `WriteArchive`).
 - **Consequence for a new build:** A binary-compatible save/load is an enormously large chunk (Lua state serialization including closures). A separate, semantic save format (JSON/CBOR of the Sim values ​​+ your own Lua state snapshot) is more realistic; Replay compatibility, on the other hand, is very achievable.
 
-## 5. FAF-Replay-Kompatibilität (.fafreplay)
+## 5. FAF replay compatibility (.fafreplay)
 
 ### Container (Web-recherchiert)
 ```
 Zeile 1 : JSON-Header, "\n"-terminiert  (u.a. "version", uid, featured_mod, sim_mods, players, …)
-Rest    : version==1 → base64-decode → erste 4 Bytes (dekomprimierte Größe) überspringen → zlib.decompress
+Rest: version==1 → base64-decode → skip first 4 bytes (decompressed size) → zlib.decompress
           version==2 → zstd.decompress
 Ergebnis: exakt der .scfareplay-Bytestream (Header + Command-Stream, s. o.)
 ```
@@ -219,7 +219,7 @@ Referenz-Implementierungen: `FAForever/faf-scfa-replay-parser` (Python + Kaitai 
 - `CClientBase::ReceiveChat` builds a `CMessage(CLIMSG_ReceiveChat)` + payload and calls `Process(msg)`; With `CNetClient` it goes over the line, with `CLocalClient` directly locally.
 - Empfang: `CClientBase::Process` case 55 → `mManager->mInterface->ReceiveChat(this, payload)` → `IClientMgrUIInterface::ReceiveChat` → UI/Lua.
 - **Chat is therefore NOT in the command stream and not in the replay body** (Message ID 55 is outside 0-49, is consumed by `CClientBase::Process` and never written to the pipe). Community parsers only read "messages" from `CMDST_LuaSimCallback` payloads (in-sim chat callbacks), not from CLIMSG_ReceiveChat.
-- Weitere UI-Notifications über dasselbe Interface: `NoteDisconnect`, `NoteEjectRequest`, `NoteGameSpeedChanged`, `ReportBottleneck(+Cleared)`.
+- More UI notifications via the same interface: `NoteDisconnect`, `NoteEjectRequest`, `NoteGameSpeedChanged`, `ReportBottleneck(+Cleared)`.
 
 ### Diplomacy — in the sim
 - `enum EAlliance : i32 { ALLIANCE_Neutral=0, ALLIANCE_Ally=1, ALLIANCE_Enemy=2 }` (`moho/sim/EAllianceTypeInfo.h`), `CArmyImpl::SetAlliance(armyId, relationIndex)` (0x006FDF30).

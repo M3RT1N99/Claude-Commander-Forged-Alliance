@@ -125,7 +125,7 @@ console.log(`  · Lua-Heap ${simBefore.toFixed(1)} MB → ${simAfter.toFixed(1)}
 check(simGrowth < 5, `Sim-VM wächst über 1000 Beats um ${simGrowth.toFixed(1)} MB (Grenze: 5)`)
 
 const units = sim.pull<{ id: number; name: string }[]>('__readAllUnitsJson()')
-check(units.length === 1 && units[0]!.name === 'uel0001', 'Der JSON-Zustand trägt die ACU')
+check(units.length === 1 && units[0]!.name === 'uel0001', 'The JSON state carries the ACU')
 
 ui.close()
 sim.close()

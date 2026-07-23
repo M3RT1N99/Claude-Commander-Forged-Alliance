@@ -244,7 +244,7 @@ console.log(
 )
 
 // Details: what is specifically missing in the biggest gaps.
-console.log('\nDie größten Lücken im Einzelnen:')
+console.log('\nThe biggest gaps in detail:')
 for (const b of sorted.slice(0, showAll ? sorted.length : 8)) {
   const open = lines.filter((z) => z.area === b && z.state !== 'ECHT')
   if (offen.length === 0) continue

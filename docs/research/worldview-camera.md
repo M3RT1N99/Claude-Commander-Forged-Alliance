@@ -73,7 +73,7 @@ is constructed via `moho.UIWorldView.__init`, i.e. the C++ Ctor.
 `RunScript("OnUpdateCursor")` — this is how worldview.lua:131 comes into play. Thereafter
 Keyboard Pan/Rotate (`ui_KeyboardPanSpeed` = 90, `…AccelerateMultiplier` = 4,
 `ui_KeyboardRotateSpeed` = 10, `…Multiplier` = 2; Cfile:421739-421742).
-Außerdem `RunScriptBool("OnIconsVisible", …)` (Cfile:1300081).
+Also `RunScriptBool("OnIconsVisible", …)` (Cfile:1300081).
 
 ### `GetLeftMouseButtonAction` — the translation Lua mode → Engine mode
 
@@ -177,7 +177,7 @@ and throw when called.
 | `GetsGlobalCameraCommands(bool)` | `mGlobalCameraCommands` — accepts keyboard camera commands | Cfile:1300446 | worldview.lua:41/60 |
 | `SetCartographic`/`IsCartographic` | Ortho-Ansicht (`CRenderWorldView::SetOrthographic`) | vftable Cfile:397448 | worldview.lua:191 |
 | `EnableResourceRendering`/`IsResourceRenderingEnabled` | Resource icons in View | — | minimap.lua:126, multifunction:455 |
-| `SetHighlightEnabled` / `HasHighlightCommand` | Hover-Highlight für Befehlsziele | — | worldview.lua:158, 182 |
+| `SetHighlightEnabled` / `HasHighlightCommand` | Hover highlight for command targets | — | worldview.lua:158, 182 |
 | `GetRightMouseButtonOrder()` → string | `RULEUCC_*`, what a right click would do now | mHelp @1300466 | worldview.lua:165 |
 | `ShowConvertToPatrolCursor()` → bool | Move-Kette → Patrol (siehe LOC Engine0009) | mHelp @1300584 | worldview.lua:139/159 |
 | `CameraReset()` | `Camera:Reset()` on the View Camera | mHelp @1300357 | — |
@@ -193,7 +193,7 @@ and throw when called.
 | `InternalCreateWldUIProvider` → **CLuaWldUIProvider** (1) | Engine recalls `CreateGameInterface`, `StartLoadingDialog`, … | wlduiprovider.lua:13 | gamemain.lua:225 |
 
 Additionally block (not WorldView's own, but used by worldview.lua):
-`GetValidAttackingUnits` (Reticle-Größe), `EntityCategoryContains`, `IsKeyDown`,
+`GetValidAttackingUnits` (reticle size), `EntityCategoryContains`, `IsKeyDown`,
 `GetNumRootFrames`.
 
 ---
@@ -221,7 +221,7 @@ RTS camera as `{ target, dist, pitchOffset }` — that's almost `{Focus, Zoom, P
    after — including “Right click = Move” as a fixed value (`worldClick`, line 125), while
    the engine for this asks `GetRightMouseButtonAction`.
 3. **No camera in the Lua.** `GetCamera` throws. This means that every file containing the
-   Kamera anfasst: zoomslider, minimap, avatars, unittext, chat-Kamera-Sprünge, usercamera.
+Camera touches: zoomslider, minimap, avatars, unittext, chat camera jumps, usercamera.
 4. **No `UpdateSelection`.** There is no `cursorInfo` state; `GetMouseWorldPos()`
    does not exist, the target reticle and hover cursor cannot work.
 5. **Selection via TS** (`selectLua` in main.ts) instead of using the selection dragger.

@@ -44,7 +44,7 @@ Two **Auto-Vivifiers** are deliberately in the productive path (nothing pops the
 ## Sources of Truth — in that order
 
 1. **IDA-Decompilation:** `Cfile/ForgedAlliance.exe.c` (~2 Mio. Zeilen, volle
-   `Moho::`-Symbole, gitignored). Zusätzlich MCP-Zugriff (`mcp__ida__*`).
+`Moho::` symbols, gitignored). Additionally MCP access (`mcp__ida__*`).
    For every question “how does the engine do this?” → search here.
 2. **Original Lua + Blueprints:** `npx tsx scripts/peek-lua.ts <pfad> <von> <bis>`
    or `--grep <regex>` (searches lua.scd, mohodata.scd, units.scd incl. `.bp`).
@@ -57,7 +57,7 @@ verify real data.
 
 `src/engine-lua/*.lua` is what the C++ engine puts into the Lua states
 (moho-classes, globals, scheduler, maui-substrate, ui-globals); TS next to it only
-Loader/Bridges. Sim läuft im Worker (`src/sim/luaSimWorker.ts`, 10-Hz-Beat),
+Loaders/Bridges. Sim runs in worker (`src/sim/luaSimWorker.ts`, 10 Hz beat),
 UI-VM im Main-Thread (`src/ui/gameUi.ts` → maui-Baum → DOM via
 `src/ui/mauiRenderer.ts`). Click into the world: `src/ui/worldCommands.ts` asks
 `commandmode.lua` — the engine doesn't decide anything.
@@ -75,7 +75,7 @@ and the UI no `CreateUnit`. Never boot both into a VM.
 `installEngine()`: Engine primitives first (SimThreads → Globals → Economy →
 Motion → Build), then **RELOAD `/lua/system/class.lua`**, then moho →
 utils → Blueprints → UnitFactory → SimSync → terrainTypes → `setupSession()`.
-`class.lua` lädt **zweimal**, weil `class.lua:78`
+`class.lua` loads **twice** because `class.lua:78`
 `local ForkThread = ForkThread` snapshotted — this is still the case with the bootstrap
 `nil`, and without reload `class.lua:377` dies with every state change
 away from the polluter. `globals.lua` deliberately does not contain `Class(`.
@@ -130,10 +130,10 @@ npx tsx scripts/peek-lua.ts --grep <regex>  # Original-Lua/Blueprints suchen
   `--import ./scripts/register-lua.mjs`** (sonst
   `ERR_UNKNOWN_FILE_EXTENSION ".lua"`; `npm test` setzt es selbst).
 - Tests sind Verify-Suiten gegen echte Spieldaten, keine Mocks. Ein roter
-  Test nach einer Ehrlichkeits-Korrektur ist ein **Fund**, kein Rückschritt.
-- Während der Arbeit gezielt die passende Suite laufen lassen; **vor jedem
+Testing after an honesty correction is a **find**, not a step backwards.
+- Run the appropriate suite while you work; **in front of everyone
   Commit** `npx tsc --noEmit` und `npm test` (alle Suiten).
-- Browser-Ende-zu-Ende: `?sandbox=<karte>&selftest=<blueprint>` fährt die
+- Browser end-to-end: `?sandbox=<map>&selftest=<blueprint>` drives the
   Techdemo ohne Maus (headless Chrome; Sim tickt in Echtzeit, nicht unter
   `--virtual-time-budget`).
 - **Debuggen:** Fehler in Lua-Threads werden nur geloggt — zuerst nach
@@ -142,62 +142,62 @@ npx tsx scripts/peek-lua.ts --grep <regex>  # Original-Lua/Blueprints suchen
 
 ## Arbeitsstil je Modell
 
-Alles oben gilt für **jedes** Modell. Dieser Abschnitt ändert nur, *wie viel* du
-am Stück übernimmst und mit welchem Aufwand — **nie, was richtig ist**. Dein
+Everything above applies to **every** model. This section only changes *how much* you
+in one go and with what effort - **never what is right**. Your
 aktives Modell steht in deinem System-Prompt.
 
 **Basis** (Sonnet-Klasse, jedes Modell, und immer bei Unsicherheit): kleine,
-verifizierbare Schritte; vor großen Umbauten über mehrere Dateien beim Nutzer
-rückversichern; für breite Suchen **einen** Recherche-Subagenten statt weiter
-Fächerung. Aufwand: mittel; hoch bei schwerem Denken.
+verifiable steps; before major modifications across multiple files for the user
+reinsure; for broad searches **a** research subagent instead of further
+Fanning. Effort: medium; high with difficult thinking.
 
 **Opus 4.8 und die Claude-5-Familie (Fable 5):** autonom arbeiten. Mehrstufige
-Arbeit von Anfang bis Ende planen und lange Vorhaben (Migrationen, Umbauten über
+Planning work from start to finish and long projects (migrations, conversions).
 viele Dateien) **ohne Zwischenhalt** zu Ende bringen, solange Typecheck und
-Suiten grün bleiben. Die Spezifikation vorn festlegen (Aufgabe, Absicht,
+Suites stay green. Define the specification upfront (task, intent,
 Randbedingungen, Abnahmekriterium in einem Zug), nicht scheibchenweise. Aufwand:
-`xhigh` als Startpunkt für Coding/Agenten-Arbeit, `high` als Minimum bei
-Denkarbeit; `max` nur für echte Grenzfälle (überdenkt strukturierte Aufgaben).
+`xhigh` as the starting point for coding/agent work, `high` as the minimum
+thinking work; `max` only for real edge cases (rethinks structured tasks).
 Der Nutzer kann mit **ultracode** weiter aufdrehen (xhigh + deterministische
-Workflow-Fächerung).
+Workflow fanning).
 
-**Fächern und auf Abdeckung prüfen (Opus 4.8 und neuer):** diese Modelle
-spawnen von sich aus zu wenig. Also *ausdrücklich* parallele Subagenten über
-unabhängige Themen fächern — z. B. je ein Agent pro Recherche-Thema
-(Front-End-Menü, WorldView, Session-Start, Kampf …) oder pro Engine-Subsystem.
-**Nicht** fächern für Arbeit, die in einer Antwort erledigt ist. Vor „fertig":
-einen frischen Subagenten den eigenen Diff prüfen lassen — sein Auftrag ist
-**Abdeckung** (jede Korrektheits- oder Anforderungslücke melden, mit
+**Compartments and check for cover (Opus 4.8 and newer):** these models
+don't spawn enough on their own. So *explicitly* parallel subagents about
+study independent topics - e.g. B. one agent per research topic
+(Front-end menu, WorldView, session start, combat…) or per engine subsystem.
+**Don't** fan for work completed in one answer. Before “done”:
+have a fresh subagent check your own diff — his job is
+**Coverage** (report any correctness or requirements gap, with
 Zuversicht + Schwere), nicht Filtern. In diesem Repo gibt es (noch) keine
 vorgefertigten Reviewer-Agenten; nutze `/code-review` bzw. einen
-`general-purpose`-Agenten mit klarem Prüfauftrag.
+`general-purpose` agents with a clear inspection mandate.
 
-**Regel-Reichweite wörtlich nennen.** Diese Modelle folgen Anweisungen wörtlich
+**State rule range verbatim.** These models follow instructions verbatim
 und verallgemeinern eine Regel nicht von selbst. Wenn eine Invariante *jeden*
 Fall betrifft, schreibe „jede/alle": *jede* Zahl kommt aus Blueprint, Lua oder
-Decomp; *jedes* fehlende Engine-Teil knallt; *jede* Spiellogik läuft in der
+Decomp; *every* missing engine part pops; *all* game logic runs in the
 Original-Lua.
 
 **Niemals** die Invarianten (Kernprinzip, „Verboten"), die Ehrlichkeitsregeln
-oder die Korrektheit davon abhängig machen, welches Modell gerade läuft — die
+or make the correctness dependent on which model is currently running - the
 Modellzeile kann veraltet sein; im Zweifel gilt die Basis. Jeden autonomen
-Schritt an einer Prüfung verankern, die du **wirklich ausführen** kannst
+Anchor the step to a test you can **actually do**
 (`npx tsc --noEmit`, die passende `verify-*`-Suite, `npm test`, der
 Browser-Selbsttest `?sandbox=…&selftest=…`) — nie an „sieht fertig aus".
 
-## Weiterführende Doku
+## Further documentation
 
 | Dokument                                                                                                               | Inhalt                                                          |
 | ---------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| [docs/STATUS.md](docs/STATUS.md)                                                                                        | Stand + bekannte Löcher (zuerst lesen)                         |
+| [docs/STATUS.md](docs/STATUS.md) | Stand + known holes (read first) |
 | [docs/PLAN-1ZU1.md](docs/PLAN-1ZU1.md)                                                                                  | Konsolidierter 1:1-Fahrplan (Meilensteine)                      |
 | [docs/PLAN-UI.md](docs/PLAN-UI.md)                                                                                      | Weg zur echten`lua/ui`, mit Decomp-Belegen                    |
 | [docs/MASTERPLAN.md](docs/MASTERPLAN.md)                                                                                | Gesamtinventur Vollspiel, Phasen A–F                           |
 | [docs/FORMATS.md](docs/FORMATS.md)                                                                                      | Dateiformate (scd/scm/sca/scmap/dds), verifiziert               |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)                                                                            | Architektur (älter; bei Widerspruch gilt CLAUDE.md)            |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Architecture (older; in case of objection, CLAUDE.md applies) |
 | [research/engine-api.md](docs/research/engine-api.md)                                                                   | **Alle** Engine-Bindungen je VM (generiert — Checkliste) |
 | [research/verified-facts.md](docs/research/verified-facts.md)                                                           | Belegtes Detailwissen nach Themen                               |
-| [research/economy-binary.md](docs/research/economy-binary.md)                                                           | Zwei-Ratio-Ökonomie aus dem Binary                             |
+| [research/economy-binary.md](docs/research/economy-binary.md) | Two-ratio economics from the binary |
 | [research/build-task-binary.md](docs/research/build-task-binary.md)                                                     | Bau-Task-Ablauf                                                 |
 | [research/command-dispatch-binary.md](docs/research/command-dispatch-binary.md)                                         | Befehls-Dispatch (Command→Task)                                |
 | [research/damage-binary.md](docs/research/damage-binary.md)                                                             | Schadenssystem                                                  |
@@ -206,7 +206,7 @@ Browser-Selbsttest `?sandbox=…&selftest=…`) — nie an „sieht fertig aus".
 | [research/ui-complete.md](docs/research/ui-complete.md)                                                                 | UI-System komplett                                              |
 | [research/game-shell.md](docs/research/game-shell.md)                                                                   | Front-End, Lobby, Session-Start                                 |
 | [research/effects-audio.md](docs/research/effects-audio.md)                                                             | Effekt-Blueprints + XACT-Audio                                  |
-| [research/sound-fmod.md](docs/research/sound-fmod.md)                                                                   | Audio-Bänke                                                    |
+| [research/sound-fmod.md](docs/research/sound-fmod.md) | Audio Benches |
 | [research/intel-vision.md](docs/research/intel-vision.md)                                                               | Intel/Recon/Sichtbarkeit                                        |
 | [research/net-replay-save.md](docs/research/net-replay-save.md)                                                         | Lockstep, Replay, Save                                          |
 | [research/render-details.md](docs/research/render-details.md)                                                           | Renderer, SCMAP-Reststruktur                                    |
@@ -215,4 +215,6 @@ Browser-Selbsttest `?sandbox=…&selftest=…`) — nie an „sieht fertig aus".
 
 ## Sprache
 
-Antworten im Chat auf Deutsch. ALLES im Repo auf Englisch: Code-Kommentare, Commits, Log-Meldungen, Check-Texte, neue Doku.
+Respond in users Language in chat. Keep all repository content in English: code comments, commits, log messages, check text, and new documentation.
+
+Preserve HTML entities and syntax exactly during text translation (for example, retain `&amp;` rather than replacing it with a raw `&`).

@@ -2,7 +2,7 @@
 
 *Outsourced from [CLAUDE.md](../../CLAUDE.md): here is what you bought with a lot of money
 Detailed knowledge with evidence. The cross-cutting invariants (blueprint defaults,
-class.lua-Semantik, getrennte Ökonomie-Schalter, wasmoon-null) stehen weiterhin
+class.lua semantics, separate economy switches, wasmoon-null) are still available
 in CLAUDE.md. Before working on one of the topics: read the relevant section.*
 
 ## Economy (Details: [economy-binary.md](economy-binary.md))
@@ -56,7 +56,7 @@ in CLAUDE.md. Before working on one of the topics: read the relevant section.*
 
 ## Movement (Details: [movement-path.md](movement-path.md))
 
-- **`MaxBrake == 0` / `MaxSteerForce == 0` heißen „nimm `MaxAcceleration`"**,
+- **`MaxBrake == 0` / `MaxSteerForce == 0` means “take `MaxAcceleration`”**,
   not "can't brake/steer" (Cfile:942136-942147). The ACU has even
   no `MaxBrake` — if read incorrectly, that pins your speed to 0.
 - Motion parameters are scaled **per tick** (`·0.1` Speed, `·0.01` Accel,
@@ -190,7 +190,7 @@ in CLAUDE.md. Before working on one of the topics: read the relevant section.*
   **`faction` is 0-based** — the Lua calculates `faction + 1` everywhere
   (gamemain.lua:109, orders.lua:675, avatars.lua:664). `SessionGetScenarioInfo()`
   returns the table that went to the sim at startup (`.Options` will
-  ungeprüft gelesen: tabs.lua:21, diplomacy.lua:34).
+read unchecked: tabs.lua:21, diplomacy.lua:34).
   `SessionGetLocalCommandSource()` is the **Client** index (1-based; 0 = allowed
   not command, Cfile:1330618), **not** the army. Without a session, everyone throws
   Session-Globals „…(): no active session." (Cfile:1330339).
@@ -236,8 +236,8 @@ in CLAUDE.md. Before working on one of the topics: read the relevant section.*
   gestrippt (`mPrefix`, Cfile:696168-696248; Beweis:
   `UICommandGraph::LoadPathParams` sets the prefix per
   `STR_Printf("%s%s",…)` itself before that, Cfile:1244372-1244378). input
-  case-insensitiv, Präfix optional (SetLexical, Cfile:1381888-1381946).
-  Vollständiges Mapping: func_UnitCommandCapToCommandType
+case-insensitive, prefix optional (SetLexical, Cfile:1381888-1381946).
+Full mapping: func_UnitCommandCapToCommandType
   (Cfile:1242230-1242328); RetaliateToggle/Dock/Script/Invalid → `'None'`.
 - **`SimCallback`** (Cfile:1359139-1359305): Args are serialized IMMEDIATELY
   (Snapshot; Functions → “Unable to marshal lua function", Cfile:999128),
@@ -289,7 +289,7 @@ in CLAUDE.md. Before working on one of the topics: read the relevant section.*
   limits the DELTA to rads: if sin²(θ/2)=|q.xyz|² ≤ sin²(rads/2) →
   UNCHANGED (target closer than limit → full rotation); otherwise q =
   (cos(rads/2), axis·±sin(rads/2)) (Vorzeichen folgt w<0). rads/2 ≥ π/2 →
-  unverändert.
+unchanged.
 
 ## Effects/Particles (Source: effects/particle.fx from effects.scd, 1332 lines — the REAL shader)
 
@@ -297,7 +297,7 @@ in CLAUDE.md. Before working on one of the topics: read the relevant section.*
   (= Ramp-U!); Position without drag `P0 + V·t + 0.5·A·t²`, with drag
   `(dz·A − dy·V)·(e^(−dx·t) − 1) + dy·A·t + P0`; Rotation
   `rot = Pos.w + Vel.w·t` rotates the ±1 quad; Billboard about
-  `InverseViewMatrix[0/1]` (Flat: Welt-X/Z); Größe `Size.x + Size.y·t`.
+`InverseViewMatrix[0/1]` (Flat: World-X/Z); Size `Size.x + Size.y·t`.
   Frame animation: `frame = floor(framerate·t)`, U at `framesize·frame`
   delay; TexOffset.z/x select the texture line, TexOffset.y the
   Ramp-Zeile (mTex1 = {alpha, rampOffset}).
@@ -312,7 +312,7 @@ in CLAUDE.md. Before working on one of the topics: read the relevant section.*
   TTrail (TrailVS: Ribbon across the viewing direction, `cross((0,0,1), dirView)`,
   V from `(startTime − originTime)/lifetime · repeatRate`).
 - **Emitter transport with us:** the sim reports live emitters per beat
-  Weltposition (`__readAllEmittersJson`, globals.lua; Owner+Knochen über
+World position (`__readAllEmittersJson`, globals.lua; owner+bones above
   `__boneWorld`) → Worker → `LuaSimClient.allEmitters()`.
 
 ## Lua-Host

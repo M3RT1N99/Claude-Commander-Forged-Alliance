@@ -11,7 +11,7 @@ All 9 render features are resolved from faf-re + effects.scd shaders + game data
 - 39 out of 60 maps use 'TTerrain' (only 4 Strata, different light/specular formula), 20 'TTerrainXP', 1 'TTerrainGlow' — we currently only implement TerrainAlbedoXP for all.
 - Skycube DDS are real DDS cubemaps: DXT1, 512×512, NO Mips, caps2=0xFE00, 6 faces of 131,072 bytes each in the order +X,−X,+Y,−Y,+Z,−Z (file length exactly 128 + 6·131072 = 786,560).
 - Water Fresnel is a procedurally generated 128×128 lookup texture: fresnel = d bias + (1 − d bias) (1 − NdotV)^fresnelPower, where d = water depth; Our parser already reads fresnelBias/fresnelPower but discards them.
-- WaterMap-Kanäle (UtilityTextureC) exakt: R = Flatness (Wellenstärke), G = Tiefe, B = Wasser-Alphamaske, A = 1 − Foam.
+- WaterMap channels (UtilityTextureC) exactly: R = flatness (wave strength), G = depth, B = water alpha mask, A = 1 − foam.
 - Decal types are an enum (1=Albedo, 2=Normals, 3=WaterMask, 4=WaterAlbedo, 6=Glow, 8=GlowMask, 9=AlbedoXp); Type 2 (75,683) and Type 1 (47,874) dominate in the original maps.
 - DecalMatrix = translate(−pos) · Ry · Rx · Rz · scale(1/scale), UV = (x,z) of the result; the Lua API CreateDecal converts center→corner (pos = center − 0.5·(right·sizeX + forward·sizeZ)), i.e. h. SDecalInfo.mPos is the CORNER of the local [0,1]² square.
 - LOD selection (Mesh::ComputeLOD): first LOD in order with cutoff<=0 (always) OR distance<=cutoff; with useDissolve distance<=cutoff+ren_MeshDissolve applies, otherwise nothing is drawn.
@@ -54,13 +54,13 @@ vec3   rotationY       Basisvektor 2  (praktisch immer (0,1,0))
 vec3   rotationZ       Basisvektor 3  (bei reiner Y-Drehung: (-sin,0,cos))
 vec3   scale           praktisch immer (1,1,1)
 ```
-= 3×3-Rotationsbasis, orthonormal (numerisch geprüft: rotX·rotZ = 0).
+= 3×3 rotation base, orthonormal (checked numerically: rotX*rotZ = 0).
 
 Magnitude: SCMP_005 = **46,971 props**, SCMP_004/006 ≈ 27,000, typical 5,000-11,000. **207 distinct prop blueprints** across all maps. → GPU Instancing pro (Blueprint,LOD) is mandatory, not optional.
 
 ---
 
-## 2. Props (Bäume/Steine)
+## 2. Props (trees/stones)
 
 **Datenquelle:** SCMAP-Props-Liste (oben) → Blueprint in `env.scd` (335 `*_prop.bp`).
 
@@ -195,7 +195,7 @@ N       = lerp(float3(0,1,0), N, waterTexture.r)                        // Flatn
 ```
 Texturen: `/textures/engine/waves.dds`, `waves000.dds`, `waves001.dds` — je **256×256, DXT3, 9 Mips**. RGB = Normale, **A = Wellenkamm**.
 
-**WaterMap-Kanäle (UtilityTextureC) — exakt:**
+**WaterMap channels (UtilityTextureC) — exact:**
 `R = Flatness` (0 = smooth, 1 = full waves) · `G = Tiefe` (index in WaterRamp + Fresnel) · `B = Wasser-Alphamaske` (→ `TWaterLayAlphaMask` gives `float4(0,0,0,mask.b)`) · `A = 1 − Foam` (comb blend: `lerp(color, waveCrestColor, (1 - waterTexture.a) · waveCrest)`).
 The three semi-resolution 8-bit masks in SCMAP (Foam/Flatness/DepthBias) are the editor sources from which this DDS is baked.
 
@@ -220,7 +220,7 @@ reflectedPixels = lerp(skyReflection, reflectedPixels, saturate(unitreflectionAm
 ```
 → **ReflectionMap = the scene is rendered mirrored.** In mesh.fx the uniform **`mirrored`** controls this pass: `if (1 == mirrored) clip(vertex.depth.x)` (cuts away everything underwater) and `alpha = mirrored ? 0.5 : …`. Where the ReflectionMap has Alpha 0 → Sky Cubemap.
 
-**Fresnel — exakte Formel** (`HighFidelityWater.cpp:100-146`, `BuildFresnelLookupTexture`, 128×128, 2 Float-Kanäle):
+**Fresnel — exact formula** (`HighFidelityWater.cpp:100-146`, `BuildFresnelLookupTexture`, 128×128, 2 float channels):
 ```
 // Spalte = Wassertiefe d, Zeile = Einfallswinkel i (= NdotV)
 reflectionBlend = d · fresnelBias
@@ -256,7 +256,7 @@ Common Varyings: **`vertex.material.y` = percentComplete (buildProgress 0→1)**
 |---|---|---|
 | `UEFBuild_*` | `UEFBuildHiFiPS` (2928) | Normal-mapped base; Team color only appears at 90%: `teamColor *= (pc>=0.9) ? (pc-0.9)*10 : 0`; `t = min(max(frac(0.02·time),0.35),0.7)`; `current = lerp(color+secondary, float3(0,0,1), t)`; `out = lerp(current, color, pc)`; `alpha = max(pc, 0.5)` → blue pulsation that disappears as you progress. Second pass: `UEFBuildOverlayHiFiPS` (2976), Alpha faded out in the last 5%. |
 | `UEFBuildCube_*` | `UEFBuildCubePS` (3003) | The “scaffolding cube” mesh; Albedo 0.025, secondary 50, same blue Lerp logic. |
-| `AeonBuild_*` | `AeonBuildPS` (2713) | Phong + Env-Cubemap; `light = 0.6·lightMultiplier·light + (1-light)·shadowFill`; `alpha = specular.b + glowMinimum`. Overlay-Pass `AeonBuildOverlayPS` (2748): zwei gegenläufig scrollende Masken (`mask1.r - mask2.g + mask1.g·mask2.r`). |
+| `AeonBuild_*` | `AeonBuildPS` (2713) | Phong + Env cubemap; `light = 0.6·lightMultiplier·light + (1-light)·shadowFill`; `alpha = specular.b + glowMinimum`. Overlay pass `AeonBuildOverlayPS` (2748): two counter-scrolling masks (`mask1.r - mask2.g + mask1.g·mask2.r`). |
 | `AeonBuildPuddle_*` | `AeonBuildPuddlePS` (2789) | scrollende UVs (`x -= mat.x·0.002`, `y += mat.x·0.0042`). |
 | `CybranBuild_*` | `CybranBuildPS` (2837) + `CybranBuildOverlayPS` | Overlay-VS `EffectVertexNormalLoFiVS(14,4,0,0,-0.008,0.008)`. |
 | `SeraphimBuild_*` | `SeraphimBuildPS` (2895) | UV distortion from `secondarySampler` (`uvaddress·0.03`), which fades out with `buildFractionMul = (pc-0.9)*10`; Falloff ramp like our already ported `UnitFalloffPS`; `alpha = max(pc, 0.25)`. Own depth technique `SeraphimBuildDepth`. |
@@ -282,7 +282,7 @@ All shields have `cartographicTechnique = "CartographicShield"`.
 ## 8. Fog of War / Range-Ringe / Selection / LOD / Silhouetten
 
 ### FoW + Ranges = Stencil-Shadow-Volumes (2-stufig)
-**Stufe 1 — Stencil füllen (ColorWrite = 0):**
+**Stage 1 — Fill Stencil (ColorWrite = 0):**
 - `vision.fx` `CastVision`: `visionVertexShader` scales a unit volume: `vertex.xz = radius·vertex.xz + position.xy`. FrontFace (Cull CCW): `StencilZFail = incr`; BackFace (Cull CW): `StencilZFail = decr`, `StencilFunc = always`, masks 0xFF.
 - `vision.fx` `CastBoundaryCCW/CW`: Card boundary box (`boxCenter`, `boxExtent`), with DepthBias ±0.00001.
 - `range.fx` `Cast`: **ellipse** instead of circle — `vertex.xz = (coeff.xx·radius.xx + coeff.yy·radius.yy)·vertex.xz + position.xy`; StencilWriteMask 0x7F, StencilMask 0x80, StencilRef 0xFF, `StencilFunc = notequal`, `StencilFail = zero`, ZFail incr/decr.
@@ -290,7 +290,7 @@ All shields have `cartographicTechnique = "CartographicShield"`.
 **Stufe 2 — Fullscreen-Quad in frame.fx:**
 - `Vision` (598): `StencilFunc = equal`, Ref 0x00 → `VisionPS(0.33)` = `float4(0,0,0,0.33)`, SrcAlpha/InvSrcAlpha → **unexplored area is darkened by 33%**.
 - `Boundary` (626): `StencilFunc = notequal`, `VisionPS(1.0)` → everything outside the map is completely black.
-- `RangeMask` (518) → `RangeFill` (542, `RangePS(float4(1,1,1,0.125))`, StencilMask 0x80/Ref 0xFF/equal) → `RangeBurn` (570, `RangePS(rangeColor)`, StencilMask 0x7F/Ref 0x00/notequal, SrcBlend one/DestBlend zero) — 3 Pässe für Füllung + Rand.
+- `RangeMask` (518) → `RangeFill` (542, `RangePS(float4(1,1,1,0.125))`, StencilMask 0x80/Ref 0xFF/equal) → `RangeBurn` (570, `RangePS(rangeColor)`, StencilMask 0x7F/Ref 0x00/notequal, SrcBlend one/DestBlend zero) — 3 passes for fill + border.
 
 ### Strategic/Cartographic-Overlay
 `frame.fx` `TStrategic` / `StrategicPS` (246): `color = tex(FrameSampler1)`, `overlay = tex(FrameSampler2)`, `fog = 1 - tex(FrameSampler3).r`; if `useStrategicOverlay`: `color = overlay.a·overlay.rgb + (1-overlay.a)·fog·color`; Alpha from a dissolve texture (`8·texcoord`) + `DissolveOffset`. mesh.fx has `CartographicUnit/Feature/Place/Build/Shield/Feedback` and `cartographic.fx`.
@@ -300,7 +300,7 @@ All shields have `cartographicTechnique = "CartographicShield"`.
 
 ### LOD system (`Mesh::ComputeLOD`, Mesh.cpp:4688-4724) — exact
 ```
-für jede LOD in Reihenfolge:
+for each LOD in order:
     cutoff = lod.cutoff                       // = LODCutoff aus dem Blueprint
     if (cutoff <= 0)               return lod   // 0/fehlend = immer sichtbar
     if (lod.useDissolve) {
@@ -324,7 +324,7 @@ TMeshAdd→Effect · TMeshExplosion→Explosion · TMeshCloud→Cloud · TMeshOu
 TMeshEMPNuke→NukeEMP · TMeshQuantumNuke→NukeQuantum · TMeshTemporalBubble→TemporalBubble
 leerer Name → "Unit"
 ```
-Danach: Technique = `<aufgelöst>_<HighFidelity|MedFidelity|LowFidelity>`.
+Then: Technique = `<resolved>_<HighFidelity|MedFidelity|LowFidelity>`.
 
 ---
 
@@ -356,7 +356,7 @@ float  clouds7               (0.0)
 ```
 **Counterproof:** `SkyDome.cpp:56-75` sets `mDomeShapeParams.z = 1.2566371f; mWidth = 16; mHeight = 6;` — identical to subHeight/subDivAx/subDivHeight. `sky.fx:99-107` declares `struct Cirrus { float2 frequency; float1 speed; float2 direction; }` + `Cirrus aCirrus[4]` + `cirrusMultiplier` + `cirrusColor` — exactly my decoded structure. `SkyDome.cpp:158` calls `/textures/environment/horizonLookup.dds`.
 
-### sky.fx-Pässe
+### sky.fx passes
 - **`Atmosphere`** (`DomeVS`/`AtmospherePS`, 229): Hemispherical dome (16×6 segments); `th = theta/2π`, `tv = (elevation - horizonBegin)/(horizonEnd - horizonBegin)`; `t = horizonLookup(th,0.25).a · horizonLookup(tv,0.75).a`; `color = lerp(horizonColor, skyColor, 1-t)`. No Z-Test/Write, Cull CW.
 - **`Decal`** (`DecalVS`/`DecalAlbedoPS`, 175/238): the **9 “Planets”** as billboards — `texcoord = uv.xy + 0.5·uv.zw·(corner+1)` (i.e. `uv` = sub-rectangle in the atlas), rotation around `position.w`, spanned with `viewRight`/`viewUp`. Pass P1 adds the glow (`decalGlowMultiplier · glow.a`).
 - **`Cirrus`** (`CirrusPS`, 264): 4 layers of **one** texture, one channel each: `alpha = cirrusMultiplier · c0.r · c1.g · c2.b · c3.a`; UV per layer: `computeCirrusCoord` = rotation by `direction`, then `frequency · (position - time·speed·direction)`.

@@ -59,7 +59,7 @@ console.log('\n== Warteschlange: zwei Panzer ==')
 check(queueFactoryBuild(host, factory, 'uel0101', 2), '__queueFactoryBuild(uel0101, 2)')
 check(
   Number(host.eval(`return __units[${factory}].__buildQueue[1].count`)) === 2,
-  'Die Warteschlange trägt { id = uel0101, count = 2 } (Form aus construction.lua:1620)',
+  'The queue has { id = uel0101, count = 2 } (form from construction.lua:1620)',
 )
 
 // A beat: __factoryTick sets up the first unit.

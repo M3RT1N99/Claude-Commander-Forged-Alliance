@@ -28,7 +28,7 @@ Each army has a `CAiReconDBImpl` (`sdk/moho/ai/CAiReconDBImpl.h`) with **8 grids
 
 | Grid | Cell size | Purpose | Only at FoW? |
 |---|---|---|---|
-| `mVisionGrid` | **2** | LoS über Wasser/Land | **ja** |
+| `mVisionGrid` | **2** | LoS over water/land | **yes** |
 | `mWaterGrid` | 4 | LoS underwater | **yes** |
 | `mRadarGrid` | 4 | Radar | no |
 | `mSonarGrid` | 4 | Sonar | no |
@@ -72,7 +72,7 @@ if (flags & RECON_Omni) return flags;               // Omni ignoriert JEDE Count
 if (RCI-Grid sichtbar an pos)  flags &= ~RECON_Radar;   // fremdes Radar-Stealthfeld
 if (SCI-Grid sichtbar an pos)  flags &= ~RECON_Sonar;
 if (aktiver Cloak-Toggle der Unit || VCI-Grid sichtbar) flags &= ~RECON_LOSNow;
-if (!(flags & RECON_LOSNow)) {                       // persönlicher Stealth wirkt NUR ausserhalb LOS
+if (!(flags & RECON_LOSNow)) { // personal stealth ONLY works outside LOS
    if (unit.RadarStealth aktiv) flags &= ~RECON_Radar;
    if (unit.SonarStealth aktiv) flags &= ~RECON_Sonar;
 }
@@ -100,7 +100,7 @@ A blip is a **real sim entity** (not a pure UI object) and is pushed to the clie
 - `WeakPtr<Unit> mCreator` (+0x270) — source unit
 - `uint8 mDeleteWhenStale` (+0x278) — in the Ctor: `sourceUnit->IsMobile() ? 1 : 0`
 - `Wm3::Vec3f mJamOffset` (+0x27C)
-- `SReconBlipUnitConstData mUnitConstDat` (+0x288) — enthält `mFake`
+- `SReconBlipUnitConstData mUnitConstDat` (+0x288) — contains `mFake`
 - `SReconBlipUnitVarData mUnitVarDat` (+0x298) — `mCustomName`, `mBlueprintState0/1`
 - `msvc8::vector<SPerArmyReconInfo> mReconDat` (+0x4C0) — **one entry per army**
 
@@ -203,7 +203,7 @@ mRadarStealth.present = (RadarStealth != 0)
 `CIntelCounterHandle::AddViz/SubViz` (`CIntelCounterHandle.cpp:357/372`) → `ApplyCounterIntelToForeignArmies`:
 ```
 for (army : sim->mArmiesList) {
-   if (army->GetReconDB() == this->mReconDB) continue;   // eigene Armee überspringen
+if (army->GetReconDB() == this->mReconDB) continue;   // skip your own army
    grid = (mType==RadarStealthField) ? reconDB->ReconGetRCIGrid()
         : (mType==SonarStealthField) ? reconDB->ReconGetSCIGrid()
         : (mType==CloakField)        ? reconDB->ReconGetVCIGrid() : null;
@@ -293,7 +293,7 @@ bool CanSeePoint(worldPos, mask) const; // 0x008B22B0 -> GridPos(pos, exploredGr
 ### Reveal-Geometrie: VisionDB + VisionRenderer
 `VisionDB` (`sdk/moho/vision/VisionDB.h/.cpp`, **client-side**, size 0x24) — Quadtree from perspective circles:
 - `Init(width, height)`: Root node = circle around `(w/2, h/2)` with `radius = 2 * sqrt((w/2)² + (h/2)²)`; then `GenerateQuadTree(root, halfSize, level=0, maxLevel=1)` → **only 1 subdivision level** (4 quadrants NW/SW/NE/SE), each with `radius = halbe Diagonale` of the subrectangle.
-- `Pool::PooledNode` (0x28): `mParent, mContained, mNext, uint8 mIsReal, uint8 mVis, EntryCircle mPrevCircle {x,y,radius}, EntryCircle mCurCircle`. Pool allokiert in 500er-Blöcken.
+- `Pool::PooledNode` (0x28): `mParent, mContained, mNext, uint8 mIsReal, uint8 mVis, EntryCircle mPrevCircle {x,y,radius}, EntryCircle mCurCircle`. Pool allocated in blocks of 500.
 - `Handle::Update(next, previous, radius, visible)`: writes `mVis`, `mPrevCircle`, `mCurCircle` and **reparentet** into the tree when the containment condition no longer applies. Prev+Cur are both saved → interpolation/smear between sim ticks.
 
 Erzeugt in `UserEntity::Update` (`UserEntity.cpp:639`):
@@ -317,7 +317,7 @@ mVisionHandle->Update(curPos.xz, lastPos.xz, (float)visionRange, alliedVisibilit
 **Replica in WebGL/Three.js:** Render the instanced cylinder (or more simply: instanced quad/disc) into an offscreen R8 texture (additive or stencil), then calculate it as a reveal mask in the terrain shader against the explored mask. The cylinder with y ∈ [-256, +256] is only there to penetrate arbitrary terrain heights — for a top-down mask render, a flat circle is sufficient.
 
 ### Last known status of buildings (revisibility)
-Vollständig sim-seitig (siehe §2):
+Completely SIM side (see §2):
 1. `ReconTick`: Unit no longer detected + Blip has `RECON_LOSEver` + `!unit->IsMobile()` → Blip survives with `UpdateBlips(unit, RECON_None, ...)`.
 2. `UpdateBlip`: `newFlags |= (oldFlags & 0x30)` → `LOSEver` and `KnownFake` remain sticky.
 3. `RefreshBlip`: Mesh/Health/MaxHealth/FractionComplete are **only** updated with `RECON_LOSNow` → the Ghost retains construction progress, HP bars and model status from the last visual contact.
@@ -410,7 +410,7 @@ Intel = { FreeIntel = true, OmniRadius = 16, VisionRadius = 26, WaterVisionRadiu
 3. `IntelHandle` per unit sense with `enabled`, `radius`, `lastPos`, `lastTickUpdated`; Motion threshold `radius*0.333` or 30 ticks.
 4. Counter handles grid into the RCI/SCI/VCI grids of **all other** armies.
 5. `ReconTick` round-robin (`tick % armyCount`), `ReconRefresh` for the rest.
-6. Blips mit `SPerArmyReconInfo[armyCount]`, sticky `LOSEver|KnownFake` (0x30), Ghost-Regel für `!IsMobile()`.
+6. Blips with `SPerArmyReconInfo[armyCount]`, sticky `LOSEver|KnownFake` (0x30), ghost rule for `!IsMobile()`.
 7. Detection: LOS → Sonar (water layer only) → Radar (non-underwater only) → Omni; then Ally-Merge; then counter with omni bypass.
 8. FoW rendering: instanced discs into a reveal texture; two channels (Explored accumulating, Fog current).
 

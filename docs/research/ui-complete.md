@@ -1,7 +1,7 @@
 # agent1
 
 ## Summary
-Vollinventur der Original-In-Game-UI (lua/ui/game/* aus lua.scd, "mini"-Layout-Variante, die das Projekt bereits nutzt) plus Frontend (lua/ui/lobby, lua/ui/menus, lua/ui/dialogs). Das Projekt hat aktuell 4 von ~30 UI-Modulen: Economy, Orders (nur 6 von 12 Slots), UnitView, Minimap-Grundform, Strategic Icons — alles in einer einzigen Datei src/ui/hud.ts. Es fehlen alle bau- und befehlsrelevanten Systeme: Construction-Panel (das Baumenü), CommandMode/Build-Preview, Cursors, Command-Feedback-Meshes, Rally-Points, Keybindings, Selection/Control-Groups, Avatare, Score, Tabs-Menüleiste, Multifunction, Chat, Pings, Tooltips sowie das komplette Frontend. Ohne Construction + CommandMode + Cursors ist das Spiel nicht spielbar — das ist P0.
+Full inventory of the original in-game UI (lua/ui/game/* from lua.scd, "mini" layout variant that the project already uses) plus frontend (lua/ui/lobby, lua/ui/menus, lua/ui/dialogs). The project currently has 4 of ~30 UI modules: Economy, Orders (only 6 of 12 slots), UnitView, Minimap Baseform, Strategic Icons — all in a single file src/ui/hud.ts. All systems relevant to construction and commands are missing: Construction Panel (the construction menu), CommandMode/Build Preview, Cursors, Command Feedback Meshes, Rally Points, Keybindings, Selection/Control Groups, Avatars, Score, Tabs Menu Bar, Multifunction, Chat, Pings, Tooltips and the entire frontend. Without Construction + CommandMode + Cursors the game is unplayable — that's P0.
 
 ## Key Facts
 - Der In-Game-UI-Baum wird von lua/ui/game/gamemain.lua:CreateUI() aufgebaut: borders.SetupBorderControl liefert 4 Layout-Container (controlClusterGroup = unteres 150px-Band, statusClusterGroup = oberes 150px-Band, mapGroup = Vollbild, windowGroup = Vollbild), an denen ALLE Panels haengen — dieses Container-Modell fehlt im Projekt komplett und ist die Voraussetzung fuer originalgetreue Positionen.
@@ -30,7 +30,7 @@ Ohne diese 4 Container sind alle weiteren Offsets im Original nicht reproduzierb
 
 ## P0 — blockiert Spielbarkeit
 
-### 1. Construction-Panel (Baumenue) — GRÖSSTES FEHLENDES TEIL
+### 1. Construction Panel — BIGGEST MISSING PART
 Quelle: `lua/ui/game/construction.lua` (79 KB) + `lua/ui/game/layouts/construction_mini.lua` (Layout).
 Funktion: Zeigt fuer die Auswahl alle baubaren Einheiten, die Bau-Queue und Upgrades. Wird von `gamemain.OnSelectionChanged` ueber `GetUnitCommandData(selection)` → `buildableCategories` gefuettert.
 
@@ -39,8 +39,8 @@ Aufbau (construction_mini.lua):
 - Hintergrund dreiteilig: `construct-panel_bmp_l/_m1/_m2/_m3/_r.dds` (`minBG` bei Left+67 / Bottom+4, `maxBG` rechts, `midBG3` tiled).
 - Haupt-Tabs links vertikal, `AtLeftTopIn(constructionTab, constructionGroup, 0, 14)`, dann `Below(..., −16)`: **construction** (`construct-tab_btn/top_tab_btn_*`), **selection** (`mid_tab_btn_*`), **enhancement** (`bot_tab_btn_*`).
 - Sub-Tabs horizontal ab `AtLeftTopIn(tab, minBG, 82, 0)`: `t1..t4` + `templates` (`construct-tech_btn/t1_btn_*` … `template_btn_*`), bei Enhancement stattdessen `LCH`/`RCH`/`Back` (`left_upgrade_btn_*`, `r_upgrade_btn_*`, `m_upgrade_btn_*`).
-- `choices` = SpecialGrid, **Höhe 50**, horizontal, Top = minBG.Top + 31 (bei construction/templates) bzw. +4 (bei selection); Left = minBG.Left + 85, Right = maxBG.Right − 49. Scroll-Buttons links/rechts (`construct-sm_btn/mid_btn_*`) und Page-Buttons (`left_btn_*`/`right_btn_*`).
-- `secondaryChoices` (**Bau-Queue-Zeile**) direkt darunter (Top = choices.Bottom + 1, Höhe 50), mit eigenem Progress-Balken 40×4 bei (5, 42).
+- `choices` = SpecialGrid, **height 50**, horizontal, Top = minBG.Top + 31 (for construction/templates) or +4 (for selection); Left = minBG.Left + 85, Right = maxBG.Right − 49. Left/right scroll buttons (`construct-sm_btn/mid_btn_*`) and page buttons (`left_btn_*`/`right_btn_*`).
+- `secondaryChoices` (**construction queue line**) directly below (Top = choices.Bottom + 1, height 50), with its own progress bar 40×4 at (5, 42).
 - `extraBtn1/2` bei (10, 31) in minBG: **Infinite-Bau** (`infinite_on/off.dds`) und **Queue-Pause** (`pause_on/off.dds`); im selection-Tab wird extraBtn1 zu **Template erstellen** (`template_on/off.dds`).
 
 Verhalten (construction.lua):
@@ -102,7 +102,7 @@ Position ist an Score gekoppelt: `score_mini.lua` setzt `avatarGroup.Top = score
 `lua/ui/game/score.lua` (18 KB) + `layouts/score_mini.lua`.
 `AtRightTopIn(mapGroup, 18, 7)`, Breite = `panel-score_bmp_t.dds`; Hintergrund dreiteilig `panel-score_bmp_t/_m/_b.dds`, links Bracket `bracket-left-energy/*`, rechts `bracket-right/*`.
 Kopfzeile: links Uhr-Icon (`/game/unit_view_icons/time.dds`, 80 % skaliert) + **Spielzeit** (`GetGameTime()`; bei `GameSpeed=adjustable` als `"MM:SS (+n)"`; bei NoRush-Option zeigt es den Countdown), rechts Panzer-Icon (`/dialogs/score-overlay/tank_bmp.dds`, 90 %) + **Unit-Count "cur/cap"**.
-Pro Armee eine Zeile (Breite 210, Höhe 14): Fraktions-Icon 14×14 mit Armee-Farbe als Hintergrund, Nickname (12 px, links, clipped), Score (rechts). Fokus-Armee: `ffff7f00` + Arial Bold 14. Ausgeschiedene: Totenkopf `icon-skull_bmp.dds`, Grau `ffa0a0a0`. Zeilen werden **jeden Beat nach Score absteigend sortiert**. Klapp-Pfeil `tab-r-btn/*`.
+One line per army (width 210, height 14): faction icon 14×14 with army color as background, nickname (12 px, left, clipped), score (right). Focus Army: `ffff7f00` + Arial Bold 14. Eliminated: Skull `icon-skull_bmp.dds`, Gray `ffa0a0a0`. Rows are sorted **each beat in descending order by score**. Folding arrow `tab-r-btn/*`.
 
 ### 10. Multifunction / Filter + Ping-Leiste (links, unter Economy)
 `lua/ui/game/multifunction.lua` (41 KB) + `layouts/multifunction_mini.lua`.
@@ -167,7 +167,7 @@ Container `AtTopIn(parent, 368)`, `AtRightIn(parent)`, Breite 60; pro belegter G
 - lua.scd → lua/ui/game/gamemain.lua (CreateUI Z.116-192: Modul-Reihenfolge; SetLayout Z.53-75; HideGameUI Z.455)
 - lua.scd → lua/ui/game/borders.lua + lua/ui/game/layouts/borders_mini.lua (controlCluster Bottom−150, statusCluster Top+150, mapGroup/windowGroup Vollbild)
 - lua.scd → lua/ui/game/construction.lua (OnSelection Z.1677, FormatData Z.1405, OnClickHandler Z.837, unitGridPages Z.29-35, constructionTabs Z.61)
-- lua.scd → lua/ui/game/layouts/construction_mini.lua (Panel-Geometrie, Tab-Positionen Z.398-436, choices Höhe 50 Z.130, OnTabChangeLayout Z.438)
+- lua.scd → lua/ui/game/layouts/construction_mini.lua (panel geometry, tab positions Z.398-436, choices height 50 Z.130, OnTabChangeLayout Z.438)
 - lua.scd → lua/ui/game/orders.lua Z.697-733 (standardOrdersTable: 12 preferredSlots + 9 RULEUTC-Toggles), Z.418-421 (Firestate-Modi)
 - lua.scd → lua/ui/game/commandmode.lua (StartCommandMode/EndCommandMode, OnCommandIssued → AddCommandFeedbackBlip, orderModes/toggleModes-Referenztabellen)
 - lua.scd → lua/ui/game/commandmeshes.lua + commandgraphparams.lua (Meshes je CommandType; Orderline-Farben/Waypoint-Texturen je UNITCOMMAND_*)

@@ -9,7 +9,7 @@ The game framework of SupCom:FA is almost completely mapped in Lua and is locate
 - Sim init order (mohodata/lua/simInit.lua comment): __blueprints → simInit.lua → ScenarioInfo set → SetupSession() (loads _save.lua + _script.lua) → Armies/Brains created (OnCreateArmyBrain → InitializeArmyAI) → BeginSession() (OnPopulate/OnStart of the map script, teams/alliances, build restrictions).
 - The map script for skirmish is minimal: `OnPopulate() ScenarioUtils.InitializeArmies() end; OnStart(self) end` — all Army/ACU/Resource generation is in mohodata `lua/sim/ScenarioUtilities.lua`.
 - Victory: `lua/victory.lua CheckVictory(scenarioInfo)` is forked by `schook/lua/simInit.lua` in BeginSession; Categories: demoralization=COMMAND, domination=STRUCTURE+ENGINEER-WALL, eradication=ALLUNITS-WALL, sandbox=no check; Poll every 3 s, victory takes 15 s stable Allied Victory situation.
-- Spielende-Fluss: brain:OnDefeat/OnVictory → `Sync.GameResult` → UserSync → `ui/game/gameresult.lua DoGameResult(armyIndex, result)` → Sound + Tab-Announcement + Score-Button → `ui/dialogs/score.lua CreateDialog(victory)`; Engine ruft zusätzlich `NoteGameOver()` in uimain.lua.
+- Game end flow: brain:OnDefeat/OnVictory → `Sync.GameResult` → UserSync → `ui/game/gameresult.lua DoGameResult(armyIndex, result)` → Sound + Tab Announcement + Score Button → `ui/dialogs/score.lua CreateDialog(victory)`; Engine additionally calls `NoteGameOver()` in uimain.lua.
 - GameOptions defaults come from `lua/ui/lobby/lobbyOptions.lua` (teamOptions + globalOpts), mixed with prefs: TeamSpawn=random, TeamLock=locked, UnitCap=500, FogOfWar=explored, Victory=demoralization(Assassination), Timeouts=3, GameSpeed=normal, CheatsEnabled=false, CivilianAlliance=enemy, PrebuiltUnits=Off, NoRushOption=Off.
 - PlayerOptions per slot (lobbyComm.GetDefaultPlayerOptions): {Team=1, PlayerColor=1, ArmyColor=1, StartSpot=1, Ready=false, Faction=5 (=NumFactions+1 → random), PlayerName, AIPersonality='', Human=true, Civilian=false} + OwnerID; maxPlayerSlots=8.
 - Game.prefs is a serialized Lua table (no INI) at %LOCALAPPDATA%\Gas Powered Games\Supreme Commander Forged Alliance\Game.prefs with top level keys profile{current,profiles[]}, options_overrides, Options.Log/Debug, CPUBenchmark, PreGameData; Access via engine globals GetPreference/SetPreference/SavePreferences, wrapped in mohodata `lua/user/prefs.lua`.
@@ -70,12 +70,12 @@ sessionInfo = {
 LaunchSinglePlayerSession(sessionInfo)               -- Engine-Native
 ```
 Default options there (`defaultOptions`, Z. 123): FogOfWar=explored, NoRushOption=Off, PrebuiltUnits=Off, Difficulty=2, DoNotShareUnitCap=true, Timeouts=-1, GameSpeed=normal, UnitCap='500', Victory='sandbox', CheatsEnabled='true', CivilianAlliance='enemy'.
-Zusätzlich: `MapUtil.GetExtraArmies(scenarioInfo)` → Civilian-Armeen (`Civilian=true, Human=false`).
+Additionally: `MapUtil.GetExtraArmies(scenarioInfo)` → Civilian armies (`Civilian=true, Human=false`).
 `FixupMapName(name)` → `/maps/<n>/<n>_scenario.lua`.
 
 ### 1.4 Session-Init im Sim (`mohodata:lua/simInit.lua` + `schook/lua/simInit.lua`)
 1. `__blueprints` from preloaded data
-2. `simInit.lua` läuft (globalInit, SimSync)
+2. `simInit.lua` is running (globalInit, SimSync)
 3. `ScenarioInfo` filled by the engine (fields from `_scenario.lua` + `Options` from GameOptions + `ArmySetup` from PlayerOptions)
 4. **`SetupSession()`**: `ArmyBrains={}`, ScenarioInfo.{PlatoonHandles, UnitGroups, UnitNames, VarTable, BuilderTable, MapData}, `ScenarioInfo.Env = import('/lua/scenarioEnvironment.lua')`, then `doscript(ScenarioInfo.save)` → global `Scenario`, `doscript(ScenarioInfo.script)`; schook complements `ScenarioInfo.TriggerManager`.
 5. Engine creates armies/brains → **`OnCreateArmyBrain(index, brain, name, nickname)`**: `ArmyBrains[index]=brain`, `InitializeArmyAI(name)`; schook-Hook calls `ScenarioUtils.InitializeStartLocation(name)` and `ScenarioUtils.SetPlans(name)` beforehand.
@@ -149,12 +149,12 @@ CheckVictory(scenarioInfo):
      'eradication'    -> categories.ALLUNITS - categories.WALL             ("Annihilation")
      sonst (sandbox)  -> return   (kein Check, Spiel endet nie)
   loop alle 3 s:
-     für jeden nicht-besiegten, nicht-zivilen Brain:
+for each non-defeated, non-civilian Brain:
         brain:GetCurrentUnits(categoryCheck) == 0  ->  brain:OnDefeat(); CallEndGame(false, true)
         sonst -> stillAlive
      stillAlive leer            -> CallEndGame(true,false)  (Draw)
-     alle stillAlive gegenseitig verbündet UND alle RequestingAlliedVictory
-        -> nach 15 s stabil: brain:OnVictory() für alle; CallEndGame(true,true)
+all stillAlive mutually allied AND all RequestingAlliedVictory
+-> stable after 15 s: brain:OnVictory() for everyone; CallEndGame(true,true)
      alle OfferingDraw          -> brain:OnDraw(); CallEndGame(true,true)
 CallEndGame(callEndGame, submitXMLStats):
   submitXMLStats -> SubmitXMLArmyStats()
@@ -174,7 +174,7 @@ Optionswerte ↔ Lobby-Labels (lobbyOptions.lua): `demoralization`=Assassination
 - `schook/lua/UserSync.lua`: `for k,gameResult in Sync.GameResult do … GpgNetSend('GameResult',…); import('/lua/ui/game/gameresult.lua').DoGameResult(armyIndex, result) end`.
 - `lua/ui/game/gameresult.lua DoGameResult(armyIndex, result)` (2.5 KB): own army index → ​​if necessary `SetFocusArmy(-1)` (if observation is allowed), sound `UI_END_Game_Victory` / `UI_END_Game_Fail`, `tabs.OnGameOver()`, `tabs.TabAnnouncement('main', "Victory!"/"You have been defeated!"/"It's a draw.")`, `tabs.AddModeText("<LOC _Score>", → score.CreateDialog(victory))`. Foreign Army Index → ​​`score.ArmyAnnounce(armyIndex, "%s wins!/%s has been defeated!")`.
 - **Score-Screen**: `lua/ui/dialogs/score.lua` (50 KB) `CreateDialog(victory, showCampaign, operationVictoryTable, midGame)` → `CreateSkirmishScreen(...)`.
-- Engine ruft zusätzlich `uimain.NoteGameOver()` → `SetFocusArmy(-1)`, Cursor zeigen, Ansage "Game over.".
+- Engine additionally calls `uimain.NoteGameOver()` → `SetFocusArmy(-1)`, show cursor, announce "Game over.".
 - In-game menu (`lua/ui/game/tabs.lua`, 34 KB): tabs `menu` / `diplomacy` / `pause`; Menu actions `Save`, `Load`, `Options`, `RestartGame` (→ `RestartSession()`), `EndSPGame`/`EndMPGame` (→ `EndGame()` → Score dialog), `ExitSPGame`/`ExitMPGame` (→ `ExitApplication()`), `Return`. `CanUserPause()` checks `Options.Timeouts` (MP only).
 
 ---
@@ -191,13 +191,13 @@ Optionswerte ↔ Lobby-Labels (lobbyOptions.lua): `demoralization`=Assassination
 - `ScenarioUtilities.InitializeArmies` → `brain:InitializeSkirmishSystems()` (aibrain.lua Z. 1106):
   ArmyPool Platoon AI off, `BuilderHandles`, `BrainConditionsMonitor`, EconomyMonitor (`EconomyTicksMonitor=50`), `NumBases=1`, `AddBuilderManagers(GetStartVector3f(), 100, 'MAIN', false)`, `BaseMonitorInitialization()`, `ArmyPool:ForkThread(BaseManagersDistressAI)`, `PickEnemy` thread.
 
-### 4.2 Plan-Ausführung (`lua/AI/aiarchetype-managerloader.lua`, 3,6 KB — kompletter „Plan")
+### 4.2 Plan Execution (`lua/AI/aiarchetype-managerloader.lua`, 3.6 KB — complete “plan”)
 ```
-GetHighestBuilder(aiBrain): iteriert globale BaseBuilderTemplates; jedes hat FirstBaseFunction(aiBrain) -> (score, type); höchster Score gewinnt
+GetHighestBuilder(aiBrain): iterates global BaseBuilderTemplates; each has FirstBaseFunction(aiBrain) -> (score, type); highest score wins
 ExecutePlan(aiBrain): SetResourceSharing(true), Under-Energy/Mass-StatTrigger(0.1),
   SetupMainBase -> AIAddBuilderTable.AddGlobalBaseTemplate(aiBrain,'MAIN',base); aiBrain:ForceManagerSort()
   ArmyPool-Units auf EngineerManager / FactoryManager verteilen
-  ForkThread(UnitCapWatchThread)  -- killt bei Unit-Cap-Nähe T1-PowerGens bzw. T1-PD
+ForkThread(UnitCapWatchThread) -- kills T1-PowerGens or T1-PD when unit cap is close
 ```
 `FirstBaseFunction` gating (examples): `NormalMain` → `per=='easy'` ⇒ 150 otherwise 1; `ChallengeMain` → `per=='medium'` ⇒ 150 otherwise 1; `RushMainLand/Air/Naval/Balanced`, `TurtleMain`, `TechMain` → high score with matching personality, `'adaptive'` ⇒ random score (`Random(1,100)` etc.). This means that the “difficulty” (easy/medium) is simply a different base template, not a multiplier.
 
@@ -259,13 +259,13 @@ Bootstrap: `schook/lua/simInit.lua` imports **all** files from `/lua/AI/PlatoonT
 5. **Victory thread** (`lua/victory.lua`, ~100 lines — trivial to recreate) + `Sync.GameResult` → `gameresult.DoGameResult` → Score dialog. **Sandbox** as default is even enough to initially play without victory logic (SinglePlayerLaunch uses exactly that).
 6. **gamemain.CreateUI** + `OnFirstUpdate` (camera zoom on ACU, select ACU) — HUD parts already exist in the project.
 
-**Stufe 1 — „richtiges" Skirmish-Gefühl:**
+**Level 1 — “real” skirmish feeling:**
 7. Score-Sync (`aibrain.CollectCurrentScores`/`SyncCurrentScores` 1 Hz → `Sync.Score` → `ui/game/score.lua`).
 8. Prefs layer (profile + `options` table + `LastScenario`/`LastColor`/`LastFaction`) — otherwise no persistence of card/faction.
 9. Keymap Layer (`defaultKeyMap` + `keyactions` + Console Dispatcher) — Order hotkeys and control groups are essential.
 10. Skirmish lobby UI (slots/faction/color/team/options/map selection with `MapPreview` from `scen.preview` or embedded scmap preview).
 
-**Stufe 2 — später:**
+**Stage 2 — later:**
 11. AI (`aiarchetype-managerloader` + AIBaseTemplates + AIBuilders + basetemplates.lua 1.17 MB) — by far the largest chunk; Until then: opponent = second person or none at all (sandbox).
 12. Kampagne (ScenarioFramework/SimObjectives/OpAI + .sfd-Movie-Decoder).
 13. Save/Load, Replays, Multiplayer/LobbyComm, Diplomacy, Mod-Manager.
@@ -303,7 +303,7 @@ Bootstrap: `schook/lua/simInit.lua` imports **all** files from `/lua/AI/PlatoonT
 - gamedata/mohodata.scd :: lua/simInit.lua — init order, SetupSession, OnCreateArmyBrain, BeginSession (Teams, RestrictedCategories)
 - gamedata/mohodata.scd :: lua/userInit.lua, lua/user/prefs.lua (Profile-API), lua/GameColors.lua (10 PlayerColors)
 - gamedata/mohodata.scd :: lua/sim/ScenarioUtilities.lua:331 CreateInitialArmyGroup, :358 CreateProps, :371 CreateResources, :436 InitializeArmies, :514 InitializeScenarioArmies, :1026 InitializeStartLocation, :1035 SetPlans
-- gamedata/schook.scd :: schook/lua/simInit.lua:16 BeginSession-Hook (CreateProps/CreateResources, Score-Threads, ForkThread(victory.CheckVictory)), :53 lädt AI/PlatoonTemplates+AIBuilders+AIBaseTemplates
+- gamedata/schook.scd :: schook/lua/simInit.lua:16 BeginSession hook (CreateProps/CreateResources, Score-Threads, ForkThread(victory.CheckVictory)), :53 loads AI/PlatoonTemplates+AIBuilders+AIBaseTemplates
 - gamedata/schook.scd :: schook/lua/UserSync.lua:94 Sync.GameResult → gameresult.DoGameResult, :122 Sync.OperationComplete → OperationVictory, :126 Sync.Cheaters
 - maps/SCMP_009/SCMP_009_scenario.lua + _script.lua — Skirmish scenario format (type='skirmish', Configurations.standard.teams FFA, ExtraArmies) and minimal map script
 - maps/X1CA_001/ — Campaign op structure (_operation.lua, _script.lua, _strings.lua, _mXai.lua, .scmap, previews)

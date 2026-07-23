@@ -1,5 +1,5 @@
 /**
- * Diagnose: "Löcher" in Watermaps (G≈0 mitten im Tiefwasser, DXT-Artefakte)
+ * Diagnose: "holes" in Watermaps (G≈0 mitten im Tiefwasser, DXT-Artefakte)
  * + lineare Regression G ≈ a·(elevation−h) + b je Karte, um zu prüfen, ob
  * eine höhenbasierte Tiefe die gebackenen Daten treu ersetzen kann.
  */

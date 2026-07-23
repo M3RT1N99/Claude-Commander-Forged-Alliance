@@ -81,7 +81,7 @@ Throwing both into a VM builds something that never existed in the original.
 
 ${section('scr_CoreInits', 'Core — in beiden VMs', 'Vektor-Mathematik, Kategorien, Threads, Blueprint-Registrierung, Dateizugriff.')}
 ${section('scr_UserInits', 'User — nur die UI-VM', 'maui-Controls, Kommandos, Selektion, Kamera, Session, Preferences.')}
-${section('sim_SimInits', 'Sim — nur die Sim-VM', 'Units, Waffen, Brains, Platoons, Effekte, Ökonomie.')}`
+${section('sim_SimInits', 'Sim — nur die Sim-VM', 'Units, weapons, brains, platoons, effects, economy.')}`
 
 await mkdir('docs/research', { recursive: true })
 await writeFile(OUT, body, 'utf8')

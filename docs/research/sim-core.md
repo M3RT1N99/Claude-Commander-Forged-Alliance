@@ -85,7 +85,7 @@ For a TS replica: One beat = one call to `advanceBeat()`; optionally a tick in t
 prev  <- current
 current <- pending
 mVelocityScale <- mPendingVelocityScale
-→ Positions-History, Collision-Update (nur bei Änderung), Intel-ForceUpdate
+→ Position history, collision update (only if changed), Intel ForceUpdate
 ```
 **Important for TS:** Motion/physics code writes to `PendingPosition`/`PendingOrientation` during the tick. Only `AdvanceCoords` at the end of the tick makes it the visible position. `Position`/`Orientation` are the status from the start of the tick during the tick. Only entities in the `mCoordEntities` intrusive list are processed (entities link themselves on when they move and off when Pos+Orient unchanged → Perf optimization).
 
@@ -104,21 +104,21 @@ There is **no** explicit “weapons step” and **no** explicit “economy step�
 - Lua `Unit:OnCreate` (Unit.lua:124): sets maintenance consumption/production from blueprint, vision radius, `VeteranLevel=0`, `MaintenanceConsumption=false`, `ActiveConsumption=false`, `Dead=false`, effect bags.
 
 ### Build / Finish
-- Fortschritt läuft über `Entity::FractionCompleted` (Offset 0xD8).
+- Progress runs via `Entity::FractionCompleted` (Offset 0xD8).
 - `Entity::UpdateFractionComplete(delta)` (Entity.cpp:3824): clamped to [0,1]; If the delta is positive, there is also an additional lower limit `Health/MaxHealth` (Health “holds” the progress).
 - `Unit::Materialize(float)` is **not lifted** (only `Entity::Materialize` → 0, and `Prop::Materialize` → Reclaim). It must: update FractionCompleted, scale Health = MaxHealth * fraction, fire at 0→>0 `OnStartBeingBuilt`, fire at ==1 `OnStopBeingBuilt`, and probably consume `mConsumptionData->mGranted`.
 - `Unit::IsBeingBuilt()` (Unit.cpp:12619).
 - **OnStopBeingBuilt** (Lua Unit.lua:1528): SetupIntel, StopBeingBuiltEffects, Rocking on Water, LifeTime Thread, Sounds, `DisallowCollisions=false` (+ Health from Builder Percentage when upgrading!), HideLandBones, Idle Effects, **Create Shield** when `bp.Defense.Shield.ShieldSize > 0 && StartOn != false`, Perm Open Animation, Initialize movement effects/footfalls.
 - `CUnitGetBuiltTask::Execute` (CUnitGetBuiltTask.cpp:21): waits in `TASKSTATE_Preparing` as long as `IsBeingBuilt()`; for Immobile → `-1` (task gone). Is the bottom task of each unit task thread (pushed in `AI_CreateCommandDispatch` immediately after dispatch).
 
-### Zerstören
+### Destroy
 `Unit::Kill(instigator, reason, excessDamageRatio)` (Unit.cpp:14358):
 1. If already dead → return.
 2. Lua `CheckCanBeKilled` — if false **and** within Playable-Rect (or no Commander) → cancel.
 3. If in transport: detach, `excessDamageRatio = 10.0f` (⇒ **no wreck**).
 4. **If `IsBeingBuilt() && WorkProgress < 0.5f` → `excessDamageRatio = 10.0f`** (half-finished buildings do not cause wreckage).
 5. Lua `SetDead`, `Entity::Kill(...)`, **`mNeedsKillCleanup = true`** (will be processed in the next tick step 13).
-6. Adjacency lösen (`OnNotAdjacentTo` beidseitig), Transport-Insassen detachen, `CommandQueue->ClearCommandQueue()`.
+6. Solve adjacency (`OnNotAdjacentTo` on both sides), detach transport occupants, `CommandQueue->ClearCommandQueue()`.
 7. Lua `OnKilled(instigator, type, overkillRatio)`.
 8. **Stats**: `massValue = bp.Economy.BuildCostMass` (× WorkProgress if under construction), analog Energy → `Units_MassValue_Lost` / for the opponent `Enemies_MassValue_Destroyed`, `Enemies_Killed`, `Enemies_Commanders_Destroyed`.
 
@@ -155,7 +155,7 @@ prop:SetMaxHealth(bp.Defense.Health)
 prop:SetHealth(self, bp.Defense.Health * bp.Wreckage.HealthMult)   -- z.B. 0.9
 prop:SetMesh(bp.Display.MeshBlueprintWrecked)
 TryCopyPose(self, prop, false)
-prop.AssociatedBP = bp.BlueprintId               -- für Rebuild-Bonus
+prop.AssociatedBP = bp.BlueprintId -- for rebuild bonus
 ```
 
 ---
@@ -175,9 +175,9 @@ Per unit there is **one** `CTaskThread` on `mTaskStageA`, whose ground task is t
 The thread list is run through per frame (with transfer to a `processed` list, merged back at the end - prevents endless loops with self-requeuing).
 
 ```
-if (--mPendingFrames > 0) return 0;          // Thread schläft noch
+if (--mPendingFrames > 0) return 0;          // Thread is still sleeping
 loop {
-  task = thread->mTaskTop;  if (!task) return -1;      // Thread leer → löschen
+task = thread->mTaskTop;  if (!task) return -1;      // Thread empty → delete
   r = task->Execute();                                  // Exception → r = -3
   switch (r) {
     case -4: return -2;            // Thread ans Ende der Stage-Liste (yield)
@@ -218,7 +218,7 @@ tryDispatchHead():
   cmd = queue->GetCurrentCommand();  if (!cmd) return 1
   mState = 1; mLinkResult = 0;
   DispatchQueuedCommand(this, cmd)                   // pusht den konkreten Task
-  return 0                                            // sofort weiter → Subtask läuft noch diesen Tick
+return 0 // continue immediately → Subtask is still running this tick
 
 TaskTick():
   if (mState == 0) return tryDispatchHead()
@@ -231,18 +231,18 @@ TaskTick():
                         : queue->RemoveFirstCommandFromQueue()
       return tryDispatchHead()
   }
-  if (cmd->mVarDat.mCount > 1) {                      // Fabrik-Stückzahl
+if (cmd->mVarDat.mCount > 1) { // Factory quantity
       cmd->mVarDat.mCount--; cmd->mNeedsUpdate = true
       return tryDispatchHead()
   }
-  if (unit->RepeatQueueEnabled && cmd->type == BuildFactory) {   // Repeat NUR für Fabrik-Bau
+if (unit->RepeatQueueEnabled && cmd->type == BuildFactory) { // Repeat ONLY for factory building
       cmd->mVarDat.mCount = cmd->mVarDat.mMaxCount; cmd->mNeedsUpdate = true
       queue->MoveFirstCommandToBackOfQueue()
       return 1
   }
   if (cmd->type == Attack) {
       if (cmd->mTarget.targetType != AITARGET_Ground) { queue->RemoveFirstCommandFromQueue(); return tryDispatchHead() }
-      // Ground-Attack (Attack-Move-Punkt) fällt durch → wie Patrol behandelt
+// Ground attack (attack move point) fails → treated like patrol
   } else if (cmd->type != Patrol && cmd->type != FormPatrol) {
       queue->RemoveFirstCommandFromQueue(); return tryDispatchHead()
   }
@@ -259,7 +259,7 @@ This is the mechanism for "new command overwrites current command".
 
 **⚠ `DispatchQueuedCommand` (FUN_00608EF0) is an empty stub in decomp** (IAiCommandDispatchImpl.cpp:398). The command→task switch must be reconstructed from the task classes.
 
-### EUnitCommandType (SSTICommandIssueData.h:19-58) — vollständig
+### EUnitCommandType (SSTICommandIssueData.h:19-58) — complete
 ```
 0 None, 1 Stop, 2 Move, 3 Dive, 4 FormMove,
 5 BuildSiloTactical, 6 BuildSiloNuke, 7 BuildFactory, 8 BuildMobile, 9 BuildAssist,
@@ -306,7 +306,7 @@ Form commands (`FormMove`, `FormAttack`, `FormPatrol`, `FormAggressiveMove`) sha
 
 **`CEconRequest`** (CEconomyEvent.h:50, 0x18 Bytes):
 ```
-+0x00 TDatListItem mNode        // in economy->registrationNode eingehängt
++0x00 TDatListItem mNode // mounted in economy->registrationNode
 +0x08 SEconValue mRequested     // PRO TICK
 +0x10 SEconValue mGranted       // PRO TICK zugeteilt (akkumulierender Pool!)
 
@@ -325,10 +325,10 @@ Each unit has exactly its own request: `Unit::mConsumptionData` (Unit.h:1768). I
 newConsumption.energy = Attributes.consumptionPerSecondEnergy * 0.1f;   // → PRO TICK
 newConsumption.mass   = Attributes.consumptionPerSecondMass   * 0.1f;
 
-if (!mConsumptionData) { neue CEconRequest, in economyInfo->registrationNode einhängen }
+if (!mConsumptionData) { new CEconRequest, mount in economyInfo->registrationNode }
 
 if (!ConsumptionActive) {
-    // RÜCKERSTATTUNG nicht verbrauchter, angesammelter Grants an den Speicher:
+// REFUND of unused, accumulated grants to storage:
     economyInfo->economy.mStored.ENERGY += mConsumptionData->mGranted.energy;
     economyInfo->economy.mStored.MASS   += mConsumptionData->mGranted.mass;
     newConsumption = {0,0};
@@ -451,13 +451,13 @@ Engine per tick (TASKSTATE_Processing/Complete, :711-796):
 ```cpp
 reclaimRate       = 1.0f / reclaimTime;         // Fraction pro Tick
 mReclaimRate      = -reclaimRate;
-mReclaimPerSecond.energy = max(reclaimEnergy,0) * reclaimRate;   // (tatsächlich PRO TICK)
+mReclaimPerSecond.energy = max(reclaimEnergy,0) * reclaimRate;   // (actually PER TICK)
 mReclaimPerSecond.mass   = max(reclaimMass,  0) * reclaimRate;
 
 // jeden Tick:
 limitingRate        = mConsumptionData->LimitingRate();
 appliedFractionDelta = target->Materialize(mReclaimRate * limitingRate);
-// bei Unit-Zielen zusätzlich Health an FractionCompleted koppeln:
+// for unit goals, additionally link Health to FractionCompleted:
 clamped = min(target->FractionCompleted, target->Health/target->MaxHealth);
 if (target->MaxHealth * clamped != target->Health) target->SetHealth(target->MaxHealth * clamped);
 unit->WorkProgress = 1.0f - target->FractionCompleted;
@@ -485,7 +485,7 @@ return time, energy, 0        -- Mass = 0!
 Engine (:454-523):
 ```cpp
 mCaptureTime += (int)max(1.0f, timeSeconds * 10.0f);           // TICKS
-// + für JEDE angehängte Entity (Transportinsassen etc.) nochmal dazu
+// + add again for EVERY attached entity (transport occupants etc.).
 energyCost = Σ energy; massCost = Σ mass;   (beide auf ≥0 geklemmt)
 mCaptureRate = { energyCost / mCaptureTime, massCost / mCaptureTime };   // PRO TICK
 → eigene CEconRequest anlegen
@@ -538,24 +538,24 @@ Cheat reference `Sim::BlingBling` (Sim.cpp:11069) shows the access path.
 ```cpp
 if (mStored.ENERGY > 0.001 && mStored.MASS > 0.001) return true;         // Speicher da → immer ok
 return (energyCost <= 0 || mIncome.ENERGY >= 0.001)
-    && (massCost   <= 0 || mIncome.MASS   >= 0.001);                     // sonst: Einkommen nötig
+&& (massCost <= 0 || mIncome.MASS >= 0.001);                     // otherwise: income required
 ```
 
 ### ⚠ The distribution routine is missing in the decomp
 There is **no** lifted function that **writes** `mIncome`, `mLastUseRequested`, `mLastUseActual`, `mGranted` or `Unit::ResourceConsumed`. However, the semantics can be clearly derived from the consumers:
 ```
 pro Tick, pro Armee:
-  1. income   = Σ über alle Units mit ProductionActive: productionPerSecond{E,M} * 0.1
+1. income = Σ over all units with ProductionActive: productionPerSecond{E,M} * 0.1
      mTotals.mIncome = income
   2. available = mStored + income + mResources (Reclaim-Puffer)  → mResources danach nullen
-  3. requested = Σ über Request-Liste (registrationNode): req->mRequested
+3. requested = Σ via request list (registrationNode): req->mRequested
      mTotals.mLastUseRequested = requested
   4. ratio_E = clamp(available.E / requested.E, 0, 1)   (analog Mass; requested==0 → ratio 1)
-  5. für jede Request:  req->mGranted += req->mRequested * ratio    // AKKUMULIEREND!
+5. for each request: req->mGranted += req->mRequested * ratio // ACCUMULATIVE!
      actual = Σ (req->mRequested * ratio)
      mTotals.mLastUseActual = actual
-  6. für jede Unit: unit->ResourceConsumed = unit->mConsumptionData->LimitingRate()
-  7. mStored = clamp(mStored + income - actual, 0, mMaxStorage)   // Überschuss = OVERFLOW, verfällt
+6. for each unit: unit->ResourceConsumed = unit->mConsumptionData->LimitingRate()
+7. mStored = clamp(mStored + income - actual, 0, mMaxStorage) // Surplus = OVERFLOW, expires
 ```
 **Evidence for accumulation semantics** (no per-tick overwrite):
 - `Unit::SetConsumptionActive(false)` refunds `mGranted` to `mStored` (Unit.cpp:14747) — only useful for a maintained pool.
@@ -573,12 +573,12 @@ pro Tick, pro Armee:
 `Create(dispatchTask, blueprint, command, rallyPointUnit)`, `InheritCommandsTo(builtUnit)` (transfers pending commands from the factory to the built unit — this is how factory waypoints/command defaults work).
 **`CFactoryBuildTask::Execute` (0x005FA790) is NOT lifted.**
 
-### Queue-Stückzahl
+### Cue quantity
 Located in `CUnitCommand::mVarDat.mCount` / `mMaxCount`. The dispatcher (IAiCommandDispatchImpl.cpp:639) decrements `mCount` per finished unit; The command is only removed with `mCount == 1`. **Repeat build** (`unit->RepeatQueueEnabled`, set via `Unit::SetRepeatQueue`, Unit.cpp:14653 → Lua `OnStartRepeatQueue`/`OnStopRepeatQueue`) is implemented **exclusively** for `UNITCOMMAND_BuildFactory`: `mCount = mMaxCount`, rotate command to the end of the queue.
 UI side: `CUnitCommandQueue::SetCommandCount(index, count)`; Count 0 ⇒ Remove command.
 
 ### Rolloff / Wartepunkte (lua/defaultunits.lua, `FactoryUnit`)
-Zustandsmaschine über `ChangeState`:
+State machine via `ChangeState`:
 ```
 OnStartBuild (:504):
     ChangeBlinkingLights('Yellow'); BuildingUnit = true
@@ -587,7 +587,7 @@ OnStartBuild (:504):
 
 BuildingState.Main (:663):
     DetachAll(bp.Display.BuildAttachBone)
-    unitBeingBuilt:AttachBoneTo(-2, self, bone)     -- Unit hängt am Bau-Bone
+unitBeingBuilt:AttachBoneTo(-2, self, bone) -- Unit is attached to the build bone
     CreateBuildRotator()                             -- dreht den Bone Richtung Rally
     StartBuildFx(unitBuilding)
 
@@ -622,7 +622,7 @@ IdleState.Main → Lights 'Green', SetBusy(false), SetBlockCommandQueue(false), 
 bp = self:GetBlueprint().Physics.RollOffPoints     -- Liste von {X,Y,Z,UnitSpin}
 px,py,pz = self:GetPosition()
 vectorObj = self:GetRallyPoint()                   -- Wegpunkt (Default: eigene Position + Offset)
--- wähle den RollOffPoint, der dem Rally-Point am nächsten liegt:
+-- choose the RollOffPoint that is closest to the Rally Point:
 for k,v in bp: distance = VDist2(vectorObj[1], vectorObj[3], v.X+px, v.Z+pz)
                if distance < lowest → bpKey = k
 spin = unitBeingBuilt.bp.Display.ForcedBuildSpin or bp[bpKey].UnitSpin
@@ -766,7 +766,7 @@ ACU-Enhancements setzen `NewBuildRate` (z.B. 30 / 90) → `SetBuildRate`.
 - C:\Users\Marti\Documents\02Projects\faf\Draiget\faf-re\src\sdk\moho\ai\IAiCommandDispatchImpl.cpp:473 — OnEvent (TaskInterruptSubtasks on queue change)
 - C:\Users\Marti\Documents\02Projects\faf\Draiget\faf-re\src\sdk\moho\ai\IAiCommandDispatchImpl.cpp:398 — DispatchQueuedCommand (EMPTY STUB — FUN_00608EF0 not lifted)
 - C:\Users\Marti\Documents\02Projects\faf\Draiget\faf-re\src\sdk\moho\ai\IAiCommandDispatchImpl.cpp:415 — AI_CreateCommandDispatch (Dispatch + CUnitGetBuiltTask on mTaskStageA)
-- C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\command\SSTICommandIssueData.h:19 — EUnitCommandType (0..39 vollständig)
+- C:\Users\Marti\Documents\02Projects\faf\Draiget\faf-re\src\sdk\moho\command\SSTICommandIssueData.h:19 — EUnitCommandType (0..39 complete)
 - C:\Users\Marti\Documents\02Projects\faf\Draiget\faf-re\src\sdk\moho\unit\CUnitCommandQueue.cpp:446 — AddCommandToQueue (Patrol ring queue insert)
 - C:\Users\Marti\Documents\02Projects\faf\Draiget\faf-re\src\sdk\moho\unit\CUnitCommandQueue.h:27 — Queue API + Layout
 - C:\Users\Marti\Documents\02Projects\faf\Draiget\faf-re\src\sdk\moho\unit\tasks\CBuildTaskHelper.cpp:61 — ComputeBuildProgressDelta = (1/(BuildTime/buildRate)) * resourceConsumed * 0.1

@@ -13,12 +13,12 @@ came from faf-re, several details were inaccurate or missing there.
 | Find target | **Engine** | `CAcquireTargetTask::TaskTick` scans blips, calls `UnitWeapon::SetTarget` |
 | Zielen | **Engine** | `CAimManipulator` dreht Turm, setzt `mCanFire` |
 | Firing decision | **Engine** | `CFireWeaponTask::Dispatch` — Fire cycle, gates, then `RunScript("OnFire")` |
-| Salve, Mündung, Schuss | **Lua** | `defaultweapons.lua` FSM → `weapon:CreateProjectile(bone)` |
+| volley, muzzle, shot | **Lua** | `defaultweapons.lua` FSM → `weapon:CreateProjectile(bone)` |
 | Generate projectile | **Engine** | `UnitWeapon::CreateProjectile` → `PROJ_Create` → Lua-`OnCreate` |
 | Flugbahn | **Engine** | `Projectile::MotionTick` (10 Hz) |
 | Treffer erkennen | **Engine** | `Projectile::CheckCollision` → Lua-Filter → `RunScript("OnImpact")` |
 | Schaden anrichten | **Lua** | `Projectile:OnImpact` → `DoDamage` → `Damage`/`DamageArea` |
-| Schaden verrechnen | **Engine** | `SIM_Damage` → Rüstung/Handicap → `RunScript("OnDamage")` |
+| Calculate damage | **Engine** | `SIM_Damage` → Armor/Handicap → `RunScript("OnDamage")` |
 | Die | **Lua** | `Unit:OnDamage` → `DoTakeDamage` → `self:Kill(...)` |
 | trigger death | **Engine** | `Unit::Kill` → `RunScript("OnKilled")` |
 | Explosion, wreck | **Lua** | `Unit:DeathThread` → `CreateWreckage` → `CreateProp` |
@@ -58,7 +58,7 @@ The Sentinel pattern is confirmed in binary: the `CWeaponAttributes`-Ctor sets
 
 ### 2b. Zielerfassung — `CAcquireTargetTask::TaskTick` (@0x5D8D10, Cfile:792838ff)
 
-- Prüfintervall: `TargetCheckInterval * 10` Ticks (Cfile:792841).
+- Check interval: `TargetCheckInterval * 10` ticks (Cfile:792841).
 - Suchradius: `max(TrackingRadius · MaxRadius, MaxRadius)` (Cfile:793146-793156)
   — **a maximum**, not just the product: `TrackingRadius < 1` doesn't reduce anything.
 - Candidates are the **Blips** of the unit (`unit->mBlipsInRange` or `GetBlipsInRange`,
@@ -115,7 +115,7 @@ New compared to weapons.md:
    `RunScript("OnCreate", inWater)` (Cfile:943988) — the `inWater` argument, which
    `TDFGauss01_script.lua:OnCreate(self, inWater)` erwartet.
 
-**Blueprint-Defaults (binär, `RProjectileBlueprintPhysics`-Ctor, Cfile:653667-653712):**
+**Blueprint defaults (binary, `RProjectileBlueprintPhysics`-Ctor, Cfile:653667-653712):**
 `Lifetime 15`, `InitialSpeed 1`, `MaxSpeed 0`, `Acceleration 0`, `TurnRate 0`,
 `CollideSurface 1`, `CollisionEntity 1`, `TrackTarget 0`, `VelocityAlign 1`, `StayUpright 0`,
 `LeadTarget 1`, `StayUnderwater 0`, **`UseGravity 1`**, `DirectionY 1`, `DirectionXRange/ZRange 1.5`,
@@ -201,7 +201,7 @@ Strings: `ENT_GetImpactTypeString` (Cfile:917363-917400) — exactly the names t
 ### 3d. `Projectile::Impact` (Cfile:944692-944745)
 
 `RunScript_StrObj("OnImpact", ImpactTypeString, targetEntity)` — **zwei** Argumente. Danach
-Statistik (`_Shots_Hit` / `_Shots_Missed` über `CAiTarget::ImpactDidHitEntity`).
+Statistics (`_Shots_Hit` / `_Shots_Missed` via `CAiTarget::ImpactDidHitEntity`).
 
 Lua-Seite: `Projectile:OnImpact` (Projectile.lua:259-356) → `DoDamage` (173-192) → `DoMetaImpact`
 → `DoUnitImpactBuffs` → Sound `Audio['Impact'..targetType]` (Fallback `Audio.Impact`) → FX →
@@ -230,7 +230,7 @@ set** (Cfile:952126-952127) ⇒ a half-finished construction site never leaves a
 (`Entity::OnDestroy`, Cfile:916143).
 
 Death/wreckage in Lua: `Unit:OnKilled` (896-943) → `DeathThread` (1200-1242) → `CreateWreckage`
-(1076-1146) — Formeln stehen vollständig in weapons.md §5.
+(1076-1146) — Formulas are completely in weapons.md §5.
 
 ## 5. Which Lua class gets a projectile?
 
@@ -249,7 +249,7 @@ A projectile's blueprint ID is the **full lowercase path with `.bp`**
 (`SetBackwardsCompatId`, blueprints.lua:104-107) — exactly the string in `Weapon.ProjectileId`.
 `ProjectileBlueprint(bp)` → `StoreBlueprint('Projectile', bp)` → `RegisterProjectileBlueprint`
 (blueprints.lua:259-262, 313) — so the pipeline is already there, the only thing missing is that
-`/projectiles/**/*_proj.bp` überhaupt in `__bpFiles` landet.
+`/projectiles/**/*_proj.bp` ends up in `__bpFiles` at all.
 
 ## 6. Missing engine bindings (≈65)
 
@@ -287,7 +287,7 @@ A projectile's blueprint ID is the **full lowercase path with `.bp`**
 **There:** the weapon objects themselves ([units.lua:54-88](../../src/engine-lua/units.lua)) — per
 `bp.Weapon` entry is an instance of the original class, with `OnCreate` ⇒ the state machine
 `defaultweapons.lua` is running. Skeleton names (`__setBones`), `class.lua`, blueprint pipeline,
-Ökonomie, Threads.
+Economics, threads.
 
 **Missing completely:**
 - **No one ever gives a weapon a target.** No `SetTarget`, no `OnGotTarget`, no `OnFire`
@@ -346,7 +346,7 @@ A projectile's blueprint ID is the **full lowercase path with `.bp`**
    ≈ 15/25/0.1 = 6 ticks; Target loses **24 HP** per hit; after `ceil(MaxHealth/24)` hits
    `OnKilled`; Wrack-Prop mit `mass = BuildCostMass · 0.9 · (1 − overkill)`.
 9. **Wreck** (`CreateProp`, `moho.prop_methods`, `/lua/sim/prop.lua`) — only when 8 is green.
-10. **Später:** Schilde, Beams (`CollisionBeamEntity`, 6 Bindungen), DoT, Nuke-Ringe, Flares.
+10. **Later:** Shields, Beams (`CollisionBeamEntity`, 6 bindings), DoT, Nuke Rings, Flares.
 
 ## 9. Offene Fragen
 

@@ -28,7 +28,7 @@ FA stable: scarce resources slow down every construction proportionately.
 ```
 if delta > 0:   # Bauen
     FractionComplete = clamp(FractionComplete + delta, health/maxHealth, 1.0)
-    AdjustHealth(maxHealth * delta)          # HP wächst proportional zum Baufortschritt
+AdjustHealth(maxHealth * delta) # HP grows proportionally to construction progress
 elif delta <= 0:  # z.B. Pause -> Materialize(0): nur Clamp, kein Fortschritt
     FractionComplete = clamp(FractionComplete, 0, 1)
 
@@ -37,8 +37,8 @@ if wasBeingBuilt and FractionComplete == 1.0:   # FERTIG
     focus:OnStopBeingBuilt(builder, layerName)   # Lua-Callback
     # Armee-Statistik: Units_Active++, Units_History++, Units_BeingBuilt--,
     #                  Units_MassValue_Built, Units_EnergyValue_Built
-    if !IsMobile:                                 # Gebäude
-        for each overlappendes Gebäude:
+if !IsMobile: # Building
+for each overlapping building:
             self:OnAdjacentTo(other); other:OnAdjacentTo(self)   # Adjacency-Buffs!
 ```
 
@@ -56,10 +56,10 @@ if wasBeingBuilt and FractionComplete == 1.0:   # FERTIG
 | case | behavior |
 | --- | --- |
 | **Pausiert** | `Materialize(0)` — Fokus behalten, Fortschritt einfroren; WorkProgress spiegelt Fokus |
-| **Enhancement** (Upgrade) | Fortschritt über Lua `WorkProgress`/`WorkItemBuildTime`, gleiche Delta-Formel |
+| **Enhancement** (Upgrade) | Progress via Lua `WorkProgress`/`WorkItemBuildTime`, same delta formula |
 | **Silo** (Nuke/TML-Munition) | `SiloAssistWithResource(requested * resourceConsumed)` |
 | **Build/Repair Shield** | additionally `AdjustHealth(regenRate*buildRate / RegenAssistMult)`; damaged → `regenAssistMult*2`, `delta*0.5` |
-| **Fuel** (Air) | `FuelRatio += (FuelRechargeRate/FuelUseTime)*0.1`; beschädigt → halbe Rate |
+| **Fuel** (Air) | `FuelRatio += (FuelRechargeRate/FuelUseTime)*0.1`; damaged → half rate |
 | **Repair** | `WorkProgress = focus.Health/MaxHealth`; done when HP full (+ fuel/shield full) |
 | **Progress Tapes** | if the progress exceeds a threshold → `OnBuildProgress`/`OnBeingBuiltProgress` in Lua |
 

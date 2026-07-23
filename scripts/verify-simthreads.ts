@@ -87,13 +87,13 @@ simTick(host)
 simTick(host)
 check(num(host, 'kc') === before, `Zähler eingefroren nach KillThread (${num(host, 'kc')} == ${before})`)
 
-console.log('\n== Verschachtelter ForkThread (Kind läuft im Folgetick) ==')
+console.log('\n== Nested ForkThread (child runs in subsequent tick) ==')
 host.eval('childRan = false')
 host.eval('ForkThread(function() ForkThread(function() childRan = true end) end)')
 simTick(host) // Eltern läuft, forkt Kind
-check(host.eval('return childRan') === false, 'Kind läuft NICHT im selben Tick')
+check(host.eval('return childRan') === false, 'Child does NOT walk in the same tick')
 simTick(host) // Kind läuft
-check(host.eval('return childRan') === true, 'Kind läuft im Folgetick')
+check(host.eval('return childRan') === true, 'Child runs in the following tick')
 
 console.log('\n== threadCount: tote Threads werden entfernt ==')
 const tc0 = threadCount(host)

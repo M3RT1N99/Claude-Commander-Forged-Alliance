@@ -1,4 +1,4 @@
-# Masterplan: Supreme Commander FA vollständig nachbauen
+# Masterplan: Completely recreate Supreme Commander FA
 
 Goal: **The complete game 1:1 in the browser** — all units, weapons,
 Factories, AI, maps, campaign, multiplayer, mods. original behavior,
@@ -59,7 +59,7 @@ FA nutzt **Lua 5.0.1 (PUC-Rio) mit GPG-gepatchtem Lexer** (Versions-String in
   reconstructed: `#` comment, `!=`, `!`, `continue`, LuaPlus table
   Size instructions `{&1&4}`. Result: **no transpiler necessary, exact
   5.0 semantics** (no integers, `arg`, `table.getn`, `for k,v in t`).
-- **Gleis B (Brücke, sofort nutzbar):** vorhandener Lexer-Transpiler
+- **Track B (bridge, immediately usable):** existing Lexer transpiler
   ([src/lua/transpile.ts](../src/lua/transpile.ts)) + wasmoon + Compat-Shims —
   to develop the `moho` API and boot path *now*. Acquaintance
   deviations documented; will be replaced with track A.
@@ -88,7 +88,7 @@ Economy, renderer, network. Lua gets the 543 sim bindings + callbacks.
 - **Commands never run directly**: a continuous task reads the queue header and
   pushes a `CCommandTask` onto the task stack. Return values ​​control this
   Scheduling (−1 = finished, 0 = immediately again, N = wait N−1 ticks).
-- **Wirtschaft = Request/Grant**: Verbraucher hängt `CEconRequest`
+- **Economy = Request/Grant**: Consumer hangs `CEconRequest`
   (requirements per tick) to the army list; Engine enters `mGranted`;
   Construction/repair use the ratio (stall = slow), capture/teleport
   waiting for full coverage.
@@ -105,7 +105,7 @@ Economy, renderer, network. Lua gets the 543 sim bindings + callbacks.
   - **Command→Task-Dispatch** (`DispatchTask` @ 0x608EF0) → 40 Befehlstypen
     ([research/command-dispatch-binary.md](research/command-dispatch-binary.md)).
   - **Construction task flow** complete ([research/build-task-binary.md](research/build-task-binary.md)):
-    `delta = (buildRate/BuildTime) * resourceConsumed * 0.1`, HP wächst linear
+`delta = (buildRate/BuildTime) * resourceConsumed * 0.1`, HP grows linearly
     with progress, completion → `OnStopBeingBuilt` (Lua) + Adjacency-
     Scan; `resourceConsumed` = `LimitingRate` from the Econ distribution (both
     Systeme greifen ineinander).
@@ -128,11 +128,11 @@ Economy, renderer, network. Lua gets the 543 sim bindings + callbacks.
 - **Range purely 2D (XZ)** versus MaxRadius²/MinRadius², separately
   `|Δy| ≤ MaxHeightDiff` and HeadingArc.
 - `TrackingRadius` is a **multiplier** from MaxRadius.
-- Türme: `TurretYaw/PitchSpeed` [°/s] → `slew = speed * DEG2RAD * 0.1` je Tick;
+- Towers: `TurretYaw/PitchSpeed` [°/s] → `slew = speed * DEG2RAD * 0.1` per tick;
   `FiringTolerance` [°] per axis.
 - Projektile: Gravitation **(0, −4.9, 0)**; Defaults UseGravity=1, Lifetime=15,
-  LeadTarget=1, TrackTarget=0; `MuzzleVelocity` überschreibt InitialSpeed
-  (mit Gauss-Jitter + Nahbereichsdämpfung).
+LeadTarget=1, TrackTarget=0; `MuzzleVelocity` overrides InitialSpeed
+(with Gaussian jitter + short-range attenuation).
 - **Damage — now reconstructed directly from the binary** (IDA; in faf-re is
   `SIM_Damage` just a stub) → [research/damage-binary.md](research/damage-binary.md):
   - **No distance falloff** (occupied): full amount to every entity in the radius.
@@ -160,16 +160,16 @@ Economy, renderer, network. Lua gets the 543 sim bindings + callbacks.
   Structure Occupancy.
 - **Slope is not an angle**: max. absolute height difference between neighboring samples
   > `MaxSlope` (standard **0.75**) ⇒ not passable.
-- Footprints global in `mohodata.scd:lua/footprints.lua` (20 Einträge).
+- Footprints global in `mohodata.scd:lua/footprints.lua` (20 entries).
 - **Pathfinding**: hierarchical A* (cluster 1/8/32/128), per footprint type
   a ClusterMap, incremental update with frame budget; A* runs in one
   Armee-Queue; Heuristik = Octile × 1.01.
 - **Repath** at: target distance > threshold, layer change, 30 ticks without
-  Positionsänderung; 3 Fehlschläge ⇒ Eskalation.
+change of position; 3 failures ⇒ escalation.
 - **Dodge is prediction based** (no boids): neighbors in radius,
   Spline forward simulation every 3 ticks, 2D OBB overlap test.
   **No physical pushing** — just occupancy + reservation + steering.
-- Layer-Höhe: Land = Terrain (SnapToGround mittelt 4 Footprint-Ecken),
+- Layer height: Land = Terrain (SnapToGround averages 4 footprint corners),
   Water = Wasserspiegel, Sub = Spiegel + (negatives) Elevation, Air = + Elevation.
 - Ships: no real draft (Footprint-MinWaterDepth), curve radius
   limits speed; Bots (RotateOnSpot) only leave
@@ -190,7 +190,7 @@ Economy, renderer, network. Lua gets the 543 sim bindings + callbacks.
   **LOSEver + KnownFake are sticky**.
 - **Ghost buildings**: no longer seen *immobile* units with LOSEver
   remain as a frozen blip (last known status).
-- **Jammer**: `Intel.JammerBlips` Fake-Blips mit zufälligem Offset im
+- **Jammer**: `Intel.JammerBlips` fake blips with random offset in
   `JamRadius`; exposed by Omni/LOS/source loss.
 - Client FoW: two grids per army — *Explored* (ever seen) and *Fog*
   (aktuell sichtbar).
@@ -202,7 +202,7 @@ Economy, renderer, network. Lua gets the 543 sim bindings + callbacks.
 - **Partikel-Physik steckt im Vertex-Shader** (`effects/particle.fx`):
   without drag `pos = P0 + V·t + 0.5·A·t²`; with drag exponential. Color =
   Partikeltextur × Ramp (U = t/lifetime).
-- BlendModes: 0=Alpha, 3=Add (häufigster), … ; 747 Partikeltexturen.
+- BlendModes: 0=Alpha, 3=Add (most common), … ; 747 particle textures.
 - Trails = Ribbons; Beam's own blueprints.
 - Effect templates: `lua/EffectTemplates.lua` (~586 tables).
 - **Audio = XACT**: `.xwb` (WBND) + `.xsb` (SDBK) — Header verifiziert.
@@ -217,7 +217,7 @@ Economy, renderer, network. Lua gets the 543 sim bindings + callbacks.
 - Original terrain normal comes from a **deferred buffer** (base pass
   writes geometry and stratum normals, `frame.fx` builds the TBN).
 - Wasser: Fresnel = prozedurale 128×128-Lookup (`d·bias + (1−d·bias)(1−NdotV)^power`);
-  WaterMap-Kanäle: **R=Flatness, G=Tiefe, B=Alphamaske, A=1−Foam**.
+WaterMap channels: **R=Flatness, G=Depth, B=Alpha Mask, A=1−Foam**.
 - Skycube-DDS = real cubemaps (DXT1 512², 6 faces, no mips).
 - Decals: Typ-Enum (1=Albedo, 2=Normals, …); Matrix = translate(−pos)·Ry·Rx·Rz·scale(1/s).
 - LOD selection: first LOD with `cutoff ≤ 0` **or** `distance ≤ cutoff`.
@@ -239,16 +239,16 @@ Economy, renderer, network. Lua gets the 543 sim bindings + callbacks.
 - **Lockstep transmits commands only**: 24 opcodes; Wire format
   `[u8 type][u16 size][payload]`; **no host relay** (broadcast to everyone,
   vollvermaschtes P2P).
-- Desync-Erkennung: MD5 über Economy + dirty Entities + **kompletten
+- Desync detection: MD5 via economy + dirty entities + **complete
   MT19937-RNG-State** je Beat; 128-Beat-Ring.
 - **Replay = recorded wire stream** (feed in bytes 1:1 again).
 - Session start via `SWldSessionInfo` (map, launch info, RNG seed) —
-  identisch für MP, SP, Replay, Load.
+identical for MP, SP, Replay, Load.
 
 ### 3.9 Game Framework
-- Skirmish = **Single-Player-Hosting** über dieselbe Lobby (Protokoll „None").
+- Skirmish = **Single-player hosting** via the same lobby ("None" protocol).
 - Sim init: `__blueprints` → `simInit.lua` → `ScenarioInfo` → `SetupSession()`
-  (lädt `_save.lua` + `_script.lua`) → Armeen/Brains → `BeginSession()`
+(loads `_save.lua` + `_script.lua`) → Armies/Brains → `BeginSession()`
   (`OnPopulate`/`OnStart`).
 - Map script for Skirmish is **minimal**; the Army/ACU generation is in
   `mohodata:lua/sim/ScenarioUtilities.lua`.
@@ -265,9 +265,9 @@ Verhaltens-/Screenshot-Test, Commit.
 
 ### Phase A — Lua-Fundament ✅ Meilenstein erreicht
 1. ✅ **FA-Lua-Transpiler** — 1316/1316 Skripte parsen (`scripts/verify-lua.ts`).
-   Dialekt-Eigenheiten gelöst: `#`-Kommentar, `!=`, `continue`→goto,
+Dialect peculiarities solved: `#` comment, `!=`, `continue`→goto,
    `arg`-Vararg→`table.pack`, generic-for→`__foriter`-Dispatcher,
-   Zahl-an-Keyword (`0then`), `{&1&4}`, BOM, ungültige Escapes.
+Number-to-keyword (`0then`), `{&1&4}`, BOM, invalid escapes.
 2. ✅ **A1** Host bootet `import.lua` + `class.lua` (`verify-luaboot.ts`).
 3. ✅ **A2** Original `LoadBlueprints()` pipeline loads real blueprint
    (`verify-blueprints.ts`).
@@ -291,20 +291,20 @@ Verhaltens-/Screenshot-Test, Commit.
 9. Task/Command system (queue semantics including patrol rotation), engineering.
 10. Passierbarkeits-Grid + hierarchisches A* + Steering/Avoidance + Formationen.
 11. Factories, Build Queue, Assist (additive), Reclaim, Repair, Capture, Upgrades;
-    **UI**: Container-Modell + Baumenü + Build-Platzierung + Command-Feedback.
+**UI**: Container model + build menu + build placement + command feedback.
 12. **Meilenstein**: kompletter Aufbau ACU → T2 spielbar.
 
 ### Phase D — Welt & Intel
-13. Intel-Grids (Zähler-Semantik!), Blips, Ghosts, Jammer, FoW (Sim + Render).
+13. Intel Grids (counter semantics!), Blips, Ghosts, Jammer, FoW (Sim + Render).
 14. Props (Instancing), Decals, TTerrain-Variante, Wasser voll (Fresnel-LUT,
     Cubemap), particle system (curves + particle.fx port), build/wreck shader.
 15. **Milestone**: Map + effects look like the original.
 
-### Phase E — Vollständigkeit
+### Phase E — Completeness
 16. Luft/Marine (Layer-Physik, Transporte, U-Boote).
 17. Audio (XACT-Parser → WebAudio).
 18. Restliche UI (Score, Avatare, Chat, Tabs, Tooltips, Cursors, Hotkeys),
-    Lobby/Menü, Optionen, **Victory Conditions**, Spielende.
+Lobby/Menu, Options, **Victory Conditions**, End of Game.
 
 ### Phase F — Gegner, Netz, Kampagne
 19. **KI**: AiBrain/Platoon bindings (57+47 methods) → Original AI Lua (83k LOC) running.
@@ -320,15 +320,15 @@ Verhaltens-/Screenshot-Test, Commit.
   bit-identisch" bleibt Pflicht.
 - **Performance**: 1000-unit benchmark from phase B (Lua callback overhead is
   the main risk); Sim in Web Worker; Instancing for props/units.
-- **Verifikation**: `verify.ts` (Daten), `verify-lua.ts` (Skripte), künftig
+- **Verification**: `verify.ts` (data), `verify-lua.ts` (scripts), future
   `verify-sim.ts` (Blueprint-Rechnung vs. Sim: DPS, Bauzeit, Reichweite).
 
 ## 6. Risiken (ehrlich)
 | Risk | Status/Countermeasure |
 | --- | --- |
-| Lua-Semantik (5.4 ≠ 5.0) | **Bestätigt gemessen** → Gleis A (eigener 5.0-Build) |
+| Lua semantics (5.4 ≠ 5.0) | **Confirmed measured** → Track A (own 5.0 build) |
 | Lua performance at 1000+ units | open → former benchmark, hot paths in TS |
 | Decomp gaps | **closed: all four reconstructed from the FAF binary via IDA-MCP** — SIM_Damage ([damage-binary.md](research/damage-binary.md)), Econ distribution ([economy-binary.md](research/economy-binary.md)), command dispatch ([command-dispatch-binary.md](research/command-dispatch-binary.md)), construction tasks ([build-task-binary.md](research/build-task-binary.md)). Further details if required directly from the IDB. |
 | Props/Particle Amount (46k props, thousands of particles) | Instancing + GPU particles (physics in the shader as in the original) |
-| XACT-Audioformat | Parser nötig; Referenz: Open-Source-XACT-Implementierungen |
+| XACT audio format | parser needed; Reference: Open Source XACT Implementations |
 | Legal | unchanged: no assets/code in the repo, BYO game ([LEGAL.md](LEGAL.md)) |

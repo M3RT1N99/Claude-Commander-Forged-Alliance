@@ -70,7 +70,7 @@ const maxMass0 = eco0.maxMass
 check(eco0.mass > 0 && eco0.energy > 0, `Starting supply from GiveInitialResources: ${eco0.mass.toFixed(0)} mass, ${eco0.energy.toFixed(0)} energy`)
 
 // --- The UI VM (same as in the browser) ------------------------------------
-console.log('\n== UI: Panels aufbauen, ACU auswählen ==')
+console.log('\n== UI: Build panels, select ACU ==')
 const dims = new Map<string, [number, number]>()
 for (const key of game.paths) {
   if (!key.startsWith('textures/ui/') || !key.endsWith('.dds')) continue
@@ -121,7 +121,7 @@ const mirror = (): void => {
   }
 }
 mirror()
-check(Number(uiHost.eval(`return __uiSelectByIds({ ${acu} })`)) === 1, 'ACU in der UI ausgewählt')
+check(Number(uiHost.eval(`return __uiSelectByIds({ ${acu} })`)) === 1, 'ACU selected in the UI')
 
 // --- The construction icon: the Original-construction.lua starts the command mode ---
 console.log('\n== Bau-Icon → commandmode.lua ==')
@@ -143,7 +143,7 @@ check(
   snapped.x === 102.5 && snapped.z === 108.5,
   `Snap (103.4, 108.9) → (${snapped.x}, ${snapped.z}) — COORDS_GridSnap, 1-m-Raster`,
 )
-check(snapped.y === 20, 'Die Höhe kommt NACH dem Snap aus dem Gelände (Cfile:641588)')
+check(snapped.y === 20, 'The height comes AFTER the snap from the terrain (Cfile:641588)')
 
 // --- The click into the world --------------------------------------------------
 console.log('\n== Klick in die Welt: Baustelle + Auftrag ==')
@@ -197,7 +197,7 @@ check(
 )
 
 // --- Construction is underway --------------------------------------------------------
-console.log('\n== Beats: der Bau wächst, die Ökonomie zahlt ==')
+console.log('\n== Beats: the building grows, the economy pays ==')
 const massBefore = engine.economy.army(1).mass
 for (let i = 0; i < 20; i++) beat(engine)
 const site1 = readLuaUnit(simHost, siteId)!
@@ -238,11 +238,11 @@ check(
 // Movement command. Before, the move command went to everything, and the sim has that
 // Building TELEPORTED to the click point (motion.lua: MaxSpeed ​​0 → “immediately on
 // Target"). That's exactly what happened in the browser.
-console.log('\n== Klick mit ausgewählter Fabrik: Sammelpunkt, keine Fahrt ==')
+console.log('\n== Click with factory selected: collection point, no journey ==')
 mirror()
 check(
   Number(uiHost.eval(`return __uiSelectByIds({ ${siteId} })`)) === 1,
-  'Die fertige Fabrik ist ausgewählt',
+  'The finished factory is selected',
 )
 
 const before = readLuaUnit(simHost, siteId)!
@@ -270,7 +270,7 @@ console.log('\n== Bau-Klick mit ZWEI Bauern: der zweite hilft ==')
   mirror()
   check(
     Number(uiHost.eval(`return __uiSelectByIds({ ${acu}, ${acu2} })`)) === 2,
-    'Beide Bauer sind ausgewählt',
+    'Both pawns are selected',
   )
   uiHost.eval(`import('/lua/ui/game/commandmode.lua').StartCommandMode('build', { name = 'ueb0101' })`)
   const assistMsg = await worldClick(uiHost, sim, { x: 92.4, z: 92.1 }, () => 20)
@@ -293,7 +293,7 @@ console.log('\n== Klick auf den Feind: Attack statt Move ==')
   const feind = spawnLuaUnit(simHost, 'uel0201', { x: 150, y: 20, z: 150 }, 2)
   check(
     Number(uiHost.eval(`return __uiSelectByIds({ ${acu} })`)) === 1,
-    'Die ACU ist ausgewählt',
+    'The ACU is selected',
   )
   const atkMsg = await worldClick(uiHost, sim, { x: 150, z: 150 }, () => 20, {
     queue: false,
@@ -302,7 +302,7 @@ console.log('\n== Klick auf den Feind: Attack statt Move ==')
   check(atkMsg === `Attack (1) → Unit ${feind}`, `worldClick → ${String(atkMsg)}`)
   check(
     simHost.eval(`return __attackOrders[${acu}] == ${feind}`) === true,
-    'Die Sim führt die Attack-Order (CAttackTargetTask)',
+    'The Sim executes the attack order (CAttackTargetTask)',
   )
 }
 

@@ -208,7 +208,7 @@ async function startFrontEndUi(): Promise<void> {
     }
     cancelAnimationFrame(frontEndFrame)
     frontEndFrame = requestAnimationFrame(tick)
-    log('Hauptmenü läuft (menus/main.lua)')
+    log('Main menu running (menus/main.lua)')
   } catch (err) {
     log(`ERROR in the main menu: ${err instanceof Error ? err.message : err}`)
     setIngame(false)
@@ -769,7 +769,7 @@ async function startSandbox(mapFolder: string): Promise<void> {
         height: currentScmap.height,
         scale: currentScmap.heightScale,
       })
-      log('Lua-Sim zurückgesetzt (neue Karte)')
+      log('Lua sim reset (new map)')
     }
 
     // Army 1 spawn point from the _save.lua
@@ -849,7 +849,7 @@ async function startSandbox(mapFolder: string): Promise<void> {
     // the sim, not the UI.
     gameUi.connectPause((paused) => {
       luaSim?.setPaused(paused)
-      log(paused ? 'Session pausiert' : 'Session läuft weiter')
+      log(paused ? 'Session pausiert' : 'Session continues')
     })
     // The construction preview (ghost buildings on the grid) — engine rendering with the
     // real blueprint models.
@@ -1123,7 +1123,7 @@ async function runSelftest(blueprintId: string): Promise<void> {
         `+${e?.massIncome.toFixed(1)} −${e?.massExpense.toFixed(1)}, Energie ${e?.energy.toFixed(0)} +${e?.energyIncome.toFixed(1)}`,
     )
     if (done >= 2) {
-      log('SELFTEST: BEIDE PANZER FERTIG — die Techdemo läuft')
+      log('SELF TEST: BOTH TANKS FINISHED - the tech demo is running')
       await selftestKampf()
       return
     }
@@ -1186,7 +1186,7 @@ async function selftestKampf(): Promise<void> {
   log(
     nPartikel > 0
       ? `SELFTEST-PARTIKEL: ${nPartikel} Partikel gespawnt — das Partikelsystem lebt`
-      : 'SELFTEST-PARTIKEL: KEIN Partikel gespawnt — Emitter-Kette prüfen',
+      : 'SELF-TEST PARTICLE: NO particle spawned — check emitter chain',
   )
   const nTrails = trails?.totalTrails() ?? 0
   log(
@@ -1201,7 +1201,7 @@ async function selftestKampf(): Promise<void> {
   log(
     nCues > 0
       ? `SELFTEST-AUDIO: ${nCues} Cue(s) als PCM abgespielt — die XACT-Kette lebt`
-      : `SELFTEST-AUDIO: keine Cue abgespielt (${nCues < 0 ? 'kein AudioContext' : 'Kette prüfen'})`,
+      : `SELFTEST-AUDIO: keine Cue abgespielt (${nCues < 0 ? 'kein AudioContext' : 'Check chain'})`,
   )
 }
 
@@ -1507,7 +1507,7 @@ btnResume.addEventListener('click', async () => {
     btnResume.hidden = true
     await connect(new FsaGameSource(handle))
   } else {
-    log('Zugriff abgelehnt — bitte das Verzeichnis neu wählen')
+    log('Access denied - please reselect the directory')
   }
 })
 
@@ -1594,7 +1594,7 @@ let luaSimBoot: Promise<LuaSimClient> | null = null
 
 async function getLuaSim(): Promise<LuaSimClient> {
   if (!luaSimBoot) {
-    if (!currentScmap) throw new Error('Sim ohne Karte: kein Gelände, kein Spawn')
+    if (!currentScmap) throw new Error('Sim without a map: no terrain, no spawn')
     log('Boote Original-Lua-Sim (Lua-VM)…')
     // The terrain goes along with MIT: the original Lua reads GetSurfaceHeight
     // already when creating a unit, and the engine does not provide any silent information for this
@@ -2238,7 +2238,7 @@ async function init(): Promise<void> {
       btnResume.classList.add('primary')
       btnResume.textContent = `Weiter mit »${stored.name}«`
       btnPickDir.classList.remove('primary')
-      btnPickDir.textContent = 'Anderes Verzeichnis wählen…'
+      btnPickDir.textContent = 'Choose another directory...'
     }
   }
 }

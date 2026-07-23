@@ -133,7 +133,7 @@ installUiEngine(host, uiFs)
 // comes first (Cfile:1273621-1273666), SetupUI comes afterwards (1273680).
 createRootFrame(host, 1920, 1080)
 
-console.log('\n== Das Original-Menü bootet sich selbst ==')
+console.log('\n== The original menu boots itself ==')
 startFrontEnd(host)
 check(String(host.eval('return GetCurrentUIState()')) === 'frontend', 'UI-Zustand ist "frontend" (splash.lua hat durchgereicht)')
 
@@ -159,7 +159,7 @@ const textures = snap.map((c) => (c.texture ? String(c.texture).toLowerCase() : 
 const texturesOf = (needle: string): number => textures.filter((t) => t.includes(needle)).length
 
 check(snap.length > 20, `${snap.length} maui-Controls stehen im Menü`)
-check(texturesOf('/logo/logo.dds') === 1, 'das Logo hängt im Baum (/scx_menu/logo/logo.dds)')
+check(texturesOf('/logo/logo.dds') === 1, 'the logo is hanging in the tree (/scx_menu/logo/logo.dds)')
 check(texturesOf('border-console-top_bmp.dds') === 1, 'der Konsolen-Rahmen ist da (border-console-top_bmp.dds)')
 
 // main.lua:104-142 — menuTop has seven entries; CreateButtonStd (543) returns
@@ -184,7 +184,7 @@ check(visibleButtons >= menuTopCount, `${visibleButtons} Knöpfe sind voll einge
 const labels = snap.filter((c) => c.kind === 'text' && c.text).map((c) => String(c.text))
 check(
   labels.some((t) => /Kampagne|Campaign/i.test(t)) && labels.some((t) => /Gefecht|Skirmish/i.test(t)),
-  'die Knöpfe tragen ihre Beschriftung aus menuTop',
+  'the buttons have their labels from menuTop',
 )
 // ... with the right characters. `/loc/<sprache>/strings_db.lua` is UTF-8;
 // Anyone who reads the latin1 file and outputs it as UTF-8 encodes every byte
@@ -197,7 +197,7 @@ check(mojibake.length === 0, `keine doppelt kodierten Umlaute (${mojibake[0]?.sl
 const version = String(host.eval('return GetVersion()'))
 const versionShown = snap.some((c) => c.kind === 'text' && String(c.text) === version)
 check(version !== 'CFA' && version.length > 3, `GetVersion() = "${version}" (aus der package.json)`)
-check(versionShown, 'die Version steht als Text im Menü (main.lua:172)')
+check(versionShown, 'the version is available as text in the menu (main.lua:172)')
 
 console.log('\n== Der Klick auf „Gefecht" trägt bis zur Lobby ==')
 // The honest proof that the chain is standing: the click goes through the dragger
@@ -240,7 +240,7 @@ if (err === null && !warnings.some((w) => w.includes('InternalCreateLobby'))) {
   // The first time the game asks if you want to play the tutorial
   // (main.lua:855-872, Prefs 'MenuTutorialPrompt'). This is original behavior,
   // no error - the dialog must therefore be answered first.
-  err = clickText(/^Nein$|^No$/i, 'der Tutorial-Dialog steht da und lässt sich mit „Nein" beantworten')
+  err = clickText(/^Nein$|^No$/i, 'The tutorial dialog is there and can be closed with “No" beantworten')
 }
 // A Lua error in an OnFrame does not THROW in the engine: RunScript catches
 // it (lua_call != 0) and logs "Error running %s script in %s: %s"
@@ -309,7 +309,7 @@ console.log('\n== Der Optionen-Dialog: ItemList, Scrollbar und Combo ==')
   check(rows > 1, `die größte Liste hat ${rows} Zeilen — die Optionen stehen wirklich drin`)
 }
 
-console.log('\n== Der Regler lässt sich ziehen — und meldet den neuen Wert ==')
+console.log('\n== The slider can be dragged - and reports the new value ==')
 // The train goes through the dragger (slider.lua:49-70: ButtonPress → Dragger,
 // OnMove → CalculateValueFromMouse → SetValue → OnValueChanged); options.lua
 // depends on it `update` (options.lua:713 → SetVolume). Without Dragger OnMove
@@ -360,7 +360,7 @@ console.log('\n== Der Regler lässt sich ziehen — und meldet den neuen Wert ==
   check(value < 50, `Zug nach links: 100 → ${Math.round(value)} (Dragger → OnMove → SetValue)`)
   check(
     host.eval('return __sliderTest.changed') !== false,
-    'OnValueChanged feuert — daran hängt options.lua:713 (update → SetVolume)',
+    'OnValueChanged fires - options.lua:713 hangs on it (update → SetVolume)',
   )
 }
 
@@ -380,7 +380,7 @@ const cueList = (): string =>
 const cues = cueList().split(' ').filter(Boolean)
 check(cues.some((c) => c.startsWith('AMB_Menu_Loop:')), `Ambient-Cue angefordert (${cues.length} Cues insgesamt)`)
 check(cues.some((c) => c.startsWith('Main_Menu:')), 'Musik-Cue "Main_Menu" angefordert')
-check(cues.filter((c) => c.endsWith(':an')).length >= 2, 'die Cues LAUFEN (Zustand wird geführt, nicht ausgegeben)')
+check(cues.filter((c) => c.endsWith(':an')).length >= 2, 'the cues are RUNNING (state is maintained, not output)')
 
 // Exit the menu - the engine way: every change of state gives the
 // Root frames free (CUIManager::SetNewLuaState, Cfile:1273600), the tree is
@@ -390,9 +390,9 @@ host.eval('__mauiResetFrames()')
 const stopped = cueList()
   .split(' ')
   .filter((c) => c.startsWith('Main_Menu:'))
-check(stopped.every((c) => c.endsWith(':aus')), 'nach dem Abräumen ist die Musik über ihr Handle gestoppt')
+check(stopped.every((c) => c.endsWith(':aus')), 'after clearing, the music on your handle is stopped')
 
-console.log('\n== Die Einstellungen überleben den Neustart ==')
+console.log('\n== The settings survive the restart ==')
 // Two things together, and both were missing:
 //
 //  1. `SavePreferences()` was a null call (`__uiSavePrefs` was never set)
@@ -430,7 +430,7 @@ console.log('\n== Die Einstellungen überleben den Neustart ==')
   host2.close()
 }
 
-console.log('\n== ConExecute ist eine echte Konsole — 19 Optionen hängen daran ==')
+console.log('\n== ConExecute is a real console — 19 options attached to it ==')
 // options.lua sets half of its options via console commands:
 //     set = function(key, value, startup) ConExecute("ui_KeyboardPanSpeed " .. value) end
 // Behind this there are real variables in the engine (Moho::TConVar), which
@@ -449,7 +449,7 @@ console.log('\n== ConExecute ist eine echte Konsole — 19 Optionen hängen dara
   // The names are NOT case-sensitive: options.lua writes `ren_Skydome`,
   // the engine is called Moho::ren_SkyDome. If you compare exactly, you lose it.
   host.eval(`ConExecute('ren_Skydome false')`)
-  check(host.eval(`return __conGet('ren_SkyDome')`) === false, 'ren_Skydome ↔ ren_SkyDome (Groß/Klein egal)')
+  check(host.eval(`return __conGet('ren_SkyDome')`) === false, 'ren_Skydome ↔ ren_SkyDome (big/small doesn't matter)')
 
   // And all the way: change option → optionslogic → ConExecute → ConVar.
   host.eval(`
@@ -458,7 +458,7 @@ console.log('\n== ConExecute ist eine echte Konsole — 19 Optionen hängen dara
   `)
   check(
     Math.abs(Number(host.eval(`return __conGet('ui_KeyboardPanSpeed')`)) - 150) < 0.001,
-    'eine geänderte Option schlägt bis in die ConVar durch (90 → 150)',
+    'a changed option affects the ConVar (90 → 150)',
   )
 }
 

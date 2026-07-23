@@ -32,7 +32,7 @@ Fixed order per tick (only when not paused; `++mCurTick`):
 5. `Entity::AdvanceCoords` (Physik/Bewegung)
 6. Build `Sync` snapshot; GC every 70 ticks
 - Then `Sim::Sync` → SSyncData + `Sync` table; UI thread `CWldSession::DoBeat`
-  wendet es an, ruft `OnSync()`/`OnBeat()`. Render-Interpolation über
+applies it, calls `OnSync()`/`OnBeat()`. Render interpolation via
   `mTimeSinceLastTick` (0..1). Spielgeschwindigkeit `pow(10, simRate*0.1)`.
 
 ## moho-Sim API (the C metatables that the Sim Lua sees)
@@ -58,11 +58,11 @@ C++-Control-Framework: `CMauiControl`-Basis (⊂ CScriptObject), Subklassen
 Bitmap/Group/Text/Edit/ItemList/Border/Dragger/Scrollbar/…/CUIWorldView.
 - Lua builds instance table, calls Global `InternalCreate<X>(self, parent)`;
   C legt Control an, `SetLuaObject` (mLuaObj=self, self._c_object=userdata).
-- Layout über 7 `CScriptLazyVar_float` (Left/Right/Top/Bottom/Width/Height/Depth;
+- Layout over 7 `CScriptLazyVar_float` (Left/Right/Top/Bottom/Width/Height/Depth;
   Element [1] = number or function, GetValue evaluated+cached).
 - Callback-Pump: `OnFrame(self,delta)`, `HandleEvent(self,event)` (bubbelt),
   `OnInit`, `OnDestroy`, `OnHide`.
-- UI-Globals für construction.lua: `EntityCategoryGetUnitList(cat)` →
+- UI globals for construction.lua: `EntityCategoryGetUnitList(cat)` →
   blueprint names; `GetUnitCommandData(sel)` → (commandCaps, toggleCaps,
   buildableCategory); `IssueBlueprintCommand`, `StartCommandMode`; EntityCategory
   (+/-/*). **UIFile is NOT an engine function** (Lua helper in uiutil.lua).
@@ -73,15 +73,15 @@ Bitmap/Group/Text/Edit/ItemList/Border/Dragger/Scrollbar/…/CUIWorldView.
 - **M1 ✓** Lua-Sim-Scheduler + Beat (ForkThread/WaitTicks + Zeit) — simThreads.ts.
 - **M2** SimEngine: Integrate scheduler + unit spawn; `OnCreate` as a thread
   run; spawned unit tick over `__units` per tick. Replaces LuaSim.
-- **M3** Ökonomie Lua-getrieben: moho `SetConsumptionActive`/`SetProductionPerSecond*`
+- **M3** Economics Lua-driven: moho `SetConsumptionActive`/`SetProductionPerSecond*`
   register real requests in a per-army economy (two-ratio math from
   take over simWorld, but fed by real unit requests). Replaces Army.tick hardcode.
 - **M4** Movement: Navigator (`unit:GetNavigator():SetGoal`) + `Entity::AdvanceCoords`
   as engine physics, driven by Lua move commands.
 - **M5** Command-Dispatch: `IssueBlueprintCommand`/CommandQueue/Tasks (Move/Build),
   Build via LimitingRate + Lua callbacks (OnStartBuild/OnStopBeingBuilt).
-- **M6** maui-UI-Kern: `moho.<x>_methods` für Controls, `InternalCreate*`,
+- **M6** maui-UI core: `moho.<x>_methods` for controls, `InternalCreate*`,
   LazyVar layout, OnFrame/HandleEvent pump, Bitmap/Text/Group rendering — with it
   lua/ui/game/construction.lua runs unchanged. Afterwards: Replace hud.ts with real UI-Lua.
 - **later** Sim→UI sync (`Sync` table, OnSync/OnBeat), lockstep gate +
-  MD5-Checksummen (MP-Determinismus), Gleis A (Lua-5.0-WASM für Bit-Genauigkeit).
+MD5 checksums (MP determinism), Track A (Lua-5.0-WASM for bit precision).

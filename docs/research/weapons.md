@@ -199,7 +199,7 @@ end
 ```lua
 AimControl = CreateAimController(self, 'Default', TurretBoneYaw, TurretBonePitch, TurretBoneMuzzle)
 AimControl:SetPrecedence(AimControlPrecedence or 10)
-if STRUCTURE then AimControl:SetResetPoseTime(9999999) end   -- Türme bleiben stehen
+if STRUCTURE then AimControl:SetResetPoseTime(9999999) end -- Towers remain stationary
 
 turretyawmin,   turretyawmax   = TurretYaw   - TurretYawRange,   TurretYaw   + TurretYawRange
 turretpitchmin, turretpitchmax = TurretPitch - TurretPitchRange, TurretPitch + TurretPitchRange
@@ -327,7 +327,7 @@ Only `TRS_Available` allows firing (CFireWeaponTask checks `TargetIsTooClose(...
 ### 2f. Zielerfassung / Priorisierung
 
 - **Detection Radius = `TrackingRadius * MaxRadius`** (CAiAttackerImpl.cpp:1256-1270) — TrackingRadius is a **multiplier**, not an absolute value (e.g. UEL0201: 1.15 → 18 * 1.15 = 20.7)
-- **Prüfintervall:** `frames = max(1, ceil(TargetCheckInterval * 10))` Ticks (CAiAttackerImpl.cpp:468-472); `NeedPrep` → fix 2 Frames
+- **Check Interval:** `frames = max(1, ceil(TargetCheckInterval * 10))` Ticks (CAiAttackerImpl.cpp:468-472); `NeedPrep` → fix 2 frames
 - **Priorities:** `TargetPriorities` (list of category strings) → `weapon:SetTargetingPriorities(parsedCategories)`. The engine iterates the list **from index 0 up** (0 = highest priority) and stops as soon as a better candidate is found; Already seen targets (`RECON_LOSEver`) are given priority (CAiAttackerImpl.cpp:1147-1170)
 - **Filter:** `TargetRestrictOnlyAllow` / `TargetRestrictDisallow` (categories) → `mCat1`/`mCat2`; `FireTargetLayerCapsTable[layer]` → `SetFireTargetLayerCaps` (Land/Water/Seabed/Air mask, is reset when changing layers, weapon.lua:347-359)
 - More gates in `UnitWeapon::CanFire` (UnitWeapon.cpp:3172): Stun, `UNITSTATE_Busy`, flyer not in the air layer, `NeedUnpack` without immobile, `AboveWaterFireOnly`/`BelowWaterFireOnly` (muzzle height vs. water level), bomb drop timing (`NeedToComputeBombDrop`, `BombDropThreshold`)
@@ -398,7 +398,7 @@ Fields (with defaults from RProjectileBlueprint.cpp:98-143):
 | `Acceleration` (+Range) | 0 | Units/s² along flight direction |
 | `Position*` / `Direction*` (+Range) | 0 / (0,1,0), Range 1.5 | Spawn-Streuung |
 | `RotationalVelocity` (+Range) | 0 | |
-| `MaxZigZag` / `ZigZagFrequency` | 0 / 0 | Ausweichmanöver |
+| `MaxZigZag` / `ZigZagFrequency` | 0 / 0 | Evasive maneuvers |
 | `DestroyOnWater` | 0 | |
 | `MinBounceCount` / `MaxBounceCount` / `BounceVelDamp` | 0 / 0 / 0.5 | Abpraller |
 | `RealisticOrdinance` / `StraightDownOrdinance` | 0 / 0 | Bomben |
@@ -575,7 +575,7 @@ amount = amount * (1.0 - ArmyGetHandicap(self:GetArmy()))
 ```
 → **`effektiv = amount * ArmorMult(ArmorType, DamageType) * (1 - Handicap)`** — first armor, then handicap.
 
-`lua/armordefinition.lua` (vollständig, 6 Einträge):
+`lua/armordefinition.lua` (complete, 6 entries):
 | ArmorType | Multiplikatoren |
 |---|---|
 | `Default` | `Normal 1.0` |
@@ -592,7 +592,7 @@ Known DamageTypes in the game Lua: `Normal`, `Overcharge`, `Deathnuke`, `Experim
 
 ### 4e. Friendly Fire
 
-Zwei **unabhängige** Flags:
+Two **independent** flags:
 - **`CollideFriendly`** (Weapon-BP, default `false`) — decides whether the projectile **collides** with allies/own (filters in `Unit:OnCollisionCheckWeapon`, `Shield:OnCollisionCheckWeapon`, `Projectile:OnCollisionCheck`)
 - **`DamageFriendly`** (Weapon-BP, **Default `true`** if nil! weapon.lua:291-293) — decides whether `DamageArea`/`DamageRing` **damage** allies
 - **`DamageSelf`** (Default `false`) — damages the Instigator itself
@@ -683,7 +683,7 @@ BoundingXYZRadius = (SizeX + SizeY + SizeZ) * 0.333
 - `scale < 0.5` → `ExplosionEffectsSml01`
 - `scale > 4`   → `ExplosionEffectsLrg01`, `ShakeTimeModifier = 1.0`, `ShakeMaxMul = 0.25`
 - otherwise → `ExplosionEffectsMed01`
-- Layer `Water` → zusätzliche Environmental-FX
+- Layer `Water` → additional environmental FX
 - `CreateFlash(obj, -1, scale, army)` → `CreateLightParticle(..., GetRandomFloat(6,10) * scale, GetRandomFloat(10.5,14.5), 'glow_03', 'ramp_flare_02')`
 - Layer `Land`: `scale > 1.2` → `CreateScorchMarkDecal` (size `scale*3`), otherwise `CreateScorchMarkSplat` (size `scale*4`); Lifetime `GetRandomFloat(300,600)`, LOD `GetRandomFloat(200,350)`
 - `CreateDebrisProjectiles(obj, BoundingXYZRadius, Dimensions)`:
@@ -822,7 +822,7 @@ end
 - **`DamageRechargeState`** (HP shot to 0): `RemoveShield()` → `ChargingUp(0, ShieldRechargeTime)` → `SetHealth(MaxHealth)` (full HP!) → `OnState`
 - **`EnergyDrainRechargeState`** (energy empty): `RemoveShield()` → `ChargingUp(0, ShieldEnergyDrainRechargeTime)` → `OnState` (or `OffState` if in transport)
 - **`OffState`** (manually off): Kill rain thread, `OffHealth = GetHealth()`, `RemoveShield()`, `Owner:OnShieldDisabled()`
-- **`ChargingUp(curProgress, time)`** — Ladebalken, fortschreitend mit tatsächlichem Energieverbrauch:
+- **`ChargingUp(curProgress, time)`** — charging bar, progressing with actual energy consumption:
   ```lua
   while curProgress < time do
       curProgress = math.min(curProgress + (Owner:GetResourceConsumed() / 10), time)
@@ -911,7 +911,7 @@ Categories = { 'AEON', 'PROJECTILE', 'MISSILE' }
 9. Reichweite: **2D-XZ** + `MaxHeightDiff` + `HeadingArcRange`.
 10. `TrackingRadius` is **Multiplier** of MaxRadius.
 11. `UseGravity` **Default true**; Gravitation `(0, -4.9, 0)`; Ballistik-Winkel via `CalculateFiringPitch` (High/Low je `BallisticArc`).
-12. `MuzzleVelocity` überschreibt `InitialSpeed`; Gauss-Jitter + `sqrt(d/reduceDist)`-Dämpfung.
+12. `MuzzleVelocity` overrides `InitialSpeed`; Gaussian jitter + `sqrt(d/reduceDist)` attenuation.
 13. `ProjectileLifetimeUsesMultiplier` → `(MaxRadius / MuzzleVelocity) * mult`.
 14. **Damage: NO range falloff.** Full `Amount` on everything in the radius/ring. Falloff only through staggered rings / ScalableRadiusAreaDoT in Lua.
 15. `effektiv = amount * ArmorMult(ArmorType, DamageType) * (1 - Handicap)`.
@@ -919,7 +919,7 @@ Categories = { 'AEON', 'PROJECTILE', 'MISSILE' }
 17. `overkillRatio = max(0, (amount - preAdjHealth) / maxHealth)`; `> 1.0` → no wreck.
 18. Wrack-Reclaim = `BuildCostMass * MassMult * (1 - overkillRatio) * fractionComplete`.
 19. Shield: Absorption `min(hp, amount*mult)`, overspill only with `PassOverkillDamage`; Rain starts `RegenStartTime` after **last** hit; after breakthrough **full** HP after `ShieldRechargeTime`.
-20. STRATEGIC+MISSILE (Nukes) durchdringen Schilde grundsätzlich.
+20. STRATEGIC+MISSILE (Nukes) generally penetrate shields.
 
 **Known gap:** The exact entity selection in `SIM_Damage` (which collision volumes are considered "in the radius" — center point vs. box/sphere intersection) cannot be reconstructed. Sphere vs collision volume overlap is recommended for replication (consistent with `PointInShape` usage in `CDamage.cpp:160-171` and the `SetPropCollision`/`SetCollisionShape` model: `COLSHAPE_Box` / `COLSHAPE_Sphere`).
 

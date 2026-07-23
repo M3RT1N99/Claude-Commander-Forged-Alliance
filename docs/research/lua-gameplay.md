@@ -23,7 +23,7 @@ FA's gameplay layer is **real Lua 5.0.1 (PUC-Rio) with GPG patched lexer** — c
 ## Details
 ## 1. Structure & Layering
 
-**Zwei Archive, zwei Schichten** (`lua.scd` überlagert `mohodata.scd`):
+**Two archives, two layers** (`lua.scd` overlays `mohodata.scd`):
 
 | Archive | Size | Files | role |
 |---|---|---|---|
@@ -169,7 +169,7 @@ Two ways, both **requiring running foreign Lua code**:
 5. AI and campaign are then added without any further porting work.
 
 ## Refs
-- C:\Program Files (x86)\Steam\steamapps\common\Supreme Commander Forged Alliance\bin\main.exe (16.714.240 B) — enthält '$Lua: Lua 5.0.1 Copyright (C) 1994-2003 Tecgraf, PUC-Rio'
+- C:\Program Files (x86)\Steam\steamapps\common\Supreme Commander Forged Alliance\bin\main.exe (16.714.240 B) — contains '$Lua: Lua 5.0.1 Copyright (C) 1994-2003 Tecgraf, PUC-Rio'
 - C:\Program Files (x86)\Steam\steamapps\common\Supreme Commander Forged Alliance\bin\MohoEngine.dll (9.827.584 B)
 - gamedata/lua.scd (7,671,907 B; 354 ​​Lua files, 7.21 MB unpacked) — game layers
 - gamedata/mohodata.scd (526,529 B; 91 files, 489 KB) — Engine SDK base

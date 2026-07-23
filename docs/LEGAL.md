@@ -24,7 +24,7 @@ This project follows the established model of engine reimplementations
 Against the large bring-your-own-assets projects, there are no successful ones
 Takedowns known; OpenMW has even reached an amicable agreement with Bethesda.
 
-## Präzedenz speziell für FA: FAForever
+## Precedence specifically for FA: FAForever
 
 FAForever (FAF) has been requiring a **Steam/GOG account link** as for years
 Proof of ownership (“for legal reasons”) and is used by the rights holders since

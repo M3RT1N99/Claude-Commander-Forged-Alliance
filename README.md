@@ -20,7 +20,7 @@ Browser and renders original entities with original textures in WebGL:
 - **Blueprints** (.bp, declarative Lua): own parser, verified against
   all 568 unit blueprints in the game
 - **DDS textures** (DXT1/3/5): native GPU upload, software decoder as
-  Fallback für Mobile
+Fallback for mobile
 - **Original shader look**: Port of the FA unit shader (`mesh.fx`,
   NormalMappedPS) including team color mask, tangent-space normal mapping
   the G/A channels, Spec/Glow
@@ -70,7 +70,7 @@ Siehe [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Kurzfassung:
 1. ✅ **Unit Viewer** — Formats, VFS, Rendering Base
 2. ✅ **Map Renderer** — SCMAP terrain splatting, water (basic)
 3. ✅ **Animationen** — SCA-Parser, GPU-Skinning, Walk-Cycles
-4. ✅ **Sim-Basis** — deterministischer 10-Hz-Kern (bit-identische Läufe),
+4. ✅ **Sim Base** — deterministic 10Hz core (bit-identical runs),
    Command queues, movement model from blueprint values, multiple units
    with selection in the sandbox
 5. **Sim-Ausbau** — Pathfinding, Kollision, Waffen/Schaden, Wirtschaft,

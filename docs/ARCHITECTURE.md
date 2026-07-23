@@ -23,7 +23,7 @@
 │ Renderer (Three.js/WebGL2)                             │
 │   Units (SCM+DDS, mesh.fx-Port) · Terrain · Effekte    │
 ├────────────────────────────────────────────────────────┤
-│ Sim-Kern (deterministisch, später im Web Worker)       │
+│ Sim core (deterministic, later in Web Worker) │
 │   Blueprints · Einheiten · Bewegung/Pathfinding ·      │
 │   Waffen/Schaden · Wirtschaft (Mass/Energy-Flow)       │
 ├────────────────────────────────────────────────────────┤

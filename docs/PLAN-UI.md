@@ -50,14 +50,14 @@ Don't touch it (step 2+ throws it away): minimap frame, icon tinting, unit view 
 `Moho::USER_GetLuaState()` @0x8C65B0 (Cfile:1368027): own state, then
 `scr_CoreInits` (Cfile:1368069) **and** `scr_UserInits` (Cfile:1368082).
 70 core globals in both VMs, 460 user globals **only** here, 668 sim globals **never**.
-Einstieg: `SCR_Import('/lua/ui/uimain.lua')['SetupUI']()` (Cfile:1262316), später
+Getting started: `SCR_Import('/lua/ui/uimain.lua')['SetupUI']()` (Cfile:1262316), later
 `func_StartGameUI` @0x83D240 → `gamemain.CreateWldUIProvider()`.
 
 ### B. LazyVar — **do not recreate**
 `lua/lazyvar.lua` is located in `mohodata.scd` and is original Lua. C++ only provides that
 *Instanzen*: `CMauiControl::CMauiControl` @0x7867B0 erzeugt sieben
 `CScriptLazyVar_float` and publishes them to the Lua table (Cfile:1123966-1123972):
-`Left, Right, Top, Bottom, Width, Height, Depth`. `CMauiBitmap` zusätzlich
+`Left, Right, Top, Bottom, Width, Height, Depth`. `CMauiBitmap` additionally
 `BitmapWidth`/`BitmapHeight` (Cfile:1118538), set from the texture dimensions
 (Cfile:1118647) — that's why a bitmap is measured by its DDS by default.
 
@@ -86,7 +86,7 @@ Text: `SetNewFont` (Cfile:1146287), `SetText`, `SetNewColor`, `GetStringAdvance`
 **If Lua delivers `false`, the event bubbles up the parent chain** (Cfile:1124525).
 Event-Table exakt nach `func_CreateLuaEvent` @0x795BD0 (Cfile:1136293):
 `Type, MouseX, MouseY, WheelRotation, KeyCode, Modifiers{Shift,Ctrl,Alt,Left,Middle,Right}`.
-Frame-Hook `OnFrame(delta)`, gated über `mNeedsFrameUpdate` (Cfile:1118936).
+Frame hook `OnFrame(delta)`, gated via `mNeedsFrameUpdate` (Cfile:1118936).
 
 ### F. Rendering
 A control = an absolutely positioned `<div>` over the WebGL canvas. Pro RAF one
@@ -104,7 +104,7 @@ TS twin **deleted** — not disabled by flag, otherwise you have two truths.
 ### Step 1 — UI VM boots, `SetupUI()` running (2 days, risk low)
 Built: `installUiEngine()`, UI Globals (`DiskGetFileInfo`, `GetPreference`, `LOC`,
 `ConExecute`). `_c_CreateCursor` (Cfile:1129627) **immediately real**, no stub.
-Ausgeführt: `uimain.lua`, `uiutil.lua`, `skins.lua`.
+Executed: `uimain.lua`, `uiutil.lua`, `skins.lua`.
 Verify: `SetupUI()` error-free; `UIUtil.GetLayoutFilename('economy')` resolves.
 
 ### Step 2 — maui substrate (1-2 weeks, **high risk**)
@@ -129,7 +129,7 @@ Engine freedom, no logic imitation.*
 Globals: `GetEconomyTotals()` (Keys exakt `maxStorage, stored, income,
 lastUseRequested, lastUseActual` — economy.lua:271), `GetArmiesTable()` (colors off
 `/lua/gamecolors.lua:16` — **import, do not type**).
-Danach **gelöscht**: hud.ts:256-320 + style.css:226-330.
+Afterwards **deleted**: hud.ts:256-320 + style.css:226-330.
 
 ### Step 4 — Selection in the Sim + `unitview.lua` (4-5 days)
 **The hidden blocker.** Without `GetSelectedUnits` neither `orders.lua` nor works
@@ -142,7 +142,7 @@ Order queue in the sim instead of direct navigator access. `commandmode.lua` is 
 State holder — the **engine polls** `GetCommandMode()` (Cfile:1262974), not the other way around.
 
 ### Step 6 — `construction.lua` + Construction (1 week)
-`IssueBlueprintCommand` (Cfile:1265693), Platzierung über `func_OrderBuildStructure`
+`IssueBlueprintCommand` (Cfile:1265693), placement via `func_OrderBuildStructure`
 @0x57A790 (Footprint, Snap, `GetElevation` — **braucht Q3**).
 On the SIM side, it depends on `__spawnBuildSite` + `issueBuildTask` — **which exist
 already and have never had a caller in the browser.**
@@ -155,7 +155,7 @@ Punkten), `tabs`, `chat`, `tooltip`.
 
 ---
 
-## Ehrliche Einschätzung
+## Honest assessment
 
 - **Bottleneck is step 2**, not the UI modules.
 - **Step 4 is the hidden blocker.** If you prefer 5/6, build TS again.

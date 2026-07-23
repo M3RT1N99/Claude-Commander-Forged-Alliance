@@ -28,7 +28,7 @@ The FA engine cleanly separates movement into four layers: (1) a cell passabilit
 - **Heightmap** `CHeightField`: `uint16 data[width*height]`, world meter = `sample * 0.0078125f` (1/128). Grid is (mapSizeX+1) x (mapSizeZ+1) Samples; **one path cell = 1 world meter**, cell (x,z) is defined by the 4 samples (x,z),(x+1,z),(x,z+1),(x+1,z+1).
 - **TerrainType grid** `mTerrainType` + `mBlocking[]` table → `STIMap::IsBlockingTerrain(z,x)` (STIMap.cpp:3481). Also returns true if x >= width-1 or z >= height-1 (border cells are blocked).
 - **Water**: global level `mWaterElevation` (only ONE water level per map), `mWaterEnabled`; if off → substitute value `-10000.0f`.
-- **COGrid** (moho/sim/COGrid.h) hält 3 BitArray2D:
+- **COGrid** (moho/sim/COGrid.h) holds 3 BitArray2D:
   - `terrainOccupation` — ground cells occupied by buildings/props (caps LAND|SEABED|SUB)
   - `waterOccupation` — Wasser-Belegung (Caps WATER)
   - `mOccupation` — **mobile unit reservation bitmap** (Unit::ReserveOgridRect / CanReserveOgridRect)
@@ -37,7 +37,7 @@ The FA engine cleanly separates movement into four layers: (1) a cell passabilit
 ### Footprint (SFootprint, 16 Byte)
 `mSizeX:u8, mSizeZ:u8, mOccupancyCaps:u8, mFlags:i8, mMaxSlope:f32, mMinWaterDepth:f32, mMaxWaterDepth:f32`
 - Caps: LAND=0x1, SEABED=0x2, SUB=0x4, WATER=0x8, AIR=0x10, ORBIT=0x20, ANY=0xFF
-- Flags: FPFLAG_IgnoreStructures=0x1 (Footprint ignoriert Gebäude-Occupancy — z.B. Experimentals)
+- Flags: FPFLAG_IgnoreStructures=0x1 (Footprint ignores building occupancy — e.g. experimentals)
 - Footprint origin cell from world position: `cell = round(worldPos - size*0.5)` (`SFootprint::ToCellPos`)
 - Cell → World Center: `world = cell + size*0.5` (`COORDS_ToWorldPos`, Entity.cpp:8261)
 
@@ -73,7 +73,7 @@ FootprintFits(grid, cell, fp, caps):
 ### MotionType → Caps-Mapping (RUnitBlueprint.cpp:258)
 | RULEUMT | Wert | Caps |
 |---|---|---|
-| None | 0 | 0x00 (Gebäude: Caps = Physics.BuildOnLayerCaps) |
+| None | 0 | 0x00 (Building: Caps = Physics.BuildOnLayerCaps) |
 | Land | 1 | LAND |
 | Air | 2 | AIR |
 | Water | 3 | WATER |
@@ -87,7 +87,7 @@ FootprintFits(grid, cell, fp, caps):
 `RUnitBlueprintPhysics::ComputeDerivedQuantities` (RUnitBlueprint.cpp:707): sets MotionType=None if MaxSpeed==0; MaxSpeedReverse<0 → =MaxSpeed; AttackElevation==0 → =Elevation; CatchUpAcc==0 → max(MaxAcceleration, MaxBrake); SkirtSize >= Footprint Size; then resolves the next appropriate footprint via `RRuleGameRules::FindFootprint` (RRuleGameRules.cpp:2300): **same caps** and minimal `max(|dSizeX|,|dSizeZ|)`.
 
 ### Footprint Table (Ground Truth) — `mohodata.scd : lua/footprints.lua`
-20 Einträge, u.a.:
+20 entries, including:
 - Vehicle1x1 / 2x2 / 5x5: LAND, MaxWaterDepth=0.05, MaxSlope=0.75 (5x5 mit IgnoreStructures)
 - Amphibious1x1 / 3x3 / 6x6: LAND|SEABED, MaxWaterDepth=25, MaxSlope=0.75
 - WaterLand1x1/2x2 (Hover): LAND|WATER, MaxWaterDepth=1, MinWaterDepth=0.1, MaxSlope=0.75; WaterLand3x3/5x5: MaxWaterDepth=5, MinWaterDepth=0
@@ -111,7 +111,7 @@ The actual A* loop lives in `moho::PathQueue` (per Army, `CArmyImpl::PathFinder`
 
 `CAiPathFinder : IPathTraveler` (CAiPathFinder.h) Callbacks:
 - `GetFootprint()` → normal or alt footprint (FAVORSWATER units switch to alt footprint underwater, CAiPathNavigator.cpp:UpdateWaterFavorAltFootprintMode)
-- `IsInBounds(cell)` → innerhalb `mPlayableRect` mit Margin = max(sizeX,sizeZ) (außer Army.UseWholeMap)
+- `IsInBounds(cell)` → within `mPlayableRect` with Margin = max(sizeX,sizeZ) (except Army.UseWholeMap)
 - `CanTraverseCell(cell)` → IsInBounds && not blocked in rect history of recent searches
 - `GetHeuristicCost(cell)` → **Octile distance** to goal rectangle: `dx,dz` = distance to rect; `max(dx,dz) + min(dx,dz)*0.41421354f`, then `* 1.01f` (slightly inadmissible → faster, slightly suboptimal)
 - `IsGoalCandidateCell(cell)` → in the outer goal rect (`mPos1`) but outside the inner rect (`mPos2`) → **ring target** (e.g. "within weapon range of X")
@@ -120,10 +120,10 @@ The actual A* loop lives in `moho::PathQueue` (per Army, `CArmyImpl::PathFinder`
 - `OnPathAccepted/Rejected/Cancelled(SNavPath)` → Result is `SNavPath` = vector of `SOCellPos{int16 x,z}`
 
 ### Pfadverfolgung & Repath (CAiPathNavigator, CAiPathNavigator.cpp)
-State: Idle/Failed/Thinking/PathEvent3(=Vollsuche läuft)/PathEvent4(=Fortsetzungssuche)/HasPath/FollowingLeader.
+State: Idle/Failed/Thinking/PathEvent3(=full search in progress)/PathEvent4(=continuation search)/HasPath/FollowingLeader.
 - `RequestPath(mode)` mode∈{1=Initial, 2=Repath, 3=Leader/Attacking}: Anchor = aktuelle Zelle, Goal setzen, QueueSearch, State=PathEvent3.
 - `UpdateCurrentPosition(pos)` je Tick:
-  1. Countdown/Retry-Delays herunterzählen
+1. Countdown/Retry delays
   2. Frontmost path cells consume as long as the second is closer than the first
   3. When path end is reached → Idle (success)
   4. `TryAdvanceTargetPoint()`: searches for the **furthest directly accessible** path node (index up to `min(pathSize-1, max(10, firstReachable))`, candidates > 50 cells distance are skipped); Reachability = `CanPathCellTransition` (occupancy check at the target node) && `CanReachCellFromCurrent`. This is **path smoothing** (string pulling).
@@ -205,7 +205,7 @@ Concept (in faf-re only provisionally lifted, but functional contract clear):
 - `SnapToWater` (CUnitMotion.cpp:2338): `y = max(terrain+0.25, waterElev + mSubElevation)`; with `mSubElevation<0` (submerged) clamped to water level; Tilt from `CalcRollHack()`.
 - `CalcRollHack()` (CUnitMotion.cpp:2277): Spring-damper for recoil/roll: `recoil *= (1 - RollDamping)`; `roll += recoil`; `recoil -= roll*RollStability`; when diving/surfacing, additional nick by `divingSpeed*4`, smoothed with 0.25/0.75.
 - `AddImpulse(imp, ballistic)` (CUnitMotion.cpp:1228): Air → directly on PhysBody; otherwise `v = imp + v*0.5`, speed clamped to `formationTopSpeed*0.2`, `mIsBeingPushed = true`, `mProcessSurfaceCollision = true`. At `ballistic` → Layer=Air, MotionState=Ballistic, random angular momentum.
-- `TransitionBetweenLayers` (CUnitMotion.cpp:1919): lineare Interpolation Pos + NLerp Orientierung über `Physics.LayerTransitionDuration * 10` Ticks.
+- `TransitionBetweenLayers` (CUnitMotion.cpp:1919): linear interpolation Pos + NLerp orientation via `Physics.LayerTransitionDuration * 10` ticks.
 
 ### Tauchen/Auftauchen (`HandleDivingAndSurfacing`, CUnitMotion.cpp:1831)
 ```
@@ -214,7 +214,7 @@ surfaceLimit   = min(0, terrain+0.25 - waterElev);  diveDepthLimit = max(diveDep
 phase = |subElev / diveDepthLimit|; if (phase > 0.5) phase = 1-phase
 base  = Physics.DiveSurfaceSpeed * 0.1
 divingSpeed = max(base*0.1, sin(phase*pi) * base)      // sanfte Ein-/Ausblendung
-MovingUp:   subElev = min(0, subElev + divingSpeed); bei 0   -> Layer setzen, State löschen, VertEvent None
+MovingUp: subElev = min(0, subElev + divingSpeed); at 0 -> set layer, delete state, VertEvent None
 MovingDown: subElev = max(limit, subElev - divingSpeed); bei limit -> Layer setzen, VertEvent Top
 ```
 
@@ -280,7 +280,7 @@ Defaults in `RUnitBlueprint::OnInitBlueprint` (RUnitBlueprint.cpp:802): MotionTy
   - `CalcFormationSpeed` (line 4300): base speedscale **0.85**; if the unit follows the leader and a `speedAnchor` exists: `delta = (speedBandLow - speedAnchor) * (CanFly ? 1.5 : 4.0)`, clamped to [-5, +20], `scale = 1 + delta*0.1` (i.e. 0.5x .. 3.0x). Return = `laneEntry->preferredSpeed` as speed limit → goes into SteeringParams as `speedLimit`.
   - `mIsInFormation` / `FollowingLeader()` / `IgnoreFormation()` control whether the path navigator follows the leader (State FollowingLeader) instead of pathing itself.
 
-## 8. Lücken in faf-re (bewusst nachzubauen)
+## 8. Gaps in faf-re (to be consciously recreated)
 
 | Function | Address | Status |
 |---|---|---|

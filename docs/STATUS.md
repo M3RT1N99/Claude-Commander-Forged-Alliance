@@ -1,4 +1,4 @@
-# Stand & bekannte Löcher
+# Stand & known holes
 
 *This document carries the changing status so that [CLAUDE.md](../CLAUDE.md)
 doesn't have to carry it. Update at every major milestone.*
@@ -18,7 +18,7 @@ completely from the original Lua via the real provider chain
 Verified in 29 suites (`npm test`) and in the browser via
 `?sandbox=<karte>&selftest=<blueprint>`.
 
-## Bekannte Löcher
+## Known holes
 
 The path to real UI: [PLAN-UI.md](PLAN-UI.md); the 1:1 overall timetable:
 [PLAN-1ZU1.md](PLAN-1ZU1.md).
@@ -59,7 +59,7 @@ The path to real UI: [PLAN-UI.md](PLAN-UI.md); the 1:1 overall timetable:
 - **The blueprint is read twice** — TS parser (models/bones) and
   real `LoadBlueprints()` pipeline. Two truths.
 - **Only one farmer per construction site** — Assist is missing.
-- **Ökonomie-Lua-API teils No-Op:** `SetProductionPerSecond*`,
+- **Economy Lua API partly no-op:** `SetProductionPerSecond*`,
   `SetConsumptionPerSecond*`, `SetBuildRate` don't write anything to them yet
   Engine economics (values ​​only come from the blueprint).
 - **`research/economy-binary.md` describes more than `economy.ts` can**
