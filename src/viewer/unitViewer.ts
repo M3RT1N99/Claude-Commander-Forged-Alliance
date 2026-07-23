@@ -70,6 +70,11 @@ export class UnitViewer {
   decalStats(): MapDecals['stats'] | null {
     return this.mapDecals?.stats ?? null
   }
+
+  /** Hide a map-prop instance whose sim prop died (reclaim/destroy). */
+  hideMapProp(mapIndex: number): void {
+    this.mapProps?.hideInstance(mapIndex)
+  }
   /** Glow/bloom chain (CBloomRenderer::DoBloom @0x7F5160). */
   private bloom: BloomPipeline | null = null
   /** Shadow pass (H7): depth from the sun, ComputeShadowPCF receivers. */

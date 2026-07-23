@@ -420,6 +420,8 @@ function __weaponTick()
   -- Guard orders (CUnitGuardTask): queue sharing, builder assist and the
   -- follow behavior run per beat like the engine's TaskTick.
   __guardTick()
+  -- Reclaim tasks (CUnitReclaimTask): drain the target, grant resources.
+  __reclaimTick()
   -- Attack-Orders ZUERST (CAttackTargetTask laeuft vor den Waffen-Tasks):
   -- sie steuern die Bewegung in Reichweite, die Zielerfassung unten
   -- bevorzugt dann das Befehlsziel.

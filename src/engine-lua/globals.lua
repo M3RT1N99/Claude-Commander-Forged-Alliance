@@ -795,6 +795,7 @@ local function __abortActive(unitId)
   __abortBuildTasks(unitId)
   __attackOrders[unitId] = nil
   __guardOrders[unitId] = nil
+  __reclaimTasks[unitId] = nil
   u.__guardedUnit = false
   u:GetNavigator():AbortMove()
 end
@@ -832,6 +833,11 @@ local function __startOrder(unitId, cmd)
       return false -- nothing to repair (TaskTick -1, Cfile:817856-817875)
     end
     __issueBuildTask(unitId, cmd.target, 'Repair', true)
+    return true
+  elseif cmd.type == 'Reclaim' then
+    local t = __props[cmd.target]
+    if not t or t.__destroyed or t.__destroyQueued then return false end
+    __reclaimTasks[unitId] = { target = cmd.target, started = false }
     return true
   elseif cmd.type == 'Guard' then
     return __guardStart(unitId, cmd.target)
@@ -960,6 +966,8 @@ function __ordersTick()
         done = __attackOrders[unitId] == nil -- __attackTick clears dead targets
       elseif cmd.type == 'Repair' then
         done = not __builderBusy(unitId)
+      elseif cmd.type == 'Reclaim' then
+        done = __reclaimTasks[unitId] == nil -- target fully reclaimed or gone
       elseif cmd.type == 'Guard' then
         done = __guardOrders[unitId] == nil -- guarded unit died (Cfile:839365)
       end
@@ -988,6 +996,7 @@ function __dispatchStop(unitId)
   __abortBuildTasks(unitId)
   __attackOrders[unitId] = nil
   __guardOrders[unitId] = nil
+  __reclaimTasks[unitId] = nil
   u.__guardedUnit = false
   u:GetNavigator():AbortMove()
   u.__faceGoal = false
@@ -1236,6 +1245,88 @@ function __guardTick()
         -- 7-tick re-check, every tick for engineer assist (Cfile:839518-839527)
         g.clock = (g.mode == 'engineer') and 1 or 7
         guardProcess(unitId, u, g, t)
+      end
+    end
+  end
+end
+
+-- === Reclaim (dispatch 0x13, CUnitReclaimTask — AiUnitReclaim.cpp) ===
+--
+-- The task asks the TARGET's own Lua for the costs
+-- (GetReclaimCosts(reclaimer) -> time, energy, mass; Cfile:848452-848455,
+-- prop.lua:153-162 — the formula stays in the original Lua), then drains
+-- fraction by 1/ticks per tick with ticks = max(1, time*10)
+-- (Cfile:848456-848465). The grant is total * |fraction delta|, added
+-- DIRECTLY to the army storage (Cfile:848612-848638) — reclaim is never
+-- economy-throttled (the request stays 0/0, LimitingRate = 1,
+-- Cfile:1107891-1107909). At fraction 0 the target runs OnReclaimed and
+-- dies (Prop::Materialize, Cfile:1013985-1014040).
+__reclaimTasks = {}
+
+function __dispatchReclaim(unitId, targetId, clear)
+  __issueOrder(unitId, { type = 'Reclaim', target = targetId }, clear)
+end
+
+function __reclaimTick()
+  for unitId, task in pairs(__reclaimTasks) do
+    local u = __units[unitId]
+    local t = __props[task.target]
+    if not u or u.__dead or u.__destroyQueued
+      or not t or t.__destroyed or t.__destroyQueued then
+      __reclaimTasks[unitId] = nil
+    else
+      local p, q = u.__pos, t.__pos
+      local dx, dz = q[1] - p[1], q[3] - p[3]
+      local dist = math.sqrt(dx * dx + dz * dz)
+      local range = (u.__bp.Economy and u.__bp.Economy.MaxBuildDistance) or 5
+      if dist > range then
+        -- Close in first (the dispatcher's Move precedes the task).
+        u.__goal = { q[1], q[3] }
+        u.__faceGoal = false
+      else
+        if u.__goal then
+          u.__goal = false
+          u.__speed = 0
+        end
+        if not task.started then
+          task.started = true
+          local ok, time, energy, mass = pcall(function() return t:GetReclaimCosts(u) end)
+          if not ok or type(time) ~= 'number' then
+            WARN('Failed to get valid reclaim costs from the target') -- Cfile:848452
+            __reclaimTasks[unitId] = nil
+          else
+            local ticks = math.max(1, time * 10)
+            task.perTick = 1 / ticks
+            task.energy = math.max(0, energy or 0)
+            task.mass = math.max(0, mass or 0)
+            if u.OnStartReclaim then
+              local okS, err = pcall(function() u:OnStartReclaim(t) end)
+              if not okS then WARN('OnStartReclaim: ' .. tostring(err)) end
+            end
+          end
+        end
+        local live = __reclaimTasks[unitId]
+        if live and live.perTick then
+          local delta = math.min(live.perTick, t.__fraction or 1)
+          t.__fraction = (t.__fraction or 1) - delta
+          -- Materialize runs the prop's "BeingReclaimed" on EVERY call
+          -- (Cfile:1014010 area).
+          if t.BeingReclaimed then
+            pcall(function() t:BeingReclaimed() end)
+          end
+          local brain = __getBrain(u.__army or 1)
+          brain:GiveResource('MASS', live.mass * delta)
+          brain:GiveResource('ENERGY', live.energy * delta)
+          if t.__fraction <= 0 then
+            if t.OnReclaimed then
+              local okR, err = pcall(function() t:OnReclaimed(u) end)
+              if not okR then WARN('OnReclaimed: ' .. tostring(err)) end
+            end
+            if not t.__destroyed and not t.__destroyQueued then t:Destroy() end
+            if u.OnStopReclaim then pcall(function() u:OnStopReclaim(t) end) end
+            __reclaimTasks[unitId] = nil
+          end
+        end
       end
     end
   end

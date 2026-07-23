@@ -729,6 +729,67 @@ console.log('\n== Befehls-Dispatch: Stop, Move-bricht-Bau, Attack ==')
     check(resumed, 'After the kill the patrol leg continues (idle re-issue, Cfile:845598-845601)')
   }
   {
+    // RECLAIM (dispatch 0x13, CUnitReclaimTask): costs come from the
+    // TARGET's own Lua (GetReclaimCosts, Cfile:848452-848455 ->
+    // prop.lua:153/wreckage.lua), the grant is total * |fraction delta|
+    // straight into the army storage (Cfile:848612-848638), at fraction 0
+    // the prop runs OnReclaimed and dies (Materialize, Cfile:1013985).
+    // Target: the wreck the combat test left on the field.
+    const wreckId = Number(
+      host.eval(`for id, p in pairs(__props) do if p.AssociatedBP then return id end end return -1`),
+    )
+    check(wreckId > 0, `A wreck prop exists to reclaim (id ${wreckId})`)
+    const reclaimer = spawnLuaUnit(host, 'uel0001', { x: 820, y: 20, z: 300 }, 1)
+    host.eval(`__units[${reclaimer}].__pos = (function()
+      local p = __props[${wreckId}].__pos return { p[1] + 3, p[2], p[3] } end)()`)
+    const massBefore = Number(host.eval(`return __getBrain(1):GetEconomyStored('MASS')`))
+    host.eval(`__dispatchReclaim(${reclaimer}, ${wreckId})`)
+    let reclaimed = false
+    for (let t = 0; t < 300 && !reclaimed; t++) {
+      beat(engine)
+      reclaimed =
+        host.eval(
+          `local p = __props[${wreckId}] return p == nil or p.__destroyed == true or p.__destroyQueued == true`,
+        ) === true
+    }
+    check(reclaimed, 'Reclaim drains the wreck to zero and destroys it (Materialize)')
+    const massAfter = Number(host.eval(`return __getBrain(1):GetEconomyStored('MASS')`))
+    check(
+      massAfter > massBefore,
+      `The mass grant lands in the army storage (${massBefore} -> ${massAfter})`,
+    )
+    beat(engine) // the queue pops the finished command on the next tick
+    check(
+      host.eval(`return __reclaimTasks[${reclaimer}] == nil and __orderActive[${reclaimer}] == nil`) === true,
+      'The reclaim task and its queue entry complete',
+    )
+  }
+  {
+    // MAP PROPS (Sim::Setup step 7, Cfile:1072041-1072105): spawned before
+    // units, NOT serialized per beat (the instanced renderer draws them);
+    // dying map props report their index once for instance hiding.
+    host.eval(`__spawnMapProp(42, '/props/defaultwreckage/defaultwreckage_prop.bp', 850, 20, 300, 0)`)
+    const mapPropId = Number(
+      host.eval(`for id, p in pairs(__props) do if p.__mapIndex == 42 then return id end end return -1`),
+    )
+    check(mapPropId > 0, 'A map prop spawns through __spawnMapProp (PROP_Create)')
+    check(
+      String(host.eval('return __readAllPropsJson()')).indexOf(`"id":${mapPropId}`) < 0,
+      'Map props are NOT serialized per beat (the instanced renderer draws them)',
+    )
+    host.eval(`__props[${mapPropId}]:Destroy()`)
+    beat(engine)
+    const removed = host.pull<number[]>('__drainRemovedMapPropsJson()')
+    check(
+      removed.includes(42),
+      `A dying map prop reports its instance index once (${JSON.stringify(removed)})`,
+    )
+    check(
+      host.pull<number[]>('__drainRemovedMapPropsJson()').length === 0,
+      'The removal report drains (second read is empty)',
+    )
+  }
+  {
     // Browser finding: an ENGINEER guarding a FINISHED factory must join
     // the factory's own FactoryBuild once it starts (the guard chain ends
     // at the factory; its running build task IS the site to assist).

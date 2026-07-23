@@ -78,6 +78,39 @@ function CreatePropHPR(bpId, x, y, z, heading, pitch, roll)
   return p
 end
 
+-- =====================================================================
+-- MAP PROPS — the engine creates them in Sim::Setup step 7, after the
+-- armies and BEFORE Lua BeginSession (Cfile:1072041-1072105): one
+-- PROP_Create per scmap entry. Health = Defense.Health, reclaim values
+-- from Economy.ReclaimMassMax/EnergyMax (Prop ctor, Cfile:1013859-1013927).
+-- Stock props never write pathfinding occupancy: every retail prop bp has
+-- footprint size 0, and the occupancy call is additionally gated on
+-- reclaim value > 0 (Cfile:1013912-1013923) — so there is NOTHING to do
+-- for movement here. "Physics.BlockPath" is not an engine field at all
+-- (zero decomp hits).
+-- =====================================================================
+
+-- Map-prop indices whose props died since the last drain — the browser
+-- keeps map props in one InstancedMesh and hides these instances.
+__removedMapProps = {}
+
+--- Spawn one map prop (called in a chunked loop from the worker boot).
+--- Unknown blueprints WARN once per path and are skipped — exactly what a
+--- failed GetPropBlueprint lookup amounts to.
+__mapPropMissing = {}
+function __spawnMapProp(index, bpId, x, y, z, heading)
+  local key = string.lower(tostring(bpId))
+  if not __registered.Prop[key] then
+    if not __mapPropMissing[key] then
+      __mapPropMissing[key] = true
+      WARN('map prop blueprint not registered: ' .. tostring(bpId))
+    end
+    return
+  end
+  local p = CreatePropHPR(key, x, y, z, heading or 0, 0, 0)
+  p.__mapIndex = index
+end
+
 --- TryCopyPose(from, to, stealAnimation) (unit.lua:1135 kopiert die Pose der
 --- sterbenden Unit auf ihr Wrack). Ohne Animations-System uebernehmen wir
 --- Position und Ausrichtung — mehr gibt es bei uns nicht zu kopieren.
@@ -104,7 +137,13 @@ function __readAllPropsJson()
   local parts = {}
   local n = 0
   for id, p in pairs(__props) do
-    if not p.__destroyed and not p.__destroyQueued then
+    if p.__destroyed or p.__destroyQueued then
+      -- dying props leave the snapshot; map-prop removal reporting lives
+      -- in __drainRemovedMapPropsJson (it must work without a snapshot).
+    elseif p.__mapIndex == nil then
+      -- Map props are NOT serialized per beat: the browser already draws
+      -- them from the scmap list (one InstancedMesh per blueprint); only
+      -- sim-born props (wrecks) go through this snapshot.
       n = n + 1
       local pos = p.__pos
       parts[n] = string.format(
@@ -117,6 +156,22 @@ function __readAllPropsJson()
     end
   end
   return '[' .. table.concat(parts, ',') .. ']'
+end
+
+--- Drain the removed-map-prop indices (one JSON array per beat). A dying
+--- MAP prop reports its instance index exactly once so the browser can
+--- hide it in the instanced renderer.
+function __drainRemovedMapPropsJson()
+  for id, p in pairs(__props) do
+    if p.__mapIndex and (p.__destroyed or p.__destroyQueued) and not p.__removalReported then
+      p.__removalReported = true
+      __removedMapProps[#__removedMapProps + 1] = p.__mapIndex
+    end
+  end
+  if __removedMapProps[1] == nil then return '[]' end
+  local out = '[' .. table.concat(__removedMapProps, ',') .. ']'
+  for i = #__removedMapProps, 1, -1 do __removedMapProps[i] = nil end
+  return out
 end
 
 --- Ein Mesh-Blueprint als JSON — der Renderer holt sich damit die

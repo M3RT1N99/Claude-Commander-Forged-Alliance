@@ -14,6 +14,18 @@ import { toSimBones, type SimBone } from '../lua/unitFactory'
  * damit nie den Main-Thread.
  */
 
+/** One scmap map prop for the sim boot (blueprint + world transform). */
+export interface MapPropSpawn {
+  /** Index into the scmap prop list — the stable id the instanced renderer
+   *  uses to hide reclaimed/destroyed instances. */
+  index: number
+  bp: string
+  x: number
+  y: number
+  z: number
+  heading: number
+}
+
 export interface LuaUnitSnapshot {
   id: number
   name: string
@@ -142,6 +154,8 @@ interface StatesMsg {
   projectiles: LuaProjectileSnapshot[]
   emitters: LuaEmitterSnapshot[]
   props: LuaPropSnapshot[]
+  /** Map-prop indices whose sim props died this beat (reclaim/destroy). */
+  removedMapProps?: number[]
   economy: EcoSnapshot
 }
 type OutMsg =
@@ -163,6 +177,8 @@ export class LuaSimClient {
   private emitterStates: LuaEmitterSnapshot[] = []
   /** Die Props des letzten Beats (Wracks) — der Renderer zeichnet sie. */
   private propStates: LuaPropSnapshot[] = []
+  /** Accumulated dead map-prop indices; drained by the instanced renderer. */
+  private readonly removedMapProps: number[] = []
   /** Letzter gemeldeter Sim-Tick (Spielzeit = Tick / 10). */
   gameTick = 0
   private nextReq = 1
@@ -188,6 +204,8 @@ export class LuaSimClient {
     vfs: GameVfs,
     terrain: HeightfieldData,
     log: (level: string, msg: string) => void,
+    /** scmap map props — spawned in the sim before any unit (Sim::Setup 7). */
+    props: MapPropSpawn[] = [],
   ): Promise<LuaSimClient> {
     // ALLE lua/-Dateien, auch lua/ui/. Die UI des Originals ist Lua (maui) und
     // soll ausgeführt werden, nicht in TS/HTML nachgebaut — sie hier
@@ -217,10 +235,14 @@ export class LuaSimClient {
     // Kosten: 289 Blueprints + 288 Skripte = 652 KB, ein Archiv-Zugriff.
     // Dazu die PROPS (`props/**.bp`) — daraus entstehen die Wracks
     // (unit.lua:1105 CreateProp(pos, bp.Wreckage.Blueprint)).
+    // And the 334 env/** map-prop blueprints (rocks, trees): the engine
+    // creates every scmap prop in Sim::Setup step 7 (Cfile:1072041-1072105)
+    // — reclaim needs their Economy.ReclaimMassMax/EnergyMax in the sim.
     const projPaths = vfs.find(
       (p) =>
-        (p.startsWith('projectiles/') || p.startsWith('props/') || p.startsWith('effects/')) &&
-        (p.endsWith('.bp') || p.endsWith('.lua')),
+        ((p.startsWith('projectiles/') || p.startsWith('props/') || p.startsWith('effects/')) &&
+          (p.endsWith('.bp') || p.endsWith('.lua'))) ||
+        (p.startsWith('env/') && p.endsWith('_prop.bp')),
     )
     for (const [p, b] of await vfs.readMany(projPaths)) files.set(p, b)
 
@@ -230,7 +252,7 @@ export class LuaSimClient {
       client.bootResolve = res
     })
     worker.onmessage = (e: MessageEvent<OutMsg>) => client.onMessage(e.data, log)
-    worker.postMessage({ type: 'boot', files, terrain })
+    worker.postMessage({ type: 'boot', files, terrain, props })
     await booted
     return client
   }
@@ -252,6 +274,11 @@ export class LuaSimClient {
         this.projectileStates = m.projectiles ?? []
         this.emitterStates = m.emitters ?? []
         this.propStates = m.props ?? []
+        // Map-prop instances that died this beat (reclaimed/destroyed) —
+        // consumed by the instanced map-prop renderer.
+        if (m.removedMapProps && m.removedMapProps.length > 0) {
+          for (const idx of m.removedMapProps) this.removedMapProps.push(idx)
+        }
         this.statesById.clear()
         for (const u of m.units) this.statesById.set(u.id, u)
         break
@@ -385,13 +412,14 @@ export class LuaSimClient {
    * Ohne das stapeln sich beim zweiten Sandbox-Start ACUs — und mit ihnen der
    * doppelte Startvorrat aus GiveInitialResources.
    */
-  async reset(terrain: HeightfieldData): Promise<void> {
+  async reset(terrain: HeightfieldData, props: MapPropSpawn[] = []): Promise<void> {
     const done = new Promise<void>((res) => {
       this.resetResolve = res
     })
     this.statesById.clear()
     this.economy = null
-    this.worker.postMessage({ type: 'reset', terrain })
+    this.removedMapProps.length = 0
+    this.worker.postMessage({ type: 'reset', terrain, props })
     await done
   }
 
@@ -484,6 +512,17 @@ export class LuaSimClient {
   /** Die Props des letzten Beats (Wracks, Felsen, Bäume). */
   allProps(): LuaPropSnapshot[] {
     return this.propStates
+  }
+
+  /** Drain the map-prop indices that died since the last call. */
+  drainRemovedMapProps(): number[] {
+    if (this.removedMapProps.length === 0) return []
+    return this.removedMapProps.splice(0, this.removedMapProps.length)
+  }
+
+  /** Reclaim (dispatch 0x13, CUnitReclaimTask): drain prop `targetId`. */
+  reclaim(id: number, targetId: number, queue = false): void {
+    this.worker.postMessage({ type: 'reclaim', id, targetId, queue })
   }
 
   /**

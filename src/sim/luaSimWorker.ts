@@ -23,6 +23,7 @@ import {
 } from '../lua/unitFactory'
 import { setTerrainSource } from '../lua/engineGlobals'
 import { Heightfield, type HeightfieldData } from './terrain'
+import type { MapPropSpawn } from './luaSimClient'
 
 const ctx = self as unknown as Worker
 let host: LuaHost | null = null
@@ -42,7 +43,7 @@ interface Vec3 {
   z: number
 }
 type InMsg =
-  | { type: 'boot'; files: Map<string, Uint8Array>; terrain: HeightfieldData }
+  | { type: 'boot'; files: Map<string, Uint8Array>; terrain: HeightfieldData; props?: MapPropSpawn[] }
   | { type: 'spawn'; reqId: number; id: string; scriptPath: string; scriptBytes: Uint8Array | null; bpBytes: Uint8Array | null; bones: SimBone[]; pos: Vec3; army: number }
   | { type: 'move'; id: number; x: number; z: number; queue?: boolean }
   | { type: 'stop'; id: number }
@@ -66,7 +67,9 @@ type InMsg =
   // Der Sammelpunkt einer Fabrik (IssueFactoryRallyPoint, Cfile:1008266) — KEIN
   // Bewegungsbefehl: die Fabrik bleibt stehen.
   | { type: 'rally'; id: number; x: number; y: number; z: number }
-  | { type: 'reset'; terrain: HeightfieldData }
+  | { type: 'reset'; terrain: HeightfieldData; props?: MapPropSpawn[] }
+  // Reclaim (dispatch 0x13, CUnitReclaimTask): drain the prop target.
+  | { type: 'reclaim'; id: number; targetId: number; queue?: boolean }
   // SessionRequestPause/SessionResume (mHelp: „Pause the world simulation.").
   // Die Engine hält die WELT an — der Beat läuft nicht weiter, die UI schon.
   | { type: 'pause'; paused: boolean }
@@ -115,6 +118,33 @@ type InMsg =
   // als Entity-IDs.
   | { type: 'simCallback'; func: string; argsLua: string; unitIds: number[] }
 
+/**
+ * Spawn the scmap map props in chunked evals (a single Lua literal for
+ * ~46k props would be a multi-megabyte chunk). Unknown blueprints WARN
+ * once per path inside __spawnMapProp and are skipped.
+ */
+function spawnMapProps(h: LuaHost, props: MapPropSpawn[]): void {
+  const CHUNK = 500
+  for (let i = 0; i < props.length; i += CHUNK) {
+    const calls: string[] = []
+    for (const p of props.slice(i, i + CHUNK)) {
+      const bp = p.bp.toLowerCase().replace(/^\//, '')
+      calls.push(
+        `__spawnMapProp(${p.index}, ${JSON.stringify('/' + bp)}, ${p.x}, ${p.y}, ${p.z}, ${p.heading})`,
+      )
+    }
+    h.eval(calls.join('\n'))
+  }
+  if (props.length > 0) {
+    // The engine logs " NUM PROPS = %d" after its creation loop
+    // (Cfile:1072082).
+    const n = Number(
+      h.eval(`local n = 0 for _, p in pairs(__props) do if p.__mapIndex then n = n + 1 end end return n`),
+    )
+    ctx.postMessage({ type: 'log', level: 'INFO', msg: `NUM PROPS = ${n} (of ${props.length} scmap entries)` })
+  }
+}
+
 ctx.onmessage = async (e: MessageEvent<InMsg>): Promise<void> => {
   const msg = e.data
   if (msg.type === 'boot') {
@@ -133,6 +163,10 @@ ctx.onmessage = async (e: MessageEvent<InMsg>): Promise<void> => {
     // lädt beim Start ebenfalls alles (Blueprints.lua über DiskFindFiles) —
     // mitten im Tick kann eine Waffe nichts nachladen.
     loadBlueprintGroups(h, msg.files)
+    // Map props BEFORE any unit spawn — the engine creates them in
+    // Sim::Setup step 7, after the armies and before Lua BeginSession
+    // (Cfile:1072041-1072105).
+    spawnMapProps(h, msg.props ?? [])
     host = h
     ctx.postMessage({ type: 'booted' })
     setInterval(tickAndPost, 100) // 10-Hz-Sim-Beat im Worker-Thread
@@ -141,6 +175,7 @@ ctx.onmessage = async (e: MessageEvent<InMsg>): Promise<void> => {
   if (msg.type === 'reset') {
     if (!bootFiles) return
     await resetSession(bootFiles, msg.terrain)
+    if (host) spawnMapProps(host, msg.props ?? [])
     ctx.postMessage({ type: 'reset-done' })
     return
   }
@@ -211,6 +246,8 @@ ctx.onmessage = async (e: MessageEvent<InMsg>): Promise<void> => {
     host.eval(`__dispatchGuard(${msg.id}, ${msg.targetId}, ${msg.queue ? 'false' : 'true'})`)
   } else if (msg.type === 'patrol') {
     host.eval(`__dispatchPatrol(${msg.id}, ${msg.x}, ${msg.z}, ${msg.queue ? 'false' : 'true'})`)
+  } else if (msg.type === 'reclaim') {
+    host.eval(`__dispatchReclaim(${msg.id}, ${msg.targetId}, ${msg.queue ? 'false' : 'true'})`)
   } else if (msg.type === 'repair') {
     host.eval(`__dispatchRepair(${msg.id}, ${msg.targetId}, ${msg.queue ? 'false' : 'true'})`)
   } else if (msg.type === 'fireState') {
@@ -253,7 +290,10 @@ function loadBlueprintGroups(h: LuaHost, files: Map<string, Uint8Array>): void {
     // `/effects/entities/**` sind ebenfalls ProjectileBlueprints: die Trümmer
     // beim Tod (defaultexplosions.lua:285) und die Nuke-Effekt-Controller.
     if (path.startsWith('projectiles/') || path.startsWith('effects/')) proj.push(path)
-    else if (path.startsWith('props/')) props.push(path)
+    // props/** are the wreck blueprints; env/**_prop.bp are the 334 map
+    // props (rocks, trees) — Sim::Setup creates one prop per scmap entry.
+    else if (path.startsWith('props/') || (path.startsWith('env/') && path.endsWith('_prop.bp')))
+      props.push(path)
   }
   const nProj = loadProjectileBlueprints(h, proj)
   const nProps = loadPropBlueprints(h, props)
@@ -287,6 +327,9 @@ function tickAndPost(): void {
   // Die PROPS (Wracks): Unit.OnKilled → CreateWreckageProp → CreateProp laeuft
   // komplett in der Original-Lua; ohne diesen Kanal bleibt jedes Wrack unsichtbar.
   const props = host.pull<unknown[]>('__readAllPropsJson()')
+  // Map-prop instances that died this beat — the instanced renderer hides
+  // them (map props are NOT serialized per beat, only their removals).
+  const removedMapProps = host.pull<number[]>('__drainRemovedMapPropsJson()')
   const a = engine.economy.army(1)
   // Der SIM-TICK gehoert zum Zustand: die Spielzeit-Uhr der UI (score.lua:230,
   // GetGameTime) zaehlt in Sim-Ticks und steht bei Pause still.
@@ -298,6 +341,7 @@ function tickAndPost(): void {
     projectiles,
     emitters,
     props,
+    removedMapProps,
     economy: {
       mass: a.mass, massStorage: a.maxMass, massIncome: a.incomeMass, massExpense: a.expenseMass,
       energy: a.energy, energyStorage: a.maxEnergy, energyIncome: a.incomeEnergy, energyExpense: a.expenseEnergy,

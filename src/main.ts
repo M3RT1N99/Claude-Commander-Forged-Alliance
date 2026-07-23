@@ -27,7 +27,7 @@ import {
 import { ddsToTexture } from './viewer/textures'
 import { UnitViewer, type SceneUnit } from './viewer/unitViewer'
 import { SandboxController, type SandboxUnitAssets } from './sandbox/sandbox'
-import { LuaSimClient, type LuaPropSnapshot } from './sim/luaSimClient'
+import { LuaSimClient, type LuaPropSnapshot, type MapPropSpawn } from './sim/luaSimClient'
 import { SANDBOX_SESSION, type SessionInfo } from './sim/session'
 import type { HeightfieldData } from './sim/terrain'
 import { Hud, type HudSource, type HudUnitInfo, type EcoSnapshot } from './ui/hud'
@@ -763,12 +763,15 @@ async function startSandbox(mapFolder: string): Promise<void> {
       luaUnits.length = 0
       knownSceneUnits.clear()
       unitLerp.clear()
-      await luaSim.reset({
-        data: currentScmap.heightmap,
-        width: currentScmap.width,
-        height: currentScmap.height,
-        scale: currentScmap.heightScale,
-      })
+      await luaSim.reset(
+        {
+          data: currentScmap.heightmap,
+          width: currentScmap.width,
+          height: currentScmap.height,
+          scale: currentScmap.heightScale,
+        },
+        mapPropSpawns(),
+      )
       log('Lua-Sim zurückgesetzt (neue Karte)')
     }
 
@@ -1610,6 +1613,23 @@ let luaSim: LuaSimClient | null = null
  */
 let luaSimBoot: Promise<LuaSimClient> | null = null
 
+/**
+ * The scmap map props for the sim boot (Sim::Setup creates one prop per
+ * entry, Cfile:1072041-1072105). The index doubles as the stable id the
+ * instanced renderer uses to hide reclaimed instances.
+ */
+function mapPropSpawns(): MapPropSpawn[] {
+  if (!currentScmap) return []
+  return currentScmap.props.map((p, index) => ({
+    index,
+    bp: p.blueprintPath,
+    x: p.position[0],
+    y: p.position[1],
+    z: p.position[2],
+    heading: Math.atan2(p.rotationX[2], p.rotationX[0]),
+  }))
+}
+
 async function getLuaSim(): Promise<LuaSimClient> {
   if (!luaSimBoot) {
     if (!currentScmap) throw new Error('Sim ohne Karte: kein Gelände, kein Spawn')
@@ -1623,9 +1643,16 @@ async function getLuaSim(): Promise<LuaSimClient> {
       height: currentScmap.height,
       scale: currentScmap.heightScale,
     }
-    luaSimBoot = LuaSimClient.create(vfs!, terrain, (lvl, msg) => {
-      if (lvl === 'WARN') log(`Lua-WARN: ${msg.slice(0, 80)}`)
-    }).then((sim) => {
+    luaSimBoot = LuaSimClient.create(
+      vfs!,
+      terrain,
+      (lvl, msg) => {
+        if (lvl === 'WARN') log(`Lua-WARN: ${msg.slice(0, 80)}`)
+        // The engine logs its prop-creation count too (Cfile:1072082).
+        else if (msg.startsWith('NUM PROPS')) log(msg)
+      },
+      mapPropSpawns(),
+    ).then((sim) => {
       luaSim = sim
       log('Lua-Sim bereit')
       return sim
@@ -1813,6 +1840,10 @@ function luaSimUpdate(): void {
   const eco = luaSim.economySnapshot()
   const states = luaSim.allStates()
   if (eco && gameUi) gameUi.beat(eco, states, luaSim.gameTick)
+
+  // Map props whose sim prop died (reclaimed/destroyed): hide the instance
+  // in the instanced renderer — map props are not per-beat serialized.
+  for (const idx of luaSim.drainRemovedMapProps()) viewer.hideMapProp(idx)
 
   // Neue Units aus der Sim (Baustelle, Fabrik-Produkt) bekommen ihr Modell. Die
   // Sim erzeugt sie; die Szene zieht nach — nicht umgekehrt.

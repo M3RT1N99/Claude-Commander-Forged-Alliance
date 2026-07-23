@@ -131,14 +131,16 @@ export class MapProps {
     const out = new MapProps()
     if (props.length === 0) return out
 
-    // One InstancedMesh per blueprint
-    const byBp = new Map<string, ScmapProp[]>()
-    for (const p of props) {
+    // One InstancedMesh per blueprint. The GLOBAL index into the scmap
+    // prop list rides along — it is the stable id the sim reports when a
+    // prop dies (reclaim/destroy) so we can hide its instance.
+    const byBp = new Map<string, { prop: ScmapProp; mapIndex: number }[]>()
+    props.forEach((p, mapIndex) => {
       const key = p.blueprintPath.toLowerCase().replace(/^\//, '')
       let list = byBp.get(key)
       if (!list) byBp.set(key, (list = []))
-      list.push(p)
-    }
+      list.push({ prop: p, mapIndex })
+    })
 
     const grey = new THREE.DataTexture(new Uint8Array([140, 140, 145, 255]), 1, 1)
     grey.needsUpdate = true
@@ -192,7 +194,7 @@ export class MapProps {
 
         // The instance transforms are shared by every LOD of the chain.
         const matrices: THREE.Matrix4[] = []
-        for (const p of instances) {
+        for (const { prop: p } of instances) {
           // The three vectors are the world directions of the local axes —
           // as columns they form the rotation matrix (makeBasis).
           xAxis.set(...p.rotationX)
@@ -212,6 +214,7 @@ export class MapProps {
               .setPosition(p.position[0], p.position[1], p.position[2]),
           )
         }
+        const lodMeshes: THREE.InstancedMesh[] = []
 
         // One InstancedMesh per LOD; the shader draws only the band
         // (previous cutoff, own cutoff] — together that is Mesh::ComputeLOD.
@@ -275,6 +278,7 @@ export class MapProps {
           const mesh = new THREE.InstancedMesh(geometry, material, matrices.length)
           for (let i = 0; i < matrices.length; i++) mesh.setMatrixAt(i, matrices[i]!)
           mesh.instanceMatrix.needsUpdate = true
+          lodMeshes.push(mesh)
           // Instances spread across the whole map; distance is cut by the
           // LOD band in the shader (Mesh::ComputeLOD).
           mesh.frustumCulled = false
@@ -295,6 +299,10 @@ export class MapProps {
           }
           near = lod.cutoff
         }
+        // Register the global-index -> (meshes, slot) lookup for removals.
+        instances.forEach(({ mapIndex }, slot) => {
+          out.instanceLookup.set(mapIndex, { meshes: lodMeshes, slot })
+        })
         out.stats.blueprints++
         out.stats.instances += instances.length
       } catch (err) {
@@ -316,6 +324,26 @@ export class MapProps {
   /** Drive the tree sway (mesh.fx `time`, seconds). */
   update(elapsedSeconds: number): void {
     for (const u of this.timeUniforms) u.value = elapsedSeconds
+  }
+
+  /** Global map index -> its instance slot in every LOD mesh of the group. */
+  private readonly instanceLookup = new Map<
+    number,
+    { meshes: THREE.InstancedMesh[]; slot: number }
+  >()
+  private readonly zeroMatrix = new THREE.Matrix4().makeScale(0, 0, 0)
+
+  /**
+   * Hide one map prop instance (its sim prop was reclaimed/destroyed):
+   * a zero-scale matrix collapses the instance in every LOD mesh.
+   */
+  hideInstance(mapIndex: number): void {
+    const hit = this.instanceLookup.get(mapIndex)
+    if (!hit) return
+    for (const mesh of hit.meshes) {
+      mesh.setMatrixAt(hit.slot, this.zeroMatrix)
+      mesh.instanceMatrix.needsUpdate = true
+    }
   }
 
   dispose(): void {

@@ -220,6 +220,13 @@ function __flushDeletions()
       if e.__isProj then
         __projectiles[e.__id] = nil
       elseif e.__isProp then
+        -- A dying MAP prop reports its instance index exactly once — the
+        -- browser hides it in the instanced renderer (map props are not
+        -- serialized per beat).
+        if e.__mapIndex and not e.__removalReported then
+          e.__removalReported = true
+          __removedMapProps[#__removedMapProps + 1] = e.__mapIndex
+        end
         __props[e.__id] = nil
       else
         __units[e.__id] = nil
