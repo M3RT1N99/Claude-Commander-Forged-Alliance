@@ -1,20 +1,20 @@
 /**
  * DDS-Container-Parser (DirectDraw Surface).
  *
- * Welche Formate im Spiel wirklich vorkommen, ist gezählt (14 307 DDS-Dateien
- * in allen Archiven, siehe scripts/verify-dds.ts):
+ * The formats that actually occur in the game have been counted (14,307 DDS
+ * files across all archives; see scripts/verify-dds.ts):
  *
- *   10 109  DXT5            Units, Effekte
+ *   10 109  DXT5            Units, effects
  *    1 250  DXT3
  *    1 242  DXT1
- *    1 134  A1R5G5B5 (16)   **die strategischen Icons**
+ *    1 134  A1R5G5B5 (16)   **the strategic icons**
  *      533  A8R8G8B8 (32)
  *       36  R8G8B8   (24)   Decals
- *        3  A8 / L8  (8)    Lookup-Texturen
+ *        3  A8 / L8  (8)    Lookup textures
  *
- * Die unkomprimierten Varianten werden beim Parsen in BGRA8 aufgeweitet — dann
- * sehen alle Konsumenten (Renderer, DataURL, HUD) genau ein unkomprimiertes
- * Format. Nichts wird geraten: die Kanal-Masken stehen im Header.
+ * Uncompressed variants are expanded to BGRA8 while parsing, so every consumer
+ * (renderer, DataURL, HUD) sees exactly one uncompressed format. Nothing is
+ * guessed: the channel masks are stored in the header.
  */
 
 export type DdsFormat = 'DXT1' | 'DXT3' | 'DXT5' | 'BGRA8'
@@ -61,7 +61,7 @@ function mipSize(format: DdsFormat, width: number, height: number): number {
   return Math.max(1, Math.ceil(width / 4)) * Math.max(1, Math.ceil(height / 4)) * blockBytes(format)
 }
 
-/** Die Kanal-Beschreibung eines unkomprimierten DDS (aus dem Pixelformat-Block). */
+/** Channel description for an uncompressed DDS (from the pixel-format block). */
 interface RawLayout {
   bytesPerPixel: number
   rMask: number
@@ -71,12 +71,12 @@ interface RawLayout {
 }
 
 /**
- * Einen unkomprimierten Mip nach BGRA8 aufweiten — die Reihenfolge, die
- * `bgraToRgba` erwartet.
+ * Expand an uncompressed mip to BGRA8 — the ordering expected by
+ * `bgraToRgba`.
  *
- * Die Masken kommen aus dem Header; die 5-Bit-Kanäle der 16-Bit-Formate werden
- * mit `(v << 3) | (v >> 2)` auf 8 Bit gestreckt (Standard-Bit-Replikation, so
- * dass 31 → 255 wird und nicht 248).
+ * The masks come from the header; the 5-bit channels of 16-bit formats are
+ * expanded to 8 bits with `(v << 3) | (v >> 2)` (standard bit replication, so
+ * that 31 → 255 rather than 248).
  */
 function expandToBgra(src: Uint8Array, count: number, layout: RawLayout): Uint8Array {
   const { bytesPerPixel, rMask, gMask, bMask, aMask } = layout
@@ -102,7 +102,7 @@ function expandToBgra(src: Uint8Array, count: number, layout: RawLayout): Uint8A
   const scale = (value: number, bits: number): number => {
     if (bits === 8) return value
     if (bits === 0) return 0
-    // Bit-Replikation: die oberen Bits werden in die unteren wiederholt.
+    // Bit replication: repeat the high bits into the low bits.
     return (value << (8 - bits)) | (value >> (2 * bits - 8))
   }
 
@@ -121,7 +121,7 @@ function expandToBgra(src: Uint8Array, count: number, layout: RawLayout): Uint8A
 
 export function parseDds(data: Uint8Array): DdsImage {
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
-  if (view.getUint32(0, true) !== DDS_MAGIC) throw new Error('DDS: falsches Magic')
+  if (view.getUint32(0, true) !== DDS_MAGIC) throw new Error('DDS: invalid magic')
 
   const height = view.getUint32(12, true)
   const width = view.getUint32(16, true)
@@ -133,15 +133,15 @@ export function parseDds(data: Uint8Array): DdsImage {
   if (pfFlags & DDPF_FOURCC) {
     const cc = fourCc(view, 84)
     if (cc !== 'DXT1' && cc !== 'DXT3' && cc !== 'DXT5') {
-      throw new Error(`DDS: FourCC "${cc}" nicht unterstützt`)
+      throw new Error(`DDS: FourCC "${cc}" is not supported`)
     }
     format = cc
   } else {
-    // Unkomprimiert: Bit-Tiefe und Kanal-Masken stehen im Header (Offset 88-104).
-    // Alles, was im Spiel vorkommt (32/24/16/8 Bit), wird nach BGRA8 aufgeweitet.
+    // Uncompressed: bit depth and channel masks are in the header (offsets 88-104).
+    // Everything that occurs in the game (32/24/16/8 bits) is expanded to BGRA8.
     const bits = view.getUint32(88, true)
     if (bits !== 8 && bits !== 16 && bits !== 24 && bits !== 32) {
-      throw new Error(`DDS: ${bits}-bit unkomprimiert nicht unterstützt`)
+      throw new Error(`DDS: ${bits}-bit uncompressed format is not supported`)
     }
     format = 'BGRA8'
     raw = {
@@ -163,7 +163,7 @@ export function parseDds(data: Uint8Array): DdsImage {
       const size = raw ? pixels * raw.bytesPerPixel : mipSize(format, w, h)
       if (offset + size > data.byteLength) break
       const slice = data.subarray(offset, offset + size)
-      // 32-Bit-BGRA liegt schon richtig; alles andere wird aufgeweitet.
+      // 32-bit BGRA is already in the correct format; everything else is expanded.
       const bytes = raw && raw.bytesPerPixel !== 4 ? expandToBgra(slice, pixels, raw) : slice
       mips.push({ data: bytes, width: w, height: h })
       offset += size
@@ -189,7 +189,7 @@ export function parseDds(data: Uint8Array): DdsImage {
   }
 
   const { mips } = readChain(128)
-  if (mips.length === 0) throw new Error('DDS: keine Mip-Daten')
+  if (mips.length === 0) throw new Error('DDS: no mip data')
 
   return { width, height, format, mips, cubeFaces: null }
 }
