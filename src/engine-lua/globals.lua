@@ -1159,7 +1159,11 @@ function __ordersTick()
       elseif cmd.type == 'Reclaim' then
         done = __reclaimTasks[unitId] == nil -- target fully reclaimed or gone
       elseif cmd.type == 'Guard' then
-        done = __guardOrders[unitId] == nil -- guarded unit died (Cfile:839365)
+        -- Guarded unit died (Cfile:839365) — but an adopted reclaim task
+        -- (sub_612E80) sits ABOVE the guard on the engine's task stack and
+        -- must finish first, or the next queued order would fight
+        -- __reclaimTick over the unit's movement goal.
+        done = __guardOrders[unitId] == nil and __reclaimTasks[unitId] == nil
       end
       if done then
         __orderActive[unitId] = nil

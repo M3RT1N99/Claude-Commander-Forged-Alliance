@@ -918,6 +918,21 @@ console.log('\n== Befehls-Dispatch: Stop, Move-bricht-Bau, Attack ==')
     }
     check(stateSeen, "IsUnitState('Reclaiming') mirrors the running reclaim task (enum 28)")
     check(joined, 'A guard with category RECLAIM joins the reclaim on the same target (sub_612E80)')
+
+    // Negative probe: a tank has no RECLAIM category — guarding a reclaiming
+    // unit must NOT make it reclaim (sub_612E80's IsInCategory gate).
+    host.eval(`__spawnMapProp(45, '/props/defaultwreckage/defaultwreckage_prop.bp', 890, 20, 350, 0)`)
+    const worker2 = spawnLuaUnit(host, 'uel0001', { x: 892, y: 20, z: 350 }, 1)
+    const tank = spawnLuaUnit(host, 'uel0201', { x: 894, y: 20, z: 350 }, 1)
+    host.eval(`local p = __props[__mapPropIds[45]] p:SetReclaimValues(1, 1, 50, 0)`)
+    host.eval(`__dispatchGuard(${tank}, ${worker2})`)
+    host.eval(`__dispatchReclaimMapProp(${worker2}, 45)`)
+    let tankJoined = false
+    for (let t = 0; t < 8; t++) {
+      beat(engine)
+      tankJoined = tankJoined || host.eval(`return __reclaimTasks[${tank}] ~= nil`) === true
+    }
+    check(!tankJoined, 'A guard WITHOUT category RECLAIM never joins the reclaim')
   }
   {
     // Browser finding: an ENGINEER guarding a FINISHED factory must join
