@@ -1,6 +1,6 @@
-import { parseXsb, type XsbBank } from '../formats/xsb'
+import { parseXsb, type XsbBank, type XsbCueTarget, type XsbPlaylistEntry } from '../formats/xsb'
 import { parseXwb, type XwbBank } from '../formats/xwb'
-import { parseXgs, type XgsData } from '../formats/xgs'
+import { parseXgs, xactVolumeByteToDb, type XgsData } from '../formats/xgs'
 import type { GameVfs } from '../vfs/vfs'
 
 /**
@@ -19,9 +19,28 @@ import type { GameVfs } from '../vfs/vfs'
  *  - Alle FA-Waves sind PCM16 — der AudioBuffer entsteht direkt aus den
  *    Samples, ohne Decoder.
  *
- * Stufe-1-Grenzen (dokumentiert): keine Loop-Auswertung (Musik spielt einen
- * Durchlauf), keine Zufalls-Variation (xsb.ts nimmt Playlist-Eintrag 0),
- * keine Instanz-Limits/Fades je Kategorie.
+ * XACT playback semantics (behavioral model: FAudio, the open XACT
+ * reimplementation — FA itself just hosts the XACT2 COM engine,
+ * Cfile:602172-602219):
+ *  - LOOPS: PlayWave loopCount 255 = infinite (FACT_internal.c:272-277);
+ *    without track variation the wave voice loops the whole buffer
+ *    (FA wave-bank LoopRegions are all 0 — measured over 4,349 waves);
+ *    with "new variation on loop" (exactly Music:Base_Building/Battle)
+ *    each iteration re-rolls the next track (FACT_upstream.c:556-570).
+ *  - VARIATION: all 123 FA track variations are RandomNoRepeats —
+ *    weighted pick excluding the previous index (FACT_internal.c:208-245).
+ *  - EFFECT VARIATION: pitch in cents (2^(pitch/1200),
+ *    FACT_upstream.c:2151), volume as random dB via the volume-byte curve;
+ *    flag semantics 0x80=pitch/0x40=volume are inferred from range
+ *    correlation over 1,675 events (named gap in the research report).
+ *  - INSTANCE LIMITS: cue level first, then category level
+ *    (play_sound, FACT_internal.c:821-864). Behaviors: 0 FailToPlay,
+ *    1 Queue / 2 ReplaceOldest (both replace the oldest — FAudio parity,
+ *    :555-561), 3 ReplaceQuietest (stubbed upstream → oldest), 4
+ *    ReplaceLowestPriority (sound priority byte, :569-576). The replaced
+ *    instance fades out over fadeOutMs, the new one fades in over
+ *    fadeInMs (linear ramps, :579-596) — Music limit=1/ReplaceOldest/
+ *    200 ms IS the music crossfade.
  *
  * KATEGORIE-LAUTSTÄRKEN (SupCom.xgs): every cue's sound carries a 0-based
  * category index; the xgs category table gives name, parent and the
@@ -44,8 +63,12 @@ export class GameAudio {
   private readonly waveBankFiles = new Map<string, string>()
   /** innerer WaveBank-Name (klein) → lazy geladene Bank (Bytes + Metadaten). */
   private readonly waveBanks = new Map<string, Promise<{ bank: XwbBank; bytes: Uint8Array } | null>>()
-  /** Handle-ID (aus der UI-VM) → laufende Quelle. */
-  private readonly playing = new Map<number, AudioBufferSourceNode>()
+  /** Handle-ID (aus der UI-VM) → laufende Instanz. */
+  private readonly playing = new Map<number, PlayingInstance>()
+  /** RandomNoRepeats memory: cue key → last picked playlist index. */
+  private readonly lastVariant = new Map<string, number>()
+  /** Monotonic age stamp — REPLACE_OLDEST picks the smallest. */
+  private nextSeq = 1
   private readonly missWarned = new Set<string>()
   /** Abgespielte Cues — der Beweiszähler für den Selbsttest. */
   playedCount = 0
@@ -175,9 +198,109 @@ export class GameAudio {
     this.log(`Audio: ${msg}`)
   }
 
+  /** PCM16 wave -> AudioBuffer (all FA waves are PCM16, no decoder). */
+  private makeBuffer(
+    wb: { bank: XwbBank; bytes: Uint8Array },
+    waveIndex: number,
+    wbName: string,
+  ): AudioBuffer | null {
+    const entry = wb.bank.entries[waveIndex]
+    if (!entry) {
+      this.warnOnce(`Wave ${waveIndex} fehlt in '${wbName}'`)
+      return null
+    }
+    const frames = entry.length / entry.blockAlign
+    const buffer = this.ctx.createBuffer(entry.channels, frames, entry.sampleRate)
+    const pcm = new Int16Array(wb.bytes.buffer, wb.bytes.byteOffset + entry.offset, entry.length / 2)
+    for (let ch = 0; ch < entry.channels; ch++) {
+      const out = buffer.getChannelData(ch)
+      for (let i = 0; i < frames; i++) {
+        out[i] = pcm[i * entry.channels + ch]! / 32768
+      }
+    }
+    return buffer
+  }
+
+  /**
+   * RandomNoRepeats (FACT_internal.c:208-245): weighted pick over the
+   * playlist (weight = weightMax − weightMin), excluding the previous
+   * index while more than one entry exists. All 123 FA track variations
+   * use exactly this selector (measured).
+   */
+  private pickVariant(cueKey: string, playlist: XsbPlaylistEntry[]): XsbPlaylistEntry {
+    const last = this.lastVariant.get(cueKey) ?? -1
+    const cands: { e: XsbPlaylistEntry; i: number; w: number }[] = []
+    for (let i = 0; i < playlist.length; i++) {
+      if (playlist.length > 1 && i === last) continue
+      const e = playlist[i]!
+      cands.push({ e, i, w: Math.max(1, e.weightMax - e.weightMin) })
+    }
+    let roll = Math.random() * cands.reduce((s, c) => s + c.w, 0)
+    let pick = cands[cands.length - 1]!
+    for (const c of cands) {
+      roll -= c.w
+      if (roll <= 0) {
+        pick = c
+        break
+      }
+    }
+    this.lastVariant.set(cueKey, pick.i)
+    return pick.e
+  }
+
+  /**
+   * Enforce one instance limit (handle_instance_limit,
+   * FACT_internal.c:541-596). Returns false when the NEW play must fail.
+   */
+  private admitAgainst(
+    insts: PlayingInstance[],
+    limit: number,
+    behavior: number,
+    fadeOutMs: number,
+  ): boolean {
+    if (insts.length < limit) return true
+    if (behavior === 0) return false // FailToPlay (:541-545)
+    let victim: PlayingInstance | null = null
+    if (behavior === 4) {
+      // ReplaceLowestPriority: the sound header priority byte (:569-576).
+      for (const i of insts) if (!victim || i.priority < victim.priority) victim = i
+    } else {
+      // Queue/ReplaceOldest both replace the oldest (:555-561); Quietest is
+      // stubbed upstream and lands on the oldest here too.
+      for (const i of insts) if (!victim || i.seq < victim.seq) victim = i
+    }
+    if (victim) this.fadeOutAndStop(victim, fadeOutMs)
+    return true
+  }
+
+  private fadeOutAndStop(inst: PlayingInstance, fadeOutMs: number): void {
+    inst.stopped = true
+    this.playing.delete(inst.handleId)
+    const t = this.ctx.currentTime
+    if (fadeOutMs > 0) {
+      inst.gain.gain.setValueAtTime(inst.gain.gain.value, t)
+      inst.gain.gain.linearRampToValueAtTime(0, t + fadeOutMs / 1000)
+      const src = inst.source
+      if (src) {
+        try {
+          src.stop(t + fadeOutMs / 1000)
+        } catch {
+          // schon beendet
+        }
+      }
+    } else {
+      try {
+        inst.source?.stop()
+      } catch {
+        // schon beendet
+      }
+    }
+  }
+
   /** __uiAudioSink: eine Cue abspielen (StartSound, ui-globals.lua). */
   play(bankName: string, cueName: string, handleId: number): void {
-    const sb = this.soundBanks.get(String(bankName ?? '').toLowerCase())
+    const bankKey = String(bankName ?? '').toLowerCase()
+    const sb = this.soundBanks.get(bankKey)
     if (!sb) {
       this.warnOnce(`Sound-Bank '${bankName}' unbekannt`)
       return
@@ -187,49 +310,136 @@ export class GameAudio {
       this.warnOnce(`Cue '${bankName}:${cueName}' nicht in der Bank`)
       return
     }
-    const wbName = sb.waveBanks[cue.waveBankIndex]
-    if (!wbName) return
-    void this.waveBank(wbName).then((wb) => {
-      if (!wb) return
-      const entry = wb.bank.entries[cue.waveIndex]
-      if (!entry) {
-        this.warnOnce(`Wave ${cue.waveIndex} fehlt in '${wbName}'`)
-        return
-      }
-      // PCM16 → AudioBuffer, ohne Decoder (alle FA-Waves sind PCM16).
-      const frames = entry.length / entry.blockAlign
-      const buffer = this.ctx.createBuffer(entry.channels, frames, entry.sampleRate)
-      const pcm = new Int16Array(
-        wb.bytes.buffer,
-        wb.bytes.byteOffset + entry.offset,
-        entry.length / 2,
+    const cueKey = `${bankKey}:${cueName}`
+
+    // Instance limits BEFORE anything plays — cue level first, then the
+    // category (play_sound order, FACT_internal.c:821-864). The check runs
+    // synchronously so same-beat bursts count each other.
+    const live = [...this.playing.values()].filter((i) => !i.stopped)
+    if (
+      !this.admitAgainst(
+        live.filter((i) => i.cueKey === cueKey),
+        cue.instanceLimit,
+        cue.limitBehavior,
+        cue.fadeOutMs,
       )
-      for (let ch = 0; ch < entry.channels; ch++) {
-        const out = buffer.getChannelData(ch)
-        for (let i = 0; i < frames; i++) {
-          out[i] = pcm[i * entry.channels + ch]! / 32768
-        }
-      }
+    ) {
+      return
+    }
+    const cat = this.xgs?.categories[cue.category]
+    if (
+      cat &&
+      !this.admitAgainst(
+        live.filter((i) => i.category === cue.category && !i.stopped),
+        cat.instanceLimit,
+        cat.instanceFlags >> 3,
+        cat.fadeOutMs,
+      )
+    ) {
+      return
+    }
+
+    const gain = this.ctx.createGain()
+    gain.connect(this.categoryNodes[cue.category] ?? this.ctx.destination)
+    const inst: PlayingInstance = {
+      handleId,
+      source: null,
+      gain,
+      cueKey,
+      category: cue.category,
+      priority: cue.priority,
+      seq: this.nextSeq++,
+      stopped: false,
+      loopsLeft: cue.loopCount > 0 && cue.loopCount < 255 ? cue.loopCount : 0,
+    }
+    this.playing.set(handleId, inst)
+
+    const fadeInMs = Math.max(cue.fadeInMs, cat?.fadeInMs ?? 0)
+    const startSource = (buffer: AudioBuffer, restart: boolean): void => {
+      if (inst.stopped) return
       const source = this.ctx.createBufferSource()
       source.buffer = buffer
-      // Route through the cue's XACT category node (authored volume x user
-      // volume, chained to Global); without xgs data fall back to the raw
-      // destination.
-      const catNode = this.categoryNodes[cue.category]
-      source.connect(catNode ?? this.ctx.destination)
-      source.onended = () => this.playing.delete(handleId)
-      this.playing.set(handleId, source)
+      // Effect variation (types 4/6): pitch in cents, volume in dB via the
+      // volume-byte curve (flag inference 0x80=pitch/0x40=volume).
+      const ev = cue.effectVariation
+      if (ev && (ev.flags & 0x80) !== 0 && ev.maxPitchCents > ev.minPitchCents) {
+        const cents = ev.minPitchCents + Math.random() * (ev.maxPitchCents - ev.minPitchCents)
+        source.playbackRate.value = Math.pow(2, cents / 1200)
+      }
+      let base = 1
+      if (ev && (ev.flags & 0x40) !== 0 && ev.maxVolByte > ev.minVolByte) {
+        const db =
+          xactVolumeByteToDb(ev.minVolByte) +
+          Math.random() * (xactVolumeByteToDb(ev.maxVolByte) - xactVolumeByteToDb(ev.minVolByte))
+        base = Math.pow(10, db / 20)
+      }
+      if (!restart && fadeInMs > 0) {
+        const t = this.ctx.currentTime
+        gain.gain.setValueAtTime(0, t)
+        gain.gain.linearRampToValueAtTime(base, t + fadeInMs / 1000)
+      } else {
+        gain.gain.value = base
+      }
+      source.connect(gain)
+      // Infinite loop WITHOUT re-roll delegates to the wave voice
+      // (FACT_internal.c:272-278); FA LoopRegions are all 0 = whole buffer.
+      if (cue.loopCount === 255 && !(cue.playlist && cue.newVariationOnLoop)) {
+        source.loop = true
+      }
+      source.onended = () => {
+        if (inst.stopped || this.playing.get(handleId) !== inst) return
+        if (cue.loopCount === 255 && cue.playlist && cue.newVariationOnLoop) {
+          // Music re-arm: each iteration rolls the next random track
+          // (FACTAudioEngine_DoWork, FACT_upstream.c:556-570).
+          void this.loadVariantBuffer(sb, cue, cueKey).then((b) => {
+            if (b && !inst.stopped) startSource(b, true)
+          })
+          return
+        }
+        if (inst.loopsLeft > 0) {
+          // Finite loopCount (2 cues in FA) — replay (FACT_internal.c:443-452).
+          inst.loopsLeft--
+          startSource(buffer, true)
+          return
+        }
+        this.playing.delete(handleId)
+      }
+      inst.source = source
       source.start()
+    }
+
+    void this.loadVariantBuffer(sb, cue, cueKey).then((buffer) => {
+      if (!buffer) {
+        this.playing.delete(handleId)
+        return
+      }
+      if (inst.stopped) return
+      startSource(buffer, false)
       this.playedCount++
     })
   }
 
+  /** Load the cue's next wave (playlist pick or the single wave). */
+  private async loadVariantBuffer(
+    sb: XsbBank,
+    cue: XsbCueTarget,
+    cueKey: string,
+  ): Promise<AudioBuffer | null> {
+    const pick = cue.playlist ? this.pickVariant(cueKey, cue.playlist) : cue
+    const wbName = sb.waveBanks[pick.waveBankIndex]
+    if (!wbName) return null
+    const wb = await this.waveBank(wbName)
+    if (!wb) return null
+    return this.makeBuffer(wb, pick.waveIndex, wbName)
+  }
+
   /** __uiAudioStopSink: eine laufende Quelle über ihre Handle-ID beenden. */
   stop(handleId: number): void {
-    const source = this.playing.get(handleId)
-    if (source) {
+    const inst = this.playing.get(handleId)
+    if (inst) {
+      inst.stopped = true
       try {
-        source.stop()
+        inst.source?.stop()
       } catch {
         // schon beendet
       }
@@ -238,9 +448,10 @@ export class GameAudio {
   }
 
   dispose(): void {
-    for (const s of this.playing.values()) {
+    for (const inst of this.playing.values()) {
+      inst.stopped = true
       try {
-        s.stop()
+        inst.source?.stop()
       } catch {
         // schon beendet
       }
@@ -248,4 +459,20 @@ export class GameAudio {
     this.playing.clear()
     void this.ctx.close()
   }
+}
+
+/** One playing cue instance (limits, fades, loop chain state). */
+interface PlayingInstance {
+  handleId: number
+  source: AudioBufferSourceNode | null
+  gain: GainNode
+  cueKey: string
+  category: number
+  /** Sound header priority byte — REPLACE_LOWEST_PRIORITY compares it. */
+  priority: number
+  /** Age stamp; REPLACE_OLDEST picks the smallest. */
+  seq: number
+  stopped: boolean
+  /** Remaining finite loop iterations (loopCount 1..254). */
+  loopsLeft: number
 }

@@ -47,7 +47,9 @@
  *                                u8 minVol, u8 maxVol, u8 varFlags}
  *                                (XACT 3.0! In 3.4 it is 22 B with filter
  *                                floats — measured at URLWeapon.xsb @0x10a:
- *                                ±200 permille pitch, end exactly at entryLength)
+ *                                pitch in CENTS, 2^(pitch/1200)
+ *                                (FACTWave_SetPitch, FACT_upstream.c:2151),
+ *                                end exactly at entryLength)
  *     Type 3  + track variation: u8 flags, u8 loopCount, u16 position,
  *                                u16 angle, u32 (count | varFlags<<16),
  *                                4 B unknown, count × {u16 wave, u8 bank,
@@ -56,20 +58,38 @@
  *     Measured event types in FA: only 1 (170×), 3 (5×), 4 (1,557×), 6 (118×) —
  *     everything else throws.
  *
- * Stage-1 decisions (documented and reported by the suite):
- *   – With multiple clips, the first clip with a Play event is used (81 sounds
- *     have more than one clip; order = file order).
- *   – For track variation (types 3/6), the FIRST playlist entry is used;
- *     `variantCount` carries the real count (2–6) so random selection can be
- *     added later.
+ * Stage-1 decision (documented and reported by the suite): with multiple
+ * clips, the first clip with a Play event is used (81 sounds have more than
+ * one clip; order = file order).
  */
+
+/** One playlist entry of a track-variation event (weight = max − min,
+ *  FACT_internal.c:2322). */
+export interface XsbPlaylistEntry {
+  waveBankIndex: number
+  waveIndex: number
+  weightMin: number
+  weightMax: number
+}
+
+/** The 7-byte XACT 3.0 effect-variation block (types 4/6). Flag semantics
+ *  are an inference from range correlation over 1,675 FA events
+ *  (0x80 = pitch enabled, 0x40 = volume enabled) — FAudio only implements
+ *  the newer 3.4 layout. Pitch is in cents (2^(pitch/1200)). */
+export interface XsbEffectVariation {
+  minPitchCents: number
+  maxPitchCents: number
+  minVolByte: number
+  maxVolByte: number
+  flags: number
+}
 
 export interface XsbCueTarget {
   /** Index in `waveBanks` (names of .xwb banks — their INTERNAL names). */
   waveBankIndex: number
   /** Wave index within the bank. */
   waveIndex: number
-  /** Number of wave alternatives (1 = no variation; stage 1 uses entry 0). */
+  /** Number of wave alternatives (1 = no variation). */
   variantCount: number
   /**
    * XACT category index (u16 in the sound header) — 0-based into the xgs
@@ -77,6 +97,28 @@ export interface XsbCueTarget {
    * Weapons, Interface.xsb menu cues -> 9 Interface / selects -> 19).
    */
   category: number
+  /** PlayWave loopCount: 0 = play once, 255 = infinite
+   *  (FACT_internal.c:272-277), else N extra iterations. */
+  loopCount: number
+  /** Full playlist of a track-variation event (types 3/6); all 123 FA
+   *  events use RandomNoRepeats (variation type 3, measured). */
+  playlist: XsbPlaylistEntry[] | null
+  /** Track variation re-rolls per loop iteration (bit22 of the variation
+   *  word) — set on exactly Music:Base_Building/Battle in FA. */
+  newVariationOnLoop: boolean
+  /** Effect variation (types 4/6) or null. */
+  effectVariation: XsbEffectVariation | null
+  /** Sound header priority byte (u8 @+6) — REPLACE_LOWEST_PRIORITY compares
+   *  it (FACT_internal.c:569-576). */
+  priority: number
+  /** Per-cue instance limit (complex cues; simple cues get 255/FAIL/0 —
+   *  FACT_internal.c:2726-2733). */
+  instanceLimit: number
+  /** 0=FailToPlay 1=Queue 2=ReplaceOldest 3=ReplaceQuietest
+   *  4=ReplaceLowestPriority (instanceFlags >> 3, FACT_internal.c:2744-2755). */
+  limitBehavior: number
+  fadeInMs: number
+  fadeOutMs: number
 }
 
 export interface XsbBank {
@@ -145,9 +187,25 @@ export function parseXsb(bytes: Uint8Array): XsbBank {
   function resolveSound(off: number): XsbCueTarget {
     const flags = u8(off)
     const category = u16(off + 1) // 0-based xgs category index (header, s. o.)
+    const priority = u8(off + 6) // REPLACE_LOWEST_PRIORITY compares it
     const entryLength = u16(off + 7)
     let p = off + 9
     const complex = (flags & 0x01) !== 0
+
+    // Cue-level limit fields are patched in by the cue loops below.
+    const base = {
+      variantCount: 1,
+      category,
+      loopCount: 0,
+      playlist: null as XsbPlaylistEntry[] | null,
+      newVariationOnLoop: false,
+      effectVariation: null as XsbEffectVariation | null,
+      priority,
+      instanceLimit: 255,
+      limitBehavior: 0,
+      fadeInMs: 0,
+      fadeOutMs: 0,
+    }
 
     let direct: XsbCueTarget | null = null
     let numClips = 0
@@ -155,7 +213,7 @@ export function parseXsb(bytes: Uint8Array): XsbBank {
       numClips = u8(p)
       p += 1
     } else {
-      direct = { waveIndex: u16(p), waveBankIndex: u8(p + 2), variantCount: 1, category }
+      direct = { ...base, waveIndex: u16(p), waveBankIndex: u8(p + 2) }
       p += 3
     }
     if ((flags & 0x0e) !== 0) p += u16(p) // RPC block; length includes the length field
@@ -178,6 +236,13 @@ export function parseXsb(bytes: Uint8Array): XsbBank {
       clipOffsets.push(u32(p + 1)) // +0 would be u8 volume
       p += 5
     }
+    const readEffectVariation = (o: number): XsbEffectVariation => ({
+      minPitchCents: view.getInt16(o, true),
+      maxPitchCents: view.getInt16(o + 2, true),
+      minVolByte: u8(o + 4),
+      maxVolByte: u8(o + 5),
+      flags: u8(o + 6),
+    })
     let target: XsbCueTarget | null = null
     let end = p
     for (const clipOffset of clipOffsets) {
@@ -195,19 +260,50 @@ export function parseXsb(bytes: Uint8Array): XsbBank {
         if (type === 1 || type === 4) {
           const waveIndex = u16(p + 1)
           const waveBankIndex = u8(p + 3)
+          const loopCount = u8(p + 4)
           p += 9 // flags, wave, bank, loopCount, position, angle
-          if (type === 4) p += 7 // effect variation (XACT 3.0: 7 B, see above)
-          if (!target) target = { waveBankIndex, waveIndex, variantCount: 1, category }
+          let effectVariation: XsbEffectVariation | null = null
+          if (type === 4) {
+            effectVariation = readEffectVariation(p)
+            p += 7 // effect variation (XACT 3.0: 7 B, see above)
+          }
+          if (!target) target = { ...base, waveBankIndex, waveIndex, loopCount, effectVariation }
         } else if (type === 3 || type === 6) {
+          const loopCount = u8(p + 1)
           p += 6 // flags, loopCount, position, angle
-          if (type === 6) p += 7
-          const count = u16(p) // u32 = count | varFlags<<16
+          let effectVariation: XsbEffectVariation | null = null
+          if (type === 6) {
+            effectVariation = readEffectVariation(p)
+            p += 7
+          }
+          // u32 = count | variationWord<<16: bits16-18 variation type (FA:
+          // always 3 = RandomNoRepeats, measured over all 123 events),
+          // bit22 = new variation on loop (FACT_internal.c:2305-2323).
+          const varWord = u32(p)
+          const count = varWord & 0xffff
+          const newVariationOnLoop = (varWord & 0x400000) !== 0
           p += 8 // + 4 B unknown (FAudio FACT_internal.c:2312)
+          const playlist: XsbPlaylistEntry[] = []
           for (let j = 0; j < count; j++) {
-            if (j === 0 && !target) {
-              target = { waveIndex: u16(p), waveBankIndex: u8(p + 2), variantCount: count, category }
-            }
+            playlist.push({
+              waveIndex: u16(p),
+              waveBankIndex: u8(p + 2),
+              weightMin: u8(p + 3),
+              weightMax: u8(p + 4),
+            })
             p += 5 // u16 wave, u8 bank, u8 weightMin, u8 weightMax
+          }
+          if (!target && playlist.length > 0) {
+            target = {
+              ...base,
+              waveBankIndex: playlist[0]!.waveBankIndex,
+              waveIndex: playlist[0]!.waveIndex,
+              variantCount: count,
+              loopCount,
+              playlist,
+              newVariationOnLoop,
+              effectVariation,
+            }
           }
         } else {
           throw new Error(`XSB ${soundBankName}: event type ${type} @${p - 7} — never observed in FA`)
@@ -243,7 +339,15 @@ export function parseXsb(bytes: Uint8Array): XsbBank {
       // from external sources and could not be verified against a real file.
       throw new Error(`XSB ${soundBankName}: cue "${cueNames[numSimpleCues + i]}" uses a variation table — never observed in FA`)
     }
-    setCue(cueNames[numSimpleCues + i]!, resolveSound(u32(o + 1)))
+    // The 15-byte complex-cue record carries the per-cue instance limit
+    // (FACT_internal.c:2744-2755): u8 instanceLimit @+9, u16 fadeInMs @+10,
+    // u16 fadeOutMs @+12, u8 instanceFlags @+14 (behavior = flags >> 3).
+    const target = resolveSound(u32(o + 1))
+    target.instanceLimit = u8(o + 9)
+    target.fadeInMs = u16(o + 10)
+    target.fadeOutMs = u16(o + 12)
+    target.limitBehavior = u8(o + 14) >> 3
+    setCue(cueNames[numSimpleCues + i]!, target)
   }
 
   const targets: XsbCueTarget[] = [...cues.values()]

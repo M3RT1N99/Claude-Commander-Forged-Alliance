@@ -49,6 +49,12 @@ export interface XgsData {
   variables: XgsVariable[]
 }
 
+/** XACT volume byte -> dB (FAudio fit; 37/39 SupCom.xgs bytes land on
+ *  integer dB). Shared with the xsb effect-variation volume range. */
+export function xactVolumeByteToDb(volumeByte: number): number {
+  return (3969 * Math.log10(volumeByte / 28240) + 8715) / 100
+}
+
 export function parseXgs(bytes: Uint8Array): XgsData {
   const v = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
   const u8 = (o: number): number => v.getUint8(o)
@@ -93,7 +99,7 @@ export function parseXgs(bytes: Uint8Array): XgsData {
     const o = catsOff + i * 10
     const volumeByte = u8(o + 8)
     // FAudio volume-byte fit (verified: 37/39 bytes land on integer dB).
-    const volumeDb = (3969 * Math.log10(volumeByte / 28240) + 8715) / 100
+    const volumeDb = xactVolumeByteToDb(volumeByte)
     categories.push({
       name: catNames[i]!,
       instanceLimit: u8(o),

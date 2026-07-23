@@ -291,5 +291,85 @@ console.log('\n== SupCom.xgs: Kategorien, Hierarchie, Volumes ==')
   check(menuCue?.category === iface!.i, `Interface.xsb 'X_Main_Menu_On' → Kategorie ${iface!.i} (Interface)`)
 }
 
+// === XACT playback semantics: loops, variations, limits (measured facts) ===
+{
+  console.log('\n== Loops, Variationen, Instanz-Limits (alle 100 Banks) ==')
+  let loopInf = 0
+  let loopFinite: string[] = []
+  let newVarOnLoop: string[] = []
+  let trackVarCues = 0
+  let playlistSizesOk = true
+  for (const f of xsbFiles) {
+    let sb: XsbBank
+    try {
+      sb = parseXsb(readFileSync(`${SOUNDS_DIR}/${f}`))
+    } catch {
+      continue
+    }
+    for (const [name, cue] of sb.cues) {
+      if (cue.loopCount === 255) loopInf++
+      else if (cue.loopCount > 0) loopFinite.push(`${sb.soundBankName}:${name}=${cue.loopCount}`)
+      if (cue.playlist && cue.newVariationOnLoop) newVarOnLoop.push(`${sb.soundBankName}:${name}`)
+      if (cue.playlist) {
+        trackVarCues++
+        if (cue.playlist.length < 2 || cue.playlist.length > 6) playlistSizesOk = false
+        if (cue.playlist.length !== cue.variantCount) playlistSizesOk = false
+      }
+    }
+  }
+  // 384 infinite loop events measured; several sounds are shared by more
+  // than one cue name, so the CUE count may exceed the event count — but
+  // every looper must be infinite except the two known finite outliers.
+  check(loopInf >= 384, `${loopInf} cues with loopCount 255 (>= 384 measured loop events)`)
+  // The measurement counted EVENTS: the second finite looper
+  // (XRL_Stream:Op5_Megalith_Fire loop=4) sits in a LATER event of a
+  // multi-event sound — the stage-1 parser resolves the FIRST play event
+  // (documented decision), so at cue level exactly one finite looper
+  // remains.
+  check(
+    loopFinite.length === 1 && loopFinite[0]!.includes('UEL0203_Move_Water_Lp=1'),
+    `the finite looper at cue level is the measured outlier (${loopFinite.join(', ')})`,
+  )
+  check(
+    newVarOnLoop.length === 2 &&
+      newVarOnLoop.some((s) => s.endsWith(':Base_Building')) &&
+      newVarOnLoop.some((s) => s.endsWith(':Battle')),
+    `new-variation-on-loop is exactly Music Base_Building+Battle (${newVarOnLoop.join(', ')})`,
+  )
+  check(trackVarCues >= 123, `${trackVarCues} cues carry a playlist (>= 123 measured events)`)
+  check(playlistSizesOk, 'every playlist has 2-6 entries and matches variantCount')
+
+  // Category instance limits (SupCom.xgs measured): Music 1/ReplaceOldest/
+  // 200 ms fadeOut is the music crossfade; World 200/FailToPlay/100 ms.
+  const xgs = parseXgs(readFileSync(`${SOUNDS_DIR}/SupCom.xgs`))
+  const cat = (n: string) => xgs.categories.find((c) => c.name === n)
+  const music = cat('Music')
+  const world = cat('World')
+  check(
+    music !== undefined &&
+      music.instanceLimit === 1 &&
+      music.instanceFlags >> 3 === 2 &&
+      music.fadeOutMs === 200,
+    `Music category: limit 1, ReplaceOldest, 200 ms fade-out (${music?.instanceLimit}/${(music?.instanceFlags ?? 0) >> 3}/${music?.fadeOutMs})`,
+  )
+  check(
+    world !== undefined && world.instanceLimit === 200 && world.instanceFlags >> 3 === 0,
+    `World category: limit 200, FailToPlay (${world?.instanceLimit}/${(world?.instanceFlags ?? 0) >> 3})`,
+  )
+
+  // Cue-level limits: the Interface UI cues use replace behaviors.
+  const iface2 = parseXsb(readFileSync(`${SOUNDS_DIR}/Interface.xsb`))
+  const accept = iface2.cues.get('UI_Menu_Accept_01')
+  const mapSel = iface2.cues.get('UI_Skirmish_Map_Select')
+  check(
+    accept !== undefined && accept.instanceLimit === 2 && accept.limitBehavior === 2,
+    `UI_Menu_Accept_01: limit 2, ReplaceOldest (${accept?.instanceLimit}/${accept?.limitBehavior})`,
+  )
+  check(
+    mapSel !== undefined && mapSel.instanceLimit === 1 && mapSel.limitBehavior === 4,
+    `UI_Skirmish_Map_Select: limit 1, ReplaceLowestPriority (${mapSel?.instanceLimit}/${mapSel?.limitBehavior})`,
+  )
+}
+
 console.log(failures === 0 ? '\nAUDIO BESTANDEN' : `\n${failures} CHECK(S) FEHLGESCHLAGEN`)
 process.exit(failures === 0 ? 0 : 1)
