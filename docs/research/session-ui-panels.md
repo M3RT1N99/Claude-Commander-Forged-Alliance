@@ -273,7 +273,7 @@ most visible gaps and do not cost a single new control.
   The score comes per beat from `GetArmyScore(i)`, or via a sim script that
   we haven't found yet? (Don't guess without proof.)
 - **`GetArmyAvatars`:** that `General.QuickSelectPriority` is the blueprint field
-  (Cfile:657062: “Indicates unit has its own avatar button in the quick select
+  (Cfile:657062: „Indicates unit has it's own avatar button in the quick select
   interface, and it's sorting priority"). Whether the engine builds the list from it or from it
   a category of its own, has not yet been traced to the source in the decomp.
 - **How ​​does `Sync` get over the worker boundary?** The original uses
