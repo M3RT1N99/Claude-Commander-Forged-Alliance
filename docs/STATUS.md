@@ -41,9 +41,14 @@ Der Weg zur echten UI: [PLAN-UI.md](PLAN-UI.md); der 1:1-Gesamtfahrplan:
   Baustellen-Look (H3), Beat-Interpolation (M6), Icon-Tint (M1).
 - **Sound-Settings stellen nichts ein** (Nutzer-Fund): SetVolume/GetVolume
   fehlen; GameAudio hat keine xgs-Kategorie-Gains (Forschung läuft).
-- **Tastatur-Folgefunde:** `InternalCreateEdit` fehlt (Chat-/Konsolen-EINGABE),
-  `StartCommandMode`-Konsolenbefehl fehlt (Hotkeys wie Shift-P/Patrol laufen
-  in die WARN-Liste), `IsAlly` in der UI-VM fehlt ('allies'-Chat).
+- **Text input works** (CMauiEdit vtable-override port: typing, selection,
+  MaxChars, OnTextChanged/OnEnterPressed/OnEscPressed/OnCharPressed,
+  caret rendering); StartCommandMode console command and UI IsAlly exist.
+  Open follow-ups: the chat WINDOW auto-hides instantly (chat config
+  never loads from the profile prefs — `GUI.config=false` starves the
+  fade thread), clipboard is a VM-internal buffer (browser clipboard is
+  async — platform deviation), drag-selection and the exact caret-blink
+  math (CMauiEdit::DoRender undecoded) are named gaps.
 - **Command dispatch, remaining gaps:** Stop / Move-cancels-build / Attack
   (units AND ground, AITARGET_Ground) / Repair (incl. HP repair) /
   shift-queueing (CUnitCommandQueue) / Guard-Assist (queue sharing, build

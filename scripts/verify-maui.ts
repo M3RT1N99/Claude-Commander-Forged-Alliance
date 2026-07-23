@@ -281,6 +281,85 @@ check(host.eval('return waited') === false, 'Nach 0,4 s wartet der Thread noch')
 for (let i = 0; i < 3; i++) host.eval('__mauiFrame(0.1)')
 check(host.eval('return waited') === true, 'Nach 0,6 s ist er durch (WaitSeconds pollt CurrentTime)')
 
+console.log('\n== The edit control (CMauiEdit — chat/console text input) ==')
+// The C++ vtable override lives in __editHandleEvent (CMauiEdit::
+// HandleKeyEvent, Cfile:1133353-1133695); typing goes through the focus
+// path of __mauiKey exactly like the engine's Char dispatcher.
+host.eval(`
+  editObj = import('/lua/maui/edit.lua').Edit(GetFrame(0))
+  editObj.Left:Set(10) editObj.Top:Set(10)
+  editObj.Width:Set(200) editObj.Height:Set(20)
+  editEvents = { changed = 0, entered = false }
+  editObj.OnTextChanged = function(self, new, old) editEvents.changed = editEvents.changed + 1 end
+  editObj.OnEnterPressed = function(self, text) editEvents.entered = text return false end
+  editObj:AcquireFocus()
+`)
+check(
+  host.eval('return __mauiFocus == editObj and editObj:IsCaretVisible() == true') === true,
+  'AcquireFocus takes the keyboard focus and shows the caret (sub_78F310)',
+)
+host.eval(`__mauiKey('Char', 72, 72, {})`) // 'H'
+host.eval(`__mauiKey('Char', 105, 73, {})`) // 'i'
+check(
+  host.eval(`return editObj:GetText()`) === 'Hi',
+  `typed characters insert at the caret (ReplaceSelection): '${host.eval('return editObj:GetText()')}'`,
+)
+check(
+  Number(host.eval('return editEvents.changed')) === 2,
+  'OnTextChanged fires per keystroke (console completion depends on it)',
+)
+host.eval(`__mauiKey('Char', 8, 8, {})`) // backspace
+check(
+  host.eval(`return editObj:GetText()`) === 'H',
+  'MKEY_BACK deletes the character left of the caret',
+)
+// OnCharPressed veto: true swallows the char (Cfile:1135940-1136014).
+host.eval(`editObj.OnCharPressed = function(self, code) return code == 88 end`) // block 'X'
+host.eval(`__mauiKey('Char', 88, 88, {})`)
+host.eval(`__mauiKey('Char', 97, 65, {})`) // 'a'
+check(
+  host.eval(`return editObj:GetText()`) === 'Ha',
+  'OnCharPressed returning true swallows the character',
+)
+// Enter: OnEnterPressed(text); returning false clears (Cfile:1132320-1132323).
+host.eval(`__mauiKey('Char', 13, 13, {})`)
+check(
+  host.eval(`return editEvents.entered`) === 'Ha',
+  'MKEY_RETURN fires OnEnterPressed with the text',
+)
+check(
+  host.eval(`return editObj:GetText()`) === '',
+  'OnEnterPressed returning false clears the text',
+)
+// MaxChars is enforced in CHARACTERS on insert and SetText (Cfile:1132488/1131601).
+host.eval(`editObj:SetMaxChars(3) editObj:SetText('abcdef')`)
+check(
+  host.eval(`return editObj:GetText()`) === 'abc',
+  'SetText truncates to MaxChars (0x78F380)',
+)
+host.eval(`__mauiKey('Char', 120, 88, {})`)
+check(
+  host.eval(`return editObj:GetText()`) === 'abc',
+  'inserts at the MaxChars limit are dropped (ReplaceSelection)',
+)
+// Escape on empty text abandons the focus (Cfile:1133638-1133648).
+host.eval(`editObj:SetMaxChars(100) __mauiKey('Char', 27, 27, {})`)
+check(host.eval(`return editObj:GetText()`) === '', 'MKEY_ESCAPE clears non-empty text first')
+host.eval(`__mauiKey('Char', 27, 27, {})`)
+check(
+  host.eval('return __mauiFocus == false or __mauiFocus == nil') === true,
+  'MKEY_ESCAPE on empty text abandons the keyboard focus',
+)
+// UTF-8 core globals (scr_CoreInits, Cfile:599069-599139).
+check(
+  Number(host.eval(`return STR_Utf8Len('Grün')`)) === 4,
+  'STR_Utf8Len counts characters, not bytes',
+)
+check(
+  host.eval(`return STR_Utf8SubString('Grünspan', 3, 4)`) === 'ünsp',
+  'STR_Utf8SubString slices 1-based character ranges',
+)
+
 host.close()
 for (const f of openFiles) await f.close()
 console.log(failures === 0 ? '\nMAUI BESTANDEN' : `\n${failures} CHECK(S) FEHLGESCHLAGEN`)

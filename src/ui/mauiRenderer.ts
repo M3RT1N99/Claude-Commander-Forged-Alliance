@@ -202,15 +202,7 @@ export class MauiRenderer {
       } else if (c.kind === 'itemlist') {
         this.drawItemList(el, c)
       } else if (c.kind === 'edit') {
-        const l = c.list || {}
-        el.textContent = String(l.text ?? '')
-        el.style.color = l.fg ? argb(String(l.fg)) : '#ffffff'
-        el.style.background = l.bg ? argb(String(l.bg)) : 'transparent'
-        el.style.fontSize = `${c.fontSize || 12}px`
-        if (c.fontFamily) el.style.fontFamily = `"${c.fontFamily}"`
-        el.style.lineHeight = `${c.height}px`
-        el.style.whiteSpace = 'pre'
-        el.style.overflow = 'hidden'
+        this.drawEdit(el, c)
       } else if (c.kind === 'worldview') {
         // Die Welt zeichnet die 3D-Engine, nicht der maui-Renderer. Das Control
         // sagt nur, WO und WIE GROSS — hier bleibt ein Loch.
@@ -326,6 +318,82 @@ export class MauiRenderer {
    * `rowHeight` folgt aus der gesetzten Schrift (SetNewFont), die Farben aus
    * SetNewColors(fg, bg, selFg, selBg).
    */
+  /**
+   * CMauiEdit rendering: text with the selection span (highlight colors),
+   * the caret bar and the optional background/dropshadow. Caret/selection
+   * indices are CHARACTER counts (codepoints) — sliced with Array.from.
+   * The exact caret-blink math of CMauiEdit::DoRender is not decoded
+   * (named gap); a CSS opacity cycle over caretCycle seconds stands in.
+   */
+  private drawEdit(el: HTMLDivElement, c: MauiControl): void {
+    const l = (c.list || {}) as {
+      text?: string
+      caret?: number
+      fg?: string
+      bg?: string
+      showBackground?: boolean
+      caretVisible?: boolean
+      caretColor?: string
+      caretCycle?: number
+      selStart?: number
+      selEnd?: number
+      hlFg?: string
+      hlBg?: string
+      dropShadow?: boolean
+    }
+    el.textContent = ''
+    el.style.color = l.fg ? argb(String(l.fg)) : '#ffffff'
+    el.style.background = l.showBackground && l.bg ? argb(String(l.bg)) : 'transparent'
+    el.style.fontSize = `${c.fontSize || 12}px`
+    if (c.fontFamily) el.style.fontFamily = `"${c.fontFamily}"`
+    el.style.lineHeight = `${c.height}px`
+    el.style.whiteSpace = 'pre'
+    el.style.overflow = 'hidden'
+    el.style.textShadow = l.dropShadow ? '1px 1px 0 rgba(0,0,0,0.8)' : ''
+
+    const chars = Array.from(String(l.text ?? ''))
+    const caret = Math.max(0, Math.min(l.caret ?? chars.length, chars.length))
+    const s = Math.min(l.selStart ?? 0, l.selEnd ?? 0)
+    const e = Math.max(l.selStart ?? 0, l.selEnd ?? 0)
+
+    const span = (text: string): HTMLSpanElement => {
+      const sp = document.createElement('span')
+      sp.textContent = text
+      return sp
+    }
+    if (e > s) {
+      el.appendChild(span(chars.slice(0, s).join('')))
+      const sel = span(chars.slice(s, e).join(''))
+      sel.style.color = l.hlFg ? argb(String(l.hlFg)) : '#000000'
+      sel.style.background = l.hlBg ? argb(String(l.hlBg)) : '#ffffff'
+      el.appendChild(sel)
+      el.appendChild(span(chars.slice(e).join('')))
+    } else {
+      el.appendChild(span(chars.slice(0, caret).join('')))
+      el.appendChild(span(chars.slice(caret).join('')))
+    }
+    if (l.caretVisible) {
+      // Insert the caret bar at the caret position (between the two spans).
+      const bar = document.createElement('span')
+      bar.textContent = '​'
+      bar.style.borderLeft = `1px solid ${l.caretColor ? argb(String(l.caretColor)) : '#fefefe'}`
+      bar.style.animation = `cfa-caret-blink ${l.caretCycle ?? 1.5}s step-end infinite`
+      const after = e > s ? 2 : 1
+      el.insertBefore(bar, el.children[after] ?? null)
+      this.ensureCaretKeyframes()
+    }
+  }
+
+  private caretKeyframesAdded = false
+  private ensureCaretKeyframes(): void {
+    if (this.caretKeyframesAdded) return
+    this.caretKeyframesAdded = true
+    const style = document.createElement('style')
+    style.textContent =
+      '@keyframes cfa-caret-blink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0.24; } }'
+    document.head.appendChild(style)
+  }
+
   private drawItemList(el: HTMLDivElement, c: MauiControl): void {
     const l = c.list || {}
     const items = l.items ?? []

@@ -176,19 +176,306 @@ function InternalCreateItemList(luaobj, parent)
   return doInit(luaobj)
 end
 
--- CMauiEdit (Cfile:1133710) — das Textfeld. Das Text-Editing selbst liegt in C++
--- (CMauiEdit::HandleKeyEvent auf MET_Char); hier steht der Zustand, den die 31
--- Bindungen lesen und schreiben.
+-- CMauiEdit (Cfile:1133710) — das Textfeld. Das Text-Editing liegt im
+-- C++-vtable-Override (CMauiEdit::HandleKeyEvent auf MET_Char) — bei uns
+-- in __editHandleEvent weiter unten. Defaults = ctor values
+-- (Cfile:1131436-1131500): maxChars 1024, 'Courier New' 14, white on
+-- black, background visible, caret fefefe with a 1.5 s / 62..255 cycle.
 function InternalCreateEdit(luaobj, parent)
   attachControl(luaobj, parent, 'edit')
   luaobj.__text = ''
   luaobj.__caret = 0
-  luaobj.__maxChars = 0
+  luaobj.__maxChars = 1024
   luaobj.__enabled = true
-  luaobj.__fontFamily = ''
-  luaobj.__fontSize = 12
-  luaobj.__colors = {}
+  luaobj.__fontFamily = 'Courier New'
+  luaobj.__fontSize = 14
+  luaobj.__colors = { fg = 'ffffffff', bg = 'ff000000' }
+  luaobj.__showBackground = true
+  luaobj.__caretVisible = false
+  luaobj.__caretColor = 'fffefefe'
+  luaobj.__caretCycle = { seconds = 1.5, minAlpha = 62, maxAlpha = 255 }
+  luaobj.__hlColors = { fg = 'ff000000', bg = 'ffffffff' }
+  luaobj.__dropShadow = false
+  luaobj.__selStart = 0
+  luaobj.__selEnd = 0
   return doInit(luaobj)
+end
+
+-- =====================================================================
+-- The edit control's C++ event override (CMauiEdit::HandleEvent,
+-- Cfile:1132299-1132317 + HandleKeyEvent Cfile:1133353-1133695).
+--
+-- All indices below are CHARACTER counts (UTF-8 codepoints via
+-- STR_Utf8Len/STR_Utf8SubString, both-VM core globals): __caret is the
+-- number of characters left of the cursor (0..len), __selStart/__selEnd
+-- span the selection.
+-- =====================================================================
+
+-- Platform deviation (named): the engine pastes/copies through the
+-- SYNCHRONOUS Windows clipboard (WIN_GetClipboardText, Cfile:1133497);
+-- the browser clipboard is async and permission-gated, so cut/copy/paste
+-- work against this VM-internal buffer.
+__editClipboard = ''
+
+local function editLen(e) return STR_Utf8Len(e.__text or '') end
+
+-- Fire OnTextChanged(new, old) with the engine's re-entry guard
+-- (mDoingCallback, Cfile:1131644-1131650) — console.lua:123 drives its
+-- completion list from it on every keystroke.
+local function editApplyText(e, new)
+  local old = e.__text or ''
+  if new == old then return end
+  e.__text = new
+  __mauiDirty = true
+  if e.OnTextChanged and not e.__doingCallback then
+    e.__doingCallback = true
+    local ok, err = xpcall(function() e:OnTextChanged(new, old) end, debug.traceback)
+    e.__doingCallback = false
+    if not ok then WARN('OnTextChanged:\n' .. tostring(err)) end
+  end
+end
+
+local function editHasSel(e) return (e.__selStart or 0) ~= (e.__selEnd or 0) end
+
+local function editSelText(e)
+  if not editHasSel(e) then return '' end
+  local s = math.min(e.__selStart, e.__selEnd)
+  local n = math.max(e.__selStart, e.__selEnd) - s
+  return STR_Utf8SubString(e.__text or '', s + 1, n)
+end
+
+-- DeleteSelection (Cfile:1132414-1132421): remove the span, caret to its
+-- start, fire TextChanged.
+local function editDeleteSelection(e)
+  if not editHasSel(e) then return end
+  local t = e.__text or ''
+  local len = editLen(e)
+  local s = math.min(e.__selStart, e.__selEnd)
+  local en = math.max(e.__selStart, e.__selEnd)
+  e.__caret = s
+  e.__selStart, e.__selEnd = 0, 0
+  editApplyText(e, STR_Utf8SubString(t, 1, s) .. STR_Utf8SubString(t, en + 1, len - en))
+end
+
+-- ReplaceSelection (Cfile:1132488-1132650): delete the selection, insert
+-- at the caret, ENFORCE mMaxChars in characters (truncate the insert).
+local function editReplaceSelection(e, insert)
+  editDeleteSelection(e)
+  local t = e.__text or ''
+  local len = editLen(e)
+  local max = e.__maxChars or 1024
+  local room = max - len
+  if room <= 0 then return end
+  if STR_Utf8Len(insert) > room then insert = STR_Utf8SubString(insert, 1, room) end
+  local caret = math.min(e.__caret or len, len)
+  local new = STR_Utf8SubString(t, 1, caret) .. insert .. STR_Utf8SubString(t, caret + 1, len - caret)
+  e.__caret = caret + STR_Utf8Len(insert)
+  editApplyText(e, new)
+end
+
+-- Word boundaries for Ctrl+arrow / Ctrl+Backspace / double-click.
+-- gpg::STR_GetWordStartIndex's exact character classes are not decoded
+-- (named gap) — whitespace-delimited words as the approximation.
+local function editWordLeft(e, from)
+  local t = e.__text or ''
+  local i = from
+  while i > 0 and STR_Utf8SubString(t, i, 1):match('^%s$') do i = i - 1 end
+  while i > 0 and not STR_Utf8SubString(t, i, 1):match('^%s$') do i = i - 1 end
+  return i
+end
+
+local function editWordRight(e, from)
+  local t = e.__text or ''
+  local len = editLen(e)
+  local i = from
+  while i < len and not STR_Utf8SubString(t, i + 1, 1):match('^%s$') do i = i + 1 end
+  while i < len and STR_Utf8SubString(t, i + 1, 1):match('^%s$') do i = i + 1 end
+  return i
+end
+
+-- Caret move with optional selection extension (HandleKeyEvent LEFT/RIGHT/
+-- HOME/END branches, Cfile:1133353-1133695): Shift extends, plain clears.
+local function editMoveCaret(e, to, extend)
+  to = math.max(0, math.min(to, editLen(e)))
+  if extend then
+    if not editHasSel(e) then e.__selStart = e.__caret or 0 end
+    e.__selEnd = to
+  else
+    e.__selStart, e.__selEnd = 0, 0
+  end
+  e.__caret = to
+  __mauiDirty = true
+end
+
+local function editCopy(e)
+  if editHasSel(e) then __editClipboard = editSelText(e) end
+end
+
+local function editCut(e)
+  if editHasSel(e) then
+    __editClipboard = editSelText(e)
+    editDeleteSelection(e)
+  end
+end
+
+local function editPaste(e)
+  if __editClipboard ~= '' then editReplaceSelection(e, __editClipboard) end
+end
+
+-- Caret index from a click x (CD3DFont::GetNearestCharacterIndex,
+-- Cfile:1133312): prefix-advance scan against the font metrics.
+local function editCaretFromX(e, x)
+  local t = e.__text or ''
+  local len = editLen(e)
+  local rel = x - e.Left()
+  local best, bestDist = 0, math.abs(rel)
+  for i = 1, len do
+    local adv = __mauiStringAdvance(STR_Utf8SubString(t, 1, i), e.__fontFamily, e.__fontSize)
+    local d = math.abs(rel - adv)
+    if d < bestDist then best, bestDist = i, d end
+  end
+  return best
+end
+
+-- The vtable override. ALWAYS "returns 0" like the engine
+-- (Cfile:1132315-1132317): callers treat every event as not consumed —
+-- mouse events keep bubbling, key events stay "skipped" (the keymap goes
+-- silent under focus anyway, Cfile:1259003 / ui-globals __uiKeyMapExecute).
+function __editHandleEvent(e, event)
+  local t = event.Type
+  if t == 'ButtonPress' or t == 'ButtonDClick' then
+    -- HandleClickEvent (Cfile:1133251-1133349): left button only, focus +
+    -- caret from the click x; double click selects the word. The
+    -- drag-selection dragger is a named gap (DragMove not decoded).
+    if not event.Modifiers or event.Modifiers.Left ~= false then
+      if e.__enabled then
+        e.__caretVisible = true
+        e:AcquireKeyboardFocus(true)
+        local caret = editCaretFromX(e, event.MouseX or e.Left())
+        if t == 'ButtonDClick' then
+          local s = editWordLeft(e, caret)
+          local en = editWordRight(e, caret)
+          e.__selStart, e.__selEnd = s, en
+          e.__caret = en
+        else
+          editMoveCaret(e, caret, false)
+        end
+      end
+    end
+    return
+  end
+  if t ~= 'Char' then return end -- KeyDown/KeyUp ignored (Cfile:1132299-1132317)
+
+  local code = event.KeyCode or 0
+  local mods = event.Modifiers or {}
+  if code == 8 then -- MKEY_BACK
+    if mods.Alt then return end
+    if mods.Ctrl then
+      editMoveCaret(e, editWordLeft(e, e.__caret or 0), true)
+      editDeleteSelection(e)
+    elseif editHasSel(e) then
+      editDeleteSelection(e)
+    elseif (e.__caret or 0) > 0 then
+      editMoveCaret(e, (e.__caret or 0) - 1, true)
+      editDeleteSelection(e)
+    end
+  elseif code == 13 then -- MKEY_RETURN: OnEnterPressed; false => ClearText
+    local keep = false
+    if e.OnEnterPressed then
+      local ok, res = xpcall(function() return e:OnEnterPressed(e.__text or '') end, debug.traceback)
+      if not ok then WARN('OnEnterPressed:\n' .. tostring(res)) end
+      keep = ok and res == true
+    end
+    if not keep then e:ClearText() end
+  elseif code == 27 then -- MKEY_ESCAPE (Cfile:1133638-1133648)
+    local handled = false
+    if e.OnEscPressed then
+      local ok, res = xpcall(function() return e:OnEscPressed(e.__text or '') end, debug.traceback)
+      if not ok then WARN('OnEscPressed:\n' .. tostring(res)) end
+      handled = ok and res == true
+    end
+    if not handled then
+      if (e.__text or '') ~= '' then e:ClearText() else e:AbandonKeyboardFocus() end
+    end
+  elseif code == 127 then -- MKEY_DELETE
+    if mods.Shift then
+      editCut(e)
+    elseif mods.Ctrl then
+      editMoveCaret(e, editWordRight(e, e.__caret or 0), true)
+      editDeleteSelection(e)
+    elseif editHasSel(e) then
+      editDeleteSelection(e)
+    elseif (e.__caret or 0) < editLen(e) then
+      editMoveCaret(e, (e.__caret or 0) + 1, true)
+      editDeleteSelection(e)
+    end
+  elseif code == 314 then -- MKEY_END
+    editMoveCaret(e, editLen(e), mods.Shift == true)
+  elseif code == 315 then -- MKEY_HOME
+    editMoveCaret(e, 0, mods.Shift == true)
+  elseif code == 316 then -- MKEY_LEFT
+    local to = (e.__caret or 0) - 1
+    if mods.Ctrl then to = editWordLeft(e, e.__caret or 0) end
+    editMoveCaret(e, to, mods.Shift == true)
+  elseif code == 318 then -- MKEY_RIGHT
+    local to = (e.__caret or 0) + 1
+    if mods.Ctrl then to = editWordRight(e, e.__caret or 0) end
+    editMoveCaret(e, to, mods.Shift == true)
+  elseif code == 324 then -- MKEY_INSERT: Shift paste, Ctrl copy
+    if mods.Shift then editPaste(e) elseif mods.Ctrl then editCopy(e) end
+  elseif code == 3 and mods.Ctrl then -- ^C
+    editCopy(e)
+  elseif code == 22 and mods.Ctrl then -- ^V
+    editPaste(e)
+  elseif code == 24 and mods.Ctrl then -- ^X
+    editCut(e)
+  elseif code > 300 then
+    -- Non-text keys: OnNonTextKeyPressed(self, MSW VK, event) — our
+    -- RawKeyCode already IS the Windows VK (gameUi keys.ts), replacing
+    -- wxCharCodeWXToMSW (Cfile:1133583-1133586).
+    if e.OnNonTextKeyPressed then
+      local ok, err = xpcall(
+        function() e:OnNonTextKeyPressed(event.RawKeyCode or 0, event) end,
+        debug.traceback
+      )
+      if not ok then WARN('OnNonTextKeyPressed:\n' .. tostring(err)) end
+    end
+  elseif code >= 32 then
+    -- Plain character: OnCharPressed veto (true => swallowed), else
+    -- insert (Cfile:1135940-1136014 -> ReplaceSelection).
+    local veto = false
+    if e.OnCharPressed then
+      local ok, res = xpcall(function() return e:OnCharPressed(code) end, debug.traceback)
+      if not ok then WARN('OnCharPressed:\n' .. tostring(res)) end
+      veto = ok and res == true
+    end
+    if not veto then editReplaceSelection(e, utf8.char(code)) end
+  end
+end
+
+-- Binding entry points (moho.lua edit_methods): the engine versions clamp
+-- to MaxChars and fire TextChanged (SetText 0x78F380 Cfile:1131601-1131654,
+-- ClearText Cfile:1131658-1131684, SetMaxChars 0x78F570 Cfile:1131686-1131714).
+function __editSetText(e, text)
+  local max = e.__maxChars or 1024
+  if STR_Utf8Len(text) > max then text = STR_Utf8SubString(text, 1, max) end
+  e.__selStart, e.__selEnd = 0, 0
+  editApplyText(e, text)
+  e.__caret = editLen(e)
+end
+
+function __editClearText(e)
+  e.__selStart, e.__selEnd = 0, 0
+  e.__caret = 0
+  editApplyText(e, '')
+end
+
+function __editEnforceMaxChars(e)
+  local max = e.__maxChars or 1024
+  if editLen(e) > max then
+    e.__caret = math.min(e.__caret or 0, max)
+    editApplyText(e, STR_Utf8SubString(e.__text or '', 1, max))
+  end
 end
 
 -- CMauiMovie (Cfile:1143258) — der Film.
@@ -632,9 +919,19 @@ local function listJson(ctrl)
   end
   if ctrl.__kind == 'edit' then
     local c = ctrl.__colors or {}
+    local hl = ctrl.__hlColors or {}
+    local cyc = ctrl.__caretCycle or {}
     return '{"text":' .. jsonStr(ctrl.__text or '')
       .. ',"caret":' .. jsonNum(ctrl.__caret or 0)
       .. ',"fg":' .. jsonOpt(c.fg) .. ',"bg":' .. jsonOpt(c.bg)
+      .. ',"showBackground":' .. tostring(ctrl.__showBackground == true)
+      .. ',"caretVisible":' .. tostring(ctrl.__caretVisible == true and __mauiFocus == ctrl)
+      .. ',"caretColor":' .. jsonOpt(ctrl.__caretColor)
+      .. ',"caretCycle":' .. jsonNum(cyc.seconds or 1.5)
+      .. ',"selStart":' .. jsonNum(ctrl.__selStart or 0)
+      .. ',"selEnd":' .. jsonNum(ctrl.__selEnd or 0)
+      .. ',"hlFg":' .. jsonOpt(hl.fg) .. ',"hlBg":' .. jsonOpt(hl.bg)
+      .. ',"dropShadow":' .. tostring(ctrl.__dropShadow == true)
       .. '}'
   end
   if ctrl.__kind == 'worldview' then
@@ -787,9 +1084,16 @@ function __mauiDispatch(control, event)
     -- errors per control (RunScript) — we keep that single log line on the TS
     -- side but enrich it with the Lua call stack, because a bare
     -- "lazyvar.lua:92: ..." message names the victim, never the caller.
-    local ok, res = xpcall(function() return c:HandleEvent(event) end, debug.traceback)
-    if not ok then error(res, 0) end
-    if res then return true end
+    -- Edits run the C++ vtable override (click-to-caret, focus) and never
+    -- consume — the event keeps bubbling (Cfile:1132299-1132317).
+    if c.__kind == 'edit' then
+      local okE, errE = xpcall(function() __editHandleEvent(c, event) end, debug.traceback)
+      if not okE then error(errE, 0) end
+    else
+      local ok, res = xpcall(function() return c:HandleEvent(event) end, debug.traceback)
+      if not ok then error(res, 0) end
+      if res then return true end
+    end
     c = c.__parent or nil
   end
   return false
@@ -968,6 +1272,13 @@ function __mauiKey(evType, keyCode, rawKeyCode, mods)
   if __mauiFocus and not __mauiFocus.__destroyed then
     -- Nur das Fokus-Control. Liefert es false, ist das Event "skipped" — der
     -- Capture-Stack wird NICHT gefragt (Cfile:1147634-1147650).
+    -- An edit runs the C++ vtable override instead of the Lua HandleEvent
+    -- and ALWAYS reports not-consumed (CMauiEdit::HandleEvent returns 0,
+    -- Cfile:1132315-1132317); the keymap stays silent under focus anyway.
+    if __mauiFocus.__kind == 'edit' then
+      __editHandleEvent(__mauiFocus, event)
+      return false
+    end
     return __mauiFocus:HandleEvent(event) == true
   end
 

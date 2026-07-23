@@ -1387,24 +1387,68 @@ local EDIT_NAMES = {
   'ShowBackground', 'ShowCaret',
 }
 local edit = withNoops(EDIT_NAMES, {
-  SetText = function(self, text)
-    self.__text = tostring(text or '')
-    self.__caret = string.len(self.__text)
-    __mauiDirty = true
-  end,
+  -- SetText truncates to MaxChars, caret -> end, fires OnTextChanged
+  -- (0x78F380, Cfile:1131601-1131654) — __editSetText in maui.lua.
+  SetText = function(self, text) __editSetText(self, tostring(text or '')) end,
   GetText = function(self) return self.__text end,
-  ClearText = function(self)
-    self.__text = ''
-    self.__caret = 0
-    __mauiDirty = true
+  -- ClearText clears text/caret/selection + OnTextChanged (Cfile:1131658).
+  ClearText = function(self) __editClearText(self) end,
+  -- SetMaxChars stores AND truncates existing text (0x78F570, Cfile:1131686).
+  SetMaxChars = function(self, n)
+    self.__maxChars = math.max(0, math.floor(tonumber(n) or 0))
+    __editEnforceMaxChars(self)
   end,
-  SetMaxChars = function(self, n) self.__maxChars = n end,
   GetMaxChars = function(self) return self.__maxChars end,
   SetCaretPosition = function(self, p) self.__caret = p end,
   GetCaretPosition = function(self) return self.__caret end,
-  EnableInput = function(self) self.__enabled = true end,
-  DisableInput = function(self) self.__enabled = false end,
+  -- EnableInput/DisableInput set mIsEnabled AND mCaretVisible together;
+  -- disabling abandons the keyboard focus (sub_78F360, Cfile:1131585).
+  EnableInput = function(self)
+    self.__enabled = true
+    self.__caretVisible = true
+    __mauiDirty = true
+  end,
+  DisableInput = function(self)
+    self.__enabled = false
+    self.__caretVisible = false
+    self:AbandonKeyboardFocus()
+    __mauiDirty = true
+  end,
   IsEnabled = function(self) return self.__enabled end,
+  -- Background / caret / highlight / dropshadow state (CMauiEdit ctor
+  -- defaults Cfile:1131436-1131500; the renderer reads all of it).
+  ShowBackground = function(self, show)
+    self.__showBackground = show == true
+    __mauiDirty = true
+  end,
+  IsBackgroundVisible = function(self) return self.__showBackground == true end,
+  ShowCaret = function(self, show)
+    self.__caretVisible = show == true
+    __mauiDirty = true
+  end,
+  IsCaretVisible = function(self) return self.__caretVisible == true end,
+  SetNewCaretColor = function(self, c)
+    self.__caretColor = c
+    __mauiDirty = true
+  end,
+  GetCaretColor = function(self) return self.__caretColor end,
+  SetCaretCycle = function(self, seconds, minAlpha, maxAlpha)
+    self.__caretCycle = { seconds = seconds or 1.5, minAlpha = minAlpha or 62, maxAlpha = maxAlpha or 255 }
+  end,
+  SetNewHighlightForegroundColor = function(self, c)
+    self.__hlColors.fg = c
+    __mauiDirty = true
+  end,
+  GetHighlightForegroundColor = function(self) return self.__hlColors.fg end,
+  SetNewHighlightBackgroundColor = function(self, c)
+    self.__hlColors.bg = c
+    __mauiDirty = true
+  end,
+  GetHighlightBackgroundColor = function(self) return self.__hlColors.bg end,
+  SetDropShadow = function(self, show)
+    self.__dropShadow = show == true
+    __mauiDirty = true
+  end,
   SetNewFont = function(self, family, pointsize)
     self.__fontFamily = family or ''
     self.__fontSize = pointsize or 12
@@ -1421,8 +1465,19 @@ local edit = withNoops(EDIT_NAMES, {
   SetNewBackgroundColor = function(self, c) self.__colors.bg = c __mauiDirty = true end,
   GetForegroundColor = function(self) return self.__colors.fg end,
   GetBackgroundColor = function(self) return self.__colors.bg end,
-  AcquireFocus = function(self) self:AcquireKeyboardFocus(false) end,
-  AbandonFocus = function(self) self:AbandonKeyboardFocus() end,
+  -- AcquireFocus only takes effect on an ENABLED edit and shows the caret
+  -- (sub_78F310, Cfile:1131557); abandoning hides it (Cfile:1131570-1131582).
+  AcquireFocus = function(self)
+    if not self.__enabled then return end
+    self.__caretVisible = true
+    self:AcquireKeyboardFocus(false)
+    __mauiDirty = true
+  end,
+  AbandonFocus = function(self)
+    self.__caretVisible = false
+    self:AbandonKeyboardFocus()
+    __mauiDirty = true
+  end,
 }, control)
 
 -- ---------------------------------------------------------------------

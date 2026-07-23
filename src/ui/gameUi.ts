@@ -677,6 +677,13 @@ export class GameUi {
           if (k.charCode !== null) {
             this.host.eval(`__mauiKey('Char', ${k.charCode}, ${k.vk}, ${m})`)
           }
+          // While an edit holds the keyboard focus, the Char event went into
+          // it even though the edit reports not-consumed (CMauiEdit::
+          // HandleEvent returns 0) — the browser must not also scroll the
+          // page with Space/arrows or trigger shortcuts while typing.
+          if (!acted && this.host.eval('return __mauiFocus ~= false and __mauiFocus ~= nil') === true) {
+            acted = true
+          }
         }
         if (acted) {
           e.preventDefault()

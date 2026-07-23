@@ -1,6 +1,7 @@
 import { LuaFactory, type LuaEngine } from 'wasmoon'
 import { transpileFaLua, COMPAT_LUA } from './transpile'
 import BOOT_LUA from '../engine-lua/boot.lua?raw'
+import STR_LUA from '../engine-lua/str.lua?raw'
 
 /**
  * Host für die Original-Lua-Sim-Umgebung von Supreme Commander FA.
@@ -94,6 +95,9 @@ export class LuaHost {
     // Kompat-Schicht (Lua-5.0-Bibliotheksfunktionen) + Basis-Engine-Globals
     this.lua.doStringSync(COMPAT_LUA)
     this.lua.doStringSync(BOOT_LUA)
+    // scr_CoreInits string helpers — BOTH VMs (STR_Utf8Len/SubString,
+    // Cfile:599069-599139); every SetupEditStd edit calls them per keystroke.
+    this.lua.doStringSync(STR_LUA)
 
     // Original-Modulsystem laden (definiert import(), __modules)
     this.runModuleGlobally('/lua/system/import.lua')
