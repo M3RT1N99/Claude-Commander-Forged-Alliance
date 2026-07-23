@@ -741,17 +741,17 @@ ACU-Enhancements setzen `NewBuildRate` (z.B. 30 / 90) → `SetBuildRate`.
 5. `Sim::AdvanceBeat` is missing a sync filter packing pass (marked as TODO in the decomp, Sim.cpp:12060) — irrelevant for a replica without netcode.
 
 ## Refs
-- C:\Users\Marti\Documents\02Projects\faf\Draiget\faf-re\src\sdk\moho\sim\Sim.cpp:11990 — Sim::AdvanceBeat (complete tick order, lines 11990-12098)
+- C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\sim\Sim.cpp:11990 — Sim::AdvanceBeat (complete tick order, lines 11990-12098)
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\sim\Sim.cpp:18260 — cfunc_GetSimTicksPerSecondL (Tickrate = 10.0 fix)
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\sim\Sim.cpp:8411 — Sim::Sync (mDidProcess-Latch)
-- C:\Users\Marti\Documents\02Projects\faf\Draiget\faf-re\src\sdk\moho\sim\Sim.cpp:9929 — Sim::CreateUnit (Unit Cap Gate; Ctor NOT lifted)
-- C:\Users\Marti\Documents\02Projects\faf\Draiget\faf-re\src\sdk\moho\sim\Sim.cpp:18020 — cfunc_GetEconomyTotalsL (Lua shape from SEconTotals)
+- C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\sim\Sim.cpp:9929 — Sim::CreateUnit (Unit Cap Gate; Ctor NOT lifted)
+- C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\sim\Sim.cpp:18020 — cfunc_GetEconomyTotalsL (Lua shape from SEconTotals)
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\sim\Sim.h:1111 — mCurBeat / mCurTick / mTaskStageA,B
-- C:\Users\Marti\Documents\02Projects\faf\Draiget\faf-re\src\sdk\moho\sim\CArmyImpl.cpp:1736 — CARmyImpl::OnTick (Army Tick Order)
-- C:\Users\Marti\Documents\02Projects\faf\Draiget\faf-re\src\sdk\moho\sim\CArmyImpl.cpp:1024 — ProcessArmyEconomyTick (cache copy only!)
+- C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\sim\CArmyImpl.cpp:1736 — CARmyImpl::OnTick (Army Tick Order)
+- C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\sim\CArmyImpl.cpp:1024 — ProcessArmyEconomyTick (cache copy only!)
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\sim\CSimArmyEconomyInfo.h — SEconTotals/SEconPair/SEconStoragePair Layout
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\sim\CEconomy.h:76 — CEconomy-Layout (identisch mit CSimArmyEconomyInfo)
-- C:\Users\Marti\Documents\02Projects\faf\Draiget\faf-re\src\sdk\moho\sim\CEconStorage.cpp:374 — CEconStorage::Chng (MaxStorage as int64)
+- C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\sim\CEconStorage.cpp:374 — CEconStorage::Chng (MaxStorage as int64)
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\misc\CEconomyEvent.h:50 — CEconRequest {mNode, mRequested, mGranted}
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\misc\CEconomyEvent.cpp:1096 — CEconRequest::LimitingRate
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\misc\CEconomyEvent.cpp:1241 — CEconomyEvent::ProcessTick (all-or-nothing + TakeGrantedResourcesAndReset)
@@ -761,37 +761,37 @@ ACU-Enhancements setzen `NewBuildRate` (z.B. 30 / 90) → `SetBuildRate`.
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\task\CTaskThread.cpp:706 — CTaskThread::Stage / :722 Unstage
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\task\CTask.cpp:375 — CTask::~CTask / :407 Ctor (Task-Stack-Push) / :426 TaskInterruptSubtasks / :454 TaskResume
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\task\CTask.h:14 — ETaskState-Enum
-- C:\Users\Marti\Documents\02Projects\faf\Draiget\faf-re\src\sdk\moho\task\CCommandTask.h:88 — CCommandTask fields (mTaskState, mDispatchResult, mLinkResult)
+- C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\task\CCommandTask.h:88 — CCommandTask fields (mTaskState, mDispatchResult, mLinkResult)
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\ai\IAiCommandDispatchImpl.cpp:589 — IAiCommandDispatchImpl::TaskTick (Queue-Semantik: Count/Patrol/Repeat)
-- C:\Users\Marti\Documents\02Projects\faf\Draiget\faf-re\src\sdk\moho\ai\IAiCommandDispatchImpl.cpp:473 — OnEvent (TaskInterruptSubtasks on queue change)
-- C:\Users\Marti\Documents\02Projects\faf\Draiget\faf-re\src\sdk\moho\ai\IAiCommandDispatchImpl.cpp:398 — DispatchQueuedCommand (EMPTY STUB — FUN_00608EF0 not lifted)
-- C:\Users\Marti\Documents\02Projects\faf\Draiget\faf-re\src\sdk\moho\ai\IAiCommandDispatchImpl.cpp:415 — AI_CreateCommandDispatch (Dispatch + CUnitGetBuiltTask on mTaskStageA)
-- C:\Users\Marti\Documents\02Projects\faf\Draiget\faf-re\src\sdk\moho\command\SSTICommandIssueData.h:19 — EUnitCommandType (0..39 complete)
-- C:\Users\Marti\Documents\02Projects\faf\Draiget\faf-re\src\sdk\moho\unit\CUnitCommandQueue.cpp:446 — AddCommandToQueue (Patrol ring queue insert)
-- C:\Users\Marti\Documents\02Projects\faf\Draiget\faf-re\src\sdk\moho\unit\CUnitCommandQueue.h:27 — Queue API + Layout
-- C:\Users\Marti\Documents\02Projects\faf\Draiget\faf-re\src\sdk\moho\unit\tasks\CBuildTaskHelper.cpp:61 — ComputeBuildProgressDelta = (1/(BuildTime/buildRate)) * resourceConsumed * 0.1
-- C:\Users\Marti\Documents\02Projects\faf\Draiget\faf-re\src\sdk\moho\unit\tasks\CBuildTaskHelper.cpp:247 — UpdateWorkProgress (Paused/Silo/Enhancing/Shield/Fuel/Repair/Progress-Bands)
-- C:\Users\Marti\Documents\02Projects\faf\Draiget\faf-re\src\sdk\moho\unit\tasks\CUnitReclaimTask.cpp:141 — QueryReclaimCosts (timeSeconds*10 → Ticks, min 1)
-- C:\Users\Marti\Documents\02Projects\faf\Draiget\faf-re\src\sdk\moho\unit\tasks\CUnitReclaimTask.cpp:191 — AwardReclaimedResources
-- C:\Users\Marti\Documents\02Projects\faf\Draiget\faf-re\src\sdk\moho\unit\tasks\CUnitReclaimTask.cpp:681 — Reclaim start (health deduction, wreck generation) / :711 Processing / :751 Complete
-- C:\Users\Marti\Documents\02Projects\faf\Draiget\faf-re\src\sdk\moho\unit\tasks\CUnitCaptureTask.cpp:454 — Capture costs (ticks, rate) / :509 Processing (CaptorCount stacking)
-- C:\Users\Marti\Documents\02Projects\faf\Draiget\faf-re\src\sdk\moho\unit\tasks\CFactoryBuildTask.h:117 — Fields (mBuildHelper, mRallyPointUnit, mBuildCount) + InheritCommandsTo
-- C:\Users\Marti\Documents\02Projects\faf\Draiget\faf-re\src\sdk\moho\unit\tasks\CUnitMobileBuildTask.cpp:213 — Dtor (cleanup/error path; Execute NOT lifted)
-- C:\Users\Marti\Documents\02Projects\faf\Draiget\faf-re\src\sdk\moho\unit\tasks\CUnitGetBuiltTask.cpp:21 — Execute (bottom task of each unit thread)
-- C:\Users\Marti\Documents\02Projects\faf\Draiget\faf-re\src\sdk\moho\unit\tasks\CUnitRepairTask.cpp:136 — InheritWork (Assist inherits WorkItem)
-- C:\Users\Marti\Documents\02Projects\faf\Draiget\faf-re\src\sdk\moho\unit\core\Unit.cpp:14716 — Unit::SetConsumptionActive (perSecond*0.1; grant refund if deactivated)
-- C:\Users\Marti\Documents\02Projects\faf\Draiget\faf-re\src\sdk\moho\unit\core\Unit.cpp:14358 — Unit::Kill (Wreck-Gating, Stats, mNeedsKillCleanup)
-- C:\Users\Marti\Documents\02Projects\faf\Draiget\faf-re\src\sdk\moho\unit\core\Unit.cpp:14531 — Unit::KillCleanup / :14485 Unit::OnDestroy
-- C:\Users\Marti\Documents\02Projects\faf\Draiget\faf-re\src\sdk\moho\unit\core\Unit.cpp:14625 — Unit::SetPaused / :14653 SetRepeatQueue
-- C:\Users\Marti\Documents\02Projects\faf\Draiget\faf-re\src\sdk\moho\unit\core\Unit.cpp:12407 — Unit::CanStartBuilding (construction gate)
-- C:\Users\Marti\Documents\02Projects\faf\Draiget\faf-re\src\sdk\moho\unit\core\Unit.h:1736 — Unit layout: mBeatResourceAccumulators(0x2E8), SharedEconomyRate*(0x2F8), mNeedsKillCleanup(0x524), mConsumptionData(0x534), ResourceConsumed(0x53C)
-- C:\Users\Marti\Documents\02Projects\faf\Draiget\faf-re\src\sdk\moho\unit\core\UnitAttributes.h:33 — buildRate(0x58), consumptionPerSecond*(0x48/0x4C), productionPerSecond*(0x50/0x54), regenRate(0x5C)
+- C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\ai\IAiCommandDispatchImpl.cpp:473 — OnEvent (TaskInterruptSubtasks on queue change)
+- C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\ai\IAiCommandDispatchImpl.cpp:398 — DispatchQueuedCommand (EMPTY STUB — FUN_00608EF0 not lifted)
+- C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\ai\IAiCommandDispatchImpl.cpp:415 — AI_CreateCommandDispatch (Dispatch + CUnitGetBuiltTask on mTaskStageA)
+- C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\command\SSTICommandIssueData.h:19 — EUnitCommandType (0..39 complete)
+- C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\unit\CUnitCommandQueue.cpp:446 — AddCommandToQueue (Patrol ring queue insert)
+- C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\unit\CUnitCommandQueue.h:27 — Queue API + Layout
+- C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\unit\tasks\CBuildTaskHelper.cpp:61 — ComputeBuildProgressDelta = (1/(BuildTime/buildRate)) * resourceConsumed * 0.1
+- C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\unit\tasks\CBuildTaskHelper.cpp:247 — UpdateWorkProgress (Paused/Silo/Enhancing/Shield/Fuel/Repair/Progress-Bands)
+- C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\unit\tasks\CUnitReclaimTask.cpp:141 — QueryReclaimCosts (timeSeconds*10 → Ticks, min 1)
+- C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\unit\tasks\CUnitReclaimTask.cpp:191 — AwardReclaimedResources
+- C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\unit\tasks\CUnitReclaimTask.cpp:681 — Reclaim start (health deduction, wreck generation) / :711 Processing / :751 Complete
+- C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\unit\tasks\CUnitCaptureTask.cpp:454 — Capture costs (ticks, rate) / :509 Processing (CaptorCount stacking)
+- C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\unit\tasks\CFactoryBuildTask.h:117 — Fields (mBuildHelper, mRallyPointUnit, mBuildCount) + InheritCommandsTo
+- C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\unit\tasks\CUnitMobileBuildTask.cpp:213 — Dtor (cleanup/error path; Execute NOT lifted)
+- C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\unit\tasks\CUnitGetBuiltTask.cpp:21 — Execute (bottom task of each unit thread)
+- C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\unit\tasks\CUnitRepairTask.cpp:136 — InheritWork (Assist inherits WorkItem)
+- C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\unit\core\Unit.cpp:14716 — Unit::SetConsumptionActive (perSecond*0.1; grant refund if deactivated)
+- C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\unit\core\Unit.cpp:14358 — Unit::Kill (Wreck-Gating, Stats, mNeedsKillCleanup)
+- C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\unit\core\Unit.cpp:14531 — Unit::KillCleanup / :14485 Unit::OnDestroy
+- C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\unit\core\Unit.cpp:14625 — Unit::SetPaused / :14653 SetRepeatQueue
+- C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\unit\core\Unit.cpp:12407 — Unit::CanStartBuilding (construction gate)
+- C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\unit\core\Unit.h:1736 — Unit layout: mBeatResourceAccumulators(0x2E8), SharedEconomyRate*(0x2F8), mNeedsKillCleanup(0x524), mConsumptionData(0x534), ResourceConsumed(0x53C)
+- C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\unit\core\UnitAttributes.h:33 — buildRate(0x58), consumptionPerSecond*(0x48/0x4C), productionPerSecond*(0x50/0x54), regenRate(0x5C)
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\entity\Entity.cpp:3824 — Entity::UpdateFractionComplete (Health-Floor)
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\entity\Entity.cpp:4522 — Entity::AdvanceCoords (Double-Buffer-Transform-Commit)
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\entity\Prop.cpp:501 — Prop::Materialize (Reclaim-Fraction, OnReclaimed)
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\sim\CFormation.h:12 — CFormation-Layout (Slots, Direction, TravelFormation)
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\sim\SimDriver.cpp — CSimDriver::ExecuteDispatchStepLocked (simRate = 1000/ms * 0.1)
-- C:\Users\Marti\Documents\02Projects\faf\Draiget\faf-re\src\sdk\moho\unit\CUnitMotion.cpp:2466 — CUnitMotion::ProcessFuelLevels (Air Staging Repair with own CEconRequest)
+- C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\unit\CUnitMotion.cpp:2466 — CUnitMotion::ProcessFuelLevels (Air Staging Repair with own CEconRequest)
 - lua.scd → lua/game.lua:11 — Game.VeteranDefault {25,100,250,500,1000}
 - lua.scd → lua/game.lua:24 — Game.GetConstructEconomyModel (time/rate, energy, mass)
 - lua.scd → lua/sim/Unit.lua:124 — Unit:OnCreate

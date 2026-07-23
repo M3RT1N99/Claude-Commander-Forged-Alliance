@@ -355,23 +355,23 @@ Entity methods (`Entity.cpp`): `PlaySound`, `SetAmbientSound`. Weapon (`UnitWeap
 - **UI**: `Interface.xsb` (119 Cues: `UI_Menu_Accept_01`, `UI_Menu_Rollover`, `UEF_Select_Tank`, …). Faction select banks: `AEONSelect.xwb`, `CYBRANSelect.xwb`, `UEFSelect.xwb`, `SeraphimSelect.xwb/.xsb`.
 
 ## Refs
-- C:\Users\Marti\Documents\02Projects\faf\Draiget\faf-re\src\sdk\moho\resource\blueprints\REmitterBlueprint.h:144 (REmitterBlueprint, 21 curves + flags + textures, size 0x284)
-- C:\Users\Marti\Documents\02Projects\faf\Draiget\faf-re\src\sdk\moho\resource\blueprints\RTrailBlueprint.h:28 (RTrailBlueprint, size 0x80)
-- C:\Users\Marti\Documents\02Projects\faf\Draiget\faf-re\src\sdk\moho\resource\blueprints\RBeamBlueprint.h:28 (RBeamBlueprint, size 0x84)
-- C:\Users\Marti\Documents\02Projects\faf\Draiget\faf-re\src\sdk\moho\resource\blueprints\REffectBlueprint.h:23 (Base: BlueprintId + High/Med/LowFidelity)
+- C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\resource\blueprints\REmitterBlueprint.h:144 (REmitterBlueprint, 21 curves + flags + textures, size 0x284)
+- C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\resource\blueprints\RTrailBlueprint.h:28 (RTrailBlueprint, size 0x80)
+- C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\resource\blueprints\RBeamBlueprint.h:28 (RBeamBlueprint, size 0x84)
+- C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\resource\blueprints\REffectBlueprint.h:23 (Base: BlueprintId + High/Med/LowFidelity)
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\effects\rendering\SEfxCurve.cpp:319 (SEfxCurve::GetValue — Interpolation + Zufalls-Spread)
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\effects\rendering\SEfxCurve.h:29
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\effects\rendering\CEfxEmitter.h:52 (CEfxEmitter, size 0x6F8)
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\effects\rendering\CEfxTrailEmitter.h:29 (size 0x1B8)
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\effects\rendering\CEfxBeam.h:15 (size 0x298)
-- C:\Users\Marti\Documents\02Projects\faf\Draiget\faf-re\src\sdk\moho\effects\rendering\EffectLuaStartupRegistrations.cpp:53-106 (all Create*-Lua signatures), :1940/:2253/:2273/:2293/:2313 (SetEmitterParam/ScaleEmitter/ResizeEmitterCurve/SetEmitterCurveParam/OffsetEmitter)
+- C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\effects\rendering\EffectLuaStartupRegistrations.cpp:53-106 (all Create*-Lua signatures), :1940/:2253/:2273/:2293/:2313 (SetEmitterParam/ScaleEmitter/ResizeEmitterCurve/SetEmitterCurveParam/OffsetEmitter)
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\effects\rendering\CEffectManagerImpl.h:47-165 (CreateEmitter/CreateAttachedEmitter/CreateEmitterAtBone/CreateTrail/CreateBeam/CreateLightParticle)
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\render\EEmitterCurve.h (21 Kurven-Lanes), EEmitterParam.h (26 Skalar-Lanes), EBeamParam.h (21 Beam-Lanes)
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\particles\SWorldParticle.h:19 (Runtime-Partikel, size 0x8C)
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\particles\SWorldBeam.h:20 (size 0xCC)
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\particles\CWorldParticles.cpp:443 (BlendMode -> Technique-Suffix Mapping), :510 (time = tick + frameDelta)
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\particles\BeamRenderHelpers.cpp:2024-2048 (TBeam_OneTexture/TwoTexture Technique-Auswahl)
-- C:\Users\Marti\Documents\02Projects\faf\Draiget\faf-re\src\sdk\moho\audio\CSndParams.h:117 (mBank/mCue/mLodCutoff/mBankId/mCueId), :168 (cfunc_SoundL builds CSndParams from {Cue,Bank,LodCutoff})
+- C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\audio\CSndParams.h:117 (mBank/mCue/mLodCutoff/mBankId/mCueId), :168 (cfunc_SoundL builds CSndParams from {Cue,Bank,LodCutoff})
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\audio\AudioEngine.cpp:3618 (func_LoadSoundPath: *.xwb + *.xsb enumerieren), :4099 (/sounds/SupCom.xgs)
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\audio\AudioEngine.h:38-205 (IXACTSoundBank/IXACTCue/IXACTEngine ABI), :493 GetBankIndex, :503 GetCueIndex, :590 Calculate3D
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\audio\CUserSoundManager.cpp:55-67 (Lua-Hilfetexte PlaySound/StopSound/SetVolume/PlayVoice), :1239 (AudioEngine::Create("/sounds"))
@@ -390,4 +390,4 @@ Entity methods (`Entity.cpp`): `PlaySound`, `SetAmbientSound`. Weapon (`UnitWeap
 - Web: https://github.com/fesh0r/xnb_parse/blob/master/xnb_parse/xact/xwb.py (Python XWB/XSB Parser)
 - Web: https://github.com/microsoft/DirectXTK/wiki/XWBTool (offizielles XWB-Tool)
 - Web: https://github.com/MonoGame/MonoGame/issues/2661 (MonoGame XactImporter/XactProcessor Status)
-- Scratchpad extracts: C:\Users\Marti\AppData\Local\Temp\claude\c--Users-Marti-Documents-02Projects-Claude-Commander-Forged-Alliance\795d25b0-6aed-4269-81c5-1f3b66283dbf\scratchpad\{particle.fx, EffectTemplates.lua, EffectUtilities.lua, defaultexplosions.lua, defaultcollisionbeams.lua, DefaultProjectiles.lua, CollisionBeam.lua, Blueprints.lua, UserMusic.lua}
+- Scratchpad extracts: C:\Users\Marti\AppData\Local\Temp\claude\c--Users-Marti-Documents-02Projekte-Claude-Commander-Forged-Alliance\795d25b0-6aed-4269-81c5-1f3b66283dbf\scratchpad\{particle.fx, EffectTemplates.lua, EffectUtilities.lua, defaultexplosions.lua, defaultcollisionbeams.lua, DefaultProjectiles.lua, CollisionBeam.lua, Blueprints.lua, UserMusic.lua}

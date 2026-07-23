@@ -243,13 +243,13 @@ Referenz-Implementierungen: `FAForever/faf-scfa-replay-parser` (Python + Kaitai 
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\net\ELobbyMsg.h (100-111, 200-209)
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\net\NetMessageRanges.h
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\net\CMessage.h:31 (Wire-Format [u8 type][u16 size][payload])
-- C:\Users\Marti\Documents\02Projects\faf\Draiget\faf-re\src\sdk\moho\net\CClientBase.h:294 (client state fields)
+- C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\net\CClientBase.h:294 (client state fields)
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\net\CClientBase.cpp:189 (Process/Ack), :385 (UpdateState/Command-Source-Autorisierung), :659 (IsReadyForBeat)
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\net\CClientManagerImpl.h:22 (CMarshaller = ICommandSink-Encoder)
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\net\CClientManagerImpl.cpp:808 (ProcessClients-Broadcast), :878 (DoBeat), :994 (UpdateStates), :1047 (GetBottleneckInfo)
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\net\CLocalClient.cpp / CNetClient.cpp (Loopback vs. Wire)
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\net\CReplayClient.h / CReplayClient.cpp:232 (Start), :172 (Process)
-- C:\Users\Marti\Documents\02Projects\faf\Draiget\faf-re\src\sdk\moho\net\IMessageReceiver.h (CMessageDispatcher, 256-slot receiver table)
+- C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\net\IMessageReceiver.h (CMessageDispatcher, 256-slot receiver table)
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\net\IClientMgrUIInterface.h (ReceiveChat, NoteDisconnect, ...)
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\net\SNetPacket.h + NetTransportEnums.h (UDP-Transport, 15-Byte-Header, 512-Byte-MTU)
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\net\CLobby.h + CLobby.cpp:3182 (LaunchGame), :3140 (SendScriptData)
@@ -264,7 +264,7 @@ Referenz-Implementierungen: `FAForever/faf-scfa-replay-parser` (Python + Kaitai 
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\sim\SDesyncInfo.h
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\sim\EAllianceTypeInfo.h (ALLIANCE_Neutral/Ally/Enemy)
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\serialization\SaveGameFileHeader.h (Magic 'RGMH', 0x2028)
-- C:\Users\Marti\Documents\02Projects\faf\Draiget\faf-re\src\sdk\moho\serialization\SSavedGameHeader.h (version 20) + SSavedGameArmyInfo.h
+- C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\moho\serialization\SSavedGameHeader.h (version 20) + SSavedGameArmyInfo.h
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\gpg\core\containers\WriteArchive.h / ReadArchive.h / ArchiveSerialization.h (ArchiveToken, TrackedPointerState, TypeHandle)
 - C:\Users\Marti\Documents\02Projekte\faf\Draiget\faf-re\src\sdk\gpg\core\streams\BinaryReader.cpp:175 (ReadString strz), :207 (ReadLengthPrefixedString u32)
 - https://github.com/FAForever/faf-scfa-replay-parser (replay.ksy + replay_parser/header.py — confirms replay header layout)

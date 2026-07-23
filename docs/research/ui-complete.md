@@ -187,7 +187,7 @@ Container `AtTopIn(parent, 368)`, `AtRightIn(parent)`, Breite 60; pro belegter G
 - lua.scd → lua/ui/game/gamecommon.lua (iconBmpWidth/Height 48 + 1px padding; GetUnitIconFileNames → /textures/ui/common/icons/units/<IconName>_icon|_build_btn_up|down|over.dds)
 - lua.scd → lua/ui/game/buildmode.lua + build_templates.lua (Taste B, Tech-Keys, Template-Verwaltung in Prefs)
 - lua.scd → lua/ui/menus/main.lua, lua/ui/lobby/lobby.lua, lua/ui/lobby/lobbyOptions.lua, lua/ui/dialogs/mapselect.lua, options.lua, keybindings.lua, score.lua
-- Project: C:\Users\Marti\Documents\02Projects\Claude Commander Forged Alliance\src\ui\hud.ts (current status: Economy Z.230-249, Orders Z.251-285 only 6 slots, UnitView Z.287-299, Minimap Z.301-334, Strategic Icons Z.121-196)
-- Project: C:\Users\Marti\Documents\02Projects\Claude Commander Forged Alliance\src\sim\simWorld.ts:153 (UnitCommand only knows 'move' - construction/queue/reclaim are completely missing)
+- Project: C:\Users\Marti\Documents\02Projekte\Claude Commander Forged Alliance\src\ui\hud.ts (current status: Economy Z.230-249, Orders Z.251-285 only 6 slots, UnitView Z.287-299, Minimap Z.301-334, Strategic Icons Z.121-196)
+- Project: C:\Users\Marti\Documents\02Projekte\Claude Commander Forged Alliance\src\sim\simWorld.ts:153 (UnitCommand only knows 'move' - construction/queue/reclaim are completely missing)
 - Projekt: C:\Users\Marti\Documents\02Projekte\Claude Commander Forged Alliance\src\sandbox\sandbox.ts:85-320 (SandboxController: spawn/clickSelect/boxSelect/commandMove/stopSelected/selectedCaps/hudUnits)
-- Extracted original sources (read only, for reference): C:\Users\Marti\AppData\Local\Temp\claude\c--Users-Marti-Documents-02Projects-Claude-Commander-Forged-Alliance\795d25b0-6aed-4269-81c5-1f3b66283dbf\scratchpad\lua\
+- Extracted original sources (read only, for reference): C:\Users\Marti\AppData\Local\Temp\claude\c--Users-Marti-Documents-02Projekte-Claude-Commander-Forged-Alliance\795d25b0-6aed-4269-81c5-1f3b66283dbf\scratchpad\lua\

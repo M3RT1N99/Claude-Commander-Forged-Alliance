@@ -421,7 +421,7 @@ Intel = { FreeIntel = true, OmniRadius = 16, VisionRadius = 26, WaterVisionRadiu
 - C:/Users/Marti/Documents/02Projekte/faf/Draiget/faf-re/src/sdk/moho/sim/CIntelGrid.cpp:657 — Raster() (halboffene Kreisscheibe, +/-1)
 - C:/Users/Marti/Documents/02Projekte/faf/Draiget/faf-re/src/sdk/moho/sim/CIntelGrid.cpp:488-574 — IsVisible(x,z) / IsVisible(Rect2i) (floor/ceil)
 - C:/Users/Marti/Documents/02Projekte/faf/Draiget/faf-re/src/sdk/moho/ai/CAiReconDBImpl.h:516-533 — 8 Grid-Slots + mFogOfWar + mVisibleToReconCategory
-- C:/Users/Marti/Documents/02Projects/faf/Draiget/faf-re/src/sdk/moho/ai/CAiReconDBImpl.cpp:1202-1212 — Grid sizes: Vision=2, all others=4
+- C:/Users/Marti/Documents/02Projekte/faf/Draiget/faf-re/src/sdk/moho/ai/CAiReconDBImpl.cpp:1202-1212 — Grid sizes: Vision=2, all others=4
 - C:/Users/Marti/Documents/02Projekte/faf/Draiget/faf-re/src/sdk/moho/ai/CAiReconDBImpl.cpp:1277 — ReconTick (Blip-Lifecycle, Ghost-Regel Zeile 1366-1378)
 - C:/Users/Marti/Documents/02Projekte/faf/Draiget/faf-re/src/sdk/moho/ai/CAiReconDBImpl.cpp:1555 — RefreshBlip (data only with RECON_LOSNow)
 - C:/Users/Marti/Documents/02Projekte/faf/Draiget/faf-re/src/sdk/moho/ai/CAiReconDBImpl.cpp:1586 — UpdateBlip (sticky 0x30, KnownFake-Entlarvung)
@@ -437,12 +437,12 @@ Intel = { FreeIntel = true, OmniRadius = 16, VisionRadius = 26, WaterVisionRadiu
 - C:/Users/Marti/Documents/02Projekte/faf/Draiget/faf-re/src/sdk/moho/sim/ReconBlip.cpp:1474 — ReconBlip::Refresh (mJamOffset-Addition)
 - C:/Users/Marti/Documents/02Projekte/faf/Draiget/faf-re/src/sdk/moho/sim/ReconBlip.cpp:1513/1789 — DestroyIfUnused / UpdateVisibility (mNeedsFlush)
 - C:/Users/Marti/Documents/02Projekte/faf/Draiget/faf-re/src/sdk/moho/entity/intel/CIntel.h:43-183 — CIntel (0x30): 9 Handles + 5 Toggles
-- C:/Users/Marti/Documents/02Projects/faf/Draiget/faf-re/src/sdk/moho/entity/intel/CIntel.cpp:193 — Ctor from Blueprint; :271 update; :420 InitIntel switch (CONTRADICTION to Eintel at 10-13)
+- C:/Users/Marti/Documents/02Projekte/faf/Draiget/faf-re/src/sdk/moho/entity/intel/CIntel.cpp:193 — Ctor from Blueprint; :271 update; :420 InitIntel switch (CONTRADICTION to Eintel at 10-13)
 - C:/Users/Marti/Documents/02Projekte/faf/Draiget/faf-re/src/sdk/moho/entity/intel/CIntelCounterHandle.h:20 — EIntelCounter (RadarStealthField=1, SonarStealthField=2, CloakField=8)
 - C:/Users/Marti/Documents/02Projekte/faf/Draiget/faf-re/src/sdk/moho/entity/intel/CIntelCounterHandle.cpp:102-157 — ApplyCounterIntelToReconGrid / ApplyCounterIntelToForeignArmies
 - C:/Users/Marti/Documents/02Projekte/faf/Draiget/faf-re/src/sdk/moho/entity/intel/CIntelPosHandle.cpp:149 — UpdatePos (Schwelle radius*0.333 / 30 Ticks)
 - C:/Users/Marti/Documents/02Projekte/faf/Draiget/faf-re/src/sdk/moho/entity/EntityPositionWatchEntry.h — mLastPos/mRadius/mLastTickUpdated/mEnabled (0x1C)
-- C:/Users/Marti/Documents/02Projects/faf/Draiget/faf-re/src/sdk/moho/unit/core/EIntelTypeInfo.h:10 — EIntel enum (canonical names/IDs)
+- C:/Users/Marti/Documents/02Projekte/faf/Draiget/faf-re/src/sdk/moho/unit/core/EIntelTypeInfo.h:10 — EIntel enum (canonical names/IDs)
 - C:/Users/Marti/Documents/02Projekte/faf/Draiget/faf-re/src/sdk/moho/sim/Sim.cpp:12018-12049 — Recon-Round-Robin (mCurTick % armyCount)
 - C:/Users/Marti/Documents/02Projekte/faf/Draiget/faf-re/src/sdk/moho/sim/UserArmy.h:25-86 — EReconGridMask + 8 Client-Grids (Explored/Fog/...)
 - C:/Users/Marti/Documents/02Projekte/faf/Draiget/faf-re/src/sdk/moho/sim/UserArmy.cpp:1441 — CanSeeCell (Explored/Fog + Ally-Merge)
@@ -452,7 +452,7 @@ Intel = { FreeIntel = true, OmniRadius = 16, VisionRadius = 26, WaterVisionRadiu
 - C:/Users/Marti/Documents/02Projekte/faf/Draiget/faf-re/src/sdk/moho/render/VisionRenderer.cpp:20-26,80-189 — 45-Segment-Zylinder, 92 Verts / 540 Indices, Effekt "vision", 12288 Instanzen
 - C:/Users/Marti/Documents/02Projekte/faf/Draiget/faf-re/src/sdk/moho/entity/UserEntity.cpp:639 — VisionDB handle per entity (alliedVisibility)
 - C:/Users/Marti/Documents/02Projekte/faf/Draiget/faf-re/src/sdk/moho/resource/blueprints/RUnitBlueprint.h:306 — RUnitBlueprintIntel (exact offsets)
-- C:/Users/Marti/Documents/02Projects/faf/Draiget/faf-re/src/sdk/moho/resource/blueprints/RUnitBlueprintCapabilityEnums.h:37 — ERuleBPUnitToggleCaps (RULEUTC_*)
+- C:/Users/Marti/Documents/02Projekte/faf/Draiget/faf-re/src/sdk/moho/resource/blueprints/RUnitBlueprintCapabilityEnums.h:37 — ERuleBPUnitToggleCaps (RULEUTC_*)
 - gamedata/mohodata.scd :: lua/sim/Blip.lua — Blip = Class(moho.blip_methods) (DestroyHooks only)
 - gamedata/mohodata.scd :: lua/sim/VizMarker.lua — InitIntel(army,'Omni'|'Radar'|'Vision'|'WaterVision',radius) + EnableIntel
 - gamedata/lua.scd :: lua/sim/Unit.lua:309-397 — OnScriptBitSet/OnScriptBitClear (toggle bits 0-8, inverted)
