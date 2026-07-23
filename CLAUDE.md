@@ -3,218 +3,225 @@
 Browser reimplementation of Supreme Commander: Forged Alliance — **1:1**.
 Assets come from the user's installation (bring your own assets).
 
-**The Destination Experience:** Connect game directory → the **real FA main menu**
-(`lua/ui/menus/main.lua`) → Skirmish over the real lobby → Session with the
-real game UI. **No web menus in the game, no recreated panels.** The
-Web Framework (Start/Sandbox/Unit Viewer/Map Viewer) is just tool and
-Launcher until the original front end is running.
+**Target experience:** Connect a game directory → the **real FA main menu**
+(`lua/ui/menus/main.lua`) → Skirmish through the real lobby → a session with the
+real game UI. **No web menus in the game and no recreated panels.** The web
+shell (Start/Sandbox/Unit Viewer/Map Viewer) is only a tool and launcher until
+the original front end is running.
 
-## The core principle — there is no negotiation here
+## The core principle — this is non-negotiable
 
-**The original Lua IS the game. The engine executes them.**
+**The original Lua IS the game. The engine executes it.**
 
-The engine (TypeScript/WebGL) is responsible for: **Calculations** (physics,
-Economics-Mathematics, Pathfinding, Categories), **Rendering** and **Load Lua
-and execute** (`lua/sim/**`, `lua/ui/**`, Blueprints). She is **not**
-responsible for game logic: `Unit.lua`, `defaultunits.lua`, `aibrain.lua`,
+The engine (TypeScript/WebGL) is responsible for **calculations** (physics,
+economics mathematics, pathfinding, categories), **rendering**, and **loading
+and executing Lua** (`lua/sim/**`, `lua/ui/**`, Blueprints). It is **not**
+responsible for game logic: `Unit.lua`, `defaultunits.lua`, `aibrain.lua`, and
 `construction.lua` are **executed, not recreated**.
 
-### Verboten
+### Prohibited
 
-- ❌ **Recreate game logic in TS.** If the answer is in `lua/sim/` or
-  `lua/ui/` is written, this file is executed - no TS, no HTML replica.
-- ❌ **Invent numbers.** Each value comes from a blueprint that
-  Original Lua or the Decomp. No "that feels right."
-- ❌ **Stubs in the production path.** Missing engine parts have to **pop**,
-  don't silently deliver nonsense. (The old stub trap has every green one for months
-  Test rendered worthless. He's not coming back.)
-- ❌ **Half engines.** Exactly one sim boat: `installEngine()`
+- ❌ **Recreating game logic in TS.** If the answer is in `lua/sim/` or
+  `lua/ui/`, execute that file — do not recreate it in TS or HTML.
+- ❌ **Inventing values.** Every value comes from a blueprint, the original Lua,
+  or the Decomp. No “that feels right.”
+- ❌ **Stubs in the production path.** Missing engine parts must **fail loudly**;
+  do not silently return nonsense. (The old stub trap made every passing test
+  worthless for months. It must not return.)
+- ❌ **Partial engines.** Exactly one Sim boot: `installEngine()`
   ([src/lua/engine.ts](src/lua/engine.ts)); exactly one UI boot:
   `installUiEngine()` + `setupGameUi()` ([src/lua/uiEngine.ts](src/lua/uiEngine.ts),
-  Order = `gamemain.lua:132-154`). Anyone who owns the engine
-  puts things together, leaves parts out and doesn't notice it.
+  order = `gamemain.lua:132-154`). Manually assembling the engine leaves out
+  parts without noticing.
 - ❌ **Lua/C++ in TS template literals.** Lua belongs in `.lua` files under
-  [src/engine-lua/](src/engine-lua/); the TS files next to it are just
-  Loader + Bridge.
+  [src/engine-lua/](src/engine-lua/); the adjacent TS files are only loaders
+  and bridges.
 
-Two **Auto-Vivifiers** are deliberately in the productive path (nothing pops there):
-`moho.<x>` creates empty classes ([moho.lua](src/engine-lua/moho.lua)),
-`__getBrain(army)` legt still Brains an ([brain.lua](src/engine-lua/brain.lua)).
+Two **Auto-Vivifiers** are deliberately in the production path (they do not
+fail there): `moho.<x>` creates empty classes
+([moho.lua](src/engine-lua/moho.lua)), and `__getBrain(army)` silently creates
+Brains ([brain.lua](src/engine-lua/brain.lua)).
 
-## Sources of Truth — in that order
+## Sources of truth — in this order
 
-1. **IDA-Decompilation:** `Cfile/ForgedAlliance.exe.c` (~2 Mio. Zeilen, volle
-`Moho::` symbols, gitignored). Additionally MCP access (`mcp__ida__*`).
-   For every question “how does the engine do this?” → search here.
-2. **Original Lua + Blueprints:** `npx tsx scripts/peek-lua.ts <pfad> <von> <bis>`
-   or `--grep <regex>` (searches lua.scd, mohodata.scd, units.scd incl. `.bp`).
-3. **faf-re / Community / Web** — only if 1 and 2 don't give anything away.
+1. **IDA decompilation:** `Cfile/ForgedAlliance.exe.c` (~2 million lines, full
+   `Moho::` symbols, gitignored). MCP access is also available (`mcp__ida__*`).
+   For every “how does the engine do this?” question, search here first.
+2. **Original Lua + Blueprints:** `npx tsx scripts/peek-lua.ts <path> <from> <to>`
+   or `--grep <regex>` (searches lua.scd, mohodata.scd, and units.scd, including
+   `.bp`).
+3. **faf-re / community / web** — only when 1 and 2 provide no answer.
 
-Don't hallucinate anything. First research, then implement, then counteract
-verify real data.
+Do not hallucinate. Research first, then implement, then verify against real
+data.
 
 ## Architecture in one paragraph
 
 `src/engine-lua/*.lua` is what the C++ engine puts into the Lua states
-(moho-classes, globals, scheduler, maui-substrate, ui-globals); TS next to it only
-Loaders/Bridges. Sim runs in worker (`src/sim/luaSimWorker.ts`, 10 Hz beat),
-UI-VM im Main-Thread (`src/ui/gameUi.ts` → maui-Baum → DOM via
-`src/ui/mauiRenderer.ts`). Click into the world: `src/ui/worldCommands.ts` asks
-`commandmode.lua` — the engine doesn't decide anything.
+(moho classes, globals, scheduler, maui substrate, ui globals); the adjacent TS
+contains only loaders and bridges. The Sim runs in a worker
+(`src/sim/luaSimWorker.ts`, 10 Hz beat); the UI VM runs on the main thread
+(`src/ui/gameUi.ts` → maui tree → DOM via `src/ui/mauiRenderer.ts`). A click in
+the world: `src/ui/worldCommands.ts` asks `commandmode.lua` — the engine does
+not decide anything.
 
 ### Two Lua VMs — not one
 
 Each engine binding is registered in exactly one state via `mPrevDef`
-([docs/research/engine-api.md](docs/research/engine-api.md), generiert):
+([docs/research/engine-api.md](docs/research/engine-api.md), generated):
 `scr_CoreInits` = both VMs (70), `scr_UserInits` = UI only (453),
-`sim_SimInits` = Sim only (626). That's why the sim doesn't know `_c_CreateCursor`
-and the UI no `CreateUnit`. Never boot both into a VM.
+`sim_SimInits` = Sim only (626). That is why the Sim does not know
+`_c_CreateCursor` and the UI does not know `CreateUnit`. Never boot both into
+one VM.
 
 ### Boot order is not cosmetic
 
-`installEngine()`: Engine primitives first (SimThreads → Globals → Economy →
-Motion → Build), then **RELOAD `/lua/system/class.lua`**, then moho →
-utils → Blueprints → UnitFactory → SimSync → terrainTypes → `setupSession()`.
+`installEngine()`: engine primitives first (SimThreads → Globals → Economy →
+Motion → Build), then **reload `/lua/system/class.lua`**, then moho → utils →
+Blueprints → UnitFactory → SimSync → terrainTypes → `setupSession()`.
 `class.lua` loads **twice** because `class.lua:78`
-`local ForkThread = ForkThread` snapshotted — this is still the case with the bootstrap
-`nil`, and without reload `class.lua:377` dies with every state change
-away from the polluter. `globals.lua` deliberately does not contain `Class(`.
+`local ForkThread = ForkThread` takes a snapshot — during bootstrap it is still
+`nil`, and without the reload `class.lua:377` fails on every state transition,
+far from the cause. `globals.lua` deliberately contains no `Class(`.
 
-### FA-Lua is one dialect (two in fact)
+### FA Lua is one dialect — actually two
 
-- **LuaPlus:** `nil`/Numbers/Strings have metatables; `nil.foo` delivers `nil`
-  instead of banging - FAs `config.lua:14-16` allows reading consciously, and
-  the original UI **relies on** (uiutil.lua:343 on the first
-  `SetupUI()`). Hergestellt via `debug.setmetatable` in
+- **LuaPlus:** `nil`/numbers/strings have metatables; `nil.foo` returns `nil`
+  instead of failing — FA's `config.lua:14-16` deliberately allows that read,
+  and the original UI **relies on it** (uiutil.lua:343 during the first
+  `SetupUI()`). Implemented through `debug.setmetatable` in
   [boot.lua](src/engine-lua/boot.lua).
-- **`config.lua` brings:** the **strict `_G`** (access to
-  throws non-existent globals; `x = nil` does NOT create a key —
-  Initialize engine globals with `false`), the **Thread object**
-  (Coroutine metatable with `Destroy = KillThread`) and `iscallable`.
+- **`config.lua` provides:** the **strict `_G`** (accessing nonexistent globals
+  throws; `x = nil` does **not** create a key — initialize engine globals with
+  `false`), the **Thread object** (a coroutine metatable with
+  `Destroy = KillThread`), and `iscallable`.
 - **Two dialects in the repo:** VFS files (original Lua, `.bp`) pass through
-  `transpileFaLua` (`#` = Kommentar, `!=`→`~=`, `continue`, `for k,v in tbl do`);
-  Files from `src/engine-lua/` are **Standard Lua 5.4** (`#t` =
-  length operator!) and go raw into `host.eval()`. An Engine Lua file ins
-  Moving VFS makes every `#t` silently a comment.
+  `transpileFaLua` (`#` = comment, `!=`→`~=`, `continue`, `for k,v in tbl do`);
+  files from `src/engine-lua/` are **standard Lua 5.4** (`#t` = length
+  operator) and go raw into `host.eval()`. Moving an engine Lua file into the
+  VFS silently turns every `#t` into a comment.
 
 ## Cross-cutting facts (always apply)
 
-- **Blueprint-Struct-Defaults:** the engine ctor (`Moho::RUnitBlueprint`
-  @0x51E480) occupies **every field** - the Lua picks up without checking
-  `bp.Defense.Shield.ShieldSize` too, even without a shield section in the `.bp`.
-- **`class.lua` copies base class fields** (no `__index` fallback): on
-  Method name may appear in exactly **one** moho name list, otherwise
-  a no-op overshadows the real implementation.
-- **Production ≠ consumption** (separate switches) and **Construction sites are for
-  the economy invisible**.
-- **The sim has the skeleton of the unit** (weapons validate bones), and the
-  Engine calls **`OnCreate` on each weapon** — order is semantics.
-- **wasmoon:** a JS function must never give `null` to Lua
-  (`LuaHost.setGlobal` converts `null → undefined`), otherwise the VM dies deeply
-  in fremder Lua.
+- **Blueprint struct defaults:** the engine constructor (`Moho::RUnitBlueprint`
+  @0x51E480) populates **every field** first — Lua accesses
+  `bp.Defense.Shield.ShieldSize` without checking, even when the `.bp` has no
+  Shield section.
+- **`class.lua` copies base-class fields** (there is no `__index` fallback): a
+  method name may appear in exactly **one** moho name list; otherwise a no-op
+  shadows the real implementation.
+- **Production ≠ consumption** (separate switches), and **construction sites
+  are invisible to the economy**.
+- **The Sim has the unit skeleton** (weapons validate bones), and the engine
+  calls **`OnCreate` on every weapon** — order is semantic.
+- **wasmoon:** a JS function must never pass `null` to Lua
+  (`LuaHost.setGlobal` converts `null → undefined`), or the VM fails deep in
+  third-party Lua.
 
-All other proven facts (economy, snap, fire state, writings,
-usersync, MaxBrake ...): **before working on the topic
-[docs/research/verified-facts.md](docs/research/verified-facts.md) lesen.**
+For all other established facts (economy, snap, fire state, fonts, usersync,
+MaxBrake, ...), **read
+[docs/research/verified-facts.md](docs/research/verified-facts.md) before
+working on the topic.**
 
-## Werkzeuge & Arbeitsweise
+## Tools & workflow
 
 ```bash
-npm test                                    # alle Verify-Suiten
-npx tsx --import ./scripts/register-lua.mjs scripts/verify-<x>.ts   # eine Suite
-npx tsc --noEmit                            # Typecheck
-npx tsx scripts/peek-lua.ts --grep <regex>  # Original-Lua/Blueprints suchen
+npm test                                    # all verification suites
+npx tsx --import ./scripts/register-lua.mjs scripts/verify-<x>.ts   # one suite
+npx tsc --noEmit                            # type check
+npx tsx scripts/peek-lua.ts --grep <regex>  # search original Lua/Blueprints
 ```
 
-- **Jedes Skript, das `src/lua/*` oder `src/sim/*` importiert, braucht
-  `--import ./scripts/register-lua.mjs`** (sonst
-  `ERR_UNKNOWN_FILE_EXTENSION ".lua"`; `npm test` setzt es selbst).
-- Tests sind Verify-Suiten gegen echte Spieldaten, keine Mocks. Ein roter
-Testing after an honesty correction is a **find**, not a step backwards.
-- Run the appropriate suite while you work; **in front of everyone
-  Commit** `npx tsc --noEmit` und `npm test` (alle Suiten).
-- Browser end-to-end: `?sandbox=<map>&selftest=<blueprint>` drives the
-  Techdemo ohne Maus (headless Chrome; Sim tickt in Echtzeit, nicht unter
+- **Every script that imports `src/lua/*` or `src/sim/*` needs
+  `--import ./scripts/register-lua.mjs`**; otherwise it gets
+  `ERR_UNKNOWN_FILE_EXTENSION ".lua"`. `npm test` sets it itself.
+- Tests are verification suites against real game data, not mocks. A failing
+  test after an honesty correction is a **finding**, not a regression.
+- Run the appropriate suite while working; before **every commit**, run
+  `npx tsc --noEmit` and `npm test` (all suites).
+- Browser end-to-end: `?sandbox=<map>&selftest=<blueprint>` runs the tech demo
+  without a mouse (headless Chrome; the Sim ticks in real time, not under
   `--virtual-time-budget`).
-- **Debuggen:** Fehler in Lua-Threads werden nur geloggt — zuerst nach
-  `ForkThread-Fehler:` in den WARN-Zeilen suchen.
-- Commits in ENGLISH: what and why, one milestone per commit.
+- **Debugging:** errors in Lua threads are only logged — first search the WARN
+  lines for `ForkThread-Fehler:`.
+- Commit messages are in **English**: what and why, one milestone per commit.
 
-## Arbeitsstil je Modell
+## Working style by model
 
-Everything above applies to **every** model. This section only changes *how much* you
-in one go and with what effort - **never what is right**. Your
-aktives Modell steht in deinem System-Prompt.
+Everything above applies to **every** model. This section changes only *how
+much* work you take on at a time and with what effort — **never what is
+correct**. Your active model is listed in your system prompt.
 
-**Basis** (Sonnet-Klasse, jedes Modell, und immer bei Unsicherheit): kleine,
-verifiable steps; before major modifications across multiple files for the user
-reinsure; for broad searches **a** research subagent instead of further
-Fanning. Effort: medium; high with difficult thinking.
+**Baseline** (Sonnet class, every model, and whenever uncertain): take small,
+verifiable steps; before major changes across multiple files, reconfirm with
+the user; for broad searches, use **one** research subagent instead of further
+fan-out. Effort: medium; high for difficult reasoning.
 
-**Opus 4.8 und die Claude-5-Familie (Fable 5):** autonom arbeiten. Mehrstufige
-Planning work from start to finish and long projects (migrations, conversions).
-viele Dateien) **ohne Zwischenhalt** zu Ende bringen, solange Typecheck und
-Suites stay green. Define the specification upfront (task, intent,
-Randbedingungen, Abnahmekriterium in einem Zug), nicht scheibchenweise. Aufwand:
-`xhigh` as the starting point for coding/agent work, `high` as the minimum
-thinking work; `max` only for real edge cases (rethinks structured tasks).
-Der Nutzer kann mit **ultracode** weiter aufdrehen (xhigh + deterministische
-Workflow fanning).
+**Opus 4.8 and the Claude-5 family (Fable 5):** work autonomously. Plan
+multi-step work from beginning to end, and complete long efforts (migrations or
+changes across many files) **without stopping** as long as the type check and
+suites remain green. Define the specification up front (task, intent,
+constraints, and acceptance criteria) in one pass, not piecemeal. Effort:
+start coding/agent work at `xhigh`, use at least `high` for reasoning, and use
+`max` only for genuine edge cases (reconsidering structured tasks). The user
+can increase this further with **ultracode** (xhigh + deterministic workflow
+fan-out).
 
-**Compartments and check for cover (Opus 4.8 and newer):** these models
-don't spawn enough on their own. So *explicitly* parallel subagents about
-study independent topics - e.g. B. one agent per research topic
-(Front-end menu, WorldView, session start, combat…) or per engine subsystem.
-**Don't** fan for work completed in one answer. Before “done”:
-have a fresh subagent check your own diff — his job is
-**Coverage** (report any correctness or requirements gap, with
-Zuversicht + Schwere), nicht Filtern. In diesem Repo gibt es (noch) keine
-vorgefertigten Reviewer-Agenten; nutze `/code-review` bzw. einen
-`general-purpose` agents with a clear inspection mandate.
+**Fan out and check coverage (Opus 4.8 and newer):** these models do not spawn
+enough agents on their own. Explicitly fan out parallel subagents across
+independent topics — for example, one agent per research topic (front-end menu,
+WorldView, session start, combat, ...) or per engine subsystem. **Do not** fan
+out work that can be completed in one answer. Before declaring work “done,”
+have a fresh subagent inspect your own diff — their task is **coverage**
+(report every correctness or requirements gap, with confidence and severity),
+not filtering. This repo has no prebuilt reviewer agents yet; use
+`/code-review` or a `general-purpose` agent with a clear review mandate.
 
-**State rule range verbatim.** These models follow instructions verbatim
-und verallgemeinern eine Regel nicht von selbst. Wenn eine Invariante *jeden*
-Fall betrifft, schreibe „jede/alle": *jede* Zahl kommt aus Blueprint, Lua oder
-Decomp; *every* missing engine part pops; *all* game logic runs in the
-Original-Lua.
+**State the scope of a rule literally.** These models follow instructions
+literally and do not generalize a rule on their own. When an invariant applies
+to *every* case, write “every/all”: *every* value comes from a blueprint, Lua,
+or the Decomp; *every* missing engine part fails loudly; *all* game logic runs
+in the original Lua.
 
-**Niemals** die Invarianten (Kernprinzip, „Verboten"), die Ehrlichkeitsregeln
-or make the correctness dependent on which model is currently running - the
-Modellzeile kann veraltet sein; im Zweifel gilt die Basis. Jeden autonomen
-Anchor the step to a test you can **actually do**
-(`npx tsc --noEmit`, die passende `verify-*`-Suite, `npm test`, der
-Browser-Selbsttest `?sandbox=…&selftest=…`) — nie an „sieht fertig aus".
+**Never** weaken the invariants (the core principle and “Prohibited”), the
+honesty rules, or correctness by making them dependent on the currently active
+model — the model list can be stale; when in doubt, use the baseline. Anchor
+every autonomous step to a check you can **actually run**
+(`npx tsc --noEmit`, the appropriate `verify-*` suite, `npm test`, or the
+browser self-test `?sandbox=…&selftest=…`) — never to “looks done.”
 
 ## Further documentation
 
-| Dokument                                                                                                               | Inhalt                                                          |
-| ---------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| [docs/STATUS.md](docs/STATUS.md) | Stand + known holes (read first) |
-| [docs/PLAN-1ZU1.md](docs/PLAN-1ZU1.md)                                                                                  | Konsolidierter 1:1-Fahrplan (Meilensteine)                      |
-| [docs/PLAN-UI.md](docs/PLAN-UI.md)                                                                                      | Weg zur echten`lua/ui`, mit Decomp-Belegen                    |
-| [docs/MASTERPLAN.md](docs/MASTERPLAN.md)                                                                                | Gesamtinventur Vollspiel, Phasen A–F                           |
-| [docs/FORMATS.md](docs/FORMATS.md)                                                                                      | Dateiformate (scd/scm/sca/scmap/dds), verifiziert               |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Architecture (older; in case of objection, CLAUDE.md applies) |
-| [research/engine-api.md](docs/research/engine-api.md)                                                                   | **Alle** Engine-Bindungen je VM (generiert — Checkliste) |
-| [research/verified-facts.md](docs/research/verified-facts.md)                                                           | Belegtes Detailwissen nach Themen                               |
-| [research/economy-binary.md](docs/research/economy-binary.md) | Two-ratio economics from the binary |
-| [research/build-task-binary.md](docs/research/build-task-binary.md)                                                     | Bau-Task-Ablauf                                                 |
-| [research/command-dispatch-binary.md](docs/research/command-dispatch-binary.md)                                         | Befehls-Dispatch (Command→Task)                                |
-| [research/damage-binary.md](docs/research/damage-binary.md)                                                             | Schadenssystem                                                  |
-| [research/movement-path.md](docs/research/movement-path.md)                                                             | Bewegung: Grid, HaStar, Navigator, Steering                     |
-| [research/weapons.md](docs/research/weapons.md)                                                                         | Waffensystem                                                    |
-| [research/ui-complete.md](docs/research/ui-complete.md)                                                                 | UI-System komplett                                              |
-| [research/game-shell.md](docs/research/game-shell.md)                                                                   | Front-End, Lobby, Session-Start                                 |
-| [research/effects-audio.md](docs/research/effects-audio.md)                                                             | Effekt-Blueprints + XACT-Audio                                  |
-| [research/sound-fmod.md](docs/research/sound-fmod.md) | Audio Benches |
-| [research/intel-vision.md](docs/research/intel-vision.md)                                                               | Intel/Recon/Sichtbarkeit                                        |
-| [research/net-replay-save.md](docs/research/net-replay-save.md)                                                         | Lockstep, Replay, Save                                          |
-| [research/render-details.md](docs/research/render-details.md)                                                           | Renderer, SCMAP-Reststruktur                                    |
-| [research/lua-gameplay.md](docs/research/lua-gameplay.md)                                                               | FA-Lua-Dialekt-Nachweis (Lua 5.0.1)                             |
-| [research/engine-core.md](docs/research/engine-core.md) / [engine-architecture.md](docs/research/engine-architecture.md) | Engine-Kern aus der Decomp                                      |
+| Document | Contents |
+| --- | --- |
+| [docs/STATUS.md](docs/STATUS.md) | Status + known gaps (read first) |
+| [docs/PLAN-1ZU1.md](docs/PLAN-1ZU1.md) | Consolidated 1:1 roadmap (milestones) |
+| [docs/PLAN-UI.md](docs/PLAN-UI.md) | Path to the real `lua/ui`, with Decomp evidence |
+| [docs/MASTERPLAN.md](docs/MASTERPLAN.md) | Full-game inventory, phases A–F |
+| [docs/FORMATS.md](docs/FORMATS.md) | File formats (scd/scm/sca/scmap/dds), verified |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Architecture (older; CLAUDE.md applies if it conflicts) |
+| [research/engine-api.md](docs/research/engine-api.md) | **All** engine bindings per VM (generated — checklist) |
+| [research/verified-facts.md](docs/research/verified-facts.md) | Established detailed knowledge by topic |
+| [research/economy-binary.md](docs/research/economy-binary.md) | Two-ratio economy from the binary |
+| [research/build-task-binary.md](docs/research/build-task-binary.md) | Build-task flow |
+| [research/command-dispatch-binary.md](docs/research/command-dispatch-binary.md) | Command dispatch (Command→Task) |
+| [research/damage-binary.md](docs/research/damage-binary.md) | Damage system |
+| [research/movement-path.md](docs/research/movement-path.md) | Movement: grid, HaStar, navigator, steering |
+| [research/weapons.md](docs/research/weapons.md) | Weapon system |
+| [research/ui-complete.md](docs/research/ui-complete.md) | Complete UI system |
+| [research/game-shell.md](docs/research/game-shell.md) | Front end, lobby, session start |
+| [research/effects-audio.md](docs/research/effects-audio.md) | Effects blueprints + XACT audio |
+| [research/sound-fmod.md](docs/research/sound-fmod.md) | Audio banks |
+| [research/intel-vision.md](docs/research/intel-vision.md) | Intel/recon/visibility |
+| [research/net-replay-save.md](docs/research/net-replay-save.md) | Lockstep, replay, save |
+| [research/render-details.md](docs/research/render-details.md) | Renderer, remaining SCMAP structure |
+| [research/lua-gameplay.md](docs/research/lua-gameplay.md) | FA Lua dialect evidence (Lua 5.0.1) |
+| [research/engine-core.md](docs/research/engine-core.md) / [engine-architecture.md](docs/research/engine-architecture.md) | Engine core from the Decomp |
 
-## Sprache
+## Language
 
-Respond in users Language in chat. Keep all repository content in English: code comments, commits, log messages, check text, and new documentation.
+Respond in German in chat. Keep **all** repository content in English: code
+comments, commits, log messages, check text, and new documentation.
 
-Preserve HTML entities and syntax exactly during text translation (for example, retain `&amp;` rather than replacing it with a raw `&`).
+Preserve HTML entities and syntax exactly during text translation (for example,
+retain `&amp;` rather than replacing it with a raw `&`).
