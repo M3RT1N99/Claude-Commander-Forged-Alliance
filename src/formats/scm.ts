@@ -1,32 +1,32 @@
 /**
- * Parser für das SCM-Modellformat der Moho-Engine (SupCom/FA).
+ * Parser for the Moho engine's SCM model format (SupCom/FA).
  *
- * Format verifiziert gegen units.scd (UEL0001_LOD0.scm) und die von GPG mit
- * dem Mod-SDK veröffentlichte Spezifikation:
+ * Format verified against units.scd (UEL0001_LOD0.scm) and the specification
+ * published by GPG with the mod SDK:
  *
  *   Header (little endian):
  *     0x00  char[4]  'MODL'
  *     0x04  u32      version (5)
- *     0x08  u32      boneOffset          — Start der Bone-Daten
- *     0x0C  u32      weightedBoneCount   — Bones mit Vertex-Gewichtung
+ *     0x08  u32      boneOffset          — start of bone data
+ *     0x0C  u32      weightedBoneCount   — bones with vertex weights
  *     0x10  u32      vertexOffset
- *     0x14  u32      vertexExtraOffset   — 0 = keine Extra-Daten
+ *     0x14  u32      vertexExtraOffset   — 0 = no extra data
  *     0x18  u32      vertexCount
  *     0x1C  u32      indexOffset
- *     0x20  u32      indexCount          — Anzahl u16-Indizes (Tri-Liste)
+ *     0x20  u32      indexCount          — number of u16 indices (triangle list)
  *     0x24  u32      infoOffset
- *     0x28  u32      infoCount           — Bytes der Info-Strings
+ *     0x28  u32      infoCount           — bytes of info strings
  *     0x2C  u32      totalBoneCount
- *   Sektionen sind mit 0xC5 gepolstert und tragen 4-Byte-Marker
- *   (NAME/SKEL/VTXL/TRIS/INFO) direkt vor dem jeweiligen Offset.
+ *   Sections are padded with 0xC5 and carry 4-byte markers
+ *   (NAME/SKEL/VTXL/TRIS/INFO) directly before their corresponding offsets.
  *
  *   Bone (108 Bytes):
- *     0x00  f32[16]  restPoseInverse (4x4, column-major wie D3D)
- *     0x40  f32[3]   position (relativ zum Parent)
+ *     0x00  f32[16]  restPoseInverse (4x4, column-major as in D3D)
+ *     0x40  f32[3]   position (relative to parent)
  *     0x4C  f32[4]   rotation (Quaternion w,x,y,z)
- *     0x5C  u32      nameOffset (absolut in die NAME-Sektion)
- *     0x60  i32      parentIndex (-1 = Wurzel)
- *     0x64  u8[8]    reserviert
+ *     0x5C  u32      nameOffset (absolute within the NAME section)
+ *     0x60  i32      parentIndex (-1 = root)
+ *     0x64  u8[8]    reserved
  *
  *   Vertex (68 Bytes):
  *     f32[3] position, f32[3] tangent, f32[3] normal, f32[3] binormal,
@@ -36,7 +36,7 @@
 export interface ScmBone {
   name: string
   parent: number
-  /** Inverse Rest-Pose, 16 floats */
+  /** Inverse rest pose, 16 floats */
   restPoseInverse: Float32Array
   position: [number, number, number]
   rotation: [number, number, number, number]
@@ -70,9 +70,9 @@ export function parseScm(data: Uint8Array): ScmModel {
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
 
   const magic = new TextDecoder('ascii').decode(data.subarray(0, 4))
-  if (magic !== 'MODL') throw new Error(`SCM: falsches Magic "${magic}" (erwartet MODL)`)
+  if (magic !== 'MODL') throw new Error(`SCM: invalid magic "${magic}" (expected MODL)`)
   const version = view.getUint32(4, true)
-  if (version !== 5) throw new Error(`SCM: nicht unterstützte Version ${version}`)
+  if (version !== 5) throw new Error(`SCM: unsupported version ${version}`)
 
   const boneOffset = view.getUint32(8, true)
   const weightedBoneCount = view.getUint32(12, true)
@@ -85,13 +85,13 @@ export function parseScm(data: Uint8Array): ScmModel {
   const totalBoneCount = view.getUint32(44, true)
 
   if (boneOffset + totalBoneCount * BONE_SIZE > data.byteLength) {
-    throw new Error('SCM: Bone-Daten außerhalb der Datei')
+    throw new Error('SCM: bone data is outside the file')
   }
   if (vertexOffset + vertexCount * VERTEX_SIZE > data.byteLength) {
-    throw new Error('SCM: Vertex-Daten außerhalb der Datei')
+    throw new Error('SCM: vertex data is outside the file')
   }
   if (indexOffset + indexCount * 2 > data.byteLength) {
-    throw new Error('SCM: Index-Daten außerhalb der Datei')
+    throw new Error('SCM: index data is outside the file')
   }
 
   // --- Bones ---------------------------------------------------------------
@@ -142,13 +142,13 @@ export function parseScm(data: Uint8Array): ScmModel {
     for (let j = 0; j < 4; j++) boneIndices[i * 4 + j] = data[p + 64 + j]!
   }
 
-  // --- Indizes ---------------------------------------------------------------
+  // --- Indices ---------------------------------------------------------------
   const indices = new Uint16Array(indexCount)
   for (let i = 0; i < indexCount; i++) {
     indices[i] = view.getUint16(indexOffset + i * 2, true)
   }
 
-  // --- Info-Strings ----------------------------------------------------------
+  // --- Info strings ----------------------------------------------------------
   const info: string[] = []
   if (infoOffset > 0 && infoOffset + infoCount <= data.byteLength) {
     const raw = new TextDecoder('utf-8').decode(data.subarray(infoOffset, infoOffset + infoCount))

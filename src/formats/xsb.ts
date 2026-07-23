@@ -1,75 +1,75 @@
 /**
- * Parser für XACT Sound Banks (.xsb, Magic 'SDBK') von SupCom:FA — löst jede
- * Cue bis zu (WaveBank-Name, Wave-Index) auf.
+ * Parser for XACT Sound Banks (.xsb, magic 'SDBK') from SupCom:FA — resolves
+ * each cue to (wave-bank name, wave index).
  *
- * Kopfstruktur hex-verifiziert (docs/research/effects-audio.md §4); die
- * Cue→Sound→Track-Kette wurde aus MonoGame (SoundBank/XactSound/XactClip.cs)
- * und FAudio (FACT_internal.c, FACT_CONTENT_VERSION_3_0 = 43) übernommen und
- * byte-genau gegen die echten Dateien gemessen: ALLE 100 .xsb der Installation
- * (80 in sounds/ + 20 in sounds/Voice/*, zusammen 4446 Cues) parsen ohne einen
- * einzigen entryLength-Mismatch, jeder Event-Separator ist 0xFF, jede Cue
- * löst sich zu einer Wave auf.
+ * Header structure hex-verified (docs/research/effects-audio.md §4); the
+ * cue→sound→track chain was taken from MonoGame (SoundBank/XactSound/XactClip.cs)
+ * and FAudio (FACT_internal.c, FACT_CONTENT_VERSION_3_0 = 43), then measured
+ * byte-for-byte against the real files: ALL 100 .xsb files in the installation
+ * (80 in sounds/ + 20 in sounds/Voice/*, 4,446 cues total) parse without a
+ * single entryLength mismatch, every event separator is 0xFF, and every cue
+ * resolves to a wave.
  *
- *   Header (verifiziert an Music.xsb, UnitRumble.xsb, URLWeapon.xsb u. a.):
+ *   Header (verified against Music.xsb, UnitRumble.xsb, URLWeapon.xsb, etc.):
  *     0x00  char[4] 'SDBK'
  *     0x04  u16 = 43, 0x06 u16 = 43   (Tool-/Formatversion, XACT 3.0)
  *     0x13  u16 numSimpleCues          0x15  u16 numComplexCues
- *     0x19  u16 Hash-Bucket-Zahl (16 bei Music/UnitRumble — KEINE Cue-Zahl)
+ *     0x19  u16 hash-bucket count (16 for Music/UnitRumble — NOT a cue count)
  *     0x1B  u8  numWaveBanks           0x1C  u16 numSounds
  *     0x1E  u32 cueNamesLength
- *     0x22  i32 simpleCuesOffset (-1 wenn keine)   0x26  i32 complexCuesOffset
- *     0x2A  i32 cueNamesOffset (null-getrennt: erst Simple-, dann Complex-Cues)
+ *     0x22  i32 simpleCuesOffset (-1 if none)      0x26  i32 complexCuesOffset
+ *     0x2A  i32 cueNamesOffset (null-separated: simple cues first, then complex)
  *     0x32  i32 variationTablesOffset  0x36  i32 transitionTablesOffset
- *     0x3A  i32 waveBankNameTableOffset (64 B je Name)
- *     0x3E/0x42 Cue-Namen-Hashtabelle (für die Auflösung unnötig)
+ *     0x3A  i32 waveBankNameTableOffset (64 B per name)
+ *     0x3E/0x42 cue-name hash table (unneeded for resolution)
  *     0x46  i32 soundsOffset           0x4A  char[64] soundBankName
  *
  *   Simple Cue (5 B):   u8 flags, u32 soundOffset
  *   Complex Cue (15 B): u8 flags, u32 code, u32 transitionOffset,
  *                       u8 instanceLimit, u16 fadeInMs, u16 fadeOutMs, u8 instanceFlags
  *     flags & 0x04 → code = Sound-Offset. Sonst Variationstabelle — kommt in
- *     FA NIE vor (0 von 1896 Cues, gemessen) und wirft deshalb.
+ *     never occurs in FA (0 of 1,896 measured cues), so it throws.
  *
  *   Sound (Header 9 B): u8 flags, u16 category, u8 volume, s16 pitch,
- *                       u8 priority, u16 entryLength (Gesamtlänge — der
- *                       Parser prüft sie nach dem Event-Parse exakt nach)
+ *                       u8 priority, u16 entryLength (total length — the
+ *                       parser verifies it exactly after parsing events)
  *     flags&0x01: complex → u8 numClips; sonst direkt {u16 wave, u8 bank}
- *     flags&0x0E: RPC-Block  {u16 len inkl. Längenfeld, …} → überspringen
- *     flags&0x10: DSP-Block — in FA nie gesetzt (gemessen), wirft
- *     Clip-Metadaten (XACT 3.0 = 5 B, OHNE die Filterfelder von 3.4!):
+ *     flags&0x0E: RPC block  {u16 len including length field, …} → skip
+ *     flags&0x10: DSP block — never set in FA (measured), throws
+ *     Clip metadata (XACT 3.0 = 5 B, WITHOUT the filter fields from 3.4!):
  *                       u8 volume, u32 eventListOffset
  *
- *   Event-Liste: u8 numEvents, je Event
- *     u32 info (Typ[4:0], Timestamp[20:5]), u16 randomOffset, u8 Separator 0xFF
- *     Typ 1  PlayWave:           u8 flags, u16 wave, u8 bank, u8 loopCount,
+ *   Event list: u8 numEvents, per event
+ *     u32 info (type[4:0], timestamp[20:5]), u16 randomOffset, u8 separator 0xFF
+ *     Type 1  PlayWave:          u8 flags, u16 wave, u8 bank, u8 loopCount,
  *                                u16 position, u16 angle
- *     Typ 4  + Effekt-Variation: Typ 1 + 7 B {s16 minPitch, s16 maxPitch,
+ *     Type 4  + effect variation: Type 1 + 7 B {s16 minPitch, s16 maxPitch,
  *                                u8 minVol, u8 maxVol, u8 varFlags}
- *                                (XACT 3.0! In 3.4 sind es 22 B mit Filter-
- *                                Floats — gemessen an URLWeapon.xsb @0x10a:
- *                                ±200 Promille Pitch, Ende exakt entryLength)
- *     Typ 3  + Track-Variation:  u8 flags, u8 loopCount, u16 position,
+ *                                (XACT 3.0! In 3.4 it is 22 B with filter
+ *                                floats — measured at URLWeapon.xsb @0x10a:
+ *                                ±200 permille pitch, end exactly at entryLength)
+ *     Type 3  + track variation: u8 flags, u8 loopCount, u16 position,
  *                                u16 angle, u32 (count | varFlags<<16),
- *                                4 B unbekannt, count × {u16 wave, u8 bank,
+ *                                4 B unknown, count × {u16 wave, u8 bank,
  *                                u8 weightMin, u8 weightMax}
- *     Typ 6  = Typ 3 mit den 7 Effekt-Bytes vor der Playlist
- *     Gemessene Event-Typen in FA: nur 1 (170×), 3 (5×), 4 (1557×), 6 (118×) —
- *     alles andere wirft.
+ *     Type 6  = Type 3 with the 7 effect bytes before the playlist
+ *     Measured event types in FA: only 1 (170×), 3 (5×), 4 (1,557×), 6 (118×) —
+ *     everything else throws.
  *
- * Stufe-1-Entscheidungen (dokumentiert, von der Suite gemeldet):
- *   – Bei mehreren Clips zählt der erste Clip mit Play-Event (81 Sounds haben
- *     mehr als einen Clip; Reihenfolge = Dateireihenfolge).
- *   – Bei Track-Variation (Typ 3/6) wird der ERSTE Playlist-Eintrag genommen;
- *     `variantCount` trägt die echte Zahl (2–6), damit später die
- *     Zufallsauswahl nachgerüstet werden kann.
+ * Stage-1 decisions (documented and reported by the suite):
+ *   – With multiple clips, the first clip with a Play event is used (81 sounds
+ *     have more than one clip; order = file order).
+ *   – For track variation (types 3/6), the FIRST playlist entry is used;
+ *     `variantCount` carries the real count (2–6) so random selection can be
+ *     added later.
  */
 
 export interface XsbCueTarget {
-  /** Index in `waveBanks` (Namen der .xwb-Banks — deren INNERE Namen). */
+  /** Index in `waveBanks` (names of .xwb banks — their INTERNAL names). */
   waveBankIndex: number
-  /** Wave-Index innerhalb der Bank. */
+  /** Wave index within the bank. */
   waveIndex: number
-  /** Zahl der Wave-Alternativen (1 = keine Variation; Stufe 1 nimmt Eintrag 0). */
+  /** Number of wave alternatives (1 = no variation; stage 1 uses entry 0). */
   variantCount: number
   /**
    * XACT category index (u16 in the sound header) — 0-based into the xgs
@@ -81,7 +81,7 @@ export interface XsbCueTarget {
 
 export interface XsbBank {
   soundBankName: string
-  /** WaveBank-Namen in Referenz-Reihenfolge (XAA.xsb → 'UAA': bankübergreifend!). */
+  /** Wave-bank names in reference order (XAA.xsb → 'UAA': cross-bank!). */
   waveBanks: string[]
   cues: Map<string, XsbCueTarget>
 }
@@ -99,16 +99,16 @@ export function parseXsb(bytes: Uint8Array): XsbBank {
   const u32 = (o: number): number => view.getUint32(o, true)
 
   const magic = new TextDecoder('ascii').decode(bytes.subarray(0, 4))
-  if (magic !== 'SDBK') throw new Error(`XSB: falsches Magic "${magic}" (erwartet SDBK)`)
+  if (magic !== 'SDBK') throw new Error(`XSB: invalid magic "${magic}" (expected SDBK)`)
   if (u16(4) !== 43 || u16(6) !== 43) {
-    throw new Error(`XSB: Version ${u16(4)}/${u16(6)} (erwartet 43/43, XACT 3.0)`)
+    throw new Error(`XSB: version ${u16(4)}/${u16(6)} (expected 43/43, XACT 3.0)`)
   }
 
   const numSimpleCues = u16(0x13)
   const numComplexCues = u16(0x15)
   const numWaveBanks = u8(0x1b)
-  // u16 wie in MonoGame/FAudio; das u16 @0x20 dahinter ist unbekannt und in
-  // allen 100 FA-Dateien 0 (gemessen) — die Doku liest die 4 Bytes als u32.
+  // u16 as in MonoGame/FAudio; the following u16 @0x20 is unknown and is 0 in
+  // all 100 FA files (measured) — the documentation reads the 4 bytes as u32.
   const cueNamesLength = u16(0x1e)
   const simpleCuesOffset = view.getInt32(0x22, true)
   const complexCuesOffset = view.getInt32(0x26, true)
@@ -121,9 +121,9 @@ export function parseXsb(bytes: Uint8Array): XsbBank {
     waveBanks.push(readCString64(bytes, waveBankNamesOffset + i * 64))
   }
 
-  // Cue-Namen: null-getrennte Liste, Reihenfolge = Simple-, dann Complex-Cues
-  // (MonoGame SoundBank.cs:108/130; gemessen: Zahl der Namen == Cue-Zahl in
-  // allen 100 Dateien).
+  // Cue names: null-separated list, simple cues first, then complex cues
+  // (MonoGame SoundBank.cs:108/130; measured: number of names == cue count in
+  // all 100 files).
   const cueNames: string[] = []
   if (cueNamesLength > 0) {
     const raw = new TextDecoder('ascii').decode(
@@ -133,14 +133,14 @@ export function parseXsb(bytes: Uint8Array): XsbBank {
   }
   if (cueNames.length !== numSimpleCues + numComplexCues) {
     throw new Error(
-      `XSB ${soundBankName}: ${cueNames.length} Cue-Namen für ${numSimpleCues}+${numComplexCues} Cues`,
+      `XSB ${soundBankName}: ${cueNames.length} cue names for ${numSimpleCues}+${numComplexCues} cues`,
     )
   }
 
   /**
-   * Einen Sound-Eintrag parsen und zur ersten Wave auflösen. Läuft durch ALLE
-   * Clips und Events und prüft am Ende exakt gegen entryLength — damit ist
-   * jede Struktur-Abweichung ein harter Fehler statt stiller Unsinn.
+   * Parse a sound entry and resolve it to the first wave. Processes ALL clips
+   * and events, then verifies exactly against entryLength — every structural
+   * deviation is therefore a hard error rather than silent nonsense.
    */
   function resolveSound(off: number): XsbCueTarget {
     const flags = u8(off)
@@ -158,24 +158,24 @@ export function parseXsb(bytes: Uint8Array): XsbBank {
       direct = { waveIndex: u16(p), waveBankIndex: u8(p + 2), variantCount: 1, category }
       p += 3
     }
-    if ((flags & 0x0e) !== 0) p += u16(p) // RPC-Block; Länge inkl. Längenfeld
+    if ((flags & 0x0e) !== 0) p += u16(p) // RPC block; length includes the length field
     if ((flags & 0x10) !== 0) {
-      // DSP kommt in keiner FA-Bank vor (0 von 4446 Sounds) — Blockgröße wäre
-      // hier nicht gegen echte Daten prüfbar, also knallen statt raten.
-      throw new Error(`XSB ${soundBankName}: Sound @${off} hat DSP-Flag — in FA nie beobachtet`)
+      // DSP occurs in no FA bank (0 of 4,446 sounds) — the block size could not
+      // be verified against real data, so throw rather than guess.
+      throw new Error(`XSB ${soundBankName}: sound @${off} has DSP flag — never observed in FA`)
     }
 
     if (!complex) {
       if (p - off !== entryLength) {
-        throw new Error(`XSB ${soundBankName}: Sound @${off} misst ${p - off} B, entryLength sagt ${entryLength}`)
+        throw new Error(`XSB ${soundBankName}: sound @${off} measures ${p - off} B, entryLength reports ${entryLength}`)
       }
       return direct as XsbCueTarget
     }
 
-    // Clip-Metadaten, dann die Event-Listen (liegen hinter den Metadaten).
+    // Clip metadata, then event lists (located after the metadata).
     const clipOffsets: number[] = []
     for (let c = 0; c < numClips; c++) {
-      clipOffsets.push(u32(p + 1)) // +0 wäre u8 volume
+      clipOffsets.push(u32(p + 1)) // +0 would be u8 volume
       p += 5
     }
     let target: XsbCueTarget | null = null
@@ -190,19 +190,19 @@ export function parseXsb(bytes: Uint8Array): XsbBank {
         const separator = u8(p)
         p += 1
         if (separator !== 0xff) {
-          throw new Error(`XSB ${soundBankName}: Event-Separator 0x${separator.toString(16)} @${p - 1} (erwartet 0xFF)`)
+          throw new Error(`XSB ${soundBankName}: event separator 0x${separator.toString(16)} @${p - 1} (expected 0xFF)`)
         }
         if (type === 1 || type === 4) {
           const waveIndex = u16(p + 1)
           const waveBankIndex = u8(p + 3)
           p += 9 // flags, wave, bank, loopCount, position, angle
-          if (type === 4) p += 7 // Effekt-Variation (XACT 3.0: 7 B, s. o.)
+          if (type === 4) p += 7 // effect variation (XACT 3.0: 7 B, see above)
           if (!target) target = { waveBankIndex, waveIndex, variantCount: 1, category }
         } else if (type === 3 || type === 6) {
           p += 6 // flags, loopCount, position, angle
           if (type === 6) p += 7
           const count = u16(p) // u32 = count | varFlags<<16
-          p += 8 // + 4 B unbekannt (FAudio FACT_internal.c:2312)
+          p += 8 // + 4 B unknown (FAudio FACT_internal.c:2312)
           for (let j = 0; j < count; j++) {
             if (j === 0 && !target) {
               target = { waveIndex: u16(p), waveBankIndex: u8(p + 2), variantCount: count, category }
@@ -210,25 +210,25 @@ export function parseXsb(bytes: Uint8Array): XsbBank {
             p += 5 // u16 wave, u8 bank, u8 weightMin, u8 weightMax
           }
         } else {
-          throw new Error(`XSB ${soundBankName}: Event-Typ ${type} @${p - 7} — in FA nie beobachtet`)
+          throw new Error(`XSB ${soundBankName}: event type ${type} @${p - 7} — never observed in FA`)
         }
       }
       end = Math.max(end, p)
     }
     if (end - off !== entryLength) {
-      throw new Error(`XSB ${soundBankName}: Sound @${off} misst ${end - off} B, entryLength sagt ${entryLength}`)
+      throw new Error(`XSB ${soundBankName}: sound @${off} measures ${end - off} B, entryLength reports ${entryLength}`)
     }
     if (!target) {
-      throw new Error(`XSB ${soundBankName}: Sound @${off} hat kein PlayWave-Event`)
+      throw new Error(`XSB ${soundBankName}: sound @${off} has no PlayWave event`)
     }
     return target
   }
 
   const cues = new Map<string, XsbCueTarget>()
   const setCue = (name: string, target: XsbCueTarget): void => {
-    // Doppelte Namen würden im Map still verschluckt — in FA kommen keine vor
-    // (gemessen über alle 100 Banks), alles andere ist ein Strukturfehler.
-    if (cues.has(name)) throw new Error(`XSB ${soundBankName}: Cue-Name "${name}" doppelt`)
+    // Duplicate names would be silently swallowed in the map — none occur in FA
+    // (measured across all 100 banks), so anything else is a structural error.
+    if (cues.has(name)) throw new Error(`XSB ${soundBankName}: cue name "${name}" is duplicated`)
     cues.set(name, target)
   }
   for (let i = 0; i < numSimpleCues; i++) {
@@ -239,9 +239,9 @@ export function parseXsb(bytes: Uint8Array): XsbBank {
     const o = complexCuesOffset + i * 15
     const flags = u8(o)
     if ((flags & 0x04) === 0) {
-      // Cue-Variationstabelle: 0 von 1896 FA-Cues — das Layout wäre nur aus
-      // Fremdquellen übernommen und gegen keine echte Datei prüfbar.
-      throw new Error(`XSB ${soundBankName}: Cue "${cueNames[numSimpleCues + i]}" nutzt eine Variationstabelle — in FA nie beobachtet`)
+      // Cue variation table: 0 of 1,896 FA cues — its layout would come only
+      // from external sources and could not be verified against a real file.
+      throw new Error(`XSB ${soundBankName}: cue "${cueNames[numSimpleCues + i]}" uses a variation table — never observed in FA`)
     }
     setCue(cueNames[numSimpleCues + i]!, resolveSound(u32(o + 1)))
   }
