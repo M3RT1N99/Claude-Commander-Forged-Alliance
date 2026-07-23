@@ -1,18 +1,18 @@
 import { bpGet, type BpObject } from './blueprint'
 
 /**
- * Mesh-/Textur-Auflösung 1:1 nach der Original-Engine:
+ * Mesh/texture resolution 1:1 with the original engine:
  *
  * - lua/system/Blueprints.lua `ExtractMeshBlueprint`: Default-Mesh-Blueprint
- *   ist `/units/<id>/<id>_mesh`; `Display.MeshBlueprint` (kleingeschrieben,
- *   ohne `.bp`) übersteuert; `'<none>'` = bewusst ohne Mesh.
- * - faf-re `RMeshBlueprintLOD::Init` (0x00518870): `prefix` = Quellpfad bis
- *   zum letzten `_`; Mesh = `MeshName` (vervollständigt gegen das
- *   Quellverzeichnis) sonst `<prefix>_lod<N>.scm`; Texturen = explizite
- *   Namen (vervollständigt) sonst `<prefix>_albedo.dds`,
+ *   is `/units/<id>/<id>_mesh`; `Display.MeshBlueprint` (lowercase, without
+ *   `.bp`) overrides it; `'<none>'` = intentionally no mesh.
+ * - faf-re `RMeshBlueprintLOD::Init` (0x00518870): `prefix` = source path up
+ *   to the final `_`; mesh = `MeshName` (completed against the source
+ *   directory) or `<prefix>_lod<N>.scm`; textures = explicit names (completed)
+ *   or `<prefix>_albedo.dds`,
  *   `<prefix>_normalsTS.dds`, `<prefix>_SpecTeam.dds`.
- * - `Display.PlaceholderMeshName` dient als Mesh-Quelle, wenn das eigene
- *   Mesh nicht existiert (Kampagnen-/Zivil-Units).
+ * - `Display.PlaceholderMeshName` serves as the mesh source when the unit's
+ *   own mesh does not exist (campaign/civilian units).
  */
 export interface UnitAssetPaths {
   mesh: string
@@ -40,12 +40,12 @@ function normalizePath(p: string): string {
   return out.join('/')
 }
 
-/** RES_CompletePath: absolut ab VFS-Wurzel oder relativ zum Quellverzeichnis. */
+/** RES_CompletePath: absolute from the VFS root or relative to the source directory. */
 function completePath(name: string, sourceDir: string): string[] {
   if (name.startsWith('/')) return [normalizePath(name)]
   const joined = normalizePath(`${sourceDir}/${name}`)
-  // Namen mit Verzeichnisanteil zusätzlich wurzel-relativ probieren —
-  // einzelne Original-BPs (z. B. XRL0403) schreiben 'Units/xrl0404/…'
+  // Also try names with a directory component relative to the root — some
+  // original blueprints (e.g. XRL0403) specify 'Units/xrl0404/…'.
   return name.includes('/') ? [joined, normalizePath(name)] : [joined]
 }
 
@@ -112,7 +112,7 @@ export function resolveUnitPaths(
   const direct = resolve(source)
   if (direct) return direct
 
-  // Platzhalter-Mesh einer anderen Unit (Kampagnen-Units)
+  // Placeholder mesh from another unit (campaign units).
   const placeholder = bpGet(bp, 'Display.PlaceholderMeshName')
   if (typeof placeholder === 'string' && placeholder) {
     return resolve(sourceFor(placeholder.toLowerCase()))

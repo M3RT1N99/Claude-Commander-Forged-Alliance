@@ -27,7 +27,9 @@ import {
   setupGameUi,
   createRootFrame,
   loadUiBlueprints,
+  applySession,
 } from '../src/lua/uiEngine'
+import { SANDBOX_SESSION } from '../src/sim/session'
 import { installEngine, beat } from '../src/lua/engine'
 import { setTerrainSource } from '../src/lua/engineGlobals'
 import { spawnLuaUnit } from '../src/lua/unitFactory'
@@ -72,6 +74,10 @@ installUiEngine(ui, {
 createRootFrame(ui, 1920, 1080)
 setupUi(ui)
 loadUiBlueprints(ui, [...game.paths].filter((p) => /^units\/[^/]+\/[^/]+_unit\.bp$/.test(p)))
+// Session-strict bindings + the camera bridge must precede the game panels
+// (same order as the browser boot).
+applySession(ui, { ...SANDBOX_SESSION, map: 'SCMP_009' })
+;(globalThis as { __cfaUiCameraBridge?: unknown }).__cfaUiCameraBridge = () => undefined
 setupGameUi(ui, () => {})
 ui.setGlobal('__uiSimCommand', () => {})
 ui.eval(`__uiSetUnit(1, 'uel0001', 1, 100, 20, 100, 12000, 12000, 1, true)`)

@@ -110,6 +110,8 @@ function __projCreate(launcher, bpId, pos, quat, speed, damage, damageRadius, da
   p.__trackTarget = phys.TrackTarget == true
   p.__velocityAlign = phys.VelocityAlign ~= false
   p.__stayUpright = phys.StayUpright == true
+  p.__leadTarget = phys.LeadTarget ~= false
+  p.__stayUnderwater = phys.StayUnderwater == true
   p.__collideSurface = phys.CollideSurface ~= false
   p.__collideEntity = phys.CollideEntity ~= false
   p.__destroyOnWater = phys.DestroyOnWater == true
@@ -125,6 +127,14 @@ function __projCreate(launcher, bpId, pos, quat, speed, damage, damageRadius, da
   -- mBallisticAcc = Gravitation * UseGravity (Cfile:943663-943668). Die
   -- Gravitationskonstante der Sim: 4.9 Weltmeter/s^2 (PhysConstants).
   p.__ballistic = { 0, (phys.UseGravity ~= false) and -__simGravity or 0, 0 }
+
+  -- The scale transform and its velocity are initialized from the projectile
+  -- blueprint (Cfile:943878-943899). SetScaleVelocity replaces the velocity.
+  local display = bp.Display or {}
+  local scale = jitter(display.UniformScale, display.MeshScaleRange)
+  local scaleVelocity = jitter(display.MeshScaleVelocity, display.MeshScaleVelocityRange)
+  p.__scale = { scale, scale, scale }
+  p.__scaleVel = { scaleVelocity, scaleVelocity, scaleVelocity }
 
   -- Lebensdauer in TICKS (Cfile:943680: curTick + (Lifetime ± Range) * 10).
   p.__lifetimeEnd = __gameTick + math.floor(jitter(phys.Lifetime, phys.LifetimeRange) * 10)
@@ -143,6 +153,7 @@ function __projCreate(launcher, bpId, pos, quat, speed, damage, damageRadius, da
   -- OnPreCreate, dann OnCreate(inWater) — EIN Argument (Cfile:943988). Genau das
   -- erwartet z. B. TDFGauss01_script.lua:OnCreate(self, inWater).
   local inWater = p.__pos[2] < __waterLevel()
+  p.__belowWater = inWater
   if inWater and p.__destroyOnWater then
     p:Destroy()
     return p
@@ -400,6 +411,10 @@ local function updateTracking(p)
   if not goal then return end
 
   local gx, gy, gz = goal[1], goal[2], goal[3]
+  if p.__stayUnderwater then
+    local underwaterGoal = __waterLevel() - 0.25
+    if gy >= underwaterGoal then gy = underwaterGoal end
+  end
   -- Lead-Vorhaltung (@944470-944500): zweischrittig ueber die
   -- Zielgeschwindigkeit, Zeitmass = Distanz / (MaxSpeed·0.1) Ticks.
   local tv = p.__tgtVel
@@ -416,11 +431,33 @@ local function updateTracking(p)
   end
 
   local pos = p.__pos
+  if p.__stayUnderwater and p.__belowWater then
+    -- Before turning, UpdateTracking drops an upward component when the
+    -- requested vector is behind the current forward axis (Cfile:944514-944540).
+    local f = __quatForward(p.__orient)
+    local dx, dy, dz = gx - pos[1], gy - pos[2], gz - pos[3]
+    if f[1] * dx + f[2] * dy + f[3] * dz < 0 then gy = pos[2] end
+  end
   p.__orient = quatFromVecRot(
     p.__orient,
     gx - pos[1], gy - pos[2], gz - pos[3],
     (p.__turnRate or 0) * DEG_PER_SEC_TO_RAD_PER_TICK
   )
+  if p.__stayUnderwater and p.__belowWater then
+    -- A tracking projectile that would rise through the surface is flattened
+    -- to reach it no sooner than one forward unit (Cfile:944623-944672).
+    local f = __quatForward(p.__orient)
+    if f[2] > 0 then
+      local ratio = (__waterLevel() - pos[2]) / f[2]
+      if ratio < 1 then
+        f[2] = f[2] * ratio
+        local len = math.sqrt(f[1] * f[1] + f[2] * f[2] + f[3] * f[3])
+        if len >= 1e-6 then
+          p.__orient = __orientFromDir({ f[1] / len, f[2] / len, f[3] / len })
+        end
+      end
+    end
+  end
   if p.__velocityAlign then
     -- func_VecSetLength: v = Forward · |v| (@944660-944676).
     local v = p.__vel
@@ -458,6 +495,14 @@ function __projectileTick()
       local v = p.__vel
       local vOld = { v[1], v[2], v[3] }
 
+      -- MotionTick advances transform scale before integrating movement
+      -- (Cfile:944123-944140).
+      local scale = p.__scale
+      local scaleVel = p.__scaleVel
+      scale[1] = scale[1] + scaleVel[1] * 0.1
+      scale[2] = scale[2] + scaleVel[2] * 0.1
+      scale[3] = scale[3] + scaleVel[3] * 0.1
+
       if not p.__trackTarget then
         v[1] = v[1] + p.__ballistic[1] * 0.1
         v[2] = v[2] + p.__ballistic[2] * 0.1
@@ -488,6 +533,11 @@ function __projectileTick()
           v[1], v[2], v[3] = v[1] * s, v[2] * s, v[3] * s
         end
       end
+      if p.__stayUpright then
+        -- COORDS_Orient(forward) keeps the forward vector and removes roll
+        -- (Cfile:944212-944217).
+        p.__orient = __orientFromDir(__quatForward(p.__orient))
+      end
 
       -- TRAPEZ (Cfile:944219-944228).
       local from = { p.__pos[1], p.__pos[2], p.__pos[3] }
@@ -496,9 +546,14 @@ function __projectileTick()
         from[2] + (vOld[2] + v[2]) * 0.05,
         from[3] + (vOld[3] + v[3]) * 0.05,
       }
+      if p.__stayUnderwater and p.__belowWater then
+        local ceiling = __waterLevel() - 0.01
+        if to[2] >= ceiling then to[2] = ceiling end
+      end
 
       local kind, target = checkCollision(p, from, to)
       p.__pos = to
+      p.__belowWater = to[2] < __waterLevel()
       if kind then
         p.__impactType = kind
         p.__impactTarget = target
@@ -522,9 +577,11 @@ function __readAllProjectilesJson()
       n = n + 1
       local pos = p.__pos
       local q = p.__orient
+      local scale = p.__scale
       parts[n] = string.format(
-        '{"id":%d,"bp":%q,"x":%.6g,"y":%.6g,"z":%.6g,"qw":%.6g,"qx":%.6g,"qy":%.6g,"qz":%.6g}',
-        id, tostring(p.__bp.BlueprintId), pos[1], pos[2], pos[3], q[1], q[2], q[3], q[4]
+        '{"id":%d,"bp":%q,"x":%.6g,"y":%.6g,"z":%.6g,"qw":%.6g,"qx":%.6g,"qy":%.6g,"qz":%.6g,"sx":%.6g,"sy":%.6g,"sz":%.6g}',
+        id, tostring(p.__bp.BlueprintId), pos[1], pos[2], pos[3], q[1], q[2], q[3], q[4],
+        scale[1], scale[2], scale[3]
       )
     end
   end

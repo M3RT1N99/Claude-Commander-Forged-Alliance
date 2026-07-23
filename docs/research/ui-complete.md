@@ -1,7 +1,7 @@
 # agent1
 
 ## Summary
-Vollinventur der Original-In-Game-UI (lua/ui/game/* aus lua.scd, "mini"-Layout-Variante, die das Projekt bereits nutzt) plus Frontend (lua/ui/lobby, lua/ui/menus, lua/ui/dialogs). Das Projekt hat aktuell 4 von ~30 UI-Modulen: Economy, Orders (nur 6 von 12 Slots), UnitView, Minimap-Grundform, Strategic Icons — alles in einer einzigen Datei src/ui/hud.ts. Es fehlen alle bau- und befehlsrelevanten Systeme: Construction-Panel (das Baumenü), CommandMode/Build-Preview, Cursors, Command-Feedback-Meshes, Rally-Points, Keybindings, Selection/Control-Groups, Avatare, Score, Tabs-Menüleiste, Multifunction, Chat, Pings, Tooltips sowie das komplette Frontend. Ohne Construction + CommandMode + Cursors ist das Spiel nicht spielbar — das ist P0.
+Full inventory of the original in-game UI (lua/ui/game/* from lua.scd, "mini" layout variant that the project already uses) plus frontend (lua/ui/lobby, lua/ui/menus, lua/ui/dialogs). The project currently has 4 of ~30 UI modules: Economy, Orders (only 6 of 12 slots), UnitView, Minimap Baseform, Strategic Icons — all in a single file src/ui/hud.ts. All systems relevant to construction and commands are missing: Construction Panel (the construction menu), CommandMode/Build Preview, Cursors, Command Feedback Meshes, Rally Points, Keybindings, Selection/Control Groups, Avatars, Score, Tabs Menu Bar, Multifunction, Chat, Pings, Tooltips and the entire frontend. Without Construction + CommandMode + Cursors the game is unplayable — that's P0.
 
 ## Key Facts
 - Der In-Game-UI-Baum wird von lua/ui/game/gamemain.lua:CreateUI() aufgebaut: borders.SetupBorderControl liefert 4 Layout-Container (controlClusterGroup = unteres 150px-Band, statusClusterGroup = oberes 150px-Band, mapGroup = Vollbild, windowGroup = Vollbild), an denen ALLE Panels haengen — dieses Container-Modell fehlt im Projekt komplett und ist die Voraussetzung fuer originalgetreue Positionen.
@@ -30,7 +30,7 @@ Ohne diese 4 Container sind alle weiteren Offsets im Original nicht reproduzierb
 
 ## P0 — blockiert Spielbarkeit
 
-### 1. Construction-Panel (Baumenue) — GRÖSSTES FEHLENDES TEIL
+### 1. Construction Panel — BIGGEST MISSING PART
 Quelle: `lua/ui/game/construction.lua` (79 KB) + `lua/ui/game/layouts/construction_mini.lua` (Layout).
 Funktion: Zeigt fuer die Auswahl alle baubaren Einheiten, die Bau-Queue und Upgrades. Wird von `gamemain.OnSelectionChanged` ueber `GetUnitCommandData(selection)` → `buildableCategories` gefuettert.
 
@@ -39,8 +39,8 @@ Aufbau (construction_mini.lua):
 - Hintergrund dreiteilig: `construct-panel_bmp_l/_m1/_m2/_m3/_r.dds` (`minBG` bei Left+67 / Bottom+4, `maxBG` rechts, `midBG3` tiled).
 - Haupt-Tabs links vertikal, `AtLeftTopIn(constructionTab, constructionGroup, 0, 14)`, dann `Below(..., −16)`: **construction** (`construct-tab_btn/top_tab_btn_*`), **selection** (`mid_tab_btn_*`), **enhancement** (`bot_tab_btn_*`).
 - Sub-Tabs horizontal ab `AtLeftTopIn(tab, minBG, 82, 0)`: `t1..t4` + `templates` (`construct-tech_btn/t1_btn_*` … `template_btn_*`), bei Enhancement stattdessen `LCH`/`RCH`/`Back` (`left_upgrade_btn_*`, `r_upgrade_btn_*`, `m_upgrade_btn_*`).
-- `choices` = SpecialGrid, **Höhe 50**, horizontal, Top = minBG.Top + 31 (bei construction/templates) bzw. +4 (bei selection); Left = minBG.Left + 85, Right = maxBG.Right − 49. Scroll-Buttons links/rechts (`construct-sm_btn/mid_btn_*`) und Page-Buttons (`left_btn_*`/`right_btn_*`).
-- `secondaryChoices` (**Bau-Queue-Zeile**) direkt darunter (Top = choices.Bottom + 1, Höhe 50), mit eigenem Progress-Balken 40×4 bei (5, 42).
+- `choices` = SpecialGrid, **height 50**, horizontal, Top = minBG.Top + 31 (for construction/templates) or +4 (for selection); Left = minBG.Left + 85, Right = maxBG.Right − 49. Left/right scroll buttons (`construct-sm_btn/mid_btn_*`) and page buttons (`left_btn_*`/`right_btn_*`).
+- `secondaryChoices` (**construction queue line**) directly below (Top = choices.Bottom + 1, height 50), with its own progress bar 40×4 at (5, 42).
 - `extraBtn1/2` bei (10, 31) in minBG: **Infinite-Bau** (`infinite_on/off.dds`) und **Queue-Pause** (`pause_on/off.dds`); im selection-Tab wird extraBtn1 zu **Template erstellen** (`template_on/off.dds`).
 
 Verhalten (construction.lua):
@@ -102,7 +102,7 @@ Position ist an Score gekoppelt: `score_mini.lua` setzt `avatarGroup.Top = score
 `lua/ui/game/score.lua` (18 KB) + `layouts/score_mini.lua`.
 `AtRightTopIn(mapGroup, 18, 7)`, Breite = `panel-score_bmp_t.dds`; Hintergrund dreiteilig `panel-score_bmp_t/_m/_b.dds`, links Bracket `bracket-left-energy/*`, rechts `bracket-right/*`.
 Kopfzeile: links Uhr-Icon (`/game/unit_view_icons/time.dds`, 80 % skaliert) + **Spielzeit** (`GetGameTime()`; bei `GameSpeed=adjustable` als `"MM:SS (+n)"`; bei NoRush-Option zeigt es den Countdown), rechts Panzer-Icon (`/dialogs/score-overlay/tank_bmp.dds`, 90 %) + **Unit-Count "cur/cap"**.
-Pro Armee eine Zeile (Breite 210, Höhe 14): Fraktions-Icon 14×14 mit Armee-Farbe als Hintergrund, Nickname (12 px, links, clipped), Score (rechts). Fokus-Armee: `ffff7f00` + Arial Bold 14. Ausgeschiedene: Totenkopf `icon-skull_bmp.dds`, Grau `ffa0a0a0`. Zeilen werden **jeden Beat nach Score absteigend sortiert**. Klapp-Pfeil `tab-r-btn/*`.
+One line per army (width 210, height 14): faction icon 14×14 with army color as background, nickname (12 px, left, clipped), score (right). Focus Army: `ffff7f00` + Arial Bold 14. Eliminated: Skull `icon-skull_bmp.dds`, Gray `ffa0a0a0`. Rows are sorted **each beat in descending order by score**. Folding arrow `tab-r-btn/*`.
 
 ### 10. Multifunction / Filter + Ping-Leiste (links, unter Economy)
 `lua/ui/game/multifunction.lua` (41 KB) + `layouts/multifunction_mini.lua`.
@@ -167,27 +167,27 @@ Container `AtTopIn(parent, 368)`, `AtRightIn(parent)`, Breite 60; pro belegter G
 - lua.scd → lua/ui/game/gamemain.lua (CreateUI Z.116-192: Modul-Reihenfolge; SetLayout Z.53-75; HideGameUI Z.455)
 - lua.scd → lua/ui/game/borders.lua + lua/ui/game/layouts/borders_mini.lua (controlCluster Bottom−150, statusCluster Top+150, mapGroup/windowGroup Vollbild)
 - lua.scd → lua/ui/game/construction.lua (OnSelection Z.1677, FormatData Z.1405, OnClickHandler Z.837, unitGridPages Z.29-35, constructionTabs Z.61)
-- lua.scd → lua/ui/game/layouts/construction_mini.lua (Panel-Geometrie, Tab-Positionen Z.398-436, choices Höhe 50 Z.130, OnTabChangeLayout Z.438)
+- lua.scd → lua/ui/game/layouts/construction_mini.lua (panel geometry, tab positions Z.398-436, choices height 50 Z.130, OnTabChangeLayout Z.438)
 - lua.scd → lua/ui/game/orders.lua Z.697-733 (standardOrdersTable: 12 preferredSlots + 9 RULEUTC-Toggles), Z.418-421 (Firestate-Modi)
 - lua.scd → lua/ui/game/commandmode.lua (StartCommandMode/EndCommandMode, OnCommandIssued → AddCommandFeedbackBlip, orderModes/toggleModes-Referenztabellen)
 - lua.scd → lua/ui/game/commandmeshes.lua + commandgraphparams.lua (Meshes je CommandType; Orderline-Farben/Waypoint-Texturen je UNITCOMMAND_*)
 - lua.scd → lua/ui/game/rallypoint.lua (WorldMesh, Shader 'RallyPoint', UniformScale 0.10)
-- lua.scd → lua/skins/skins.lua (skins.default.cursors: vollständige Cursor-Tabelle mit Hotspots/Frames/FPS; Fonts + Farben je Fraktion)
+- lua.scd → lua/skins/skins.lua (skins.default.cursors: complete cursor table with hotspots/frames/FPS; fonts + colors per faction)
 - lua.scd → lua/ui/controls/worldview.lua (OnUpdateCursor Z.131-202, DecalFunctions Z.28-90, ApplyCursor Z.234)
-- lua.scd → lua/keymap/defaultKeyMap.lua (vollständige Original-Tastenbelegung) + lua/keymap/keyactions.lua (Konsolen-Aktionen je Binding)
+- lua.scd → lua/keymap/defaultKeyMap.lua (complete original key mapping) + lua/keymap/keyactions.lua (console actions per binding)
 - lua.scd → lua/ui/game/tabs.lua Z.34-56 (tabs: menu/diplomacy/pause) + Z.58+ (menus.main) + layouts/tabs_mini.lua (Panel-Breite 180, oben zentriert)
-- lua.scd → lua/ui/game/score.lua (SetupPlayerLines Z.114, _OnBeat Z.226 Sortierung/Farben) + layouts/score_mini.lua (AtRightTopIn 18/7, Uhr + Unit-Count)
+- lua.scd → lua/ui/game/score.lua (SetupPlayerLines Z.114, _OnBeat Z.226 sorting/colors) + layouts/score_mini.lua (AtRightTopIn 18/7, clock + unit count)
 - lua.scd → lua/ui/game/avatars.lua (CreateAvatarUI Z.46, CreateIdleEngineerList Z.419, CreateIdleFactoryList Z.556) + layouts/avatars_mini.lua (rechts, Top 200, Breite 200)
 - lua.scd → lua/ui/game/multifunction.lua Z.60-135 (overlays: control/team-color/economy/military-radar; pings: alert/move/attack/marker) + layouts/multifunction_mini.lua
 - lua.scd → lua/ui/game/ping.lua Z.15-20 (PingTypes) + lua/ui/game/pingGroup.lua
-- lua.scd → lua/ui/game/tooltip.lua (CreateMouseoverDisplay Z.23, Hotkey-Einblendung) + lua/ui/help/tooltips.lua (82 KB Texte) + lua/ui/help/unitdescription.lua
+- lua.scd → lua/ui/game/tooltip.lua (CreateMouseoverDisplay Z.23, hotkey display) + lua/ui/help/tooltips.lua (82 KB texts) + lua/ui/help/unitdescription.lua
 - lua.scd → lua/ui/game/timer.lua, consoleecho.lua, announcement.lua, zoomslider.lua, tracking.lua, connectivity.lua, rename.lua, gameresult.lua
 - lua.scd → lua/ui/game/chat.lua + layouts/chat_layout.lua; lua/ui/game/diplomacy.lua + shareResources.lua + allianceOffer.lua
-- lua.scd → lua/ui/game/minimap.lua + layouts/minimap_mini.lua (Window mit Drag-Handles, Rahmen mini-map-brd/*)
-- lua.scd → lua/ui/game/gamecommon.lua (iconBmpWidth/Height 48 + 1px Padding; GetUnitIconFileNames → /textures/ui/common/icons/units/<IconName>_icon|_build_btn_up|down|over.dds)
+- lua.scd → lua/ui/game/minimap.lua + layouts/minimap_mini.lua (window with drag handles, frame mini-map-brd/*)
+- lua.scd → lua/ui/game/gamecommon.lua (iconBmpWidth/Height 48 + 1px padding; GetUnitIconFileNames → /textures/ui/common/icons/units/<IconName>_icon|_build_btn_up|down|over.dds)
 - lua.scd → lua/ui/game/buildmode.lua + build_templates.lua (Taste B, Tech-Keys, Template-Verwaltung in Prefs)
 - lua.scd → lua/ui/menus/main.lua, lua/ui/lobby/lobby.lua, lua/ui/lobby/lobbyOptions.lua, lua/ui/dialogs/mapselect.lua, options.lua, keybindings.lua, score.lua
-- Projekt: C:\Users\Marti\Documents\02Projekte\Claude Commander Forged Alliance\src\ui\hud.ts (aktueller Stand: Economy Z.230-249, Orders Z.251-285 nur 6 Slots, UnitView Z.287-299, Minimap Z.301-334, Strategic Icons Z.121-196)
-- Projekt: C:\Users\Marti\Documents\02Projekte\Claude Commander Forged Alliance\src\sim\simWorld.ts:153 (UnitCommand kennt nur 'move' — Bau/Queue/Reclaim fehlen komplett)
+- Project: C:\Users\Marti\Documents\02Projekte\Claude Commander Forged Alliance\src\ui\hud.ts (current status: Economy Z.230-249, Orders Z.251-285 only 6 slots, UnitView Z.287-299, Minimap Z.301-334, Strategic Icons Z.121-196)
+- Project: C:\Users\Marti\Documents\02Projekte\Claude Commander Forged Alliance\src\sim\simWorld.ts:153 (UnitCommand only knows 'move' - construction/queue/reclaim are completely missing)
 - Projekt: C:\Users\Marti\Documents\02Projekte\Claude Commander Forged Alliance\src\sandbox\sandbox.ts:85-320 (SandboxController: spawn/clickSelect/boxSelect/commandMove/stopSelected/selectedCaps/hudUnits)
-- Extrahierte Original-Quellen (nur lesend, für Referenz): C:\Users\Marti\AppData\Local\Temp\claude\c--Users-Marti-Documents-02Projekte-Claude-Commander-Forged-Alliance\795d25b0-6aed-4269-81c5-1f3b66283dbf\scratchpad\lua\
+- Extracted original sources (read only, for reference): C:\Users\Marti\AppData\Local\Temp\claude\c--Users-Marti-Documents-02Projekte-Claude-Commander-Forged-Alliance\795d25b0-6aed-4269-81c5-1f3b66283dbf\scratchpad\lua\

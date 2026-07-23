@@ -1,7 +1,7 @@
 /**
- * Software-Dekoder für DXT1/DXT3/DXT5 (BC1/BC2/BC3) nach RGBA8.
- * Fallback für Plattformen ohne WEBGL_compressed_texture_s3tc
- * (v.a. Mobile-GPUs) und für Node-Tests.
+ * Software decoder for DXT1/DXT3/DXT5 (BC1/BC2/BC3) to RGBA8.
+ * Fallback for platforms without WEBGL_compressed_texture_s3tc
+ * (especially mobile GPUs) and for Node tests.
  */
 
 function decodeColorBlock(
@@ -52,7 +52,7 @@ function decodeColorBlock(
   return fourColor
 }
 
-/** Dekodiert die 3-Bit-Alpha-Indizes eines DXT5-Alpha-Blocks. */
+/** Decodes the 3-bit alpha indices of a DXT5 alpha block. */
 function decodeDxt5Alpha(src: Uint8Array, o: number, out: Uint8Array): void {
   const a0 = src[o]!
   const a1 = src[o + 1]!
@@ -66,7 +66,7 @@ function decodeDxt5Alpha(src: Uint8Array, o: number, out: Uint8Array): void {
     alphas[6] = 0
     alphas[7] = 255
   }
-  // 48 Bit Indizes, little-endian über 6 Bytes
+  // 48-bit indices, little-endian across 6 bytes.
   let bits = 0
   let bitCount = 0
   let byteIdx = o + 2
@@ -135,7 +135,7 @@ export function decodeDxt(
   return out
 }
 
-/** BGRA8 → RGBA8 (unkomprimierte DDS). */
+/** BGRA8 → RGBA8 (uncompressed DDS). */
 export function bgraToRgba(src: Uint8Array): Uint8Array {
   const out = new Uint8Array(src.length)
   for (let i = 0; i < src.length; i += 4) {

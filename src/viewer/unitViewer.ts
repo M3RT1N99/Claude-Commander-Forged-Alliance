@@ -770,6 +770,14 @@ export class UnitViewer {
     pitchOffset: 0,
     goalTarget: new THREE.Vector3(),
     goalDist: 40,
+    nearDist: 40,
+    maxZoomMult: 1,
+    transition: null as null | {
+      startTarget: THREE.Vector3
+      startDist: number
+      elapsed: number
+      seconds: number
+    },
     goalYaw: 0,
     panX: 0,
     panZ: 0,
@@ -778,12 +786,14 @@ export class UnitViewer {
   setRtsControls(enabled: boolean): void {
     this.rts.enabled = enabled
     this.controls.enabled = !enabled
+    this.rts.transition = null
     if (enabled) {
       this.rts.target.copy(this.controls.target)
       this.rts.goalTarget.copy(this.controls.target)
       const d = this.camera.position.distanceTo(this.controls.target)
       this.rts.dist = d
       this.rts.goalDist = d
+      this.rts.nearDist = d
       this.rts.yaw = 0
       this.rts.goalYaw = 0
       this.rts.pitchOffset = 0
@@ -828,6 +838,25 @@ export class UnitViewer {
     }
     r.goalTarget.y = this.heightAt(r.goalTarget.x, r.goalTarget.z)
 
+    const transition = r.transition
+    if (transition) {
+      transition.elapsed += Math.max(dt, 0)
+      const progress = Math.min(transition.elapsed / transition.seconds, 1)
+      // TargetBox starts a timed CameraImpl move. The default camera has
+      // ease-in/out enabled, so use the zero-tangent Hermite form and finish
+      // exactly at the requested duration (CameraImpl::TimedMoveInit/TargetBox).
+      const eased = progress * progress * (3 - 2 * progress)
+      r.target.lerpVectors(transition.startTarget, r.goalTarget, eased)
+      r.dist = transition.startDist + (r.goalDist - transition.startDist) * eased
+      if (progress === 1) {
+        r.target.copy(r.goalTarget)
+        r.dist = r.goalDist
+        r.transition = null
+      }
+      this.applyRtsCameraTransform()
+      return
+    }
+
     // exponentielle Glättung
     const k = 1 - Math.exp(-10 * dt)
     r.target.lerp(r.goalTarget, k)
@@ -837,6 +866,11 @@ export class UnitViewer {
     while (dy < -Math.PI) dy += 2 * Math.PI
     r.yaw += dy * k
 
+    this.applyRtsCameraTransform()
+  }
+
+  private applyRtsCameraTransform(): void {
+    const r = this.rts
     const pitch = this.rtsPitch(r.dist)
     const horiz = Math.cos(pitch) * r.dist
     this.camera.position.set(
@@ -848,6 +882,113 @@ export class UnitViewer {
     this.camera.far = Math.max(2000, r.dist * 10)
     this.camera.updateProjectionMatrix()
     this.camera.lookAt(r.target)
+  }
+
+  /**
+   * CameraImpl::TargetBox: focus the box center and set target zoom to its
+   * largest horizontal extent (Cfile:1150045-1150092).
+   */
+  rtsTargetBox(
+    minX: number,
+    minY: number,
+    minZ: number,
+    maxX: number,
+    maxY: number,
+    maxZ: number,
+    seconds = 0,
+  ): void {
+    if (!this.rts.enabled) throw new Error('Cannot target an RTS camera while RTS controls are disabled')
+    const r = this.rts
+    r.goalTarget.set((minX + maxX) * 0.5, (minY + maxY) * 0.5, (minZ + maxZ) * 0.5)
+    r.goalDist = Math.max(maxX - minX, maxZ - minZ)
+    r.nearDist = r.goalDist
+    if (seconds === 0) {
+      r.transition = null
+      r.goalTarget.y = this.heightAt(r.goalTarget.x, r.goalTarget.z)
+      r.target.copy(r.goalTarget)
+      r.dist = r.goalDist
+      this.applyRtsCameraTransform()
+    } else if (seconds > 0) {
+      r.transition = {
+        startTarget: r.target.clone(),
+        startDist: r.dist,
+        elapsed: 0,
+        seconds,
+      }
+    }
+  }
+
+  /** CameraImpl::TargetLocation restores the camera's current near zoom. */
+  rtsTargetLocation(x: number, z: number): void {
+    if (!this.rts.enabled) throw new Error('Cannot target an RTS camera while RTS controls are disabled')
+    this.rts.goalTarget.set(x, this.heightAt(x, z), z)
+    this.rts.goalDist = this.rts.nearDist
+  }
+
+  /**
+   * Minimap coordinates use the same orthographic framing as mapCameraFor.
+   * TargetLocation subsequently clamps the camera focus to the playable map.
+   */
+  rtsTargetFromMinimap(
+    clientX: number,
+    clientY: number,
+    rect: { left: number; top: number; width: number; height: number },
+  ): void {
+    const hf = this.heightfield
+    if (!hf) throw new Error('Cannot target an RTS camera from the minimap without terrain')
+    if (rect.width <= 0 || rect.height <= 0) throw new Error('Cannot target an RTS camera from an empty minimap')
+    const scale = Math.max(hf.width / rect.width, hf.height / rect.height)
+    const x = (clientX - rect.left - rect.width * 0.5) * scale + hf.width * 0.5
+    const z = (clientY - rect.top - rect.height * 0.5) * scale + hf.height * 0.5
+    this.rtsTargetLocation(x, z)
+  }
+
+  /** The CameraImpl scalar getters exposed to UI Lua. */
+  rtsCameraValue(what: string): number | [number, number, number] | undefined {
+    const r = this.rts
+    if (!r.enabled) return undefined
+    switch (what) {
+      case 'zoom':
+        return r.dist
+      case 'targetZoom':
+        return r.nearDist
+      case 'minZoom':
+        return this.conVarNumber('cam_NearZoom')
+      case 'maxZoom':
+        return this.rtsMaxZoom()
+      case 'focus':
+        return [r.target.x, r.target.y, r.target.z]
+      default:
+        return undefined
+    }
+  }
+
+  /** The CameraImpl scalar setters exposed to UI Lua. */
+  rtsSetCameraValue(what: string, value: number | boolean, seconds = 0): void {
+    if (!this.rts.enabled) throw new Error('Cannot set an RTS camera while RTS controls are disabled')
+    const r = this.rts
+    if (what === 'maxZoomMult') {
+      if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+        throw new Error('Invalid RTS camera max zoom multiplier')
+      }
+      r.maxZoomMult = value
+      return
+    }
+    if (what !== 'zoom' && what !== 'targetZoom') return
+    if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+      throw new Error('Invalid RTS camera zoom')
+    }
+    r.nearDist = value
+    r.goalDist = value
+    if (seconds === 0) {
+      r.dist = value
+      this.applyRtsCameraTransform()
+    }
+  }
+
+  private rtsMaxZoom(): number {
+    return (this.heightfield ? Math.max(this.heightfield.width, this.heightfield.height) * 1.4 : 800) *
+      this.rts.maxZoomMult
   }
 
   /** Aktuelle Kamera-Zoomdistanz (für Strategic-Icon-Schwellen). */
@@ -886,10 +1027,9 @@ export class UnitViewer {
     const delta = wheelDelta > 0 ? -1 : 1
     const factor = Math.pow(2, -zoomAmount * delta)
     // GetMaxZoom() ist in der Engine kartenabhängig; hier ist es die Kartengröße.
-    const maxDist = this.heightfield
-      ? Math.max(this.heightfield.width, this.heightfield.height) * 1.4
-      : 800
+    const maxDist = this.rtsMaxZoom()
     r.goalDist = Math.min(Math.max(r.goalDist * factor, nearZoom), maxDist)
+    r.nearDist = r.goalDist
     const cursor = this.pickTerrain(clientX, clientY)
     if (cursor) {
       const shift = 1 - r.goalDist / oldDist

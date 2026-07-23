@@ -1,8 +1,8 @@
 import { BlobFile, HttpRangeFile, type RandomAccessFile } from './randomAccess'
 
 /**
- * Quelle für die Spieldateien. Die Assets bleiben immer auf dem Rechner des
- * Users (bring your own game) — es wird nichts hochgeladen oder verteilt.
+ * Source for game files. Assets always remain on the user's computer (bring
+ * your own game) — nothing is uploaded or distributed.
  */
 export interface GameDirEntry {
   name: string
@@ -17,14 +17,14 @@ export interface GameSource {
 }
 
 // ---------------------------------------------------------------------------
-// File System Access API (Chrome/Edge): User wählt sein Spielverzeichnis.
+// File System Access API (Chrome/Edge): the user selects their game directory.
 // ---------------------------------------------------------------------------
 
 export class FsaGameSource implements GameSource {
   readonly label: string
 
   constructor(private readonly root: FileSystemDirectoryHandle) {
-    this.label = `Ordner: ${root.name}`
+    this.label = `Folder: ${root.name}`
   }
 
   private async resolveDir(relDir: string): Promise<FileSystemDirectoryHandle> {
@@ -35,7 +35,7 @@ export class FsaGameSource implements GameSource {
     return dir
   }
 
-  /** Case-insensitive Verzeichnisnavigation (Windows-Semantik). */
+  /** Case-insensitive directory traversal (Windows semantics). */
   private async getChildDir(
     parent: FileSystemDirectoryHandle,
     name: string,
@@ -49,7 +49,7 @@ export class FsaGameSource implements GameSource {
           return handle as FileSystemDirectoryHandle
         }
       }
-      throw new Error(`Verzeichnis nicht gefunden: ${name}`)
+      throw new Error(`Directory not found: ${name}`)
     }
   }
 
@@ -66,7 +66,7 @@ export class FsaGameSource implements GameSource {
           return handle as FileSystemFileHandle
         }
       }
-      throw new Error(`Datei nicht gefunden: ${name}`)
+      throw new Error(`File not found: ${name}`)
     }
   }
 
@@ -87,7 +87,7 @@ export class FsaGameSource implements GameSource {
   async open(relPath: string): Promise<RandomAccessFile> {
     const segs = relPath.split(/[/\\]/).filter(Boolean)
     const fileName = segs.pop()
-    if (!fileName) throw new Error(`Ungültiger Pfad: ${relPath}`)
+    if (!fileName) throw new Error(`Invalid path: ${relPath}`)
     const dir = await this.resolveDir(segs.join('/'))
     const handle = await this.getChildFile(dir, fileName)
     return new BlobFile(await handle.getFile())
@@ -95,12 +95,12 @@ export class FsaGameSource implements GameSource {
 }
 
 // ---------------------------------------------------------------------------
-// Fallback für Browser ohne File System Access API: <input webkitdirectory>
+// Fallback for browsers without the File System Access API: <input webkitdirectory>
 // ---------------------------------------------------------------------------
 
 export class FileListGameSource implements GameSource {
-  readonly label = 'Ordner (Datei-Auswahl)'
-  /** Key: relativer Pfad in Kleinbuchstaben (ohne Wurzelordner-Namen). */
+  readonly label = 'Folder (file selection)'
+  /** Key: relative path in lowercase (without the root directory name). */
   private readonly files = new Map<string, File>()
 
   constructor(fileList: FileList) {
@@ -129,23 +129,23 @@ export class FileListGameSource implements GameSource {
 
   async open(relPath: string): Promise<RandomAccessFile> {
     const file = this.files.get(relPath.toLowerCase().replaceAll('\\', '/'))
-    if (!file) throw new Error(`Datei nicht gefunden: ${relPath}`)
+    if (!file) throw new Error(`File not found: ${relPath}`)
     return new BlobFile(file)
   }
 }
 
 // ---------------------------------------------------------------------------
-// Dev-Modus: Vite-Middleware /gamefiles (siehe vite.config.ts)
+// Development mode: Vite /gamefiles middleware (see vite.config.ts)
 // ---------------------------------------------------------------------------
 
 export class HttpGameSource implements GameSource {
-  readonly label = 'Dev-Server (lokale Installation)'
+  readonly label = 'Dev server (local installation)'
 
   constructor(private readonly base = '/gamefiles') {}
 
   async list(relDir: string): Promise<GameDirEntry[]> {
     const res = await fetch(`${this.base}/__list?dir=${encodeURIComponent(relDir)}`)
-    if (!res.ok) throw new Error(`Dev-Server: HTTP ${res.status} für "${relDir}"`)
+    if (!res.ok) throw new Error(`Dev server: HTTP ${res.status} for "${relDir}"`)
     return res.json()
   }
 
@@ -157,8 +157,8 @@ export class HttpGameSource implements GameSource {
 }
 
 // ---------------------------------------------------------------------------
-// Persistenz des Directory-Handles (IndexedDB), damit der User den Ordner
-// nicht bei jedem Besuch neu wählen muss.
+// Persist the directory handle (IndexedDB) so the user does not need to
+// select the folder again on every visit.
 // ---------------------------------------------------------------------------
 
 const DB_NAME = 'claude-commander-fa'

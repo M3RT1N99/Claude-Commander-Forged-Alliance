@@ -29,7 +29,9 @@ import {
   setupGameUi,
   createRootFrame,
   loadUiBlueprints,
+  applySession,
 } from '../src/lua/uiEngine'
+import { SANDBOX_SESSION } from '../src/sim/session'
 import { worldClick, getCommandMode, snapToGrid, footprintOf } from '../src/ui/worldCommands'
 import { findFiles } from '../src/vfs/glob'
 import { parseDds } from '../src/formats/dds'
@@ -99,6 +101,11 @@ installUiEngine(uiHost, {
 createRootFrame(uiHost, 1920, 1080)
 setupUi(uiHost)
 loadUiBlueprints(uiHost, bpPaths)
+// The session-strict bindings (GetArmiesTable/GetFocusArmy error without a
+// session) and the camera bridge must be in place BEFORE the game panels
+// import — same order as the browser boot.
+applySession(uiHost, { ...SANDBOX_SESSION, map: 'SCMP_009' })
+;(globalThis as { __cfaUiCameraBridge?: unknown }).__cfaUiCameraBridge = () => undefined
 setupGameUi(uiHost, log)
 uiHost.setGlobal('__uiSimCommand', () => {})
 

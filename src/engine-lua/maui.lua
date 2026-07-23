@@ -1168,6 +1168,23 @@ function __mauiMouse(evType, x, y, mods, keyCode)
   local handled = __mauiDispatch(hit, {
     Type = evType, MouseX = x, MouseY = y, Modifiers = mods, KeyCode = keyCode or 0,
   })
+  if hit and hit.__kind == 'worldview' then
+    -- CUIWorldView owns all input inside its own rectangle. A cartographic view
+    -- must never fall through to the main WorldCamera's selection/order path:
+    -- its left press retargets the tracked camera (Cfile:1299947-1299979), and
+    -- its wheel is consumed by that view (Cfile:1299628-1299646).
+    if hit.__isMiniMap then
+      if evType == 'ButtonPress' and keyCode == 1 and hit.__trackCamera then
+        __uiCameraBridge('minimapTarget', hit.__trackCamera, x, y)
+      end
+      return true
+    end
+    if handled then return true end
+    -- A main WorldView hands its unhandled click to the browser world-command
+    -- bridge, which is the local equivalent of CUIWorldView's native command
+    -- dispatch.
+    return false
+  end
   if handled then return true end
   -- Ein Treffer auf die WORLDVIEW ist KEIN UI-Treffer: die Weltansicht IST die
   -- Welt (CUIWorldView). Im Original behandelt sie den Klick selbst — Auswahl,
@@ -1186,12 +1203,16 @@ end
 
 function __mauiWheel(x, y, rotation, mods)
   local hit = __mauiHitTest(x, y)
-  return __mauiDispatch(hit, {
+  local handled = __mauiDispatch(hit, {
     Type = 'WheelRotation',
     MouseX = x, MouseY = y,
     WheelRotation = rotation, WheelDelta = rotation,
     Modifiers = mods,
   })
+  -- The minimap owns its wheel event (CUIWorldView::HandleEvent); do not let it
+  -- zoom the main RTS camera through the browser fallback.
+  if hit and hit.__kind == 'worldview' and hit.__isMiniMap then return true end
+  return handled
 end
 
 -- =====================================================================

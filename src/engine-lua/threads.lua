@@ -11,11 +11,11 @@ function GameTick() return __gameTick end
 function GetGameTick() return __gameTick end
 function GetGameTimeSeconds() return __gameTick * 0.1 end
 
--- Thread-OBJEKT wie in der Engine: cfunc_ForkThreadL (Cfile:592423-592526)
--- liefert kein rohes Handle, sondern m_threadObj — ein Objekt mit Methoden,
--- u. a. :Destroy(). Unit:ForkThread legt es in self.Trash, und der Original-
--- trashbag.lua (Zeile 21) weist alles ohne Destroy() zurueck. Ein blankes
--- table wie frueher ist also nicht "fast richtig", sondern schlicht falsch.
+-- Thread OBJECT as in the engine: cfunc_ForkThreadL (Cfile:592423-592526)
+-- returns not a raw handle but m_threadObj — an object with methods including
+-- :Destroy(). Unit:ForkThread puts it in self.Trash, and original trashbag.lua
+-- (line 21) rejects everything without Destroy(). A plain table, as used
+-- before, is not "almost correct" but simply wrong.
 local ThreadMeta = {}
 ThreadMeta.__index = ThreadMeta
 function ThreadMeta:Destroy() self.dead = true end
@@ -28,7 +28,7 @@ local function newThread(fn)
     return setmetatable({ co = coroutine.create(fn), wait = 0 }, ThreadMeta)
 end
 
--- ForkThread(fn, ...) -> Thread-Objekt. Läuft ab dem folgenden Tick.
+-- ForkThread(fn, ...) -> Thread object. Runs from the next tick onward.
 function ForkThread(fn, ...)
     if type(fn) ~= 'function' then error('ForkThread: function expected', 2) end
     local t = newThread(fn)
@@ -39,9 +39,9 @@ function ForkThread(fn, ...)
     return t
 end
 
--- __startThread(fn): erster Slice SOFORT (setzt Sofort-Zustand, z. B. Unit-
--- OnCreate), Rest als regulärer Thread. Ermöglicht WaitTicks/ForkThread in
--- OnCreate, ohne die synchrone Sofortwirkung zu verlieren. -> ok, err.
+-- __startThread(fn): first slice IMMEDIATELY (sets immediate state, e.g. Unit
+-- OnCreate), then continues as a regular thread. Allows WaitTicks/ForkThread
+-- in OnCreate without losing the synchronous immediate effect. -> ok, err.
 function __startThread(fn)
     local t = newThread(fn)
     __currentThread = t
@@ -56,7 +56,7 @@ function __startThread(fn)
     return true
 end
 
--- WaitTicks(n): aktuellen Thread n Ticks schlafen legen (coroutine.yield).
+-- WaitTicks(n): put the current thread to sleep for n ticks (coroutine.yield).
 function WaitTicks(n)
     coroutine.yield(n or 1)
 end
@@ -69,14 +69,14 @@ function KillThread(t)
     if t then t.dead = true end
 end
 
--- Unit:ForkThread ist Lua (unit.lua) und legt das Objekt in self.Trash — der
--- Trash ruft beim Aufraeumen :Destroy(), womit der Thread stirbt.
+-- Unit:ForkThread is Lua (unit.lua) and puts the object in self.Trash — when
+-- cleared, Trash calls :Destroy(), which kills the thread.
 
 function CurrentThread()
     return __currentThread
 end
 
--- SuspendCurrentThread(): schläft unbegrenzt bis ResumeThread.
+-- SuspendCurrentThread(): sleeps indefinitely until ResumeThread.
 function SuspendCurrentThread()
     coroutine.yield(-1)
 end
@@ -85,7 +85,7 @@ function ResumeThread(t)
     if t then t.wait = 0; t.suspended = false end
 end
 
--- Resümiert alle fälligen Threads (Moho::CTaskStage::DoFrame).
+-- Resumes all due threads (Moho::CTaskStage::DoFrame).
 function __simAdvanceThreads()
     local n = nthreads
     for i = 1, n do
@@ -117,7 +117,7 @@ function __simAdvanceThreads()
             end
         end
     end
-    -- Tote Threads entfernen, Reihenfolge stabil (neue Forks bleiben erhalten).
+    -- Remove dead threads, preserving order (new forks remain).
     local w = 0
     for j = 1, nthreads do
         local t = threads[j]
@@ -130,7 +130,7 @@ function __simAdvanceThreads()
     nthreads = w
 end
 
--- Ein Sim-Tick (Engine Sim::AdvanceBeat — hier: Zeit + Threads).
+-- A sim tick (engine Sim::AdvanceBeat — here: time + threads).
 function __simTick()
     __gameTick = __gameTick + 1
     __simAdvanceThreads()

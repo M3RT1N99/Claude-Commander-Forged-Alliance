@@ -2,13 +2,13 @@ import { inflateSync } from 'fflate'
 import type { RandomAccessFile } from './randomAccess'
 
 /**
- * Zip-Reader mit wahlfreiem Zugriff — SCD-Archive sind normale Zip-Dateien
- * (verifiziert: PK\x03\x04, Einträge überwiegend "Stored", teils "Deflate").
- * Es wird nur das Central Directory gelesen; Einträge werden einzeln bei
- * Bedarf geladen. Damit sind auch 1,3-GB-Archive im Browser kein Problem.
+ * ZIP reader with random access — SCD archives are regular ZIP files
+ * (verified: PK\x03\x04, entries mostly "Stored", partly "Deflate"). Only the
+ * central directory is read; entries are loaded individually on demand. This
+ * makes even 1.3 GB archives unproblematic in the browser.
  */
 export interface ZipEntry {
-  /** Pfad wie im Archiv gespeichert (Forward-Slashes, Original-Casing). */
+  /** Path as stored in the archive (forward slashes, original casing). */
   name: string
   compressedSize: number
   uncompressedSize: number
@@ -20,13 +20,13 @@ export interface ZipEntry {
 const EOCD_SIG = 0x06054b50
 const CDIR_SIG = 0x02014b50
 const LOCAL_SIG = 0x04034b50
-/** EOCD: 22 Bytes fix + max. 65535 Bytes Kommentar */
+/** EOCD: 22 fixed bytes + at most 65,535 bytes of comment. */
 const EOCD_SEARCH_SPAN = 22 + 65535
 
 export class ZipArchive {
   private constructor(
     private readonly file: RandomAccessFile,
-    /** Key: Pfad in Kleinbuchstaben (Spiel-Pfade sind case-insensitiv). */
+    /** Key: lowercase path (game paths are case-insensitive). */
     readonly entries: Map<string, ZipEntry>,
   ) {}
 
@@ -41,7 +41,7 @@ export class ZipArchive {
         break
       }
     }
-    if (eocd < 0) throw new Error('Kein Zip-Archiv (End of Central Directory nicht gefunden)')
+    if (eocd < 0) throw new Error('Not a ZIP archive (End of Central Directory not found)')
 
     const count = tail.getUint16(eocd + 10, true)
     const cdirSize = tail.getUint32(eocd + 12, true)
@@ -54,7 +54,7 @@ export class ZipArchive {
     let p = 0
     for (let i = 0; i < count; i++) {
       if (cdir.getUint32(p, true) !== CDIR_SIG) {
-        throw new Error(`Zip: Central-Directory-Eintrag ${i} beschädigt`)
+        throw new Error(`ZIP: central-directory entry ${i} is corrupted`)
       }
       const method = cdir.getUint16(p + 10, true)
       const compressedSize = cdir.getUint32(p + 20, true)
@@ -82,7 +82,7 @@ export class ZipArchive {
     return new ZipArchive(file, entries)
   }
 
-  /** Case-insensitive Lookup mit normalisierten Slashes. */
+  /** Case-insensitive lookup with normalized slashes. */
   get(path: string): ZipEntry | undefined {
     return this.entries.get(path.toLowerCase().replaceAll('\\', '/'))
   }
@@ -92,7 +92,7 @@ export class ZipArchive {
       await this.file.slice(entry.localHeaderOffset, entry.localHeaderOffset + 30),
     )
     if (head.getUint32(0, true) !== LOCAL_SIG) {
-      throw new Error(`Zip: Local Header von "${entry.name}" beschädigt`)
+      throw new Error(`ZIP: local header for "${entry.name}" is corrupted`)
     }
     const nameLen = head.getUint16(26, true)
     const extraLen = head.getUint16(28, true)
@@ -102,22 +102,22 @@ export class ZipArchive {
   }
 
   /**
-   * Viele Einträge auf einmal.
+   * Read many entries at once.
    *
-   * `read()` kostet pro Datei ZWEI Zugriffe aufs Archiv (Local Header, dann
-   * Daten). Der UI-Boot braucht ~1500 Lua-Dateien und ~7000 Texturmaße — einzeln
-   * gelesen sind das ~17.000 Zugriffe, und über HTTP ebenso viele Requests.
+   * `read()` costs TWO archive accesses per file (local header, then data). UI
+   * boot needs ~1,500 Lua files and ~7,000 texture dimensions — read
+   * individually, that is ~17,000 accesses and just as many HTTP requests.
    *
-   * Zwei Hebel, beide gemessen:
+   * Two measured levers:
    *
-   *  1. **Benachbarte Einträge zusammenfassen.** In lua.scd liegen die Dateien
-   *     lückenlos hintereinander (Median-Lücke 0 Byte) — 369 Dateien passen in
-   *     2 Zugriffe. In units.scd dagegen liegen die Blueprints im Median 1,1 MB
-   *     auseinander (Modelle und Animationen dazwischen); dort wird NICHT
-   *     zusammengefasst, sonst liest man das Archiv leer. Genau dafür ist
-   *     `maxGap` da — ohne Grenze wurden aus 10 MB Nutzlast 1350 MB Leserei.
-   *  2. **Die Blöcke NEBENEINANDER lesen.** Jeder Zugriff hat Latenz (HTTP:
-   *     Request/Response). Sequentiell wartet man sie alle nacheinander ab.
+   *  1. **Combine adjacent entries.** In lua.scd, files are contiguous
+   *     (median gap 0 bytes) — 369 files fit in 2 accesses. In units.scd,
+   *     however, blueprints are a median 1.1 MB apart (models and animations
+   *     lie between them); do NOT combine them there or the entire archive is
+   *     read. That is exactly what `maxGap` is for — without a limit, 10 MB of
+   *     payload became 1,350 MB of reads.
+   *  2. **Read blocks IN PARALLEL.** Each access has latency (HTTP:
+   *     request/response). Sequential reads wait for all of them one by one.
    */
   async readMany(
     entries: ZipEntry[],
@@ -126,15 +126,14 @@ export class ZipArchive {
     const out = new Map<ZipEntry, Uint8Array>()
     if (entries.length === 0) return out
 
-    // Nach Position sortieren — nur so lassen sich Nachbarn zusammenfassen.
+    // Sort by position — only then can neighbors be combined.
     const sorted = [...entries].sort((a, b) => a.localHeaderOffset - b.localHeaderOffset)
-    // Obergrenze des Datenendes: 30 Byte fester Header + Name + Extra-Feld. Das
-    // Extra-Feld ist hier nie groß, ein großzügiger Aufschlag reicht als Schranke.
+    // Upper bound of the data end: 30-byte fixed header + name + extra field.
+    // The extra field is never large here, so a generous allowance is sufficient.
     const endOf = (e: ZipEntry): number =>
       Math.min(this.file.size, e.localHeaderOffset + 30 + e.name.length + 4096 + e.compressedSize)
 
-    // Blöcke bilden: benachbarte Einträge zusammen, ein Sprung über maxGap
-    // beendet den Block.
+    // Form blocks: combine adjacent entries; a jump over maxGap ends the block.
     const blocks: { lo: number; hi: number; from: number; to: number }[] = []
     let i = 0
     while (i < sorted.length) {
@@ -159,14 +158,14 @@ export class ZipArchive {
         const e = sorted[k]!
         const p = e.localHeaderOffset - b.lo
         if (view.getUint32(p, true) !== LOCAL_SIG) {
-          throw new Error(`Zip: Local Header von "${e.name}" beschädigt`)
+          throw new Error(`ZIP: local header for "${e.name}" is corrupted`)
         }
         const start = p + 30 + view.getUint16(p + 26, true) + view.getUint16(p + 28, true)
         out.set(e, this.decompress(e, buf.subarray(start, start + e.compressedSize)))
       }
     }
 
-    // Bis zu `parallel` Blöcke gleichzeitig in der Luft.
+    // Keep up to `parallel` blocks in flight at once.
     let next = 0
     await Promise.all(
       Array.from({ length: Math.min(parallel, blocks.length) }, async () => {
@@ -183,6 +182,6 @@ export class ZipArchive {
     if (entry.method === 8) {
       return inflateSync(raw, { out: new Uint8Array(entry.uncompressedSize) })
     }
-    throw new Error(`Zip: Kompressionsmethode ${entry.method} nicht unterstützt (${entry.name})`)
+    throw new Error(`ZIP: compression method ${entry.method} is not supported (${entry.name})`)
   }
 }

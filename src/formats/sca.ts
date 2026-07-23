@@ -1,28 +1,28 @@
 /**
- * Parser für das SCA-Animationsformat der Moho-Engine (SupCom/FA).
+ * Parser for the Moho engine's SCA animation format (SupCom/FA).
  *
- * Layout (verifiziert an UEL0001_A001.sca und dem rekonstruierten Loader
- * RScaResource::LoadScaFile in faf-re; Dateigrößen-Arithmetik geht exakt
- * auf: animDataOffset + 28 + numFrames*(8 + numBones*28) == Dateigröße):
+ * Layout (verified against UEL0001_A001.sca and the reconstructed
+ * RScaResource::LoadScaFile loader in faf-re; file-size arithmetic matches
+ * exactly: animDataOffset + 28 + numFrames*(8 + numBones*28) == file size):
  *
  *   Header:
  *     0x00  char[4]  'ANIM'
- *     0x04  u32      version (5; <5 hat andere Quaternion-Reihenfolge)
+ *     0x04  u32      version (5; <5 uses a different quaternion order)
  *     0x08  u32      numFrames
- *     0x0C  f32      duration (Sekunden)
+ *     0x0C  f32      duration (seconds)
  *     0x10  u32      numBones
- *     0x14  u32      namesOffset    — numBones nullterminierte Strings
- *     0x18  u32      linksOffset    — numBones × i32 Parent-Index (-1 = Wurzel)
+ *     0x14  u32      namesOffset    — numBones null-terminated strings
+ *     0x18  u32      linksOffset    — numBones × i32 parent index (-1 = root)
  *     0x1C  u32      animDataOffset
  *     0x20  u32      frameSize      — 8 + numBones*28 (redundant)
  *
- *   Ab animDataOffset:
+ *   From animDataOffset:
  *     28 Bytes Root-Delta  {pos f32[3], quat f32[4] (w,x,y,z)}
  *     numFrames × Frame:
  *       8-Byte-Header {f32 time, u32 flags}
  *       numBones × 28-Byte-Key {pos f32[3], quat f32[4] (w,x,y,z)}
  *
- *   Keys sind Lokal-Posen relativ zum Parent-Bone.
+ *   Keys are local poses relative to the parent bone.
  */
 
 export interface ScaAnim {
@@ -31,13 +31,13 @@ export interface ScaAnim {
   duration: number
   boneNames: string[]
   boneParents: Int32Array
-  /** Root-Delta: Gesamtbewegung der Animation [px,py,pz, qw,qx,qy,qz] */
+  /** Root delta: total animation displacement [px,py,pz, qw,qx,qy,qz] */
   rootDelta: Float32Array
-  /** Frame-Zeiten (numFrames) */
+  /** Frame times (numFrames) */
   times: Float32Array
   /**
    * Keys: numFrames × numBones × 7 floats [px,py,pz, qw,qx,qy,qz],
-   * Frame-major (Frame f, Bone b beginnt bei (f*numBones + b) * 7).
+   * Frame-major (frame f, bone b begins at (f*numBones + b) * 7).
    */
   keys: Float32Array
 }
@@ -59,7 +59,7 @@ export function parseSca(data: Uint8Array): ScaAnim {
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
 
   const magic = new TextDecoder('ascii').decode(data.subarray(0, 4))
-  if (magic !== 'ANIM') throw new Error(`SCA: falsches Magic "${magic}" (erwartet ANIM)`)
+  if (magic !== 'ANIM') throw new Error(`SCA: invalid magic "${magic}" (expected ANIM)`)
   const version = view.getUint32(4, true)
   const numFrames = view.getUint32(8, true)
   const duration = view.getFloat32(12, true)
@@ -72,11 +72,11 @@ export function parseSca(data: Uint8Array): ScaAnim {
   const expectedEnd = animDataOffset + KEY_BYTES + numFrames * frameBytes
   if (expectedEnd > data.byteLength) {
     throw new Error(
-      `SCA: Datei zu kurz (${data.byteLength} B, erwartet ${expectedEnd} B) — Layout-Fehler?`,
+      `SCA: file too short (${data.byteLength} B, expected ${expectedEnd} B) — layout error?`,
     )
   }
 
-  // --- Bone-Namen & Parents ---------------------------------------------------
+  // --- Bone names & parents ---------------------------------------------------
   const boneNames: string[] = []
   let p = namesOffset
   for (let i = 0; i < numBones; i++) {
@@ -91,7 +91,7 @@ export function parseSca(data: Uint8Array): ScaAnim {
   }
 
   // --- Keys ---------------------------------------------------------------------
-  // Version < 5 speichert Quaternions als (x,y,z,w) → nach (w,x,y,z) rotieren.
+  // Version < 5 stores quaternions as (x,y,z,w) → rotate to (w,x,y,z).
   const oldQuatOrder = version < 5
 
   const readKey = (offset: number, out: Float32Array, outIdx: number): void => {
@@ -119,7 +119,7 @@ export function parseSca(data: Uint8Array): ScaAnim {
   let frameOffset = animDataOffset + KEY_BYTES
   for (let f = 0; f < numFrames; f++) {
     times[f] = view.getFloat32(frameOffset, true)
-    // +4: u32 flags (ungenutzt)
+    // +4: u32 flags (unused)
     let keyOffset = frameOffset + FRAME_HEADER_BYTES
     for (let b = 0; b < numBones; b++) {
       readKey(keyOffset, keys, (f * numBones + b) * KEY_FLOATS)

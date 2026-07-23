@@ -72,6 +72,12 @@ export interface UiFileSystem {
   }
 }
 
+type UiCameraBridge = (operation: string, ...args: (string | number | boolean)[]) => unknown
+
+function activeUiCameraBridge(): UiCameraBridge | undefined {
+  return (globalThis as { __cfaUiCameraBridge?: UiCameraBridge }).__cfaUiCameraBridge
+}
+
 export function installUiEngine(host: LuaHost, fs: UiFileSystem): UiEngine {
   // Reihenfolge wie beim Sim-Boot und aus demselben Grund: erst die
   // Engine-Primitive, dann class.lua neu laden (class.lua:78 snapshottet
@@ -84,6 +90,11 @@ export function installUiEngine(host: LuaHost, fs: UiFileSystem): UiEngine {
   // also steht unsere Version drin. Im Hauptmenü ist sie sichtbar (main.lua:172).
   host.setGlobal('__engineVersion', `${pkg.name} ${pkg.version}`)
   host.eval(UI_GLOBALS_LUA)
+  host.setGlobal('__uiCameraBridge', (operation: string, ...args: (string | number | boolean)[]) => {
+    const bridge = activeUiCameraBridge()
+    if (!bridge) throw new Error(`UI camera bridge is unavailable for ${operation}`)
+    return bridge(operation, ...args)
+  })
   host.eval(PREFS_LUA)
   // Die Konsole der Engine (ConExecute + ConVars). 19 der 37 Optionen wirken
   // ueber genau diesen Weg — vorher hat ConExecute nur geloggt, und damit war
@@ -250,6 +261,11 @@ export function applySession(host: LuaHost, info: SessionInfo, playerName = 'Com
   // Genau EIN Client (der Spieler). Die Engine zählt Befehlsquellen 1-basiert
   // (Cfile:1330618: `mLocalCmdSrc + 1`; 255 → 0 „can't issue commands").
   host.call('__uiSessionSetCommandSources', playerName, 1)
+  for (const a of info.armies) {
+    for (const source of a.authorizedCommandSources ?? (a.human ? [1] : [])) {
+      host.call('__uiSessionAuthorizeCommandSource', a.index, source)
+    }
+  }
   host.call('__uiSessionSetFocusArmy', info.armies.find((a) => a.human)?.index ?? 1)
   // Alliance mirror: the same skirmish default the sim sets up
   // (scenarioutilities.lua:495 — distinct non-civilian pairs are enemies);

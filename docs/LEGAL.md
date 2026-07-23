@@ -1,78 +1,76 @@
-# Rechtliche Einordnung & Ownership-Verifikation
+# Legal classification & ownership verification
 
-*(Stand der Recherche: 2026-07-12 — keine Rechtsberatung)*
+*(Research status: 2026-07-12 — not legal advice)*
 
-## Grundprinzip: Engine ja, Assets nein
+## Basic principle: engine yes, assets no
 
-Dieses Projekt folgt dem etablierten Modell der Engine-Reimplementierungen
+This project follows the established model for engine reimplementations
 (OpenMW, OpenRA, openage, OpenTTD, ScummVM):
 
-1. **Eigener Code**: Die Engine ist eine Neuentwicklung in TypeScript.
-   Es wird kein Original-Code, keine dekompilierte Binary und kein
-   Original-Asset ins Repo übernommen oder verteilt.
-2. **Bring your own assets**: Modelle, Texturen, Blueprints, Karten und
-   Sounds werden zur Laufzeit **lokal** aus der vom User gekauften
-   Installation gelesen. Nichts wird hochgeladen, gebündelt oder gecacht
-   verteilt. Die `.gitignore` blockiert Asset-Formate zusätzlich.
-3. **Interoperabilität**: Das Einlesen proprietärer Dateiformate zum Zweck
-   der Interoperabilität ist nach gefestigter Rechtsprechung zulässig
-   (EU: Art. 6 Software-RL / § 69e UrhG; US: Sega v. Accolade u. a.).
-   Die hier implementierten Parser beruhen auf öffentlich dokumentierten
-   Formaten (GPG-Mod-SDK, Community-Doku) und eigener Analyse der eigenen,
-   gekauften Spieldateien.
+1. **Own code**: The engine is a new TypeScript development. No original code,
+   decompiled binary, or original asset is brought into or distributed from the
+   repository.
+2. **Bring your own assets**: models, textures, blueprints, maps, and sounds
+   are read **locally** at runtime from the user's purchased installation.
+   Nothing is uploaded, bundled, or distributed from a cache. `.gitignore`
+   additionally blocks asset formats.
+3. **Interoperability**: Reading proprietary file formats for interoperability
+   is permitted under established case law (EU: Art. 6 Software-RL / § 69e
+   UrhG; US: Sega v. Accolade et al.). The parsers implemented here are based
+   on publicly documented formats (GPG Mod SDK, community documentation) and
+   independent analysis of purchased game files.
 
-Gegen die großen Bring-your-own-assets-Projekte sind keine erfolgreichen
-Takedowns bekannt; OpenMW hat sich mit Bethesda sogar gütlich abgestimmt.
+No successful takedowns against the large bring-your-own-assets projects are
+known; OpenMW has even reached an amicable agreement with Bethesda.
 
-## Präzedenz speziell für FA: FAForever
+## FA-specific precedent: FAForever
 
-FAForever (FAF) verlangt seit Jahren einen **Steam-/GOG-Account-Link** als
-Besitznachweis („for legal reasons") und wird von den Rechteinhabern seit
-über einem Jahrzehnt geduldet — obwohl FAF deutlich weiter geht als dieses
-Projekt (Verteilung gepatchter Binaries und Spieldaten-Patches).
+FAForever (FAF) has required a **Steam/GOG account link** as proof of
+ownership (“for legal reasons”) for years, and rights holders have tolerated
+it for more than a decade — even though FAF goes considerably further than
+this project (distributing patched binaries and game-data patches).
 
-## Ownership-Verifikation (geplanter Flow)
+## Ownership verification (planned flow)
 
-Gestaffelt, FAF-Vorbild:
+Tiered, following the FAF model:
 
-| Stufe | Nachweis | Status |
-| ----- | -------- | ------ |
-| 1 | **Lokale Installation vorhanden** — die App funktioniert nur, wenn der User sein Installationsverzeichnis mit den SCD-Archiven bereitstellt. Wer die Dateien hat, hat das Spiel. | ✅ implementiert (einzige Asset-Quelle) |
-| 2 | **Steam-Link**: Login via Steam OpenID (`steamcommunity.com/openid`) → Server prüft per `IPlayerService/GetOwnedGames`, ob App-ID **9420** (SupCom:FA) in der Bibliothek ist. Profil muss dafür kurzzeitig öffentlich sein (identisch zu FAFs Flow). `ISteamUser/CheckAppOwnership` wäre sauberer, ist aber Publishern vorbehalten. | geplant (braucht kleinen Server + API-Key) |
-| 3 | **GOG-Link**: wie FAF (GOG-Account-Verknüpfung). | geplant |
+| Tier | Proof | Status |
+| ---- | ----- | ------ |
+| 1 | **Local installation available** — the app works only when the user provides their installation directory containing the SCD archives. Whoever has the files has the game. | ✅ implemented (the only asset source) |
+| 2 | **Steam link**: Login via Steam OpenID (`steamcommunity.com/openid`) → the server checks through `IPlayerService/GetOwnedGames` whether app ID **9420** (SupCom:FA) is in the library. The profile must be public briefly (identical to FAF's flow). `ISteamUser/CheckAppOwnership` would be cleaner, but is reserved for publishers. | planned (requires a small server + API key) |
+| 3 | **GOG link**: as in FAF (GOG account linking). | planned |
 
-Hinweis: Stufe 2/3 sind für Multiplayer/Community-Features gedacht. Für die
-lokale Nutzung ist Stufe 1 der praktikable und übliche Standard aller
-Reimplementierungsprojekte.
+Note: tiers 2/3 are intended for multiplayer/community features. For local use,
+tier 1 is the practical and usual standard for all reimplementation projects.
 
-## Umgang mit faf-re
+## Handling faf-re
 
-Das rekonstruierte Engine-Repo (`faf-re`) ist per Reverse Engineering aus
-der Binary gewonnen — rechtlich eine andere Kategorie als Clean-Room-Neubau.
-Konsequenz für dieses Projekt:
+The reconstructed engine repository (`faf-re`) was obtained through reverse
+engineering of the binary — legally, it is a different category from a
+clean-room reimplementation. The consequence for this project:
 
-- faf-re dient als **Verhaltensreferenz** (Formeln, Abläufe, Semantik,
-  Datenstrukturen) — wie eine Spezifikation.
-- **Kein Code-Transfer**: Es wird kein rekonstruierter C++-Code (auch nicht
-  übersetzt/1:1 portiert) in dieses Repo übernommen. Verhalten wird aus der
-  Referenz verstanden und eigenständig implementiert.
-- Spielregeln/Balance stammen ohnehin aus den (lokal gelesenen) Lua- und
-  Blueprint-Dateien des Spiels selbst.
+- faf-re serves as a **behavioral reference** (formulas, processes, semantics,
+  data structures) — like a specification.
+- **No code transfer**: no reconstructed C++ code (including translated or
+  1:1-ported code) is brought into this repository. Behavior is understood from
+  the reference and implemented independently.
+- Game rules/balance come from the game's own Lua and blueprint files, which
+  are read locally.
 
-## IP-Situation
+## IP situation
 
-Supreme Commander: Forged Alliance (2007, Gas Powered Games / THQ). Die
-Marken-/Publishingrechte liegen heute im Nordic/Embracer-Umfeld (THQ Nordic);
-das Spiel wird weiterhin auf Steam/GOG verkauft. Verkaufslink statt
-Asset-Download ist auch deshalb die richtige Strategie: Jeder Nutzer dieses
-Projekts ist ein zusätzlicher Käufer des Originals.
+Supreme Commander: Forged Alliance (2007, Gas Powered Games / THQ). Trademark
+and publishing rights are now in the Nordic/Embracer sphere (THQ Nordic); the
+game continues to be sold on Steam/GOG. A sales link instead of an asset
+download is therefore also the right strategy: every user of this project is
+an additional purchaser of the original.
 
-## Quellen
+## Sources
 
 - [Steamworks: User Authentication and Ownership](https://partner.steamgames.com/doc/features/auth)
 - [Steamworks: IPlayerService/GetOwnedGames](https://partner.steamgames.com/doc/webapi/iplayerservice)
 - [FAF: What is Steam link/GOG link, why is it required?](https://forum.faforever.com/topic/3800/what-is-steam-link-gog-link-why-is-it-required-and-how-do-i-do-it)
 - [FAF: Why do I need to link my account?](https://forum.faforever.com/topic/252/why-do-i-need-to-link-my-account-to-steam-or-gog-com/1)
-- [OpenMW-Forum: Rechtslage von Engine-Reimplementierungen](https://forum.openmw.org/viewtopic.php?t=7561)
+- [OpenMW forum: legal status of engine reimplementations](https://forum.openmw.org/viewtopic.php?t=7561)
 - [Wikipedia: List of game engine recreations](https://en.wikipedia.org/wiki/List_of_game_engine_recreations)
-- [openage README (Asset-Policy)](https://github.com/SFTtech/openage/blob/master/README.md)
+- [openage README (asset policy)](https://github.com/SFTtech/openage/blob/master/README.md)

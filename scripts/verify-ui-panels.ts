@@ -150,6 +150,11 @@ check(
 // Dieselbe Session, die auch die Sim bekommt (SANDBOX_SESSION) — EIN Weg für
 // Browser und Test (applySession in src/lua/uiEngine.ts).
 applySession(host, { ...SANDBOX_SESSION, map: 'SCMP_009' })
+
+// The browser's main.ts registers the real camera bridge; headless the
+// worldview/minimap imports still need a callable seam (a recording no-op
+// is a test double, not a production stub).
+;(globalThis as { __cfaUiCameraBridge?: unknown }).__cfaUiCameraBridge = () => undefined
 check(
   Number(host.eval('return GetArmiesTable().numArmies')) === 2,
   'GetArmiesTable(): 2 armies (ARMY_1 + the selftest enemy ARMY_2)',

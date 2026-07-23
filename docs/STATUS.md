@@ -1,46 +1,48 @@
-# Stand & bekannte Löcher
+# Status & known gaps
 
-*Dieses Dokument trägt den wechselnden Zustand, damit [CLAUDE.md](../CLAUDE.md)
-ihn nicht tragen muss. Bei jedem größeren Meilenstein aktualisieren.*
+*This document tracks the changing status so [CLAUDE.md](../CLAUDE.md) does not
+have to. Update it at every major milestone.*
 
-## Stand (Juli 2026): Techdemo mit Kampf, Effekten, Audio und lebender UI
+## Status (July 2026): tech demo with combat, effects, audio, and a live UI
 
-ACU auswählen → Bau-Menü aus dem Blueprint → Gebäude aufs Raster setzen →
-echte Ökonomie zahlt → die Fabrik produziert Panzer → Gauss-Duell mit
-Projektilen, Schaden, Tod und **Wrack** (Wreckage-Shader aus mesh.fx). Dazu:
-Partikel/Trails/Beams (particle.fx-Port, CEfxEmitter-Tick), CollisionBeams,
-gelenkte Munition, XACT-Audio als PCM im Lautsprecher, Einheiten im
-Karten-Licht (mesh.fx ComputeLight). Die Session-UI (economy, multifunction,
-orders, construction, unitview, tabs, avatars, minimap-Fenster …) rendert
-komplett aus der Original-Lua über die echte Provider-Kette
-(DoPreload → erster Sync-Beat → DoInitializing); die **Tastatur lebt**
-(Keymap aus keymapper.lua, 135 Hotkeys, CUIKeyHandler-Executor, UI_Lua).
-Verifiziert in 29 Suiten (`npm test`) und im Browser über
-`?sandbox=<karte>&selftest=<blueprint>`.
+Select an ACU → open the build menu from its blueprint → place a building on
+the grid → the real economy pays → the factory produces tanks → a Gauss duel
+with projectiles, damage, death, and **wreckage** (the wreckage shader from
+mesh.fx). Also included: particles/trails/beams (particle.fx port,
+CEfxEmitter tick), CollisionBeams, guided munitions, XACT audio as PCM through
+the speakers, and units under map lighting (mesh.fx ComputeLight). The session
+UI (economy, multifunction, orders, construction, unitview, tabs, avatars,
+minimap window, ...) renders entirely from the original Lua through the real
+provider chain (DoPreload → first sync beat → DoInitializing); **keyboard input
+works** (keymap from keymapper.lua, 135 hotkeys, CUIKeyHandler executor,
+UI_Lua). Verified in 29 suites (`npm test`) and in the browser through
+`?sandbox=<map>&selftest=<blueprint>`.
 
-## Bekannte Löcher
+## Known gaps
 
-Der Weg zur echten UI: [PLAN-UI.md](PLAN-UI.md); der 1:1-Gesamtfahrplan:
+The path to the real UI: [PLAN-UI.md](PLAN-UI.md); the complete 1:1 roadmap:
 [PLAN-1ZU1.md](PLAN-1ZU1.md).
 
-- **Kein echtes Hauptmenü als Standard-Weg.** Das Front-End bootet
-  (verify-frontend), aber die Sandbox startet über den Web-Launcher;
-  `LaunchSinglePlayerSession`/Lobby fehlen.
-- **Render-Inventur offen (H/M-Liste):** Normals-Decals (brauchen
-  Normal-RT), Refraktions-/Reflexions-RT des Wassers (benannte Näherung),
-  Prop-Sim (RECLAIMABLE/BlockPath), Planeten-Glow-Pass (Write_A),
-  Bloating-Props (2 BPs statisch), Baustellen-Depth (SeraphimBuildDepth).
-  NEU ERLEDIGT: Schatten (H7) mit ComputeShadowPCF + Depth-Pass,
-  Aeon/Insect-Unit-Shader (M5), Undulating-Baum-Schwanken. ERLEDIGT seit der Inventur:
-  scmap-Schwanz vollständig geparst (ad3c8e4), Karten-Props als
-  Instanz-LOD-Ketten (H5), DDS-Cubemaps + Env-Reflexion (5287a98),
-  Terrain-Shader-Varianten + Stratum-Normals + Skirt (H4), Albedo-Decals
-  als Instanz-Patches, Sky-Dome mit Planeten + Cirrus (M9), Wasser voll
-  nach HighFidelityPS (H6, 95a36b0), Build-Shader ALLER vier Fraktionen
-  (c370942), Glow/Bloom-Pass nach CBloomRenderer (H2, ef1f088),
-  Baustellen-Look (H3), Beat-Interpolation (M6), Icon-Tint (M1).
-- **Sound-Settings stellen nichts ein** (Nutzer-Fund): SetVolume/GetVolume
-  fehlen; GameAudio hat keine xgs-Kategorie-Gains (Forschung läuft).
+- **No real main menu as the default path.** The front end boots
+  (verify-frontend), but the sandbox starts through the web launcher;
+  `LaunchSinglePlayerSession`/Lobby are missing.
+- **Rendering inventory (H/M list), still open:** the water's
+  refraction/reflection RT (a named approximation), planet glow pass
+  (Write_A), Bloating Props (2 BPs static), and construction-site depth
+  (SeraphimBuildDepth). **COMPLETED since the inventory:** normals decals
+  through the screen-space normal prepass (46c3e8b), shadows (H7) with
+  ComputeShadowPCF + depth pass, Aeon/Insect unit shader (M5), undulating
+  tree sway, SCMAP tail fully parsed (ad3c8e4), map props as instance LOD
+  chains (H5), DDS cubemaps + environment reflection (5287a98), terrain
+  shader variants + stratum normals + skirt (H4), albedo decals as
+  instance patches, sky dome with planets + Cirrus (M9), water according
+  to HighFidelityPS (H6, 95a36b0), build shaders for ALL four factions
+  (c370942), glow/bloom pass after CBloomRenderer (H2, ef1f088),
+  construction-site appearance (H3), beat interpolation (M6), icon
+  tint (M1).
+- **Sound settings do not change anything** (user finding): SetVolume/GetVolume
+  are missing; GameAudio has no xgs category gains (research report exists:
+  audio loops/variations/instance limits — implementation pending).
 - **Text input works** (CMauiEdit vtable-override port: typing, selection,
   MaxChars, OnTextChanged/OnEnterPressed/OnEscPressed/OnCharPressed,
   caret rendering); StartCommandMode console command and UI IsAlly exist.
@@ -52,31 +54,37 @@ Der Weg zur echten UI: [PLAN-UI.md](PLAN-UI.md); der 1:1-Gesamtfahrplan:
   (browser clipboard is async — platform deviation); drag-selection and
   the exact caret-blink math (CMauiEdit::DoRender undecoded) are named
   gaps.
-- **Command dispatch, remaining gaps:** Stop / Move-cancels-build / Attack
-  (units AND ground, AITARGET_Ground) / Repair (incl. HP repair) /
-  shift-queueing (CUnitCommandQueue) / Guard-Assist (queue sharing, build
-  assist, follow) / SetFireState are 1:1 now (dispatch table @0x608EF0);
-  still open: Patrol, Reclaim/Capture, point guard, capture-on-enemy,
-  guard enemy chase (GetBestEnemy), ground-attack ring rotation in the
-  queue, and the command markers (UICommandGraph — order lines exist).
-- **Sim-Funde:** Einheiten stapeln sich am Roll-off (keine Separation),
-  Mex-Stall (Produktion × LimitingRate, Cfile:953938), Türme drehen nicht
-  (Turret-Aiming), Audio-Loops/Variationen.
-- **`src/ui/hud.ts`** ist der letzte TS-Rest (Minimap-Bild, strategische
-  Icons). Dort nichts Neues anbauen; er verschwindet mit worldview/minimap.
-- **Die Karte wird in TS geparst** (`main.ts` liest `Scenario…Markers` selbst)
-  statt über `ScenarioUtilities.lua` (keine Armee-Gruppen, keine Props).
-- **Das Blueprint wird zweimal gelesen** — TS-Parser (Modelle/Knochen) und
-  echte `LoadBlueprints()`-Pipeline. Zwei Wahrheiten.
-- **Assist works** (multi-builder placement + guard on builders/factories);
-  guarding a RECLAIMING builder does not assist yet (reclaim is missing
-  entirely).
-- **Ökonomie-Lua-API teils No-Op:** `SetProductionPerSecond*`,
-  `SetConsumptionPerSecond*`, `SetBuildRate` schreiben noch nichts in die
-  Engine-Ökonomie (Werte kommen nur aus dem Blueprint).
-- **`research/economy-binary.md` beschreibt mehr, als `economy.ts` kann**
-  (Handicap, Overflow-Sharing, kumulierter `granted`-Akku).
-- **DDS-Parser:** 16-Bit-unkomprimierte DDS werden abgelehnt (Fund vom
-  Selbsttest-Lauf, betrifft mindestens eine UI-Textur).
-- **Score-Zahlen bleiben leer** (1:1: Vanilla-3599 hat keinen
-  currentScores-Produzenten) — Nutzer-Entscheidung Vanilla vs. FAF offen.
+- **Command dispatch:** Stop, Move-cancels-build, Attack (units and
+  ground, AITARGET_Ground), Repair (including HP repair), shift queueing
+  (CUnitCommandQueue), Guard/Assist (queue sharing, build assist, follow),
+  Patrol (ring-rotated queue legs with engage-on-the-way), Reclaim
+  (props/wrecks with the target-Lua cost formula), SetFireState, and
+  command-cap masks/build restrictions (Add/RemoveCommandCap,
+  Add/RemoveBuildRestriction with dispatch validation) are 1:1 now
+  (dispatch table @0x608EF0). Still open: Capture, point guard,
+  capture-on-enemy, guard enemy chase (GetBestEnemy), reclaim-assist
+  through guard (sub_612E80), ground-attack ring rotation in the queue,
+  the reclaim UI command mode (GetReclaimablesInRect), and command
+  markers (UICommandGraph — order lines exist).
+- **Sim findings:** units stack up at roll-off (no separation), Mex stall
+  (production × LimitingRate, Cfile:953938).
+- **`src/ui/hud.ts`** is the last TS remainder (minimap image, strategic
+  icons). Do not add anything new there; it disappears with worldview/minimap.
+- **The map is parsed in TS** (`main.ts` reads `Scenario…Markers` itself)
+  instead of through `ScenarioUtilities.lua` (no army groups); map PROPS
+  now reach the sim through the boot message (Sim::Setup step 7,
+  5182/5182 on SCMP_009).
+- **The blueprint is read twice** — by the TS parser (models/bones) and the
+  real `LoadBlueprints()` pipeline. Two sources of truth.
+- **Assist works** (multi-builder placement plus Guard on a builder/factory);
+  a Guard on a reclaiming builder does not assist yet (guard's
+  assist-reclaim branch, sub_612E80).
+- **Economy Lua API is partly a no-op:** `SetProductionPerSecond*`,
+  `SetConsumptionPerSecond*`, and `SetBuildRate` still do not write to the
+  engine economy (values come only from the blueprint).
+- **`research/economy-binary.md` describes more than `economy.ts` supports**
+  (Handicap, overflow sharing, cumulative `granted` accumulator).
+- **DDS parser:** 16-bit uncompressed DDS files are rejected (a finding from a
+  self-test run; it affects at least one UI texture).
+- **Score numbers remain blank** (1:1: Vanilla-3599 has no `currentScores`
+  producers) — the user decision between Vanilla and FAF remains open.

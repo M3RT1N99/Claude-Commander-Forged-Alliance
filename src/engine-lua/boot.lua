@@ -1,15 +1,15 @@
 __diskwatch = {}
--- Sprache der Installation. Die Original-Init-Skripte setzen sie genau so
--- (viewerinit.lua:5, editorinit.lua:5: `__language = 'us'`); Localization.lua:150
--- liest sie beim Laden.
+-- Installation language. The original initialization scripts set it exactly
+-- this way (viewerinit.lua:5, editorinit.lua:5: `__language = 'us'`);
+-- Localization.lua:150 reads it during loading.
 __language = 'us'
--- false, nicht nil: `x = nil` legt den Schluessel gar nicht an, und config.lua:56
--- macht den Zugriff auf ein nicht existierendes Global zum Fehler.
+-- false, not nil: `x = nil` does not create the key at all, and config.lua:56
+-- turns access to a nonexistent global into an error.
 __currentSource = false
 
--- DiskToLocal(path): ein Pfad des HOST-Dateisystems zurueck in den VFS-Pfad des
--- Spiels. Der LuaHost mountet jede VFS-Datei unter `/mod/<pfad>`
--- (src/lua/host.ts: FS_PREFIX) — genau dieser Praefix muss hier wieder weg.
+-- DiskToLocal(path): convert a HOST filesystem path back to the game's VFS
+-- path. LuaHost mounts every VFS file below `/mod/<path>`
+-- (src/lua/host.ts: FS_PREFIX) — remove exactly that prefix here.
 --
 -- Das ist kein Kosmetikum: `lua/system/Blueprints.lua:70-83` hat ein EIGENES
 -- GetSource(), das den Chunk-Namen aus `debug.getinfo(n).source` nimmt und ihn

@@ -1,90 +1,90 @@
-# Das echte Front-End: Splash, Hauptmenü, Weg in die Session
+# The real front-end: Splash, main menu, way into the session
 
-Wie die Engine das Front-End bootet, was `lua/ui/menus/main.lua` dafür verlangt und was
-uns dazu noch fehlt. Ergänzt [engine-api.md](engine-api.md) (Liste aller Bindungen je VM)
-und [game-shell.md](game-shell.md); Session-Start selbst ist hier **nicht** Thema — nur
-der Übergang.
+How the engine boots the front end, what `lua/ui/menus/main.lua` charges for it and what
+we still lack it. Added [engine-api.md](engine-api.md) (list of all bindings per VM)
+and [game-shell.md](game-shell.md); Session start itself is **not** an issue here — just
+the transition.
 
-## 1. Überblick
+## 1. Overview
 
-Es gibt **eine** UI-Lua-VM für die ganze Anwendung. `Moho::USER_GetLuaState`
-(Cfile:1368027-1368075) ist ein Singleton (`sUserLuaState`), das beim ersten Aufruf
-angelegt wird und `scr_CoreInits` + `scr_UserInits` **einmal** registriert. Splash,
-Hauptmenü, Lobby und Spiel-UI laufen alle in **derselben** VM.
+There is **one** UI Lua VM for the whole application. `Moho::USER_GetLuaState`
+(Cfile:1368027-1368075) is a singleton (`sUserLuaState`) that is activated on the first call
+is created and `scr_CoreInits` + `scr_UserInits` is registered **once**. splash,
+Main menu, lobby and game UI all run in **the same** VM.
 
-Was wechselt, ist nicht die VM, sondern der **UI-Zustand**:
+What changes is not the VM, but the **UI state**:
 
 ```
 UIS_none=0  UIS_splash=1  UIS_frontend=2  UIS_game=3  UIS_lobby=4   (Cfile:1262301-1262311)
 ```
 
-`GetCurrentUIState()` liefert daraus `'splash'`, `'frontend'` oder `'game'`
+`GetCurrentUIState()` then returns `'splash'`, `'frontend'` or `'game'`
 (mHelp, Cfile:1265924).
 
-## 2. Die Boot-Kette (mit Belegen)
+## 2. The boot chain (with receipts)
 
-### 2.1 Der Zustandswechsel: `CUIManager::SetNewLuaState` (@0x84C4E0-ff, Cfile:1273520)
+### 2.1 The state change: `CUIManager::SetNewLuaState` (@0x84C4E0-ff, Cfile:1273520)
 
-Jeder Wechsel geht durch diese eine Funktion. Sie tut der Reihe nach:
+Every change goes through this one function. She does in turn:
 
-1. Input-Capture-Stack und aktuellen Dragger abräumen (Cfile:1273557-1273564).
+1. Clear input capture stack and current dragger (Cfile:1273557-1273564).
 2. Alte Root-Frames freigeben, `mState = neuerState` (Cfile:1273600-1273605).
-3. `__EngineStats`-Tabelle in die Globals legen (Cfile:1273610).
-4. **Pro Head einen `CMauiFrame` erzeugen** (Cfile:1273621) und seine LazyVars setzen:
+3. Place `__EngineStats` table in the globals (Cfile:1273610).
+4. **Create a `CMauiFrame` per head** (Cfile:1273621) and set its LazyVars:
    `Left=0, Top=0, Width=w, Height=h` (Cfile:1273661-1273666).
-   Fehlschlag ⇒ `gpg::Die("CUIManager::Init - unable to create root frame for head %d.")`
-5. **`SetupUI()` aus `/lua/ui/uimain.lua` rufen** (`sub_83CD30`, Cfile:1262316-1262345;
-   Aufruf Cfile:1273680). Fehlschlag ⇒ `gpg::Die("... unable to start main UI script.")`
+   Failure ⇒ `gpg::Die("CUIManager::Init - unable to create root frame for head %d.")`
+5. **Call `SetupUI()` from `/lua/ui/uimain.lua`** (`sub_83CD30`, Cfile:1262316-1262345;
+   Call Cfile:1273680). Failure ⇒ `gpg::Die("... unable to start main UI script.")`
 
-**Der Root-Frame existiert also VOR `SetupUI()`** — und `SetupUI()` läuft bei **jedem**
-Zustandswechsel neu, nicht nur einmal. Genau darauf zielt der Kommentar in
+**So the root frame exists BEFORE `SetupUI()`** — and `SetupUI()` runs on **everyone**
+Change of state new, not just once. That's exactly what the comment in is aimed at
 uimain.lua:22-25 („SetCursor needs to happen anytime this function is called").
-`uimain.lua:29` (`if alreadySetup then return end`) schützt nur den Rest.
+`uimain.lua:29` (`if alreadySetup then return end`) only protects the rest.
 
-### 2.2 Die vier Einstiege (alle: `USER_GetLuaState` → `sUIState=…` → `SetNewLuaState` → `SCR_Import('/lua/ui/uimain.lua')[X]()`)
+### 2.2 The four entrances (all: `USER_GetLuaState` → `sUIState=…` → `SetNewLuaState` → `SCR_Import('/lua/ui/uimain.lua')[X]()`)
 
-| Engine-Funktion | Adresse / Cfile | ruft in uimain.lua |
+| Engine function | Address/Cfile | calls in uimain.lua |
 |---|---|---|
 | `Moho::UI_StartSplashScreens` | 0x83CE20, Cfile:1262357 | `StartSplashScreen` (uimain.lua:41) |
 | `Moho::UI_StartFrontEnd` | 0x83D140, Cfile:1262476 | `StartFrontEndUI` (uimain.lua:46) |
 | `func_StartHostLobbyUI` / `func_StartJoinLobbyUI` | 0x83CF20 / 0x83D030 | `StartHostLobbyUI` / `StartJoinLobbyUI` (uimain.lua:68/76) |
 | `func_StartGameUI` | 0x83D240, Cfile:1262514 | `StartGameUI` (uimain.lua:83) |
 
-Die Lua-Globals `EngineStartSplashScreens()` / `EngineStartFrontEndUI()` sind nur dünne
-Wrapper darum (Cfile:1263777-1263805 bzw. 1263827) — mHelp: *„kill current UI and start
+The Lua globals `EngineStartSplashScreens()` / `EngineStartFrontEndUI()` are only thin
+Wrapper around it (Cfile:1263777-1263805 or 1263827) — mHelp: *“kill current UI and start
 splash screens"*.
 
 ### 2.3 Anwendungsstart (`main`, Cfile:1373640-1373870)
 
-Reihenfolge der Kommandozeilen-Prüfungen; der letzte Zweig ist der Normalfall:
+Order of command line checks; the last branch is the normal case:
 
 - `/map <x>` bzw. `/perf` → `func_StartCommandLineSession` (Cfile:1373521) ruft
   `singleplayerlaunch.lua:StartCommandLineSession` (Cfile:1373668, 1373854)
-- `/replay <f>` → schreibt `FrontEndData.replay_filename` in die UI-Globals (Cfile:1373686)
+- `/replay <f>` → writes `FrontEndData.replay_filename` into the UI globals (Cfile:1373686)
 - `/joingame`, `/gpgnet`, `/hostgame` → Lobby-Einstiege
-- **sonst: `Moho::UI_StartSplashScreens()`** (Cfile:1373865)
+- **otherwise: `Moho::UI_StartSplashScreens()`** (Cfile:1373865)
 
-Rückweg: `sub_88C9C0` (Cfile:1321251) = `WLD_Teardown()` → `UI_StartFrontEnd()`. Nach
-dem Spiel landet man also wieder im Hauptmenü, und weil `SetNewLuaState` die Frames
-neu baut, ist der maui-Baum dabei leer.
+Return path: `sub_88C9C0` (Cfile:1321251) = `WLD_Teardown()` → `UI_StartFrontEnd()`. After
+After the game you end up back in the main menu, and because `SetNewLuaState` the frames
+new, the Maui tree is empty.
 
-### 2.4 `uimain.lua` — was danach passiert
+### 2.4 `uimain.lua` — what happens afterwards
 
 - `SetupUI()` (uimain.lua:20-37): `UIUtil.CreateCursor()` + `SetCursor(c)`; einmalig
-  Layout aus `Prefs.GetFromCurrentProfile('layout')` (Default `'bottom'`) und
+  Layout from `Prefs.GetFromCurrentProfile('layout')` (default `'bottom'`) and
   `UIUtil.SetCurrentSkin(skin or 'uef')`.
 - `StartSplashScreen()` (uimain.lua:41-44) → `splash.lua:CreateUI()`.
 - `StartFrontEndUI()` (uimain.lua:46-64):
   1. `if not DebugFacilitiesEnabled() then IN_RemoveKeyMapTable(keyMap.debugKeyMap) end`
-     — **wird bei uns immer laufen**, weil `DebugFacilitiesEnabled()` false liefert.
-  2. `GetFrontEndData('NextOpBriefing')` → Kampagnen-Briefing, sonst
+     — **will always run for us** because `DebugFacilitiesEnabled()` returns false.
+  2. `GetFrontEndData('NextOpBriefing')` → Campaign briefing, otherwise
      `import('/lua/ui/menus/main.lua').CreateUI()`.
   3. `GetNumRootFrames() > 1` → `multihead.lua`.
 
-### 2.5 `splash.lua` — und der ehrliche Ausweg
+### 2.5 `splash.lua` — and the honest way out
 
 `splash.lua:14-19` spielt vier `.sfd`-Filme (thqlogo, gpglogo, nvidia_logo,
-fmv_scx_intro) mit FMOD-Cues. Aber **Zeile 22-25**:
+fmv_scx_intro) with FMOD cues. But **Lines 22-25**:
 
 ```lua
 if GetPreference("movie.nologo") then
@@ -93,192 +93,192 @@ if GetPreference("movie.nologo") then
 end
 ```
 
-Das ist ein Original-Pfad, kein Trick: gesetzte Preference ⇒ kein Splash. Zweiter
-Original-Ausweg: `CMauiMovie::LoadFile` gibt **false** zurück, wenn `/nomovie` auf der
-Kommandozeile steht (Cfile:1143020-1143035) — `movie.lua:32-53` fängt das ab
-(`local ok = self:InternalSet(filename)`; `else self:OnStopped()`). Ein `Movie`, dessen
-`InternalSet` false liefert, ist also **das dokumentierte Engine-Verhalten**, nicht ein
-Stub. Damit kann das Hauptmenü ohne SFD-Decoder korrekt laufen.
+This is an original path, not a trick: set preference ⇒ no splash. Second
+Original way out: `CMauiMovie::LoadFile` returns **false** if `/nomovie` on the
+Command line is (Cfile:1143020-1143035) — `movie.lua:32-53` intercepts this
+(`local ok = self:InternalSet(filename)`; `else self:OnStopped()`). A `Movie`, whose
+`InternalSet` returns false, so it is **the documented engine behavior**, not a
+Stub. This means that the main menu can run correctly without an SFD decoder.
 
-## 3. `lua/ui/menus/main.lua` — was das Hauptmenü verlangt
+## 3. `lua/ui/menus/main.lua` — what the main menu asks for
 
-`CreateUI()` (main.lua:50-993), der Reihe nach:
+`CreateUI()` (main.lua:50-993), in order:
 
-| Zeile | Was |
+| line | What |
 |---|---|
 | 52 | `UIUtil.SetCurrentSkin('uef')` |
-| 57-62 | ohne `GetPreference("profile.current")` → `dialogs/profile.lua` statt Menü |
-| 65-142 | Menü-Tabellen: `menuTop` (Campaign, Skirmish, Multiplayer LAN, …, Options, Exit), `menuExtras`, `menuMultiplayer` |
+| 57-62 | without `GetPreference("profile.current")` → `dialogs/profile.lua` instead of menu |
+| 65-142 | Menu tables: `menuTop` (Campaign, Skirmish, Multiplayer LAN, …, Options, Exit), `menuExtras`, `menuMultiplayer` |
 | 148 | `parent = UIUtil.CreateScreenGroup(GetFrame(0), "Main Menu ScreenGroup")` |
 | 151-153, 34-48 | `Prefs.GetOption("mainmenu_bgmovie")` (Default **true**, options.lua:358-371) → `Movie('/movies/main_menu.sfd')`, `Loop(true)`, `Play()` |
 | 166-198 | Bitmaps: `/scx_menu/logo/logo.dds`, `border-console-top_bmp.dds`, `border-bot-{left,mid,right}.dds` |
 | 172 | `UIUtil.CreateText(border, GetVersion(), 14, UIUtil.bodyFont)` |
-| 208-222 | Lauftext (EULA) über `SetNeedsFrameUpdate(true)` + `OnFrame` |
+| 208-222 | Running text (EULA) via `SetNeedsFrameUpdate(true)` + `OnFrame` |
 | 231-255 | `PlaySound(Sound{Cue='AMB_Menu_Loop',Bank='AmbientTest'})`, Musik `Sound{Cue='Main_Menu',Bank='Music'}`; `StopSound(handle)` in `StopMusic`/`OnDestroy` |
-| 258-295 | `topLevelGroup`, `mainMenuGroup`, sechs Bracket-Bitmaps aus `/scx_menu/main-menu/` |
-| 297-327 | `menuBracketMiddle.Animate` — Einfahr-Animation über `OnFrame` + `PlaySound('X_Main_Menu_On_Start')` |
-| 341-820 | `MenuBuild(menuTable)`: Titel-Bitmap `/menus/main03/panel-top_bmp.dds` + Text, Profil-Button, dann **je Eintrag** `UIUtil.CreateButtonStd(mainMenuGroup, '/scx_menu/large-no-bracket-btn/large', v.name, 22, 2, 0, "UI_Menu_MouseDown", "UI_Menu_Rollover")` (543), `btn:UseAlphaHitTest(false)` (555), Glow-Bitmap + `EffectHelpers.FadeIn/FadeOut` (567-590), `Tooltip.AddButtonTooltip` (593) |
-| 990-992 | `MenuBuild('home', true)` und `FlushEvents()` |
+| 258-295 | `topLevelGroup`, `mainMenuGroup`, six bracket bitmaps from `/scx_menu/main-menu/` |
+| 297-327 | `menuBracketMiddle.Animate` — Retract animation via `OnFrame` + `PlaySound('X_Main_Menu_On_Start')` |
+| 341-820 | `MenuBuild(menuTable)`: Title bitmap `/menus/main03/panel-top_bmp.dds` + text, profile button, then **per entry** `UIUtil.CreateButtonStd(mainMenuGroup, '/scx_menu/large-no-bracket-btn/large', v.name, 22, 2, 0, "UI_Menu_MouseDown", "UI_Menu_Rollover")` (543), `btn:UseAlphaHitTest(false)` (555), glow bitmap + `EffectHelpers.FadeIn/FadeOut` (567-590), `Tooltip.AddButtonTooltip` (593) |
+| 990-992 | `MenuBuild('home', true)` and `FlushEvents()` |
 
-Importe von main.lua: `uiutil`, `layouthelpers`, `effecthelpers`, `bitmap`, `menucommon`,
+Imports of main.lua: `uiutil`, `layouthelpers`, `effecthelpers`, `bitmap`, `menucommon`,
 `multilinetext`, `button`, `group`, `prefs`, `ui/game/tooltip`, `maputil`, `ui/help/tooltips`,
 `movie`, `mods` (main.lua:9-22).
 
-**Achtung, Import-Nebenwirkung:** `effecthelpers.lua:28` ruft auf **Modulebene**
-`UIUtil.CreateScreenGroup(GetFrame(0), "Effect Helper ScreenGroup")`. Ohne Root-Frame
-knallt schon der Import.
+**Attention, import side effect:** `effecthelpers.lua:28` calls at **module level**
+`UIUtil.CreateScreenGroup(GetFrame(0), "Effect Helper ScreenGroup")`. Without root frame
+the import is already banging.
 
-## 4. Fehlende Engine-Bindungen
+## 4. Missing engine bindings
 
-Alle aus `scr_UserInits` (engine-api.md), alle heute in
+All from `scr_UserInits` (engine-api.md), all in today
 [ui-globals-missing.lua](../../src/engine-lua/ui-globals-missing.lua) → sie werfen beim Aufruf.
 
-### 4.1 Für Hauptmenü **zwingend**
+### 4.1 For main menu **mandatory**
 
-| Name | Semantik (Decomp) | Beleg | gebraucht von |
+| Name | Semantics (Decomp) | receipt | used by |
 |---|---|---|---|
-| `EngineStartFrontEndUI` | UI abräumen, `sUIState=UIS_frontend`, `uimain.StartFrontEndUI()` | Cfile:1263827, 1262476 | splash.lua:23/51 |
-| `EngineStartSplashScreens` | dito für `UIS_splash`, `uimain.StartSplashScreen()` | Cfile:1263790, 1262357 | Boot |
-| `GetFrontEndData` / `SetFrontEndData` | lesen/schreiben in die **UI-Global-Tabelle `FrontEndData`** | Cfile:1268794 / 1268715; Tabellenzugriff 1268831 / 1268751 | uimain.lua:56 |
+| `EngineStartFrontEndUI` | Clear UI, `sUIState=UIS_frontend`, `uimain.StartFrontEndUI()` | Cfile:1263827, 1262476 | splash.lua:23/51 |
+| `EngineStartSplashScreens` | ditto for `UIS_splash`, `uimain.StartSplashScreen()` | Cfile:1263790, 1262357 | boat |
+| `GetFrontEndData` / `SetFrontEndData` | read/write to the **UI global table `FrontEndData`** | Cfile:1268794 / 1268715; Table access 1268831 / 1268751 | uimain.lua:56 |
 | `IN_RemoveKeyMapTable` | „removes the keys from the key map" | Cfile:1260010 | uimain.lua:52 |
 | `StopSound(handle,[immediate=false])` | Handle stoppen | Cfile:1348237 | main.lua:242/249 |
-| `PlaySound` **muss ein Handle liefern** | heute `nil` → `StopSound` bekäme nichts | Cfile:1348174 (`StartSound(handle)`) | main.lua:231/236 |
+| `PlaySound` **must provide a handle** | today `nil` → `StopSound` would get nothing | Cfile:1348174 (`StartSound(handle)`) | main.lua:231/236 |
 | `FlushEvents()` | „flush mouse/keyboard events" | Cfile:1274594 | main.lua:992 |
 | `ExitApplication` | „request that the application shut down" | Cfile:1263877 | main.lua:980 |
-| `InternalCreateMovie(luaobj,parent)` | + `moho.movie_methods`: `InternalSet`, `Play`, `Stop`, `Loop`, `IsLoaded`, `GetFrameRate`, `GetNumFrames`; LazyVars **`MovieWidth`/`MovieHeight`** | Cfile:1143258; LazyVars 1142984-1142985; `LoadFile`→false bei `/nomovie` 1143020-1143035 | main.lua:35, splash.lua:32 |
+| `InternalCreateMovie(luaobj,parent)` | + `moho.movie_methods`: `InternalSet`, `Play`, `Stop`, `Loop`, `IsLoaded`, `GetFrameRate`, `GetNumFrames`; LazyVars **`MovieWidth`/`MovieHeight`** | Cfile:1143258; LazyVars 1142984-1142985; `LoadFile`→false at `/nomovie` 1143020-1143035 | main.lua:35, splash.lua:32 |
 | `GetVersion()` | Core-Global, `"GetVersion() -> string"` | Cfile:599401 | main.lua:172 — heute **erfunden** (`'CFA'`) |
 
-### 4.2 Für Splash zusätzlich
+### 4.2 For Splash additionally
 
-| Name | Semantik | Beleg |
+| Name | Semantics | receipt |
 |---|---|---|
-| `GetCursor()` | liefert das Cursor-Objekt (CMauiCursor, 5 Methoden) | Cfile:1274426; splash.lua:27/52 |
+| `GetCursor()` | returns the cursor object (CMauiCursor, 5 methods) | Cfile:1274426; splash.lua:27/52 |
 | `AddInputCapture(control)` | „set a control as the current capture" | Cfile:1147871; splash.lua:30 |
 | `RemoveInputCapture(control)` | „remove … (always first from back)" | Cfile:1147921; splash.lua:49 |
 | `AnyInputCapture` / `GetInputCapture` | Stack abfragen | Cfile:1147773 / 1147818 |
-| `SoundIsPrepared(handle)`, `StartSound`, `PlayVoice(params,duck)` | Movie wartet in `movie.lua:37-49` darauf | Cfile:1348102 / 1348174 / 1348652 |
+| `SoundIsPrepared(handle)`, `StartSound`, `PlayVoice(params,duck)` | Movie is waiting for it in `movie.lua:37-49` | Cfile:1348102 / 1348174 / 1348652 |
 
-### 4.3 Für Untermenüs (später)
+### 4.3 For submenus (later)
 
 `InternalCreateItemList` (Cfile:1140074), `InternalCreateEdit` (1133710),
 `InternalCreateScrollbar` (1144735), `InternalCreateMapPreview` (1276475),
-`InternalCreateLobby` (1168970, Klasse `CLobby` mit 18 Methoden),
+`InternalCreateLobby` (1168970, class `CLobby` with 18 methods),
 `InternalCreateDiscoveryService` (1168381), `GetAntiAliasingOptions`,
 `GetVolume`/`SetVolume` (options.lua:700-807), `OpenURL`, `GetSpecialFile*`.
 
-**Nicht in der Decomp:** `IsSignedInToSteam()` (main.lua:900) taucht in
-`scr_UserInits` **nicht** auf → siehe offene Fragen.
+**Not in the decomp:** `IsSignedInToSteam()` (main.lua:900) appears in
+`scr_UserInits` **not** on → see open questions.
 
-## 5. Ist-Stand unserer Engine
+## 5. Current status of our engine
 
-**Da:** [maui.lua](../../src/engine-lua/maui.lua) — `InternalCreateFrame/Group/Bitmap/Text/Border`,
-die sieben LazyVars, `DoInit→OnInit`, Hit-Test, Event-Pump (`__mauiMouse`, `__mauiWheel`,
-Parent-Bubbling wie Cfile:1124525), Frame-Pumpe (`__mauiFrame`), Snapshot für den Renderer.
+**There:** [maui.lua](../../src/engine-lua/maui.lua) — `InternalCreateFrame/Group/Bitmap/Text/Border`,
+the seven LazyVars, `DoInit→OnInit`, hit test, event pump (`__mauiMouse`, `__mauiWheel`,
+Parent bubbling like Cfile:1124525), frame pump (`__mauiFrame`), snapshot for the renderer.
 [moho.lua](../../src/engine-lua/moho.lua) — `control_methods` (25), `bitmap_methods` (18,
-inkl. `UseAlphaHitTest`), `text_methods`, `frame_methods`, `cursor_methods`.
+including `UseAlphaHitTest`), `text_methods`, `frame_methods`, `cursor_methods`.
 [ui-globals.lua](../../src/engine-lua/ui-globals.lua) — `GetPreference`/`SetPreference`/
 `SavePreferences`/`GetOptions` (in-memory + localStorage), `GetFrame`/`GetNumRootFrames`,
-`_c_CreateCursor`/`SetCursor`, `PlaySound` (nur Protokoll), `ConExecute`,
+`_c_CreateCursor`/`SetCursor`, `PlaySound` (protocol only), `ConExecute`,
 `DebugFacilitiesEnabled`, `HasCommandLineArg`.
 [uiEngine.ts](../../src/lua/uiEngine.ts) — `installUiEngine()`, `setupUi()` (ruft
-das echte `uimain.SetupUI()`), `createRootFrame()`, `setupGameUi()`.
+the real `uimain.SetupUI()`), `createRootFrame()`, `setupGameUi()`.
 
-**Fehlt / ist falsch:**
+**Missing/incorrect:**
 
-1. **Es gibt keinen Front-End-Boot.** [gameUi.ts](../../src/ui/gameUi.ts):106-116 springt
-   direkt in `setupGameUi()`. Kein `StartSplashScreen`, kein `StartFrontEndUI`, kein `main.lua`.
-2. **Reihenfolge verdreht:** gameUi.ts:106-107 ruft `setupUi()` **vor** `createRootFrame()`.
-   Die Engine macht es umgekehrt (Root-Frame Cfile:1273621-1273666, dann SetupUI
-   Cfile:1273680). Solange nur `SetupUI` läuft, fällt es nicht auf; `effecthelpers.lua:28`
-   (Modulebene, `GetFrame(0)`) würde es sofort zerreißen.
-3. **`GetVersion()` liefert `'CFA'`** — eine erfundene Zahl im Produktivpfad
-   (ui-globals.lua:654). Sie steht sichtbar im Hauptmenü (main.lua:172).
-4. **`PlaySound` gibt kein Handle zurück**, `StopSound`/`StartSound`/`SoundIsPrepared`
-   fehlen ganz → jede Musik-/Movie-Steuerung ist tot.
-5. **Kein `moho.movie_methods`.** Der Auto-Vivifier in moho.lua liefert dafür eine **leere
-   Klasse**; `movie.lua:32` (`self:InternalSet(...)`) knallt dann mit „attempt to call a nil
-   value" — laut, aber weit weg von der Ursache.
-6. **Kein Input-Capture, kein Keymap, kein `FlushEvents`.**
-7. **Der maui-Renderer kennt keinen `movie`-Kind** (`draws()` in maui.lua:225-235 kennt nur
+1. **There is no front-end boot.** [gameUi.ts](../../src/ui/gameUi.ts):106-116 jumps
+   directly in `setupGameUi()`. No `StartSplashScreen`, no `StartFrontEndUI`, no `main.lua`.
+2. **Order reversed:** gameUi.ts:106-107 calls `setupUi()` **before** `createRootFrame()`.
+   The engine does it the other way around (root frame Cfile:1273621-1273666, then SetupUI
+   Cfile:1273680). As long as `SetupUI` is running, it is not noticeable; `effecthelpers.lua:28`
+(module level, `GetFrame(0)`) would immediately tear it.
+3. **`GetVersion()` returns `'CFA'`** — a made-up number in the production path
+   (ui-globals.lua:654). It is visible in the main menu (main.lua:172).
+4. **`PlaySound` does not return a handle**, `StopSound`/`StartSound`/`SoundIsPrepared`
+   are completely missing → every music/movie control is dead.
+5. **No `moho.movie_methods`.** The auto-vivifier in moho.lua provides an **empty one
+   Class**; `movie.lua:32` (`self:InternalSet(...)`) then pops with “attempt to call a nil
+   value" — loud, but far from the cause.
+6. **No input capture, no keymap, no `FlushEvents`.**
+7. **The maui renderer does not know any `movie` child** (`draws()` in maui.lua:225-235 only knows
    `bitmap`/`text`).
 
-## 6. Bau-Reihenfolge (kleinste ehrlich testbare Schritte)
+## 6. Construction sequence (smallest honestly testable steps)
 
-**Schritt 1 — Front-End-Boot ohne Splash, ohne Movie.**
-`createRootFrame()` **vor** `setupUi()` ziehen; `startFrontEnd(host)` in `uiEngine.ts`
-(Gegenstück zu `setupGameUi`), das `import('/lua/ui/uimain.lua').StartFrontEndUI()` ruft.
-Dazu die Minimal-Globals: `EngineStartFrontEndUI`, `EngineStartSplashScreens`,
+**Step 1 — Front End Boot without Splash, without Movie.**
+`createRootFrame()` **drag before** `setupUi()`; `startFrontEnd(host)` to `uiEngine.ts`
+(counterpart to `setupGameUi`), which calls `import('/lua/ui/uimain.lua').StartFrontEndUI()`.
+Plus the minimal globals: `EngineStartFrontEndUI`, `EngineStartSplashScreens`,
 `FrontEndData = {}` + `Get/SetFrontEndData`, `GetCurrentUIState`, `IN_AddKeyMapTable`/
 `IN_RemoveKeyMapTable`/`IN_ClearKeyMap`, `FlushEvents`, `ExitApplication`, echtes
-`GetVersion()` (aus der Installation, nicht erfunden).
-Damit `main.lua` ohne Film startet: `Prefs.SetOption('mainmenu_bgmovie', false)` — der
-Original-Weg (options.lua:358-371), kein Sonderfall im Code.
-*Verifikation:* `scripts/verify-frontend.ts` — UI-VM booten, `StartFrontEndUI()`, dann
-`__mauiSnapshot()`: es muss `logo.dds`, `border-console-top_bmp.dds` und **genau so viele
-`large_btn_up.dds`-Bitmaps geben, wie `menuTop` Einträge hat** (main.lua:104-142).
+`GetVersion()` (from the installation, not invented).
+So that `main.lua` starts without film: `Prefs.SetOption('mainmenu_bgmovie', false)` — the
+Original way (options.lua:358-371), no special case in the code.
+*Verification:* `scripts/verify-frontend.ts` — Boot UI VM, `StartFrontEndUI()`, then
+`__mauiSnapshot()`: there must be `logo.dds`, `border-console-top_bmp.dds` and **exactly as many
+`large_btn_up.dds` bitmaps give as `menuTop` has entries** (main.lua:104-142).
 
-**Schritt 2 — Audio-Handles (ohne Ausgabe).**
-`PlaySound` liefert ein Handle-Objekt (Tabelle mit Bank/Cue/State); `StartSound`,
+**Step 2 — Audio Handles (without output).**
+`PlaySound` returns a handle object (table with bank/cue/state); `StartSound`,
 `StopSound`, `SoundIsPrepared`, `PauseSound`, `PlayVoice`, `PauseVoice`, `GetVolume`,
-`SetVolume` arbeiten darauf. Keine Ausgabe erfinden — nur den Zustand führen, wie bisher
+`SetVolume` work on it. Don't invent an output - just keep the situation as before
 protokollieren.
-*Verifikation:* `__uiSoundsRequested` enthält nach `CreateUI()` `AMB_Menu_Loop` und
-`Main_Menu`; nach `parent:Destroy()` ist bei beiden Handles `stopped = true`.
+*Verification:* `__uiSoundsRequested` contains `AMB_Menu_Loop` and `CreateUI()`
+`Main_Menu`; after `parent:Destroy()` is `stopped = true` for both handles.
 
-**Schritt 3 — Menü bedienbar.**
-Maus-Events über `__mauiMouse` (steht schon) an die Buttons; `Tooltip`, `EffectHelpers`
-laufen dann von selbst. `AddInputCapture`/`RemoveInputCapture`/`GetInputCapture`/
-`AnyInputCapture` als echter Stack (Cfile:1147871/1147921).
-*Verifikation (Browser, `?frontend`):* Klick auf „Options" baut `dialogs/options.lua`;
-Klick auf „Skirmish" muss mit **genau einer** Meldung scheitern:
-`InternalCreateLobby: … noch nicht implementiert` (lobbycomm.lua:121). Das ist der
-ehrliche Beweis, dass die Kette bis zur Lobby läuft.
+**Step 3 — Menu operable.**
+Mouse events via `__mauiMouse` (already written) to the buttons; `Tooltip`, `EffectHelpers`
+then run automatically. `AddInputCapture`/`RemoveInputCapture`/`GetInputCapture`/
+`AnyInputCapture` as a real stack (Cfile:1147871/1147921).
+*Verification (browser, `?frontend`):* Clicking on “Options” builds `dialogs/options.lua`;
+Clicking on "Skirmish" must fail with **exactly one** message:
+`InternalCreateLobby: … noch nicht implementiert` (lobbycomm.lua:121). That's the one
+honest proof that the chain runs all the way to the lobby.
 
-**Schritt 4 — Movie-Control.**
+**Step 4 — Movie Control.**
 `InternalCreateMovie` + `moho.movie_methods` + LazyVars `MovieWidth`/`MovieHeight`.
-`InternalSet` liefert zunächst **false** — exakt das `/nomovie`-Verhalten
-(Cfile:1143020-1143035), also `OnStopped()`. Damit sind `mainmenu_bgmovie=true` und
-`splash.lua` lauffähig, ohne dass ein einziger Frame gerendert wird oder eine Zahl
-erfunden wäre. SFD-Decoder ist ein eigenes Thema.
+`InternalSet` initially returns **false** — exactly the `/nomovie` behavior
+(Cfile:1143020-1143035), i.e. `OnStopped()`. This means that `mainmenu_bgmovie=true` and
+`splash.lua` can run without rendering a single frame or number
+would be invented. SFD decoder is a separate topic.
 
-**Schritt 5 — Splash.**
-`GetCursor()` + Input-Capture; `movie.nologo`-Preference als Abkürzung bleibt bestehen.
+**Step 5 — Splash.**
+`GetCursor()` + input capture; `movie.nologo`-Preference remains as an abbreviation.
 
-**Schritt 6 — Der Übergang in die Session.**
-Zwei Original-Wege, die Skirmish-Taste ist der **teurere**:
+**Step 6 — Transitioning into the session.**
+Two original ways, the skirmish button is the **more expensive** one:
 
 - **Lobby** (main.lua:909-922): `lobby.CreateLobby('None', 0, playerName, nil, nil,
-  topLevelGroup, cb)` + `lobby.HostGame(name, scenarioFileName, true)`. Braucht
-  `InternalCreateLobby` (lobbycomm.lua:121) und die Klasse `CLobby` (18 Methoden); der
-  Start läuft dann über `CLobby::LaunchGame` (Cfile:1170898) — eine große Engine-Funktion
+  topLevelGroup, cb)` + `lobby.HostGame(name, scenarioFileName, true)`. Needs
+  `InternalCreateLobby` (lobbycomm.lua:121) and the class `CLobby` (18 methods); the
+  Start then runs via `CLobby::LaunchGame` (Cfile:1170898) — a large engine function
   (LaunchInfoNew, ClientManager, NetConnector).
 - **`LaunchSinglePlayerSession(sessionInfo)`** (Cfile:1321744): mHelp *„launch a new single
   player session."*, Rumpf = `WLD_SetupSessionInfo(luaTable)` → `WLD_BeginSession(...)`
-  (Cfile:1321776-1321782); wirft, wenn schon eine Session läuft. Genau diesen Weg nehmen
-  Kampagne (main.lua:864), Tutorial und
+  (Cfile:1321776-1321782); throws if a session is already running. Take exactly this route
+  Campaign (main.lua:864), tutorial and
   `singleplayerlaunch.lua:StartCommandLineSession` (297-324 → `SetupCommandLineSkirmish`,
   228-294 → `LaunchSinglePlayerSession`, 323).
 
-**Empfehlung:** zuerst `LaunchSinglePlayerSession` + `StartCommandLineSession` bedienen —
-das ist ein echter, in der Engine verdrahteter Einstieg (`/map`, Cfile:1373668), erzeugt
-`sessionInfo` (teamInfo, Fraktionen, Farben, scenarioMods) komplett aus der Original-Lua
-und braucht **keine** Lobby. Die Skirmish-Taste kommt danach.
+**Recommendation:** use `LaunchSinglePlayerSession` + `StartCommandLineSession` first —
+this is a real entry wired into the engine (`/map`, Cfile:1373668), generated
+`sessionInfo` (teamInfo, factions, colors, scenarioMods) completely from the original Lua
+and needs **no** lobby. The skirmish button comes after.
 
 ## 7. Offene Fragen
 
-1. **`IsSignedInToSteam()`** (main.lua:900, `ButtonMatchmaking`) steht **nicht** in
-   `scr_UserInits` (engine-api.md, 200 Globals). Die `lua.scd` des Nutzers ist also aus
-   einem anderen Build als `Cfile/ForgedAlliance.exe.c`. Betrifft nur den
-   Matchmaking-Knopf — aber: gibt es weitere solche Divergenzen im Front-End?
-2. **`GetVersion()`** — woher kommt der String? Core-Global (Cfile:599401), aber die
-   Quelle (Ressource? `version.lua`?) ist ungeprüft. Bis dahin darf er nicht erfunden werden.
-3. **`FrontEndData`** wird von der Engine in die Globals gelegt (Cfile:1268751) — an welcher
-   Stelle wird die Tabelle **angelegt**? (Bei `/replay` wird sie ohne vorheriges Create
+1. **`IsSignedInToSteam()`** (main.lua:900, `ButtonMatchmaking`) is **not** in
+   `scr_UserInits` (engine-api.md, 200 globals). So the user's `lua.scd` is off
+   a build other than `Cfile/ForgedAlliance.exe.c`. Only affects that
+   Matchmaking button — but: are there other such divergences in the front end?
+2. **`GetVersion()`** — where does the string come from? Core-Global (Cfile:599401), but the
+   Source (resource? `version.lua`?) is unchecked. Until then it must not be invented.
+3. **`FrontEndData`** is placed by the engine in the globals (Cfile:1268751) - where
+   Where is the table **created**? (With `/replay` it is created without prior creation
    beschrieben, Cfile:1373686.)
-4. **`func_StartGameUI`** bekommt einen `LuaState*` als Argument (Cfile:1262514) — ist das
-   immer `USER_GetLuaState()`, oder gibt es für die Spiel-UI doch einen zweiten State?
-   Für uns heute irrelevant (eine UI-VM), aber die Annahme sollte belegt sein.
-5. **`_head_test` / Multihead** (`GetNumRootFrames() > 1`, uimain.lua:61) — wir haben genau
-   einen Frame. Bleibt das so?
-6. **SFD-Format** (`/movies/*.sfd`) — ungeprüft. Solange `InternalSet` ehrlich false
-   liefert, blockiert es nichts.
+4. **`func_StartGameUI`** gets a `LuaState*` as argument (Cfile:1262514) — that is
+   always `USER_GetLuaState()`, or is there a second state for the game UI?
+   Irrelevant to us today (a UI VM), but the assumption should be proven.
+5. **`_head_test` / Multihead** (`GetNumRootFrames() > 1`, uimain.lua:61) — we have exactly
+   a frame. Will it stay that way?
+6. **SFD format** (`/movies/*.sfd`) — unchecked. As long as `InternalSet` is honestly false
+   delivers, it blocks nothing.
