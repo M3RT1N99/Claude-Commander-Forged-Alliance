@@ -22,6 +22,13 @@ import { TerrainNormalsPass } from './terrainNormals'
 import DEPTH_UNIT_VS from './shaders/depthUnit.vert.glsl?raw'
 import DEPTH_FS from './shaders/depth.frag.glsl?raw'
 
+/** The nearest world object under the cursor — one depth-sorted raycast
+ *  across units, wreck meshes and instanced map props (pickWorld). */
+export type WorldPick =
+  | { kind: 'unit'; unit: SceneUnit; distance: number }
+  | { kind: 'wreck'; object: THREE.Object3D; distance: number }
+  | { kind: 'mapProp'; mapIndex: number; distance: number }
+
 /** Eine in die Szene gesetzte Einheit (Sandbox-Modus). */
 export class SceneUnit {
   playing = false
@@ -91,7 +98,7 @@ export class UnitViewer {
    *  targets tree/rock instances of the instanced renderer. */
   pickMapProp(clientX: number, clientY: number): number | null {
     if (!this.mapProps) return null
-    return this.mapProps.pick(this.screenRay(clientX, clientY))
+    return this.mapProps.pick(this.screenRay(clientX, clientY))?.mapIndex ?? null
   }
 
   /** Pick the nearest of the given scene objects (wreck meshes live in
@@ -106,6 +113,42 @@ export class UnitViewer {
     const roots = new Set(objects)
     while (obj && !roots.has(obj)) obj = obj.parent
     return obj
+  }
+
+  /**
+   * ONE depth-sorted pick across units, wreck meshes and instanced map
+   * props: the engine resolves a world click to the CLOSEST entity of
+   * any kind under the cursor — not by category priority. Units come
+   * from the scene list (visible only), wrecks from the caller
+   * (individual meshes live in main), map props from the instanced
+   * renderer.
+   */
+  pickWorld(clientX: number, clientY: number, wrecks: THREE.Object3D[]): WorldPick | null {
+    const ray = this.screenRay(clientX, clientY)
+    let best: WorldPick | null = null
+    const unitHit = ray.intersectObjects(
+      this.units.filter((u) => u.mesh.visible).map((u) => u.mesh),
+      false,
+    )[0]
+    if (unitHit) {
+      const unit = this.units.find((u) => u.mesh === unitHit.object)
+      if (unit) best = { kind: 'unit', unit, distance: unitHit.distance }
+    }
+    if (wrecks.length > 0) {
+      const hit = ray.intersectObjects(wrecks, true)[0]
+      if (hit && (!best || hit.distance < best.distance)) {
+        // Walk up to the registered root (wreck meshes may have child parts).
+        let obj: THREE.Object3D | null = hit.object
+        const roots = new Set(wrecks)
+        while (obj && !roots.has(obj)) obj = obj.parent
+        if (obj) best = { kind: 'wreck', object: obj, distance: hit.distance }
+      }
+    }
+    const prop = this.mapProps?.pick(ray)
+    if (prop && (!best || prop.distance < best.distance)) {
+      best = { kind: 'mapProp', mapIndex: prop.mapIndex, distance: prop.distance }
+    }
+    return best
   }
   /** Glow/bloom chain (CBloomRenderer::DoBloom @0x7F5160). */
   private bloom: BloomPipeline | null = null

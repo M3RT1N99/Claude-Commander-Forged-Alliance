@@ -68,11 +68,9 @@ The path to the real UI: [PLAN-UI.md](PLAN-UI.md); the complete 1:1 roadmap:
   (sub_612E80). Still open: Capture, point guard, capture-on-enemy,
   guard enemy chase (GetBestEnemy), ground-attack ring rotation in the
   queue, rectangle reclaim (GetReclaimablesInRect), and command markers
-  (UICommandGraph — order lines exist). Named gap: click picking
-  resolves by CATEGORY priority (units, then wrecks, then map props)
-  instead of by ray depth — with overlapping silhouettes the nearer
-  prop can lose against a unit or wreck behind it (the engine picks
-  the closest entity of any kind).
+  (UICommandGraph — order lines exist). Click picking is ONE
+  depth-sorted raycast across units, wrecks and instanced map props
+  (the closest entity of any kind wins — engine semantics).
 - **Sim findings:** units stack up at roll-off (no separation), Mex stall
   (production × LimitingRate, Cfile:953938).
 - **`src/ui/hud.ts`** is the last TS remainder (minimap image, strategic

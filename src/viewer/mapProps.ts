@@ -339,17 +339,19 @@ export class MapProps {
   private readonly zeroMatrix = new THREE.Matrix4().makeScale(0, 0, 0)
 
   /**
-   * Raycast the instanced map props; returns the scmap index of the
-   * nearest hit instance (hidden instances have zero-scale matrices and
-   * never intersect).
+   * Raycast the instanced map props; returns the scmap index and ray
+   * distance of the nearest hit instance (hidden instances have
+   * zero-scale matrices and never intersect). The distance lets the
+   * caller depth-sort against units and wrecks — the engine picks the
+   * closest entity of any kind.
    */
-  pick(raycaster: THREE.Raycaster): number | null {
+  pick(raycaster: THREE.Raycaster): { mapIndex: number; distance: number } | null {
     const hits = raycaster.intersectObjects(this.group.children, false)
     for (const hit of hits) {
       if (hit.instanceId === undefined) continue
       const table = this.slotIndex.get(hit.object as THREE.InstancedMesh)
       const mapIndex = table?.[hit.instanceId]
-      if (mapIndex !== undefined) return mapIndex
+      if (mapIndex !== undefined) return { mapIndex, distance: hit.distance }
     }
     return null
   }

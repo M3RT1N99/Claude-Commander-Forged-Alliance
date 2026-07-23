@@ -1421,16 +1421,18 @@ viewportEl.addEventListener('contextmenu', (e) => {
     return
   }
   // Otherwise the view's default order for the selection: Move onto
-  // terrain, Attack on an enemy unit, Repair on an own unfinished one.
+  // terrain, Attack on an enemy unit, Repair on an own unfinished one,
+  // Guard on an own healthy one, Reclaim on a wreck or map prop.
   const hit = viewer.pickTerrain(e.clientX, e.clientY)
   if (hit) void issueWorldCommand(hit, e.shiftKey, zielUnter(e.clientX, e.clientY))
 })
 
 /**
- * The unit under the cursor, classified for the command dispatch: an ENEMY
- * turns the default click into Attack, an OWN UNFINISHED structure into
- * Repair (resume construction), an OWN HEALTHY unit into Guard (assist,
- * dispatch 0x0F).
+ * The world object under the cursor, classified for the command dispatch:
+ * an ENEMY unit turns the default click into Attack, an OWN UNFINISHED
+ * structure into Repair (resume construction), an OWN HEALTHY unit into
+ * Guard (assist, dispatch 0x0F), a wreck or map prop into Reclaim
+ * (dispatch 0x13).
  */
 function zielUnter(clientX: number, clientY: number): {
   enemy?: number
@@ -1441,30 +1443,30 @@ function zielUnter(clientX: number, clientY: number): {
   /** A map prop (tree/rock) under the cursor — its scmap instance index. */
   reclaimMapProp?: number
 } {
-  const picked = viewer.pickUnit(clientX, clientY)
   if (!luaSim) return {}
-  if (picked) {
-    const u = luaUnits.find((x) => x.scene === picked)
-    if (u) {
-      if (u.army !== 1) return { enemy: u.id }
-      const s = luaSim.state(u.id)
-      // Repair target: unfinished (resume construction) OR finished but
-      // damaged (HP repair — same CBuildTaskHelper, Cfile:815445).
-      if (s && (s.fraction < 1 || s.health < s.maxHealth)) return { repair: u.id }
-      return { own: u.id }
-    }
+  // ONE depth-sorted raycast across units, wrecks and instanced map props —
+  // the engine picks the CLOSEST entity of any kind under the cursor.
+  const hit = viewer.pickWorld(clientX, clientY, [...propMeshes.values()])
+  if (!hit) return {}
+  if (hit.kind === 'unit') {
+    const u = luaUnits.find((x) => x.scene === hit.unit)
+    if (!u) return {}
+    if (u.army !== 1) return { enemy: u.id }
+    const s = luaSim.state(u.id)
+    // Repair target: unfinished (resume construction) OR finished but
+    // damaged (HP repair — same CBuildTaskHelper, Cfile:815445).
+    if (s && (s.fraction < 1 || s.health < s.maxHealth)) return { repair: u.id }
+    return { own: u.id }
   }
-  // No unit: props are reclaim targets (dispatch 0x13) — wrecks first
-  // (individual meshes), then the instanced map props (trees, rocks).
-  const wreck = viewer.pickAmong(clientX, clientY, [...propMeshes.values()])
-  if (wreck) {
+  if (hit.kind === 'wreck') {
+    // Props are reclaim targets (dispatch 0x13) — reverse-map the wreck
+    // mesh to its sim prop id.
     for (const [id, mesh] of propMeshes) {
-      if (mesh === wreck) return { reclaimProp: id }
+      if (mesh === hit.object) return { reclaimProp: id }
     }
+    return {}
   }
-  const mapIndex = viewer.pickMapProp(clientX, clientY)
-  if (mapIndex !== null) return { reclaimMapProp: mapIndex }
-  return {}
+  return { reclaimMapProp: hit.mapIndex }
 }
 
 /**
