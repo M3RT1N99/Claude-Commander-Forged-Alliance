@@ -33,9 +33,9 @@ export interface LuaUnitSnapshot {
   /** Erstellungs-Tick — die Build-Shader zählen ihr Alter darüber (material.x). */
   born: number
   /** The unit's active order (command graph): type + target position. */
-  order?: { t: 'Move' | 'Attack' | 'Repair' | 'BuildMobile'; x: number; z: number }
+  order?: { t: 'Move' | 'Attack' | 'Repair' | 'BuildMobile' | 'Patrol'; x: number; z: number }
   /** The full command queue, head first (CUnitCommandQueue). */
-  orders?: { t: 'Move' | 'Attack' | 'Repair' | 'BuildMobile'; x: number; z: number }[]
+  orders?: { t: 'Move' | 'Attack' | 'Repair' | 'BuildMobile' | 'Patrol'; x: number; z: number }[]
   /** Turret aim state per weapon (yaw/pitch bones, radians vs. rest pose). */
   turrets?: { b: string; y: number; pb?: string; p?: number }[]
   /** Die Armee der Unit (1-basiert) — unitsOfFocusArmy filtert danach. */
@@ -412,6 +412,10 @@ export class LuaSimClient {
   /** Guard/assist (dispatch 0x0F): follow + assist `targetId`. */
   guard(id: number, targetId: number, queue = false): void {
     this.worker.postMessage({ type: 'guard', id, targetId, queue })
+  }
+  /** Patrol (dispatch 0x10): one leg; the queue's ring rotation loops it. */
+  patrol(id: number, x: number, z: number, queue = false): void {
+    this.worker.postMessage({ type: 'patrol', id, x, z, queue })
   }
   /** Repair (dispatch 0x14): resume building the unfinished `targetId`. */
   repair(id: number, targetId: number, queue = false): void {

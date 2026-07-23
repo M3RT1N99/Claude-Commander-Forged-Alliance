@@ -46,11 +46,20 @@ Befehls-Enum: `EUnitCommandType` (faf-re `command/SSTICommandIssueData.h`).
 | 0x20 | Sacrifice | `CUnitSacrificeTask` |
 | 0x21 | Pause | `Unit::SetPaused` |
 | 0x22 | OverCharge | `CUnitFireAtTask` |
-| 0x23 | AggressiveMove | `NewMoveTask` (aggressiv) |
+| 0x23 | AggressiveMove | `CUnitPatrolTask` (one leg: Move + engage; Cfile:831100-831104) |
 | 0x24 | FormAggressiveMove | `CUnitFormAndMoveTask` (aggressiv) |
 | 0x25 | AssistMove | `CUnitAssistMoveTask` |
 | 0x26 | SpecialAction | `CUnitScriptTask` |
 | 0x27 | Dock | Carrier-Land (`IssueCarrierLandTask`) |
+
+**Reading the IDA output:** the `case UNITCOMMAND_*:` labels in this switch
+are shifted by ONE against `EUnitCommandType` (the code under `case X`
+implements X+1) — proven by `gpg::Logf("UNITCOMMAND_BuildAssist not
+implemented")` sitting under `case UNITCOMMAND_BuildMobile`
+(Cfile:830620-830622). The AggressiveMove row above was corrected through
+that shift: the case builds `Move(unit, cmd)` +
+`CUnitPatrolTask::operator new(dispatch, &goal, 1)` (Cfile:831100-831104) —
+attack-move is a single patrol leg, not a move task.
 
 Weitere Callees: `NewCallTransportCommand`, `IssueRefuelTask`,
 `IssueCallTeleportTask`, `IssueCallLandTransportTask`,

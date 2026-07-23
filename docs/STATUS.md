@@ -60,9 +60,9 @@ Der Weg zur echten UI: [PLAN-UI.md](PLAN-UI.md); der 1:1-Gesamtfahrplan:
   statt über `ScenarioUtilities.lua` (keine Armee-Gruppen, keine Props).
 - **Das Blueprint wird zweimal gelesen** — TS-Parser (Modelle/Knochen) und
   echte `LoadBlueprints()`-Pipeline. Zwei Wahrheiten.
-- **Assist läuft** (multi-builder placement + Guard auf Bauer/Fabrik);
-  ein Guard auf einen REKLAMIERENDEN Bauer assistiert noch nicht
-  (Reclaim fehlt ganz).
+- **Assist works** (multi-builder placement + guard on builders/factories);
+  guarding a RECLAIMING builder does not assist yet (reclaim is missing
+  entirely).
 - **Ökonomie-Lua-API teils No-Op:** `SetProductionPerSecond*`,
   `SetConsumptionPerSecond*`, `SetBuildRate` schreiben noch nichts in die
   Engine-Ökonomie (Werte kommen nur aus dem Blueprint).

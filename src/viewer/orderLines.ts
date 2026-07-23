@@ -20,7 +20,7 @@ export interface OrderLineEntry {
   unitId: number
   /** Segment index within the unit's command queue (0 = active order). */
   seg?: number
-  type: 'Move' | 'Attack' | 'Repair' | 'BuildMobile'
+  type: 'Move' | 'Attack' | 'Repair' | 'BuildMobile' | 'Patrol'
   from: { x: number; y: number; z: number }
   to: { x: number; y: number; z: number }
 }
@@ -38,6 +38,10 @@ const PARAMS: Record<
   // waypoint repair_btn_up.dds — Repair shares it.
   BuildMobile: { color: 0xffff00, alpha: 0xdd / 255, waypoint: 'repair_btn_up' },
   Repair: { color: 0xffff00, alpha: 0xdd / 255, waypoint: 'repair_btn_up' },
+  // UNITCOMMAND_Patrol (:82-89): inherits default_MoveColors ('dd00ffff');
+  // its own line texture (orderline_arrow02, anim 0.25) is a named gap —
+  // the waypoint sprite is the visible difference for now.
+  Patrol: { color: 0x00ffff, alpha: 0xdd / 255, waypoint: 'patrol_btn_up' },
 }
 
 const LINE_WIDTH = 0.3 // approximation (renderer constant not recovered)

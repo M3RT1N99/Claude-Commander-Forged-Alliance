@@ -806,6 +806,12 @@ local function __startOrder(unitId, cmd)
   if cmd.type == 'Move' then
     u:GetNavigator():SetGoal({ cmd.x, 0, cmd.z })
     return true
+  elseif cmd.type == 'Patrol' then
+    -- One patrol leg IS a move: CUnitPatrolTask sets exactly one nav goal
+    -- (TaskTick, Cfile:845598-845601); the LOOP lives in the queue's ring
+    -- rotation, not in the task.
+    u:GetNavigator():SetGoal({ cmd.x, 0, cmd.z })
+    return true
   elseif cmd.type == 'Attack' then
     if cmd.gx then
       -- Ground attack: the SAME task with an AITARGET_Ground target.
@@ -848,6 +854,7 @@ function __ordersAdvance(unitId)
 end
 
 --- The queue insert (UNIT_IssueCommand, Cfile:1007575-1007589).
+__orderSerial = 0
 function __issueOrder(unitId, cmd, clear)
   if clear == nil then clear = true end -- IssueUnitCommand default (Cfile:1265640)
   local u = __units[unitId]
@@ -864,10 +871,58 @@ function __issueOrder(unitId, cmd, clear)
   elseif #q >= 500 then
     return -- queue cap (Cfile:1007566-1007569)
   end
-  q[#q + 1] = cmd
+  -- mInstanceSerial: every command gets an increasing stamp; the patrol
+  -- insertion rule below needs it after the ring has rotated.
+  __orderSerial = __orderSerial + 1
+  cmd.serial = __orderSerial
+  -- AddCommandToQueue patrol rule (CUnitCommandQueue.cpp:446, sim-core.md
+  -- :208-209): a new Patrol appended while the HEAD is Patrol and more
+  -- than one command exists goes BEFORE the element with the smallest
+  -- serial — keeps the loop in original order after rotation.
+  local head = __orderActive[unitId] or q[1]
+  local inserted = false
+  if not clear and cmd.type == 'Patrol' and head and head.type == 'Patrol' then
+    -- Find the waiting element with the smallest serial; if it is older
+    -- than the RUNNING command, the ring has rotated and the new point
+    -- goes before it (else appending is cyclically equivalent).
+    local activeSerial = __orderActive[unitId] and (__orderActive[unitId].serial or 0) or math.huge
+    local at, smallest = nil, nil
+    for i, e in ipairs(q) do
+      if smallest == nil or (e.serial or 0) < smallest then
+        smallest, at = e.serial or 0, i
+      end
+    end
+    if at and smallest < activeSerial then
+      table.insert(q, at, cmd)
+      inserted = true
+    end
+  end
+  if not inserted then q[#q + 1] = cmd end
   -- The engine starts the head on the next TaskTick; with nothing active
   -- we start it now (same beat).
   if not __orderActive[unitId] then __ordersAdvance(unitId) end
+end
+
+--- Patrol engagement (CUnitPatrolTask::FindTarget, Cfile:845090-845235):
+--- the best enemy within bp.AI.GuardScanRadius becomes a full attack
+--- subtask (Cfile:845567-845585). DEVIATION: the original iterates the
+--- unit's recon blips (mBlipsInRange) — our sim has no intel system yet,
+--- so we scan units directly.
+local function patrolFindEnemy(u)
+  if not u.__weapons or not u.__weapons[1] then return nil end
+  local radius = (u.__bp and u.__bp.AI and u.__bp.AI.GuardScanRadius) or 25
+  local p = u.__pos
+  local best, bestD2 = nil, radius * radius
+  for id, other in pairs(__units) do
+    if not other.__dead and not other.__destroyQueued and not other.__beingBuilt
+      and IsEnemy(u.__army or 1, other.__army or 1) then
+      local q = other.__pos
+      local dx, dz = q[1] - p[1], q[3] - p[3]
+      local d2 = dx * dx + dz * dz
+      if d2 <= bestD2 then best, bestD2 = id, d2 end
+    end
+  end
+  return best
 end
 
 --- Per-beat completion detection: pop the head when its work is done and
@@ -882,6 +937,25 @@ function __ordersTick()
       local done = false
       if cmd.type == 'Move' then
         done = not u.__goal -- motion.lua sets __goal = false on arrival
+      elseif cmd.type == 'Patrol' then
+        -- Engage on the way; otherwise the leg completes inside the 1x1
+        -- goal cell (the task's SNavGoal box, Cfile:845637-845650) and a
+        -- navigator idle AWAY from it (after a kill) re-issues the goal
+        -- (TaskTick idle path, Cfile:845598-845601).
+        if not __attackOrders[unitId] then
+          local enemy = patrolFindEnemy(u)
+          if enemy then
+            __attackOrders[unitId] = enemy
+          else
+            local p = u.__pos
+            local dx, dz = cmd.x - p[1], cmd.z - p[3]
+            if dx * dx + dz * dz <= 1.0 then
+              done = true
+            elseif not u.__goal then
+              u:GetNavigator():SetGoal({ cmd.x, 0, cmd.z })
+            end
+          end
+        end
       elseif cmd.type == 'Attack' then
         done = __attackOrders[unitId] == nil -- __attackTick clears dead targets
       elseif cmd.type == 'Repair' then
@@ -891,6 +965,13 @@ function __ordersTick()
       end
       if done then
         __orderActive[unitId] = nil
+        -- Ring rotation (dispatcher TaskTick, sim-core.md:243-252): a
+        -- finished Patrol goes to the BACK of a non-empty queue; a single
+        -- patrol point just completes (RemoveFirstCommandFromQueue).
+        if cmd.type == 'Patrol' then
+          local q = __orders[unitId]
+          if q and q[1] then q[#q + 1] = cmd end
+        end
         __ordersAdvance(unitId)
       end
     end
@@ -916,6 +997,13 @@ end
 --- clear=false (Shift) it queues behind the running order.
 function __dispatchMove(unitId, x, z, clear)
   __issueOrder(unitId, { type = 'Move', x = x, z = z }, clear)
+end
+
+--- Patrol (dispatch 0x10, CUnitPatrolTask): ONE leg per command — the
+--- loop is the queue's ring rotation, engagement happens on the way
+--- (see __ordersTick). Shift-added points use the serial insertion rule.
+function __dispatchPatrol(unitId, x, z, clear)
+  __issueOrder(unitId, { type = 'Patrol', x = x, z = z }, clear)
 end
 
 --- Attack (Dispatch 0x0A, CAttackTargetTask): die Order merken — der

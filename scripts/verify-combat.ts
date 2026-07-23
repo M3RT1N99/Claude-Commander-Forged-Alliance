@@ -218,14 +218,14 @@ console.log('\n== Gelenkte Munition: die Zealot-Rakete dreht auf ein seitliches 
   // (10 m in +X, 30 m voraus). Geradeaus (Tracking aus) verfehlt sie um 10 m —
   // mit UpdateTracking dreht die Nase ein und trifft. Der Abschusswinkel ist
   // realistisch: im Spiel zielt die WAFFE vor dem Abschuss grob aufs Ziel.
-  const schuetzeId = spawnLuaUnit(host, 'uel0201', { x: 200, y: 20, z: 90 }, 1)
+  const gunnerId = spawnLuaUnit(host, 'uel0201', { x: 200, y: 20, z: 90 }, 1)
   const zielId = spawnLuaUnit(host, 'uel0201', { x: 210, y: 20, z: 130 }, 2)
   const fliege = (tracking: boolean): string =>
     host.eval(`
-      local schuetze = __units[${schuetzeId}]
+      local gunner = __units[${gunnerId}]
       local ziel = __units[${zielId}]
       local p = __projCreate(
-        schuetze, '/projectiles/aaazealotmissile01/aaazealotmissile01_proj.bp',
+        gunner, '/projectiles/aaazealotmissile01/aaazealotmissile01_proj.bp',
         { 200, 22, 100 }, __orientFromDir({ 0, 0, 1 }), 30, 100, 0, 'Normal', ziel, true
       )
       p.__leadTarget = true
@@ -256,8 +256,8 @@ console.log('\n== CollisionBeam: der Dauerstrahl des Cybran-T2-Turms ==')
   const turm = spawnLuaUnit(host, 'urb2301', { x: 300, y: 20, z: 100 }, 1)
   // The victim stands SIDEWAYS (+X): the turret must slew ~90 degrees
   // before the fire gate (weapon->mCanFire) lets the beam start.
-  const opfer = spawnLuaUnit(host, 'uel0201', { x: 312, y: 20, z: 100 }, 2)
-  check(turm > 0 && opfer > 0, `Turm ${turm} (Cybran T2 PD) und Opfer ${opfer}, 12 m seitlich`)
+  const victim = spawnLuaUnit(host, 'uel0201', { x: 312, y: 20, z: 100 }, 2)
+  check(turm > 0 && victim > 0, `Turm ${turm} (Cybran T2 PD) und Opfer ${victim}, 12 m seitlich`)
   const beams = Number(host.eval('return #__collisionBeams'))
   check(beams >= 1, `${beams} CollisionBeam-Entity(s) beim Waffen-OnCreate erzeugt`)
   let beamAn = false
@@ -268,7 +268,7 @@ console.log('\n== CollisionBeam: der Dauerstrahl des Cybran-T2-Turms ==')
     if (!beamAn) {
       beamAn = host.eval('for _, b in ipairs(__collisionBeams) do if b:IsEnabled() then return true end end return false') === true
     }
-    const hp = Number(host.eval(`local u = __units[${opfer}] return (u and u.__health) or 0`))
+    const hp = Number(host.eval(`local u = __units[${victim}] return (u and u.__health) or 0`))
     if (t === 0) hpStart = hp
     if (hp < hpStart && hp >= 0) {
       schaden = true
@@ -515,26 +515,26 @@ console.log('\n== Befehls-Dispatch: Stop, Move-bricht-Bau, Attack ==')
   // Cfile:812553-812563): the tank closes to weapon range, the weapon takes
   // the POSITION as its target and fires; the order never self-completes
   // (HasTarget stays true for Ground, Cfile:800284).
-  const schuetze = spawnLuaUnit(host, 'uel0201', { x: 400, y: 20, z: 340 }, 1)
-  host.eval(`__dispatchAttackGround(${schuetze}, 440, 340)`)
-  let bodenZiel = false
-  let gefeuert = false
-  for (let t = 0; t < 300 && !(bodenZiel && gefeuert); t++) {
+  const gunner = spawnLuaUnit(host, 'uel0201', { x: 400, y: 20, z: 340 }, 1)
+  host.eval(`__dispatchAttackGround(${gunner}, 440, 340)`)
+  let groundTarget = false
+  let fired = false
+  for (let t = 0; t < 300 && !(groundTarget && fired); t++) {
     beat(engine)
-    if (!bodenZiel) {
-      bodenZiel =
+    if (!groundTarget) {
+      groundTarget =
         host.eval(
-          `local u = __units[${schuetze}] if not u then return false end
+          `local u = __units[${gunner}] if not u then return false end
            for _, w in ipairs(u.__weapons or {}) do
              if w.__targetGround and w.__targetGround[1] == 440 then return true end
            end
            return false`,
         ) === true
     }
-    if (bodenZiel && !gefeuert) {
-      gefeuert =
+    if (groundTarget && !fired) {
+      fired =
         host.eval(
-          `local u = __units[${schuetze}] if not u then return false end
+          `local u = __units[${gunner}] if not u then return false end
            for _, w in ipairs(u.__weapons or {}) do
              if (w.__fireClock or 0) > 0 then return true end
            end
@@ -542,25 +542,25 @@ console.log('\n== Befehls-Dispatch: Stop, Move-bricht-Bau, Attack ==')
         ) === true
     }
   }
-  check(bodenZiel, 'Ground attack: the weapon takes the position target (AITARGET_Ground)')
-  check(gefeuert, 'Ground attack: the weapon fires at the ground (fire clock running)')
+  check(groundTarget, 'Ground attack: the weapon takes the position target (AITARGET_Ground)')
+  check(fired, 'Ground attack: the weapon fires at the ground (fire clock running)')
   check(
-    host.eval(`return __attackOrders[${schuetze}] ~= nil`) === true,
+    host.eval(`return __attackOrders[${gunner}] ~= nil`) === true,
     'Ground attack never self-completes (HasTarget true for Ground, Cfile:800284)',
   )
   {
     const rows = host.pull<{ id: number; order?: { t: string; x: number; z: number } }[]>(
       '__readAllUnitsJson()',
     )
-    const s = rows.find((r) => r.id === schuetze)
+    const s = rows.find((r) => r.id === gunner)
     check(
       s?.order?.t === 'Attack' && s.order.x === 440,
       `Snapshot carries the ground-attack order for the command graph (${JSON.stringify(s?.order)})`,
     )
   }
-  host.eval(`__dispatchStop(${schuetze})`)
+  host.eval(`__dispatchStop(${gunner})`)
   check(
-    host.eval(`return __attackOrders[${schuetze}] == nil`) === true,
+    host.eval(`return __attackOrders[${gunner}] == nil`) === true,
     'Stop ends the ground attack (queue + order wiped)',
   )
 
@@ -569,50 +569,50 @@ console.log('\n== Befehls-Dispatch: Stop, Move-bricht-Bau, Attack ==')
   // a guarded factory shares its build queue (sub_6127F0); the order ends
   // when the guarded unit dies (Cfile:839365-839385).
   {
-    const bauer = spawnLuaUnit(host, 'uel0001', { x: 600, y: 20, z: 300 }, 1)
-    const helfer = spawnLuaUnit(host, 'uel0001', { x: 606, y: 20, z: 300 }, 1)
-    const baustelle = Number(
+    const builderAcu = spawnLuaUnit(host, 'uel0001', { x: 600, y: 20, z: 300 }, 1)
+    const helperAcu = spawnLuaUnit(host, 'uel0001', { x: 606, y: 20, z: 300 }, 1)
+    const buildSite = Number(
       host.eval(
         `local id = __spawnBuildSite('/units/ueb0101/ueb0101_script.lua', 'ueb0101', 603, 20, 303, 1) return id`,
       ),
     )
-    host.eval(`__issueBuildTask(${bauer}, ${baustelle}, 'MobileBuild')`)
-    host.eval(`__dispatchGuard(${helfer}, ${bauer})`)
+    host.eval(`__issueBuildTask(${builderAcu}, ${buildSite}, 'MobileBuild')`)
+    host.eval(`__dispatchGuard(${helperAcu}, ${builderAcu})`)
     let joined = false
     for (let t = 0; t < 40 && !joined; t++) {
       beat(engine)
       joined =
         host.eval(
           `for _, task in pairs(__buildTasks) do
-             if task.builder == ${helfer} and task.target == ${baustelle} then return true end
+             if task.builder == ${helperAcu} and task.target == ${buildSite} then return true end
            end
            return false`,
         ) === true
     }
     check(joined, 'Guard on a builder joins its build (guard chain -> repair task, sub_612BB0)')
     check(
-      host.eval(`return __units[${helfer}]:IsUnitState('Guarding')`) === true,
+      host.eval(`return __units[${helperAcu}]:IsUnitState('Guarding')`) === true,
       "IsUnitState('Guarding') answers from the real guard order (ctor bit 0x10, Cfile:836995)",
     )
     check(
       host.eval(
-        `local g = __units[${helfer}]:GetGuardedUnit() return g ~= nil and g.__id == ${bauer}`,
+        `local g = __units[${helperAcu}]:GetGuardedUnit() return g ~= nil and g.__id == ${builderAcu}`,
       ) === true,
       'GetGuardedUnit returns the guarded unit (mGuardedUnit, Cfile:839316-839333)',
     )
     check(
       host.eval(
-        `local gs = __units[${bauer}]:GetGuards() return table.getn(gs) == 1 and gs[1].__id == ${helfer}`,
+        `local gs = __units[${builderAcu}]:GetGuards() return table.getn(gs) == 1 and gs[1].__id == ${helperAcu}`,
       ) === true,
       'GetGuards lists the assisting unit (reverse of the guard orders)',
     )
-    host.eval(`__units[${bauer}].__dead = true`)
+    host.eval(`__units[${builderAcu}].__dead = true`)
     beat(engine)
     check(
-      host.eval(`return __guardOrders[${helfer}] == nil`) === true,
+      host.eval(`return __guardOrders[${helperAcu}] == nil`) === true,
       'Guard ends when the guarded unit dies (TaskTick -1, Cfile:839365-839385)',
     )
-    host.eval(`__dispatchStop(${helfer})`)
+    host.eval(`__dispatchStop(${helperAcu})`)
   }
   {
     // Factory queue sharing: the guarding idle factory pulls ONE item off
@@ -640,6 +640,93 @@ console.log('\n== Befehls-Dispatch: Stop, Move-bricht-Bau, Attack ==')
       ) === true,
       'Exactly one item is pulled per idle re-check (count decrement, Cfile:838030-838049)',
     )
+  }
+  {
+    // PATROL (dispatch 0x10, CUnitPatrolTask): one leg per command; the
+    // LOOP is the queue's ring rotation (sim-core.md:243-252); shift-adds
+    // after rotation insert before the smallest serial (CUnitCommandQueue
+    // .cpp:446); enemies within AI.GuardScanRadius are engaged on the way
+    // (FindTarget, Cfile:845090-845235).
+    const patroller = spawnLuaUnit(host, 'uel0201', { x: 700, y: 20, z: 300 }, 1)
+    host.eval(`__dispatchPatrol(${patroller}, 708, 300)`)
+    host.eval(`__dispatchPatrol(${patroller}, 716, 300, false)`)
+    host.eval(`__dispatchPatrol(${patroller}, 708, 308, false)`)
+    let rotated = false
+    for (let t = 0; t < 200 && !rotated; t++) {
+      beat(engine)
+      rotated =
+        host.eval(
+          `local a = __orderActive[${patroller}]
+           local q = __orders[${patroller}] or {}
+           if not a or a.x ~= 716 then return false end
+           return q[#q] ~= nil and q[#q].x == 708 and q[#q].z == 300`,
+        ) === true
+    }
+    check(rotated, 'Patrol ring: the finished leg rotates to the back of the queue (sim-core.md:250)')
+    check(
+      host.eval(
+        `local n = __orderActive[${patroller}] and 1 or 0
+         return n + #(__orders[${patroller}] or {}) == 3`,
+      ) === true,
+      'Patrol loop never shrinks (3 points stay 3 commands)',
+    )
+    // Shift-add after rotation: the new point goes BEFORE the oldest
+    // element (smallest serial) — between the last point and the loop seam.
+    host.eval(`__dispatchPatrol(${patroller}, 716, 308, false)`)
+    check(
+      host.eval(
+        `local q = __orders[${patroller}] or {}
+         for i, e in ipairs(q) do
+           if e.x == 716 and e.z == 308 then
+             local nxt = q[i + 1]
+             return nxt ~= nil and nxt.x == 708 and nxt.z == 300
+           end
+         end
+         return false`,
+      ) === true,
+      'Shift-added patrol point inserts before the smallest serial (CUnitCommandQueue.cpp:446)',
+    )
+    host.eval(`__dispatchStop(${patroller})`)
+    check(
+      host.eval(
+        `return __orderActive[${patroller}] == nil and (__orders[${patroller}] == nil or __orders[${patroller}][1] == nil)`,
+      ) === true,
+      'Stop wipes the patrol loop',
+    )
+
+    // Single patrol point: completes and empties the queue (no self-loop,
+    // RemoveFirstCommandFromQueue, sim-core.md:251).
+    const solo = spawnLuaUnit(host, 'uel0201', { x: 700, y: 20, z: 330 }, 1)
+    host.eval(`__dispatchPatrol(${solo}, 706, 330)`)
+    let soloDone = false
+    for (let t = 0; t < 200 && !soloDone; t++) {
+      beat(engine)
+      soloDone = host.eval(`return __orderActive[${solo}] == nil`) === true
+    }
+    check(soloDone, 'A single patrol point completes instead of looping (sim-core.md:251)')
+
+    // Engage on the way: an enemy inside AI.GuardScanRadius becomes an
+    // attack subtask; after the kill the leg re-issues its goal.
+    const sentry = spawnLuaUnit(host, 'uel0201', { x: 740, y: 20, z: 300 }, 1)
+    const victim = spawnLuaUnit(host, 'uel0201', { x: 752, y: 20, z: 306 }, 2)
+    host.eval(`__dispatchPatrol(${sentry}, 780, 300)`)
+    let engaged = false
+    let resumed = false
+    for (let t = 0; t < 400 && !resumed; t++) {
+      beat(engine)
+      if (!engaged) {
+        engaged = host.eval(`return __attackOrders[${sentry}] == ${victim}`) === true
+      } else {
+        resumed =
+          host.eval(
+            `local o = __units[${victim}]
+             local a = __orderActive[${sentry}]
+             return (o == nil or o.__dead == true) and a ~= nil and a.type == 'Patrol'`,
+          ) === true
+      }
+    }
+    check(engaged, 'Patrol engages the enemy inside AI.GuardScanRadius (FindTarget, Cfile:845090)')
+    check(resumed, 'After the kill the patrol leg continues (idle re-issue, Cfile:845598-845601)')
   }
   {
     // Browser finding: an ENGINEER guarding a FINISHED factory must join

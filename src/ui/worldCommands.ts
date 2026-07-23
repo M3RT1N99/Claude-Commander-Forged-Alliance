@@ -43,6 +43,8 @@ export interface WorldCommandSim {
   repair(id: number, targetId: number, queue?: boolean): void
   /** Guard/assist (dispatch 0x0F, CUnitGuardTask): follow + assist the target. */
   guard(id: number, targetId: number, queue?: boolean): void
+  /** Patrol (dispatch 0x10, CUnitPatrolTask): one leg, ring-rotated queue. */
+  patrol(id: number, x: number, z: number, queue?: boolean): void
   /**
    * Der SAMMELPUNKT einer Fabrik (IssueFactoryRallyPoint, Cfile:1008266). Er ist
    * kein Bewegungsbefehl: die Fabrik bleibt stehen, nur ihre frischen Einheiten
@@ -153,8 +155,29 @@ export async function worldClick(
       Clear: !opts.queue,
     })
     return opts.enemyTargetId === undefined
-      ? `Attack (${n}) → Boden ${hit.x.toFixed(1)}, ${hit.z.toFixed(1)}`
-      : `Attack (${n}) → Unit ${opts.enemyTargetId}`
+      ? `Attack (${n}) → ground ${hit.x.toFixed(1)}, ${hit.z.toFixed(1)}`
+      : `Attack (${n}) → unit ${opts.enemyTargetId}`
+  }
+
+  // The Patrol button/hotkey (orders.lua:699, P/Shift-P via
+  // StartCommandMode order RULEUCC_Patrol): every click is one patrol
+  // waypoint; held Shift keeps the mode alive (commandmode.lua:81-85) and
+  // the queue's ring rotation loops the points (sim-core.md:243-252).
+  if (cm.mode === 'order' && cm.name === 'RULEUCC_Patrol') {
+    let n = 0
+    for (const u of selection) {
+      if (u.canMove) {
+        sim.patrol(u.id, hit.x, hit.z, opts.queue)
+        n++
+      }
+    }
+    if (n === 0) return null
+    onCommandIssued(host, {
+      CommandType: 'Patrol',
+      Position: { x: hit.x, y: elevation(hit.x, hit.z), z: hit.z },
+      Clear: !opts.queue,
+    })
+    return `Patrol (${n}) → ${hit.x.toFixed(0)}, ${hit.z.toFixed(0)}`
   }
 
   // The Guard button (orders.lua, RULEUCC_Guard): a click on a unit guards
@@ -185,7 +208,7 @@ export async function worldClick(
       Position: { x: hit.x, y: elevation(hit.x, hit.z), z: hit.z },
       Clear: !opts.queue,
     })
-    return `Guard-Punkt → Move ${hit.x.toFixed(0)}, ${hit.z.toFixed(0)}`
+    return `Guard point → move ${hit.x.toFixed(0)}, ${hit.z.toFixed(0)}`
   }
 
   if (cm.mode === 'build' || cm.mode === 'buildanchored') {

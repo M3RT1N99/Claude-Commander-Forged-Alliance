@@ -243,7 +243,7 @@ local function orderList(id, u)
   if ot then out = { { t = ot, x = ox, z = oz } } end
   for _, cmd in ipairs((__orders and __orders[id]) or {}) do
     local x, z
-    if cmd.type == 'Move' then
+    if cmd.type == 'Move' or cmd.type == 'Patrol' then
       x, z = cmd.x, cmd.z
     elseif cmd.gx then
       x, z = cmd.gx, cmd.gz -- queued ground attack
