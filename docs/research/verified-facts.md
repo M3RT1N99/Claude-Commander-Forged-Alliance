@@ -260,6 +260,52 @@ Full mapping: func_UnitCommandCapToCommandType
 - **Boot vulnerability found:** `repr` is a global from `/lua/system/repr.lua`
   (globalinit.lua:19, right after utils.lua) — the sim VM didn't load it, and
   `simcallbacks.lua:18` died because of `repr == nil` instead of "No callback named...".
+- **`GetUnitCommandData(units)` (cfunc, Cfile:1264504-1264815)** returns
+  `orders, toggles, buildableCategories`. The third value is **always** an
+  EntityCategory object, **never nil** — even for an empty selection the two
+  AssignNewTable calls (Cfile:1264740/:1264765) plus `func_NewEntityCategory` run
+  after the unit loop and it does `return 3` (Cfile:1264788-1264808). The
+  buildable category accumulates across the selection as an **INTERSECTION**
+  (`BVIntSet::IntersectWith`, Cfile:1264719: the first builder copies, each
+  further one intersects; per unit it also subtracts already-queued categories,
+  Cfile:1264659-1264712) — **not a union**. So the build menu shows only what ALL
+  selected units can build; a non-builder in the selection empties it.
+- **`GetEconomyTotals()` returns SIX subtables** (Cfile:1264359-1264364):
+  `stored, income, reclaimed, lastUseRequested, lastUseActual, maxStorage`, each
+  keyed MASS/ENERGY, copied raw per tick (`qmemcpy 0x38`). `reclaimed` is the
+  third pair (`mTotals.mReclaimed`); reclaim is written to **two** places —
+  storage AND this counter (CUnitReclaimTask, Cfile:848614-848639) — and is
+  **not** folded into income. The UI economy.lua reads only five of them.
+- **`IN_ParseKeyModifiers` (Cfile:1259566-1259700):** tokens split on `-` are
+  **prepended** (Cfile:1261100-1261138), so the vector reverses and `start[0]` =
+  the **last** written token = the key name; the rest are modifiers with bits
+  Shift=0x80000000, Ctrl=0x40000000, Alt=0x20000000 (Cfile:1259641/54/67). (The
+  faf-re reconstruction had this reversed — the raw decomp is authoritative.)
+- **`SetCurrentFactoryForQueueDisplay(unit)` returns nil for an empty/absent
+  queue** (`AssignNil`, Cfile:1257091), never an empty table — construction.lua:1655
+  branches `if currentCommandQueue then SetQueueGrid else ClearQueueGrid`.
+- **`GetUnitCommandFromCommandCap(cap)` never throws on an unknown cap:** the
+  cfunc ignores SetLexical's return (Cfile:1264874), the enum stays RULEUCC_None,
+  and `UnitCommandCapToCommandType` yields `'None'` (Cfile:1242230-1242328). Only
+  a non-string arg is a TypeError.
+- **`SelectUnits`/`AddSelectUnits` (Cfile:1361484-1361655)** filter IsDead **and
+  DestroyQueued**, keep only `IsSelectable()` units, and substitute a selectable
+  transport/dock parent (category TRANSPORTATION) for a non-selectable unit
+  (Cfile:1361497-1361534). The apply itself is `CWldSession::SetSelection`.
+- **The UI→sim command seam crosses as strings only because of `CMarshaller`:**
+  ProcessInfoPair carries (int entityId, string key, string value)
+  (Cfile:998503/997049). SetFireState sends the lexical string ('ReturnFire'/…),
+  ToggleScriptBit a decimal bit string, SetPaused "true"/"false" — an
+  int→string→int round-trip forced by the network protocol, not semantics.
+  `ToggleScriptBit` also guards: it dispatches only when the unit's actual bit ==
+  the passed curState (Cfile:1360311); `cfunc_SetPausedL` = "Pause builders in
+  this list" (per-unit mIsPaused, halts production — distinct from the whole-world
+  `SessionRequestPause`).
+- **`Unit:TestCommandCaps` in the engine tests the blueprint's TOGGLE caps**
+  (mGeneral.mToggleCaps, Cfile:975662-975663) — an apparent copy/paste quirk for
+  a "CommandCaps" test. UnitAttributes seeds the runtime command mask from
+  `bp.General.CommandCaps` (Cfile:949126); AddCommandCap `|= bit` (Cfile:975473),
+  RemoveCommandCap `&= ~bit` (Cfile:975542), RestoreCommandCaps resets to blueprint.
 
 ## Guided ammunition (projectile tracking — decomp + faf-re, all documented)
 
