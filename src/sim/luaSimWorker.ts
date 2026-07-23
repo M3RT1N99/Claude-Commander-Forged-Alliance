@@ -64,6 +64,12 @@ type InMsg =
   // sSimDriver->ProcessInfo(entityId, "SetFireState", value)). EFireState
   // Cfile:702842-702850: ReturnFire=0, HoldFire=1, HoldGround=2.
   | { type: 'fireState'; id: number; state: number }
+  // ToggleScriptBit (cfunc_ToggleScriptBitL): desired bit state; the sim flips
+  // it via Unit:SetScriptBit (guards + fires OnScriptBitSet/Clear, moho.lua:426).
+  | { type: 'scriptBit'; id: number; bit: number; value: boolean }
+  // Per-unit SetPaused (cfunc_SetPausedL "Pause builders in this list") —
+  // DISTINCT from the whole-world 'pause' above (that halts the beat).
+  | { type: 'unitPause'; id: number; paused: boolean }
   // Der Sammelpunkt einer Fabrik (IssueFactoryRallyPoint, Cfile:1008266) — KEIN
   // Bewegungsbefehl: die Fabrik bleibt stehen.
   | { type: 'rally'; id: number; x: number; y: number; z: number }
@@ -259,6 +265,14 @@ ctx.onmessage = async (e: MessageEvent<InMsg>): Promise<void> => {
     // No task, no queue: fire state is unit state, not a command
     // (Unit::SetFireState — weapons read it every tick, weapons.lua:89/229).
     host.eval(`local u=__units[${msg.id}]; if u then u:SetFireState(${msg.state}) end`)
+  } else if (msg.type === 'scriptBit') {
+    // ToggleScriptBit: apply the DESIRED state; Unit:SetScriptBit guards and
+    // fires OnScriptBitSet/Clear (shields, weapon hold, stealth, intel, cloak).
+    host.eval(`local u=__units[${msg.id}]; if u then u:SetScriptBit(${msg.bit}, ${msg.value ? 'true' : 'false'}) end`)
+  } else if (msg.type === 'unitPause') {
+    // Per-unit SetPaused: halts this builder/factory's production only
+    // (build.lua gates __buildCollect/__factoryTick on u.__paused).
+    host.eval(`local u=__units[${msg.id}]; if u then u:SetPaused(${msg.paused ? 'true' : 'false'}) end`)
   }
 }
 
@@ -355,6 +369,7 @@ function tickAndPost(): void {
       mass: a.mass, massStorage: a.maxMass, massIncome: a.incomeMass, massExpense: a.expenseMass,
       energy: a.energy, energyStorage: a.maxEnergy, energyIncome: a.incomeEnergy, energyExpense: a.expenseEnergy,
       massRequested: a.requestedMass, energyRequested: a.requestedEnergy,
+      reclaimMass: a.reclaimMass, reclaimEnergy: a.reclaimEnergy,
     },
   })
 }

@@ -127,6 +127,12 @@ export class ArmyEconomy {
   /** Demand before throttling (brain:GetEconomyRequested). */
   requestedMass = 0
   requestedEnergy = 0
+  // Reclaim income this beat — kept separate from income (mTotals.mReclaimed,
+  // the third pair in SSTIArmyVariableData, Cfile:1016010-1016024). The engine
+  // writes reclaim to TWO places: storage AND this counter (Cfile:848614-848639);
+  // reclaimed is NOT folded into income. Kept per second like income/expense.
+  reclaimMass = 0
+  reclaimEnergy = 0
 
   private readonly units = new Map<number, UnitEcon>()
   /** Transiente Bau-Requests (pro Tick vom Bau-System gesetzt). */
@@ -165,6 +171,12 @@ export class ArmyEconomy {
 
   /** Ein Wirtschafts-Tick (im Sim-Beat vor der Thread-Stage). */
   tick(): void {
+    // Reclaim is a per-beat counter (mReclaimed, ctor-init 0, Cfile:1016016):
+    // reset it each tick. The reclaim grants run in phase 4 (AFTER this tick()
+    // in phase 2, src/lua/engine.ts:106-136); the end-of-beat snapshot sees
+    // exactly this beat's reclaim.
+    this.reclaimMass = 0
+    this.reclaimEnergy = 0
     let prodM = 0
     let prodE = 0
     let maxM = 0
@@ -237,6 +249,17 @@ export class ArmyEconomy {
   give(res: Res, amount: number): void {
     if (res === 'MASS') this.mass = f(Math.min(Math.max(this.mass + amount, 0), this.maxMass))
     else this.energy = f(Math.min(Math.max(this.energy + amount, 0), this.maxEnergy))
+  }
+
+  /**
+   * This tick's reclaim grant (mass/energy per tick) — accumulated separately
+   * from income as a per-second rate (like income/expense, /DT). Storage is
+   * still filled by `give()`/GiveResource; this is ONLY the reclaimed display
+   * counter (the engine writes to both places, Cfile:848614-848639). Reset in tick().
+   */
+  addReclaim(massPerTick: number, energyPerTick: number): void {
+    this.reclaimMass = f(this.reclaimMass + massPerTick / DT)
+    this.reclaimEnergy = f(this.reclaimEnergy + energyPerTick / DT)
   }
 
   /** brain:GetEconomyUsage(res) — actual spend per second (after throttling). */
@@ -340,6 +363,13 @@ export function installEconomy(host: LuaHost, mgr: EconomyManager): void {
   // Startwerte — nicht aus einer TS-Konstante.
   host.setGlobal('__econGive', (army: number, res: string, amount: number) => {
     mgr.army(army).give(res.toUpperCase() === 'MASS' ? 'MASS' : 'ENERGY', amount)
+  })
+  // This tick's reclaim grant into the separate reclaimed counter (on top of
+  // the storage credit via __econGive) — the engine writes to both places
+  // (Cfile:848614-848639). Mass/energy per tick; addReclaim converts to the
+  // per-second rate.
+  host.setGlobal('__econReclaim', (army: number, mass: number, energy: number) => {
+    mgr.army(army).addReclaim(mass, energy)
   })
   host.setGlobal('__econStored', (army: number, res: string) => mgr.army(army).stored((res === 'MASS' ? 'MASS' : 'ENERGY')))
   host.setGlobal('__econStoredRatio', (army: number, res: string) => mgr.army(army).storedRatio(res === 'MASS' ? 'MASS' : 'ENERGY'))

@@ -42,6 +42,9 @@ export interface LuaUnitSnapshot {
   fireState?: number
   /** Guarded unit id (0 = none) — mUnit->mGuardedUnit mirrored per beat. */
   guard?: number
+  /** Effective command-cap mask (UnitAttributes::commandCapsMask) — the UI
+   *  mirror follows runtime Add/RemoveCommandCap through this sync. */
+  caps?: number
   /** Erstellungs-Tick — die Build-Shader zählen ihr Alter darüber (material.x). */
   born: number
   /** The unit's active order (command graph): type + target position. */
@@ -474,6 +477,16 @@ export class LuaSimClient {
   /** SetFireState (cfunc_SetFireStateL → sim driver ProcessInfo, ui-globals.lua:617). */
   setFireState(id: number, state: number): void {
     this.worker.postMessage({ type: 'fireState', id, state })
+  }
+  /** ToggleScriptBit (cfunc_ToggleScriptBitL): the UI sends the DESIRED bit
+   *  state; the sim flips it via Unit:SetScriptBit (fires OnScriptBitSet/Clear). */
+  setScriptBit(id: number, bit: number, value: boolean): void {
+    this.worker.postMessage({ type: 'scriptBit', id, bit, value })
+  }
+  /** Per-unit SetPaused (cfunc_SetPausedL): pause a builder/factory's
+   *  production — DISTINCT from the whole-world session pause (`setPaused`). */
+  setUnitPaused(id: number, paused: boolean): void {
+    this.worker.postMessage({ type: 'unitPause', id, paused })
   }
 
   /**

@@ -235,7 +235,9 @@ end
 function __factoryTick()
   for id, f in pairs(__units) do
     local q = f.__buildQueue
-    if q and table.getn(q) > 0 and not f.__beingBuilt and not isBuilding(id) then
+    -- A paused factory (SetPaused) starts no new unit from its queue
+    -- (cfunc_SetPausedL: mIsPaused halts production).
+    if q and table.getn(q) > 0 and not f.__beingBuilt and not isBuilding(id) and not f.__paused then
       local item = q[1]
       local p = f.__pos or { 0, 0, 0 }
       local scriptPath = '/units/' .. item.id .. '/' .. item.id .. '_script.lua'
@@ -277,8 +279,9 @@ function __buildCollect()
     local army = (b and b.__army) or 1
     task.step = 0
     task.blocked = false
-    if not aktiv[tid] then
-      -- Wartet noch in der Warteschlange: kostet nichts, tut nichts.
+    if not aktiv[tid] or (b and b.__paused == true) then
+      -- Still waiting in the queue OR the builder is paused (SetPaused,
+      -- cfunc_SetPausedL): costs nothing, does nothing.
       task.blocked = true
       __econClearBuildRequest(army, tid)
     elseif b and t

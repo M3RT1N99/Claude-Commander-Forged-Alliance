@@ -488,7 +488,13 @@ local unit = withNoops(UNIT_NAMES, {
     return false
   end,
   IsIdleState = function(self) return true end,
-  IsPaused = function(self) return false end,
+  -- SetPaused/IsPaused (cfunc_SetPausedL "Pause builders in this list"): the
+  -- unit's mIsPaused flag. A paused builder / paused factory halts production
+  -- and resource demand (build.lua __buildCollect/__factoryTick). SetPaused is
+  -- in UNIT_NAMES (the noop list), but withNoops skips names that already have a
+  -- real method — as with IsPaused.
+  IsPaused = function(self) return self.__paused == true end,
+  SetPaused = function(self, paused) self.__paused = paused == true end,
   IsStunned = function(self) return false end,
 
   -- Weapons: the engine builds one object per bp.Weapon entry (see units.lua).

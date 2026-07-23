@@ -124,6 +124,13 @@ function __spawnUnit(scriptPath, bpId, x, y, z, army, complete)
   u.Trash = TrashBag()
   __units[id] = u
 
+  -- Install the command-cap bindings up front (seeded from the blueprint mask)
+  -- so a script's OnCreate/OnStopBeingBuilt can already call AddCommandCap/
+  -- RemoveCommandCap. Without this they hit the withNoops stub until the first
+  -- readRow beat and the cap change is silently lost
+  -- (globals.lua __ensureCommandCapMask; UnitAttributes init Cfile:949126).
+  __ensureCommandCapMask(u)
+
   -- Blueprint-Ökonomie in die Engine-Ökonomie der Armee einklinken (Original:
   -- CEconomy im CArmyImpl; die Unit registriert Produktion/Unterhalt).
   local e = bp.Economy or {}
@@ -318,6 +325,11 @@ local function readRow(id, u)
     -- The guarded unit id (mUnit->mGuardedUnit, task-synced Cfile:839316) —
     -- feeds GetGuardedEntity/GetAssistingUnitsList in the user mirror.
     guard = u.__guardedUnit or 0,
+    -- The effective command-cap mask (UnitAttributes::commandCapsMask:
+    -- blueprint-initialized, mutated by Add/RemoveCommandCap, faf-re
+    -- Unit.cpp:8675-8813). Synced per beat so the UI mirror follows
+    -- runtime cap changes instead of freezing at the blueprint state.
+    caps = __ensureCommandCapMask(u),
     born = u.__spawnTick or 0,
     mesh = u.__meshBp,
     army = u.__army or 1,
@@ -374,6 +386,7 @@ function __readAllUnitsJson()
       .. ',"fraction":' .. jnum(r.fraction)
       .. ',"fireState":' .. jnum(r.fireState)
       .. ',"guard":' .. jnum(r.guard)
+      .. ',"caps":' .. jnum(r.caps)
       .. ',"born":' .. jnum(r.born)
       .. (function()
         -- The whole command queue (head first) for the command graph;

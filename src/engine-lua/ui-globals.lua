@@ -323,7 +323,7 @@ function GetAttachedUnitsList(units)
 end
 
 -- Von der Engine pro Beat: der Zustand einer Unit aus der Sim.
-function __uiSetUnit(id, blueprintId, army, x, y, z, health, maxHealth, workProgress, idle, fireState, guardedId)
+function __uiSetUnit(id, blueprintId, army, x, y, z, health, maxHealth, workProgress, idle, fireState, guardedId, capMask)
   local u = __uiUnits[id]
   if not u then
     -- SUnitVarDat-Ctor (Cfile:772277): mFireState = FIRESTATE_ReturnFire (0).
@@ -344,6 +344,10 @@ function __uiSetUnit(id, blueprintId, army, x, y, z, health, maxHealth, workProg
   if fireState ~= nil then u.fireState = fireState end
   -- Guarded unit id (0 = none) — GetGuardedEntity/GetAssistingUnitsList.
   if guardedId ~= nil then u.guardedId = guardedId ~= 0 and guardedId or false end
+  -- Effective command-cap mask (UnitAttributes::commandCapsMask): the sim
+  -- is the authority — runtime Add/RemoveCommandCap arrives here per beat
+  -- (-1 = no value in this beat; keep the blueprint-derived mask).
+  if capMask ~= nil and capMask >= 0 then u.__commandCapMask = capMask end
   u.dead = false
 end
 
@@ -508,6 +512,14 @@ end
 
 -- SelectUnits(nil) heisst "alles abwaehlen" (uiutil.lua:103) und ist legal.
 -- Rueckgabe: die akzeptierten Units (Cfile:1361553).
+--
+-- Reduced filter (documented gap): the engine drops IsDead AND DestroyQueued,
+-- keeps only IsSelectable() units, and substitutes a selectable transport/dock
+-- parent (category TRANSPORTATION) for a non-selectable unit
+-- (Cfile:1361497-1361534). Our UserUnit mirror carries none of those — no
+-- DestroyQueued/IsSelectable flag, no transports in the sim yet — so it filters
+-- IsDead only. No mirror field is invented on suspicion; this filter grows once
+-- the sim exposes selectable/attachment state.
 function SelectUnits(units)
   local old = __uiSelection or {}
   local new = {}
@@ -575,17 +587,22 @@ function __uiSelectByIds(ids)
   return table.getn(units)
 end
 
--- === Oekonomie (Sim -> UI) ===
--- GetEconomyTotals() liefert genau die fuenf Tabellen, die economy.lua:271-275
--- liest, jeweils mit den Schluesseln MASS und ENERGY.
+-- === Economy (Sim -> UI) ===
+-- GetEconomyTotals() returns SIX tables (Cfile:1264359-1264364): stored, income,
+-- reclaimed, lastUseRequested, lastUseActual, maxStorage — each keyed MASS and
+-- ENERGY. The UI economy.lua:271-275 reads five of them (not reclaimed);
+-- reclaimed carries the real reclaim throughput and the engine's table shape.
 --
--- WICHTIG: die Werte sind PRO TICK, nicht pro Sekunde — economy.lua:277-279
--- multipliziert sie selbst mit GetSimTicksPerSecond(). Wer hier Werte pro
--- Sekunde einspeist, zeigt das Zehnfache an.
+-- IMPORTANT: the values are PER TICK, not per second — economy.lua:277-279
+-- multiplies them by GetSimTicksPerSecond() itself. Feeding per-second values
+-- here shows tenfold.
 __uiEcon = {
   maxStorage = { MASS = 0, ENERGY = 0 },
   stored = { MASS = 0, ENERGY = 0 },
   income = { MASS = 0, ENERGY = 0 },
+  -- reclaimed: separate from income (the engine writes reclaim to storage AND
+  -- this counter, Cfile:848614-848639) — per tick like income.
+  reclaimed = { MASS = 0, ENERGY = 0 },
   lastUseRequested = { MASS = 0, ENERGY = 0 },
   lastUseActual = { MASS = 0, ENERGY = 0 },
 }
@@ -599,7 +616,7 @@ function GetSimTicksPerSecond()
 end
 
 -- Von der Engine pro Sim-Beat gefuettert (der Worker schickt den Zustand).
-function __uiSetEconomy(maxM, maxE, storedM, storedE, incM, incE, reqM, reqE, useM, useE)
+function __uiSetEconomy(maxM, maxE, storedM, storedE, incM, incE, reqM, reqE, useM, useE, recM, recE)
   local e = __uiEcon
   e.maxStorage.MASS = maxM
   e.maxStorage.ENERGY = maxE
@@ -612,32 +629,53 @@ function __uiSetEconomy(maxM, maxE, storedM, storedE, incM, incE, reqM, reqE, us
   e.lastUseRequested.ENERGY = reqE * 0.1
   e.lastUseActual.MASS = useM * 0.1
   e.lastUseActual.ENERGY = useE * 0.1
+  -- reclaimed is per tick too (×0.1) — same round-trip as income (economy.lua
+  -- scales it back up with GetSimTicksPerSecond()). recM/recE are nil-tolerant
+  -- for old callers.
+  e.reclaimed.MASS = (recM or 0) * 0.1
+  e.reclaimed.ENERGY = (recE or 0) * 0.1
 end
 
 -- === Kommando-Daten der Selektion ===
 --
 -- GetUnitCommandData(unitSet) -> orders, toggles, buildableCategories
--- (Cfile:1264504-1264646). Die Engine verrechnet pro Unit die
--- CommandCaps/ToggleCaps und die vorkompilierte Bau-Kategorie aus dem
--- Blueprint (bp.Economy.BuildableCategory) und akkumuliert ueber die Selektion
--- als VEREINIGUNG (EntityCategory::Add).
+-- (Cfile:1264504-1264646). The engine folds each unit's CommandCaps/ToggleCaps
+-- and its precompiled buildable category (bp.Economy.BuildableCategory), and
+-- accumulates the buildable category across the selection as an INTERSECTION
+-- (BVIntSet::IntersectWith, Cfile:1264719): the first builder copies, every
+-- further one intersects — the build menu shows only what ALL selected units
+-- can build. (Left open on purpose: the original also subtracts each unit's
+-- already-queued categories, Cfile:1264659-1264712 — that needs the
+-- queue->category mapping.)
 --
--- orders/toggles sind ARRAYS von Cap-Strings — orders.lua:891 iteriert sie
--- mit `for index, availOrder in availableOrders do`.
+-- orders/toggles are ARRAYS of cap strings — orders.lua:891 iterates them with
+-- `for index, availOrder in availableOrders do`.
 --
--- Bei LEERER Auswahl liefert die Engine LEERE TABELLEN, nicht nil: die beiden
--- AssignNewTable-Aufrufe (Cfile:1264740, :1264765) stehen HINTER der Schleife
--- ueber die Units und laufen deshalb immer. Wer hier nil zurueckgibt, toetet
--- orders.lua:891 (`for index, availOrder in availableOrders do`) bei jeder
--- Abwahl — und damit die ganze UI-VM.
+-- For an EMPTY selection the engine returns EMPTY TABLES (the two AssignNewTable
+-- calls Cfile:1264740, :1264765 sit AFTER the unit loop and always run) AND an
+-- EMPTY category as the third value — NEVER nil (func_NewEntityCategory +
+-- return 3, Cfile:1264788-1264808). Returning nil here kills orders.lua:891 on
+-- every deselect and makes EntityCategoryContains(cats, ...) crash on nil.
+--
+-- Empty category (matches nothing): ALLUNITS minus ALLUNITS is the empty set in
+-- the expression tree (catTest 'sub' = `true and not true` = false for any unit).
+local EMPTY_CATEGORY = categories.ALLUNITS - categories.ALLUNITS
+
 function GetUnitCommandData(units)
-  if type(units) ~= 'table' or table.getn(units) == 0 then return {}, {}, nil end
+  if type(units) ~= 'table' or table.getn(units) == 0 then
+    return {}, {}, EMPTY_CATEGORY
+  end
 
   local orderSet, toggleSet = {}, {}
   local cats = nil
 
   for _, u in ipairs(units) do
     local bp = u:GetBlueprint()
+    -- Buildable category per unit; EMPTY by default so a blueprint-less unit
+    -- still contributes to the cross-unit intersection — the engine's intersect
+    -- block sits OUTSIDE the blueprint guard (Cfile:1264717-1264727), while
+    -- orders/toggles stay guarded, matching the engine.
+    local unitCats = EMPTY_CATEGORY
     if bp then
       for cap, on in pairs((bp.General and bp.General.CommandCaps) or {}) do
         if on then orderSet[cap] = true end
@@ -645,14 +683,20 @@ function GetUnitCommandData(units)
       for cap, on in pairs((bp.General and bp.General.ToggleCaps) or {}) do
         if on then toggleSet[cap] = true end
       end
+      -- Within one unit the BuildableCategory terms are UNIONED (the unit builds
+      -- whatever matches ANY term); across units they are INTERSECTED
+      -- (Cfile:1264719). No BuildableCategory keeps the empty category, so the
+      -- intersection goes empty — a non-builder in the selection empties the
+      -- build menu, exactly like the original.
       local buildable = bp.Economy and bp.Economy.BuildableCategory
       if buildable then
         for _, expr in ipairs(buildable) do
-          local c = ParseEntityCategory(expr)
-          if cats then cats = cats + c else cats = c end
+          unitCats = unitCats + ParseEntityCategory(expr)
         end
       end
     end
+    -- Intersect for EVERY selected unit (blueprint-less -> EMPTY -> blanks it).
+    cats = cats == nil and unitCats or (cats * unitCats)
   end
 
   local orders, toggles = {}, {}
@@ -660,7 +704,7 @@ function GetUnitCommandData(units)
   for cap in pairs(toggleSet) do toggles[table.getn(toggles) + 1] = cap end
   table.sort(orders)
   table.sort(toggles)
-  return orders, toggles, cats
+  return orders, toggles, cats or EMPTY_CATEGORY
 end
 
 -- === Die Naht zur Sim ===
@@ -1175,13 +1219,6 @@ function InternalCreateWldUIProvider(luaobj)
   __uiWldProvider = luaobj
 end
 
--- "FlushEvents() -- flush mouse/keyboard events" (Cfile:1274567): leert die
--- Eingabe-Queue des UI-Managers (sub_84DA80). gamemain.lua:297 ruft es am Ende
--- von StopLoadingDialog, damit waehrend des Ladens gepufferte Klicks nicht ins
--- frische Spiel durchschlagen. Unsere Events laufen SYNCHRON (__mauiMouse
--- verarbeitet sofort, es gibt keine Queue) — geleert wird eine leere Queue.
-function FlushEvents() end
-
 --- "Return true iff the active session is a replay session." — wir spielen live.
 function SessionIsReplay()
   if not __uiScenarioInfo then error('no active session.', 2) end
@@ -1260,12 +1297,11 @@ function GetUnitCommandFromCommandCap(cap)
     error('GetUnitCommandFromCommandCap: string erwartet', 2)
   end
   local key = string.gsub(string.lower(cap), '^ruleucc_', '')
-  local cmd = CAP_TO_COMMAND[key]
-  if not cmd then
-    -- SetLexical wirft bei unbekannten Enum-Namen (Cfile:1381940-1381946).
-    error('GetUnitCommandFromCommandCap: unbekannter Command-Cap "' .. cap .. '"', 2)
-  end
-  return cmd
+  -- An unknown cap is NOT an error: the original ignores SetLexical's return
+  -- value (Cfile:1264874), the enum stays RULEUCC_None, and
+  -- UnitCommandCapToCommandType yields 'None' (Cfile:1242230-1242328). Only a
+  -- non-string throws (TypeError), like the original.
+  return CAP_TO_COMMAND[key] or 'None'
 end
 
 function IssueCommand(command, data, clear)
@@ -1458,33 +1494,17 @@ function PauseVoice(category, bPause)
   PauseSound(category, bPause)
 end
 
--- === Lautstaerken ===
+-- === Movie volume (SetMovieVolume/GetMovieVolume) ===
 --
---   float GetVolume(category)      Cfile:1348388
---   SetVolume(category, volume)    Cfile:1348320
 --   SetMovieVolume(volume): 0.0 - 2.0   Cfile:1302838
 --   GetMovieVolume()                    Cfile:1302900
 --
--- Die Kategorien stehen in der Original-Lua: options.lua:700/729/735/745 setzt
--- "Global", "World", "Interface" und "Music". Der Wertebereich ist 0..1 — die
--- Option ist ein Regler 0..100 und teilt selbst durch 100 (options.lua:710).
---
--- Der Startwert ist 1.0, weil genau das die Option vorgibt (default = 100,
--- options.lua:697) und `set` beim Start SetVolume(value/100) ruft. Es ist keine
--- erfundene Zahl, sondern die, die die Original-Lua eine Zeile spaeter selbst
--- setzt. Ausgabe gibt es noch keine (M12) — der Zustand wird nur gefuehrt.
-__uiVolumes = { Global = 1.0, World = 1.0, Interface = 1.0, Music = 1.0 }
+-- The CATEGORY volumes (SetVolume/GetVolume, category = 'Global'/'World'/
+-- 'Interface'/'Music') live further down under "Category volumes" — only there
+-- do they wire __uiVolumeSink to the audio output and match the AudioEngine
+-- insert-default semantics (Cfile:605038). The movie volume starts at 1.0
+-- (options.lua default 100, /100).
 __uiMovieVolume = 1.0
-
-function SetVolume(category, volume)
-  __uiVolumes[category] = volume
-end
-
-function GetVolume(category)
-  local v = __uiVolumes[category]
-  if v == nil then return 1.0 end
-  return v
-end
 
 function SetMovieVolume(volume)
   __uiMovieVolume = volume
@@ -1509,8 +1529,19 @@ __uiQueueCopy = {}
 
 function SetCurrentFactoryForQueueDisplay(unit)
   __uiQueueFactory = unit or false
-  if not unit then return {} end
+  -- Empty/missing queue -> nil, NEVER an empty table (AssignNil, Cfile:1257091).
+  -- construction.lua:1655 branches `if currentCommandQueue then SetQueueGrid(...)
+  -- else ClearQueueGrid()` — an empty table would be truthy here and leave the
+  -- empty grid standing.
+  if not unit then
+    __uiQueueCopy = {}
+    return nil
+  end
   local q = unit:GetBuildQueue()
+  if not q or table.getn(q) == 0 then
+    __uiQueueCopy = {}
+    return nil
+  end
   -- Die Engine kopiert die Queue SOFORT in sCurrentBuildQueue (Cfile:1257076,
   -- sub_837070) — sonst meldete der naechste Beat ein Geister-Update fuer die
   -- Anzeige, die construction.lua gerade selbst aufgebaut hat.

@@ -1099,6 +1099,23 @@ async function startSandbox(mapFolder: string): Promise<void> {
         for (const id of ids) luaSim?.setFireState(id, value)
         return
       }
+      // ToggleScriptBit (orders.lua: shield/weapon/stealth/intel/cloak toggles):
+      // the UI sends the DESIRED state {bit, value}; the sim applies it via
+      // Unit:SetScriptBit (guarded, fires OnScriptBitSet/Clear, moho.lua:426).
+      if (cmd === 'togglescriptbit') {
+        const sb = value as { bit?: number; value?: boolean } | undefined
+        if (sb && typeof sb.bit === 'number') {
+          for (const id of ids) luaSim?.setScriptBit(id, sb.bit, sb.value === true)
+        }
+        return
+      }
+      // SetPaused (cfunc_SetPausedL "Pause builders in this list"): a SEPARATE
+      // per-unit path — NOT the whole-world session pause (that freezes the
+      // entire sim). value is the boolean; the sim halts production + demand.
+      if (cmd === 'setpaused' && typeof value === 'boolean') {
+        for (const id of ids) luaSim?.setUnitPaused(id, value)
+        return
+      }
       log(`Befehl an die Sim: ${name}(${ids.join(',')}) — noch kein Weg dorthin`)
     })
     // SimCallback (Ctrl-K-Selbstzerstörung, Kontrollgruppen, Diplomatie):
@@ -1831,6 +1848,7 @@ const EMPTY_ECO: EcoSnapshot = {
   mass: 0, massStorage: 0, massIncome: 0, massExpense: 0,
   energy: 0, energyStorage: 0, energyIncome: 0, energyExpense: 0,
   massRequested: 0, energyRequested: 0,
+  reclaimMass: 0, reclaimEnergy: 0,
 }
 
 /**

@@ -866,6 +866,11 @@ function __ensureCommandCapMask(u)
     u.RestoreCommandCaps = function(self)
       self.__commandCapMask = blueprintCommandCapMask(self.__bp)
     end
+    -- NOTE: the engine's TestCommandCaps tests the blueprint's TOGGLE caps
+    -- (mGeneral.mToggleCaps, Cfile:975662-975663) — an apparent copy/paste quirk
+    -- for a "CommandCaps" test. We deliberately test the runtime COMMAND mask
+    -- (the sensible reading; no caller relies on the quirk). Documented so the
+    -- divergence is known, not accidental.
     u.TestCommandCaps = function(self, cap)
       local bit = commandCapBit(cap)
       return bit ~= 0 and (__ensureCommandCapMask(self) & bit) == bit
@@ -1557,6 +1562,11 @@ function __reclaimTick()
           local brain = __getBrain(u.__army or 1)
           brain:GiveResource('MASS', live.mass * delta)
           brain:GiveResource('ENERGY', live.energy * delta)
+          -- Reclaim is a SEPARATE display counter in the original (mTotals.
+          -- mReclaimed), ON TOP OF the storage credit above — the engine writes
+          -- to both places (Cfile:848614-848639). __econReclaim feeds
+          -- GetEconomyTotals().reclaimed; income stays untouched.
+          __econReclaim(u.__army or 1, live.mass * delta, live.energy * delta)
           if t.__fraction <= 0 then
             if t.OnReclaimed then
               local okR, err = pcall(function() t:OnReclaimed(u) end)

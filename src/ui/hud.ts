@@ -50,6 +50,13 @@ export interface EcoSnapshot {
    */
   massRequested: number
   energyRequested: number
+  /**
+   * Reclaim income this beat (mass/energy per second) — the original's third
+   * pair in GetEconomyTotals().reclaimed, kept separate from income (the engine
+   * writes reclaim to storage AND a counter, Cfile:848614).
+   */
+  reclaimMass: number
+  reclaimEnergy: number
 }
 
 /** Momentaufnahme einer Einheit für Minimap und strategische Icons. */
