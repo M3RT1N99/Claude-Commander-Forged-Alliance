@@ -17,14 +17,14 @@ export interface GameSource {
 }
 
 // ---------------------------------------------------------------------------
-// File System Access API (Chrome/Edge): User selects his game directory.
+// File System Access API (Chrome/Edge): User wählt sein Spielverzeichnis.
 // ---------------------------------------------------------------------------
 
 export class FsaGameSource implements GameSource {
   readonly label: string
 
   constructor(private readonly root: FileSystemDirectoryHandle) {
-    this.label = `Folder: ${root.name}`
+    this.label = `Ordner: ${root.name}`
   }
 
   private async resolveDir(relDir: string): Promise<FileSystemDirectoryHandle> {
@@ -49,7 +49,7 @@ export class FsaGameSource implements GameSource {
           return handle as FileSystemDirectoryHandle
         }
       }
-      throw new Error(`Directory not found: ${name}`)
+      throw new Error(`Verzeichnis nicht gefunden: ${name}`)
     }
   }
 
@@ -66,7 +66,7 @@ export class FsaGameSource implements GameSource {
           return handle as FileSystemFileHandle
         }
       }
-      throw new Error(`File not found: ${name}`)
+      throw new Error(`Datei nicht gefunden: ${name}`)
     }
   }
 
@@ -87,7 +87,7 @@ export class FsaGameSource implements GameSource {
   async open(relPath: string): Promise<RandomAccessFile> {
     const segs = relPath.split(/[/\\]/).filter(Boolean)
     const fileName = segs.pop()
-    if (!fileName) throw new Error(`Invalid path: ${relPath}`)
+    if (!fileName) throw new Error(`Ungültiger Pfad: ${relPath}`)
     const dir = await this.resolveDir(segs.join('/'))
     const handle = await this.getChildFile(dir, fileName)
     return new BlobFile(await handle.getFile())
@@ -95,12 +95,12 @@ export class FsaGameSource implements GameSource {
 }
 
 // ---------------------------------------------------------------------------
-// Fallback for browsers without File System Access API: <input webkitdirectory>
+// Fallback für Browser ohne File System Access API: <input webkitdirectory>
 // ---------------------------------------------------------------------------
 
 export class FileListGameSource implements GameSource {
-  readonly label = 'Folder (file selection)'
-  /** Key: relative path in lowercase letters (without root folder name). */
+  readonly label = 'Ordner (Datei-Auswahl)'
+  /** Key: relativer Pfad in Kleinbuchstaben (ohne Wurzelordner-Namen). */
   private readonly files = new Map<string, File>()
 
   constructor(fileList: FileList) {
@@ -129,7 +129,7 @@ export class FileListGameSource implements GameSource {
 
   async open(relPath: string): Promise<RandomAccessFile> {
     const file = this.files.get(relPath.toLowerCase().replaceAll('\\', '/'))
-    if (!file) throw new Error(`File not found: ${relPath}`)
+    if (!file) throw new Error(`Datei nicht gefunden: ${relPath}`)
     return new BlobFile(file)
   }
 }
@@ -145,7 +145,7 @@ export class HttpGameSource implements GameSource {
 
   async list(relDir: string): Promise<GameDirEntry[]> {
     const res = await fetch(`${this.base}/__list?dir=${encodeURIComponent(relDir)}`)
-    if (!res.ok) throw new Error(`Dev server: HTTP ${res.status} for "${relDir}"`)
+    if (!res.ok) throw new Error(`Dev-Server: HTTP ${res.status} für "${relDir}"`)
     return res.json()
   }
 
@@ -157,8 +157,8 @@ export class HttpGameSource implements GameSource {
 }
 
 // ---------------------------------------------------------------------------
-// Persistence of the directory handle (IndexedDB) so that the user can access the folder
-// you don't have to choose again every time you visit.
+// Persistenz des Directory-Handles (IndexedDB), damit der User den Ordner
+// nicht bei jedem Besuch neu wählen muss.
 // ---------------------------------------------------------------------------
 
 const DB_NAME = 'claude-commander-fa'

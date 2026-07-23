@@ -54,7 +54,7 @@ check(num(host, 'GetSimTicksPerSecond()') === 10, `GetSimTicksPerSecond = ${num(
 check(Math.abs(num(host, 'SecondsPerTick()') - 0.1) < 1e-9, `SecondsPerTick = ${num(host, 'SecondsPerTick()')}`)
 check(currentTick(host) === 0, `Start-Tick = ${currentTick(host)}`)
 
-console.log('\n== ForkThread + WaitTicks(1): Loop runs per tick ==')
+console.log('\n== ForkThread + WaitTicks(1): Schleife läuft pro Tick ==')
 host.eval('counter = 0')
 host.eval('ForkThread(function() while true do counter = counter + 1; WaitTicks(1) end end)')
 for (let i = 0; i < 5; i++) simTick(host)
@@ -62,13 +62,13 @@ check(num(host, 'counter') === 5, `Zähler nach 5 Ticks = ${num(host, 'counter')
 check(currentTick(host) === 5, `Tick = ${currentTick(host)}`)
 check(Math.abs(num(host, 'GetGameTimeSeconds()') - 0.5) < 1e-9, `GetGameTimeSeconds = ${num(host, 'GetGameTimeSeconds()')} (0.5 s)`)
 
-console.log('\n== WaitTicks(3): sums up exactly 3 ticks after the first run ==')
+console.log('\n== WaitTicks(3): resümiert exakt 3 Ticks nach dem ersten Lauf ==')
 host.eval('resumeTick = -1')
 host.eval('ForkThread(function() WaitTicks(3); resumeTick = GetGameTick() end)')
 const startTick = currentTick(host)
 for (let i = 0; i < 4; i++) simTick(host)
-// first run at startTick+1, WaitTicks(3) -> resume at startTick+4
-check(num(host, 'resumeTick') === startTick + 4, `summarizes at Tick ${num(host, 'resumeTick')} (expected ${startTick + 4})`)
+// erster Lauf bei startTick+1, WaitTicks(3) -> resume bei startTick+4
+check(num(host, 'resumeTick') === startTick + 4, `resümiert bei Tick ${num(host, 'resumeTick')} (erwartet ${startTick + 4})`)
 
 console.log('\n== ForkThread-Argumente ==')
 host.eval('argsum = 0')
@@ -76,8 +76,8 @@ host.eval('ForkThread(function(a, b) argsum = a + b end, 3, 4)')
 simTick(host)
 check(num(host, 'argsum') === 7, `argsum = ${num(host, 'argsum')} (erwartet 7)`)
 
-console.log('\n== KillThread stops a thread ==')
-// Keep handle in a GLOBAL (local won't survive the next eval).
+console.log('\n== KillThread stoppt einen Thread ==')
+// Handle in einem GLOBAL halten (local überlebt den nächsten eval nicht).
 host.eval('kc = 0; KILL = ForkThread(function() while true do kc = kc + 1; WaitTicks(1) end end)')
 simTick(host) // kc = 1
 simTick(host) // kc = 2
@@ -87,13 +87,13 @@ simTick(host)
 simTick(host)
 check(num(host, 'kc') === before, `Zähler eingefroren nach KillThread (${num(host, 'kc')} == ${before})`)
 
-console.log('\n== Nested ForkThread (child runs in subsequent tick) ==')
+console.log('\n== Verschachtelter ForkThread (Kind läuft im Folgetick) ==')
 host.eval('childRan = false')
 host.eval('ForkThread(function() ForkThread(function() childRan = true end) end)')
 simTick(host) // Eltern läuft, forkt Kind
-check(host.eval('return childRan') === false, 'Child does NOT walk in the same tick')
+check(host.eval('return childRan') === false, 'Kind läuft NICHT im selben Tick')
 simTick(host) // Kind läuft
-check(host.eval('return childRan') === true, 'Child runs in the following tick')
+check(host.eval('return childRan') === true, 'Kind läuft im Folgetick')
 
 console.log('\n== threadCount: tote Threads werden entfernt ==')
 const tc0 = threadCount(host)

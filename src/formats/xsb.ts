@@ -65,11 +65,11 @@
  */
 
 export interface XsbCueTarget {
-  /** Index in `waveBanks` (names of .xwb banks — their INNER names). */
+  /** Index in `waveBanks` (Namen der .xwb-Banks — deren INNERE Namen). */
   waveBankIndex: number
-  /** Wave index within the bank. */
+  /** Wave-Index innerhalb der Bank. */
   waveIndex: number
-  /** Number of wave alternatives (1 = no variation; level 1 takes entry 0). */
+  /** Zahl der Wave-Alternativen (1 = keine Variation; Stufe 1 nimmt Eintrag 0). */
   variantCount: number
   /**
    * XACT category index (u16 in the sound header) — 0-based into the xgs
@@ -81,7 +81,7 @@ export interface XsbCueTarget {
 
 export interface XsbBank {
   soundBankName: string
-  /** WaveBank names in reference order (XAA.xsb → 'UAA': across banks!). */
+  /** WaveBank-Namen in Referenz-Reihenfolge (XAA.xsb → 'UAA': bankübergreifend!). */
   waveBanks: string[]
   cues: Map<string, XsbCueTarget>
 }
@@ -101,14 +101,14 @@ export function parseXsb(bytes: Uint8Array): XsbBank {
   const magic = new TextDecoder('ascii').decode(bytes.subarray(0, 4))
   if (magic !== 'SDBK') throw new Error(`XSB: falsches Magic "${magic}" (erwartet SDBK)`)
   if (u16(4) !== 43 || u16(6) !== 43) {
-    throw new Error(`XSB: Version ${u16(4)}/${u16(6)} (expected 43/43, XACT 3.0)`)
+    throw new Error(`XSB: Version ${u16(4)}/${u16(6)} (erwartet 43/43, XACT 3.0)`)
   }
 
   const numSimpleCues = u16(0x13)
   const numComplexCues = u16(0x15)
   const numWaveBanks = u8(0x1b)
-  // u16 as in MonoGame/FAudio; the u16 @0x20 behind it is unknown and in
-  // all 100 FA files 0 (measured) — the documentation reads the 4 bytes as u32.
+  // u16 wie in MonoGame/FAudio; das u16 @0x20 dahinter ist unbekannt und in
+  // allen 100 FA-Dateien 0 (gemessen) — die Doku liest die 4 Bytes als u32.
   const cueNamesLength = u16(0x1e)
   const simpleCuesOffset = view.getInt32(0x22, true)
   const complexCuesOffset = view.getInt32(0x26, true)
@@ -121,9 +121,9 @@ export function parseXsb(bytes: Uint8Array): XsbBank {
     waveBanks.push(readCString64(bytes, waveBankNamesOffset + i * 64))
   }
 
-  // Cue names: zero-separated list, order = simple, then complex cues
-  // (MonoGame SoundBank.cs:108/130; measured: number of names == cue number in
-  // all 100 files).
+  // Cue-Namen: null-getrennte Liste, Reihenfolge = Simple-, dann Complex-Cues
+  // (MonoGame SoundBank.cs:108/130; gemessen: Zahl der Namen == Cue-Zahl in
+  // allen 100 Dateien).
   const cueNames: string[] = []
   if (cueNamesLength > 0) {
     const raw = new TextDecoder('ascii').decode(
@@ -133,7 +133,7 @@ export function parseXsb(bytes: Uint8Array): XsbBank {
   }
   if (cueNames.length !== numSimpleCues + numComplexCues) {
     throw new Error(
-      `XSB ${soundBankName}: ${cueNames.length} cue names for ${numSimpleCues}+${numComplexCues} cues`,
+      `XSB ${soundBankName}: ${cueNames.length} Cue-Namen für ${numSimpleCues}+${numComplexCues} Cues`,
     )
   }
 
@@ -160,8 +160,8 @@ export function parseXsb(bytes: Uint8Array): XsbBank {
     }
     if ((flags & 0x0e) !== 0) p += u16(p) // RPC-Block; Länge inkl. Längenfeld
     if ((flags & 0x10) !== 0) {
-      // DSP does not appear in any FA bank (0 of 4446 sounds) — block size would be
-      // cannot be checked against real data here, so guess instead of guessing.
+      // DSP kommt in keiner FA-Bank vor (0 von 4446 Sounds) — Blockgröße wäre
+      // hier nicht gegen echte Daten prüfbar, also knallen statt raten.
       throw new Error(`XSB ${soundBankName}: Sound @${off} hat DSP-Flag — in FA nie beobachtet`)
     }
 
@@ -172,7 +172,7 @@ export function parseXsb(bytes: Uint8Array): XsbBank {
       return direct as XsbCueTarget
     }
 
-    // Clip metadata, then the event lists (located behind the metadata).
+    // Clip-Metadaten, dann die Event-Listen (liegen hinter den Metadaten).
     const clipOffsets: number[] = []
     for (let c = 0; c < numClips; c++) {
       clipOffsets.push(u32(p + 1)) // +0 wäre u8 volume
@@ -219,16 +219,16 @@ export function parseXsb(bytes: Uint8Array): XsbBank {
       throw new Error(`XSB ${soundBankName}: Sound @${off} misst ${end - off} B, entryLength sagt ${entryLength}`)
     }
     if (!target) {
-      throw new Error(`XSB ${soundBankName}: Sound @${off} does not have a PlayWave event`)
+      throw new Error(`XSB ${soundBankName}: Sound @${off} hat kein PlayWave-Event`)
     }
     return target
   }
 
   const cues = new Map<string, XsbCueTarget>()
   const setCue = (name: string, target: XsbCueTarget): void => {
-    // Duplicate names would be silently swallowed in the map - none appear in FA
-    // (measured across all 100 banks), everything else is a structural error.
-    if (cues.has(name)) throw new Error(`XSB ${soundBankName}: Cue name "${name}" duplicated`)
+    // Doppelte Namen würden im Map still verschluckt — in FA kommen keine vor
+    // (gemessen über alle 100 Banks), alles andere ist ein Strukturfehler.
+    if (cues.has(name)) throw new Error(`XSB ${soundBankName}: Cue-Name "${name}" doppelt`)
     cues.set(name, target)
   }
   for (let i = 0; i < numSimpleCues; i++) {
@@ -239,9 +239,9 @@ export function parseXsb(bytes: Uint8Array): XsbBank {
     const o = complexCuesOffset + i * 15
     const flags = u8(o)
     if ((flags & 0x04) === 0) {
-      // Cue variation table: 0 of 1896 FA cues — the layout would just be off
-      // Taken from external sources and cannot be checked against a real file.
-      throw new Error(`XSB ${soundBankName}: Cue "${cueNames[numSimpleCues + i]}" uses a variation table — never observed in FA`)
+      // Cue-Variationstabelle: 0 von 1896 FA-Cues — das Layout wäre nur aus
+      // Fremdquellen übernommen und gegen keine echte Datei prüfbar.
+      throw new Error(`XSB ${soundBankName}: Cue "${cueNames[numSimpleCues + i]}" nutzt eine Variationstabelle — in FA nie beobachtet`)
     }
     setCue(cueNames[numSimpleCues + i]!, resolveSound(u32(o + 1)))
   }

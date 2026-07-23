@@ -1,37 +1,37 @@
 -- =====================================================================
--- THE SKELETON — in the SIM, not just in the renderer.
+-- DAS SKELETT — in der SIM, nicht nur im Renderer.
 --
--- The engine also loads the model of a unit into the sim: hanging on the bones
--- Weapon turrets, muzzles, construction and effect bones. Without bone transform there
--- there is no starting point for a projectile — `weapon:CreateProjectile(muzzleBone)`
--- needs the world pose of this very bone.
+-- Die Engine laedt das Modell einer Unit auch in die Sim: an den Knochen haengen
+-- Waffentuerme, MUENDUNGEN, Bau- und Effekt-Knochen. Ohne Knochen-Transform gibt
+-- es keinen Startpunkt fuer ein Projektil — `weapon:CreateProjectile(muzzleBone)`
+-- braucht die Weltpose genau dieses Knochens.
 --
--- Proven:
+-- Belegt:
 --   Entity:GetBoneDirection(nameOrIndex)  (cfunc_EntityGetBoneDirectionL,
---     Cfile:931469-931505) gets GetBoneWorldTransform(bone) and uses it to rotate the
---     Vector (0,0,1): the viewing direction of a bone is its +Z-AXIS.
---     Returns: three numbers (x, y, z), no vector object.
---   Entity:GetPosition([bone]) (Cfile:934579) — with bone the world position
---     this very bone.
+--     Cfile:931469-931505) holt GetBoneWorldTransform(bone) und rotiert damit den
+--     Vektor (0,0,1): die Blickrichtung eines Knochens ist seine +Z-ACHSE.
+--     Rueckgabe: drei Zahlen (x, y, z), kein Vektor-Objekt.
+--   Entity:GetPosition([bone]) (Cfile:934579) — mit Knochen die Weltposition
+--     genau dieses Knochens.
 --   Entity:IsValidBone(nameOrIndex, allowNil=false) (Cfile:931520ff).
 --
--- The bones come from the SCM file (src/formats/scm.ts): per bone
--- Name, parent index (0-based, -1 = root), position RELATIVE TO PARENT and
--- Rotation as a quaternion (w, x, y, z).
+-- Die Knochen kommen aus der SCM-Datei (src/formats/scm.ts): je Knochen
+-- Name, Elternindex (0-basiert, -1 = Wurzel), Position RELATIV ZUM ELTERN und
+-- Rotation als Quaternion (w, x, y, z).
 --
--- LIMIT, which is honestly named here: we put together the REST POSE and
--- rotate with the heading of the unit. The engine also rotates tower and
--- Weapon bones over the aim manipulators - they are still dummies for us
--- (globals.lua). A gun turret fires from the resting position of its muzzle,
--- not from the targeted one. This is a known deviation, not a replica.
+-- GRENZE, die hier ehrlich benannt wird: wir setzen die RUHEPOSE zusammen und
+-- drehen sie mit dem Heading der Unit. Die Engine dreht zusaetzlich Turm- und
+-- Waffenknochen ueber die AimManipulatoren mit — die sind bei uns noch Attrappen
+-- (globals.lua). Ein Geschuetzturm feuert also aus der Ruhepose seiner Muendung,
+-- nicht aus der gezielten. Das ist eine bekannte Abweichung, kein Nachbau.
 --
 -- STANDARD-LUA 5.4 (geht roh in host.eval).
 -- =====================================================================
 
--- bpId (small) -> { names = {...}, xform = { {pos={x,y,z}, rot={w,x,y,z}} }, index = { [name]=i } }
+-- bpId (klein) -> { names = {...}, xform = { {pos={x,y,z}, rot={w,x,y,z}} }, index = { [name]=i } }
 __unitBones = {}
 
--- Quaternion math (w, x, y, z) — same convention as the SCM file.
+-- Quaternion-Mathematik (w, x, y, z) — dieselbe Konvention wie die SCM-Datei.
 local function qmul(a, b)
   local aw, ax, ay, az = a[1], a[2], a[3], a[4]
   local bw, bx, by, bz = b[1], b[2], b[3], b[4]
@@ -43,7 +43,7 @@ local function qmul(a, b)
   }
 end
 
---- Rotate a vector with a quaternion: v' = q * v * q^-1.
+--- Einen Vektor mit einer Quaternion drehen: v' = q * v * q^-1.
 local function qrot(q, v)
   local w, x, y, z = q[1], q[2], q[3], q[4]
   local vx, vy, vz = v[1], v[2], v[3]
@@ -58,7 +58,7 @@ local function qrot(q, v)
   }
 end
 
--- The engine page fills the skeleton bone by bone (scalars, none
+-- Die Engine-Seite fuellt das Skelett Knochen fuer Knochen (Skalare, kein
 -- Lua-Quelltext in TS): __beginBones -> __addBone* -> __finishBones.
 local pending = nil
 
@@ -77,16 +77,16 @@ function __addBone(name, parent, px, py, pz, qw, qx, qy, qz)
   }
 end
 
---- Dissolve the resting pose into SPACE (chain to the root).
---- Parent indexes are 0-based (-1 = root), the Lua list is 1-based.
+--- Die Ruhepose in den WELTRAUM aufloesen (Kette bis zur Wurzel).
+--- Elternindizes sind 0-basiert (-1 = Wurzel), die Lua-Liste ist 1-basiert.
 ---
---- The SCM is built in MODEL units; it comes into the world
---- `Display.UniformScale` of the blueprint (uel0001: 0.105, uel0201: 0.07 — the
---- Renderer scales its mesh with exactly this value). Without the scaling it sat
---- the ACU muzzle 10 meters AHEAD and 12 ABOVE the unit - each shot
---- arose somewhere in the void and fell into the ground in front of the target due to gravity
---- Floor. The blueprint is already registered when setting bones
---- (giveUnit/prepare load the bp first, then the skeleton).
+--- Die SCM ist in MODELL-Einheiten gebaut; in die Welt kommt sie ueber
+--- `Display.UniformScale` des Blueprints (uel0001: 0.105, uel0201: 0.07 — der
+--- Renderer skaliert sein Mesh mit genau diesem Wert). Ohne die Skalierung sass
+--- die ACU-Muendung 10 Weltmeter VOR und 12 UEBER der Einheit — jeder Schuss
+--- entstand irgendwo im Nichts und fiel per Gravitation vor dem Ziel in den
+--- Boden. Der Blueprint ist beim Knochen-Setzen bereits registriert
+--- (giveUnit/prepare laden erst das bp, dann das Skelett).
 function __finishBones()
   if not pending then return end
   local bones = pending.bones
@@ -118,8 +118,8 @@ function __finishBones()
     index[string.lower(b.name)] = i
     resolve(i)
   end
-  -- Scale AFTER dissolving (the relative chain remains consistent,
-  -- Rotations are scaling-free).
+  -- NACH dem Aufloesen skalieren (die relative Kette bleibt dabei konsistent,
+  -- Rotationen sind skalierungsfrei).
   if scale ~= 1 then
     for _, x in pairs(xform) do
       x.pos[1] = x.pos[1] * scale
@@ -131,15 +131,15 @@ function __finishBones()
   pending = nil
 end
 
---- The skeleton of an entity (or an empty one if no model is loaded).
+--- Das Skelett einer Entity (oder ein leeres, wenn kein Modell geladen ist).
 function __skeletonOf(e)
   local s = e.__bones
   if type(s) == 'table' and s.names then return s end
   return { names = {}, xform = {}, index = {} }
 end
 
---- Bones -> 1-based index. The engine takes name OR index (0-based:
---- GetBoneName(i) starts at 0, ENTSCR_ResolveBoneIndex).
+--- Knochen -> 1-basierter Index. Die Engine nimmt Namen ODER Index (0-basiert:
+--- GetBoneName(i) beginnt bei 0, ENTSCR_ResolveBoneIndex).
 function __boneIndex(e, bone)
   if bone == nil then return nil end
   local s = __skeletonOf(e)
@@ -151,15 +151,15 @@ function __boneIndex(e, bone)
   return s.index[string.lower(tostring(bone))]
 end
 
---- The WORLD POSE of a bone: resting pose in the model room, rotated with the heading
---- the unit, moved to its position.
---- Returns pos {x,y,z}, red {w,x,y,z}. Boneless: the pose of the entity itself
---- (the engine does this with bone index -2, Cfile:930866).
+--- Die WELTPOSE eines Knochens: Ruhepose im Modellraum, gedreht mit dem Heading
+--- der Unit, verschoben an ihre Position.
+--- Liefert pos {x,y,z}, rot {w,x,y,z}. Ohne Knochen: die Pose der Entity selbst
+--- (das tut die Engine mit Bone-Index -2, Cfile:930866).
 function __boneWorld(e, bone)
-  -- CollisionBeam entities have TWO virtual bones (GetBoneCount = 2,
+  -- CollisionBeam-Entities haben ZWEI virtuelle Knochen (GetBoneCount = 2,
   -- Cfile:16624): Bone 0 = Strahlanfang (Muendung), Bone 1 = Treffpunkt.
-  -- CollisionBeam.lua attaches its FX exactly to it (CreateAttachedEmitter
-  -- self,0/1) and reads GetPosition(1) for the damage.
+  -- CollisionBeam.lua haengt seine FX genau daran (CreateAttachedEmitter
+  -- self,0/1) und liest GetPosition(1) fuer den Schaden.
   if e.__beamBones then
     local i = bone
     if i == nil or i == -1 or i == -2 then i = 0 end
@@ -168,7 +168,7 @@ function __boneWorld(e, bone)
   end
   local p = e.__pos or { 0, 0, 0 }
   local h = e.__heading or 0
-  -- Heading is a rotation around the Y-axis (motion.lua: forward = sin/cos h).
+  -- Heading ist eine Drehung um die Y-Achse (motion.lua: vorwaerts = sin/cos h).
   local hq = { math.cos(h * 0.5), 0, math.sin(h * 0.5), 0 }
 
   local i = __boneIndex(e, bone)
@@ -181,7 +181,7 @@ function __boneWorld(e, bone)
   return { (p[1] or 0) + wp[1], (p[2] or 0) + wp[2], (p[3] or 0) + wp[3] }, qmul(hq, x.rot)
 end
 
---- The +Z axis of a quaternion — what GetBoneDirection returns.
+--- Die +Z-Achse einer Quaternion — was GetBoneDirection zurueckgibt.
 function __quatForward(q)
   return qrot(q, { 0, 0, 1 })
 end

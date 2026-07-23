@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 
-// Shader sources are available as .glsl files (see src/viewer/shaders/);
-// this file is just loader + three.js structure.
+// Shader-Quellen liegen als .glsl-Dateien daneben (siehe src/viewer/shaders/);
+// diese Datei ist nur Loader + three.js-Aufbau.
 import UNIT_VS from './shaders/unit.vert.glsl?raw'
 import UNIT_FS from './shaders/unit.frag.glsl?raw'
 import UNIT_SERAPHIM_FS from './shaders/unitSeraphim.frag.glsl?raw'
@@ -25,7 +25,7 @@ export interface UnitTextures {
   albedo: THREE.Texture
   normals: THREE.Texture | null
   specTeam: THREE.Texture | null
-  /** Falloff ramp for the Seraphim shader */
+  /** Falloff-Ramp für den Seraphim-Shader */
   lookup?: THREE.Texture | null
 }
 
@@ -43,7 +43,7 @@ export interface MapLighting {
   lightingMultiplier: number
 }
 
-/** Tool light for the Unit VIEWER (no game, no map loaded). */
+/** Werkzeug-Licht für den Unit-VIEWER (kein Spiel, keine Karte geladen). */
 const VIEWER_LIGHT: MapLighting = {
   sunDirection: new THREE.Vector3(0.35, 0.8, 0.5).normalize(),
   sunColor: new THREE.Color(1.3, 1.25, 1.15),
@@ -102,13 +102,13 @@ export function createUnitMaterial(
       specTeamMap: { value: textures.specTeam ?? white },
       teamColor: { value: teamColor },
       sunDirection: { value: lighting.sunDirection },
-      // mesh.fx names (unit.frag.glsl) …
+      // mesh.fx-Namen (unit.frag.glsl) …
       sunDiffuse: { value: lighting.sunColor },
       sunAmbient: { value: lighting.sunAmbience },
       shadowFill: { value: lighting.shadowFillColor },
       lightMultiplier: { value: lighting.lightingMultiplier },
-      // ... and the scmap names of the Seraphim port (NEVER got them before —
-      // Seraphim units expected zero light).
+      // … und die scmap-Namen des Seraphim-Ports (bekam sie vorher NIE —
+      // Seraphim-Einheiten rechneten mit Null-Licht).
       sunAmbience: { value: lighting.sunAmbience },
       shadowFillColor: { value: lighting.shadowFillColor },
       glowMultiplier: { value: 2.0 }, // mesh.fx:56
@@ -128,7 +128,7 @@ export function createUnitMaterial(
  */
 export function createUefBuildMaterials(
   textures: UnitTextures,
-  /** The build grid: /textures/effects/UEFBuildSpecular.dds (tiled). */
+  /** Das Bau-Gitter: /textures/effects/UEFBuildSpecular.dds (kachelnd). */
   buildSpecular: THREE.Texture,
   teamColor: THREE.Color,
   skinMatrices: THREE.Matrix4[],
@@ -197,15 +197,15 @@ export function createUefBuildMaterials(
  * gives every build mesh the shader '<Faction>Build' and the secondary
  * texture '/textures/effects/<Faction>BuildSpecular.dds'):
  *
- * - AeonBuild (mesh.fx:5349): opaque growing shell (AeonBuildPS:2713,
- * mesh scaled by max(pc, 0.75) in AeonBuildVS :1307) + a blended
- * scanline overlay (AeonBuildOverlayPS:2748).
- * - CybranBuild (:5491): blended hologram (CybranBuildPS :2837, insect
- * aniso lookup) + red scanline overlay (CybranBuildOverlayPS:2883,
- * EffectVertexNormalLoFiVS(14,4,0,0,-0.008,0.008)).
- * - SeraphimBuild (:5580): single blended pass (SeraphimBuildPS :2895,
- * mesh scaled by 0.25 + pc*0.75, UV distortion from the secondary,
- * falloff ramp via blueprints.lua:229).
+ *  - AeonBuild (mesh.fx:5349): opaque growing shell (AeonBuildPS :2713,
+ *    mesh scaled by max(pc, 0.75) in AeonBuildVS :1307) + a blended
+ *    scanline overlay (AeonBuildOverlayPS :2748).
+ *  - CybranBuild (:5491): blended hologram (CybranBuildPS :2837, insect
+ *    aniso lookup) + red scanline overlay (CybranBuildOverlayPS :2883,
+ *    EffectVertexNormalLoFiVS(14,4,0,0,-0.008,0.008)).
+ *  - SeraphimBuild (:5580): single blended pass (SeraphimBuildPS :2895,
+ *    mesh scaled by 0.25 + pc*0.75, UV distortion from the secondary,
+ *    falloff ramp per blueprints.lua:229).
  *
  * `fraction`/`unitAge` update per frame via the returned uniform refs,
  * like the UEF pair above.
@@ -216,13 +216,13 @@ export function createFactionBuildMaterials(
   /** /textures/effects/<Faction>BuildSpecular.dds */
   buildSpecular: THREE.Texture,
   /** Cybran only: /textures/engine/insectlookup.dds (Cfile:1194790). */
-  insectLookup: THREE.Texture | zero,
+  insectLookup: THREE.Texture | null,
   /** Seraphim only: /textures/environment/Falloff_seraphim_lookup.dds. */
-  falloffLookup: THREE.Texture | zero,
+  falloffLookup: THREE.Texture | null,
   teamColor: THREE.Color,
   skinMatrices: THREE.Matrix4[],
   lighting: MapLighting = VIEWER_LIGHT,
-  envCube: THREE.Texture | null = zero,
+  envCube: THREE.Texture | null = null,
 ): { base: THREE.ShaderMaterial; overlay: THREE.ShaderMaterial | null } {
   const white = new THREE.DataTexture(new Uint8Array([255, 255, 255, 0]), 1, 1)
   white.needsUpdate = true
@@ -336,7 +336,7 @@ export function createWreckageMaterial(
   textures: UnitTextures,
   noise: THREE.Texture,
   skinMatrices: THREE.Matrix4[],
-  /** Creation time in seconds (Sim-Tick / 10) — varies the noise. */
+  /** Erstellungszeit in Sekunden (Sim-Tick / 10) — variiert das Noise. */
   creationTime: number,
   lighting: MapLighting = VIEWER_LIGHT,
 ): THREE.ShaderMaterial {

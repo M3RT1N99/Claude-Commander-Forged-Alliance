@@ -35,7 +35,7 @@ import type { SessionInfo } from '../sim/session'
  * Texte, die Farben und die Anzeigelogik kommen aus `lua/ui/game/economy.lua`
  * und ihren Layout-Dateien, nicht aus TypeScript.
  */
-/** Where the settings are located in the browser (the counterpart to Game.prefs). */
+/** Wo die Einstellungen im Browser liegen (das Gegenstück zu Game.prefs). */
 const PREFS_KEY = 'ccfa.prefs'
 
 export class GameUi {
@@ -77,9 +77,9 @@ export class GameUi {
      */
     session?: SessionInfo,
   ): Promise<GameUi> {
-    // The game's fonts (<GameDir>/fonts). They provide the metric with which
-    // the original Lua calculates its text layout (text.lua:39/47) — and they will
-    // rendered straight away instead of replacing it with a system font.
+    // Die Schriften des Spiels (<GameDir>/fonts). Sie liefern die Metrik, mit der
+    // die Original-Lua ihr Text-Layout rechnet (text.lua:39/47) — und sie werden
+    // gleich auch gerendert, statt sie durch eine Systemschrift zu ersetzen.
     const tStart = performance.now()
     const fonts = new FontBook()
     for (const bytes of fontFiles) {
@@ -92,31 +92,31 @@ export class GameUi {
     }
     log(`UI: ${fonts.size} Schriften aus <GameDir>/fonts`)
 
-    // ALL .lua files, not just lua/**: Localization.lua loads the language file
-    // from /loc/<language>/strings_db.lua (localization.lua:15) — which is located
-    // outside of lua/. Anyone who filters here breaks the boat at one point
-    // has nothing to do with the filter.
-    // In addition, the .bp files: LoadBlueprints() runs them as Lua, and
-    // `unitview.lua`/`construction.lua` need `__blueprints`.
+    // ALLE .lua-Dateien, nicht nur lua/**: Localization.lua lädt die Sprachdatei
+    // aus /loc/<sprache>/strings_db.lua (localization.lua:15) — die liegt
+    // außerhalb von lua/. Wer hier filtert, bricht den Boot an einer Stelle, die
+    // nichts mit dem Filter zu tun hat.
+    // Dazu die .bp-Dateien: LoadBlueprints() führt sie als Lua aus, und
+    // `unitview.lua`/`construction.lua` brauchen `__blueprints`.
     const bpPaths = mode === 'frontend' ? [] : vfs.find((p) => /^units\/[^/]+\/[^/]+_unit\.bp$/.test(p))
-    // The unit SCRIPTS (`units/<id>/<id>_script.lua`) belong to the Sim, not the
-    // UI: the engine loads it via `Blueprint.Script` when a unit is created —
-    // not a single file under `lua/ui/**` imports any of them (checked).
-    // They are scattered throughout units.scd (1 GB) and cost the UI boot alone
+    // Die Unit-SKRIPTE (`units/<id>/<id>_script.lua`) gehören der Sim, nicht der
+    // UI: die Engine lädt sie über `Blueprint.Script`, wenn eine Unit entsteht —
+    // keine einzige Datei unter `lua/ui/**` importiert eine davon (geprüft).
+    // Sie liegen verstreut in units.scd (1 GB) und kosteten den UI-Boot allein
     // ~700 Archiv-Zugriffe.
     const luaPaths = [
       ...vfs.find((p) => p.endsWith('.lua') && !p.startsWith('units/')),
       ...bpPaths,
     ]
-    // ONE access per archive area instead of two per file (vfs.readMany). The
-    // Lua is located in small archives (lua.scd 7 MB, mohodata 0.5 MB) - they are on
-    // Reading the piece costs nothing; reading them individually cost at launch
-    // Seconds (and thousands of requests via HTTP).
+    // EIN Zugriff pro Archiv-Bereich statt zwei pro Datei (vfs.readMany). Die
+    // Lua liegt in kleinen Archiven (lua.scd 7 MB, mohodata 0,5 MB) — sie am
+    // Stück zu lesen kostet nichts; sie einzeln zu lesen kostete beim Start
+    // Sekunden (und über HTTP tausende Requests).
     const files = await vfs.readMany(luaPaths)
 
-    // The maui-Lua queries texture dimensions SYNCHRONOUSLY (GetTextureDimensions, because a
-    // Bitmap is measured according to its DDS without layout helpers). The VFS reads
-    // but asynchronously — so the dimensions of the UI textures are determined beforehand.
+    // Die maui-Lua fragt Texturmaße SYNCHRON ab (GetTextureDimensions, weil ein
+    // Bitmap sich ohne Layout-Helfer nach seiner DDS bemisst). Das VFS liest
+    // aber asynchron — also werden die Maße der UI-Texturen vorher ermittelt.
     const uiTextures = vfs.find((p) => p.startsWith('textures/ui/') && p.endsWith('.dds'))
     const dims = new Map<string, [number, number]>()
     {
@@ -126,18 +126,18 @@ export class GameUi {
           const dds = parseDds(b)
           dims.set(p, [dds.width, dds.height])
         } catch {
-          // Broken/unknown DDS: don't guess — the Lua gets nil and the
+          // Kaputte/unbekannte DDS: nicht raten — die Lua bekommt nil und der
           // Skin-Fallback greift.
         }
       }
     }
-    log(`UI: ${files.size} Lua files, ${dims.size} texture dimensions`)
+    log(`UI: ${files.size} Lua-Dateien, ${dims.size} Texturmaße`)
 
     const allPaths = new Set(vfs.find(() => true))
     const host = await LuaHost.create(files, (level, msg) => {
       if (level === 'WARN') log(`UI-WARN: ${msg.slice(0, 400)}`)
     })
-    // The deferred DoInitializing step ('game' mode only, see below).
+    // Der aufgeschobene DoInitializing-Schritt (nur 'game'-Modus, siehe unten).
     let worldInit: (() => void) | null = null
 
     installUiEngine(host, {
@@ -147,87 +147,87 @@ export class GameUi {
       stringAdvance: (text, family, size) => fonts.advance(text, family, size),
       fontMetrics: (family, size) => fonts.metrics(family, size),
       conVarChanged,
-      // Settings survive reload. The engine writes them as
-      // Lua source code to `Game.prefs` — here it's the same text, just the
-      // Storage is localStorage. Without that, every option, every profile and
-      // every volume returns to the beginning after the next call.
+      // Die Einstellungen überleben das Neuladen. Die Engine schreibt sie als
+      // Lua-Quelltext nach `Game.prefs` — hier ist es derselbe Text, nur die
+      // Ablage ist der localStorage. Ohne das war jede Option, jedes Profil und
+      // jede Lautstärke nach dem nächsten Aufruf wieder auf Anfang.
       prefs: {
         load: () => localStorage.getItem(PREFS_KEY),
         save: (luaText) => {
           try {
             localStorage.setItem(PREFS_KEY, luaText)
           } catch (e) {
-            // Full/locked memory: say it, don't swallow it.
-            log(`Prefs: could not be saved — ${e instanceof Error ? e.message : e}`)
+            // Voller/gesperrter Speicher: sagen, nicht schlucken.
+            log(`Prefs: konnten nicht gespeichert werden — ${e instanceof Error ? e.message : e}`)
           }
         },
       },
     })
-    // Root frame FIRST, then SetupUI — that's how the engine does it
+    // Root-Frame ZUERST, dann SetupUI — so macht es die Engine
     // (CUIManager::SetNewLuaState: Frame Cfile:1273621-1273666, SetupUI erst
-    // Cfile:1273680). The other way around, the import of is already tearing things apart
-    // effecthelpers.lua, which calls GetFrame(0) at the module level (line 28).
+    // Cfile:1273680). Andersherum zerreißt schon der Import von
+    // effecthelpers.lua, das auf Modulebene GetFrame(0) ruft (Zeile 28).
     createRootFrame(host, window.innerWidth, window.innerHeight)
 
     if (mode === 'frontend') {
-      // The main menu builds itself: startFrontEnd only calls the entry
+      // Das Hauptmenü baut sich selbst: startFrontEnd ruft nur den Einstieg der
       // Engine (EngineStartSplashScreens → splash.lua → EngineStartFrontEndUI →
       // uimain.StartFrontEndUI → menus/main.lua:CreateUI). SetupUI() läuft dabei
-      // from __uiSetNewLuaState — just like in CUIManager::SetNewLuaState.
+      // aus __uiSetNewLuaState heraus — genau wie in CUIManager::SetNewLuaState.
       startFrontEnd(host)
     } else {
       setupUi(host)
 
-      // The blueprints belong in BOTH VMs: unitview.lua:180 reads
-      // __blueprints[...], construction.lua:1681 asks EntityCategoryGetUnitList.
+      // Die Blueprints gehören in BEIDE VMs: unitview.lua:180 liest
+      // __blueprints[...], construction.lua:1681 fragt EntityCategoryGetUnitList.
       const bpCount = loadUiBlueprints(host, bpPaths)
       log(`UI: ${bpCount} Blueprints geladen (echte Pipeline)`)
 
-      // The SESSION is in front of the panels: avatars.lua:30 reads
-      // `GetArmiesTable().armiesTable[GetFocusArmy()].faction` already at
+      // Die SESSION steht vor den Panels: avatars.lua:30 liest
+      // `GetArmiesTable().armiesTable[GetFocusArmy()].faction` schon beim
       // Import, tabs.lua:20 `SessionGetScenarioInfo().Options.Timeouts`.
       if (session) applySession(host, session)
 
-      // The world start, literally like the engine (func_DoPreload, Cfile:1320735):
-      // StartGameUI → StartLoadingDialog. The loading dialog sets REAL
+      // Der Weltstart, wörtlich wie die Engine (func_DoPreload, Cfile:1320735):
+      // StartGameUI → StartLoadingDialog. Der Lade-Dialog setzt dabei ECHTE
       // ConVars (UI_RenderUnitBars, UI_NisRenderIcons, ren_SelectBoxes —
-      // gamemain.lua:217-219). The sim loads in parallel in the worker; the waiting time
-      // at this point is zero in the browser.
+      // gamemain.lua:217-219). Die Sim lädt parallel im Worker; die Wartezeit
+      // an dieser Stelle ist im Browser null.
       startSessionLoading(host)
 
-      // DoInitializing (Cfile:1321030-1321090) does NOT run here, but first
-      // after the FIRST sim beat with sync data (Cfile:1321067) — see beat().
-      // The reason is not a timing detail, but semantics: gamemain.lua:77-102
-      // (OnFirstUpdate) reads `GetArmyAvatars()` on the first frame and forks
-      // a thread that calls `SelectUnits(avatars)` 3 s later. Is it running?
-      // Setup BEFORE the first unit sync, avatars is nil - the fork deletes
-      // then every selection made in the meantime, the start zoom (UIZoomTo)
-      // is eliminated, and the ACU never gets its player name. That was exactly it
-      // the “empty UI” finding (orders hidden, 0 construction icons).
+      // DoInitializing (Cfile:1321030-1321090) läuft NICHT hier, sondern erst
+      // nach dem ERSTEN Sim-Beat mit Sync-Daten (Cfile:1321067) — siehe beat().
+      // Der Grund ist kein Timing-Detail, sondern Semantik: gamemain.lua:77-102
+      // (OnFirstUpdate) liest beim ersten Frame `GetArmyAvatars()` und forkt
+      // einen Thread, der 3 s später `SelectUnits(avatars)` ruft. Läuft der
+      // Aufbau VOR dem ersten Unit-Sync, ist avatars nil — der Fork löscht
+      // dann jede inzwischen getätigte Auswahl, der Start-Zoom (UIZoomTo)
+      // entfällt, und die ACU bekommt nie ihren Spielernamen. Genau das war
+      // der „leere UI"-Befund (Orders versteckt, 0 Bau-Icons).
       worldInit = () => {
-        // SetNewLuaState clears the root frames (the loading dialog disappears),
-        // SetupUI + StartGameUI run AGAIN (fresh provider), then
-        // StopLoadingDialog — the faction image fades out over 1.5 s, and the
-        // Original Lua forks InitialAnimations (gamemain.lua:253-263): first
-        // THIS includes score, economy, avatars and the riders.
+        // SetNewLuaState räumt die Root-Frames (der Lade-Dialog verschwindet),
+        // SetupUI + StartGameUI laufen ERNEUT (frischer Provider), dann
+        // StopLoadingDialog — das Fraktionsbild blendet über 1,5 s aus, und die
+        // Original-Lua forkt InitialAnimations (gamemain.lua:253-263): erst
+        // DARIN fahren Score, Economy, Avatare und die Reiter ein.
         host.eval('__mauiResetFrames()')
         host.eval('__uiSetupUi()')
         host.eval('__uiStartGameUI()')
         finishSessionLoading(host)
 
-        // From here, the original Lua builds out the UI — in order
-        // gamemain.lua:145-153; in the engine CreateGameInterface comes AFTER
-        // StopLoadingDialog (Cfile:1321080). The Verify suite takes the same route.
+        // Ab hier baut die Original-Lua die UI — in der Reihenfolge aus
+        // gamemain.lua:145-153; in der Engine kommt CreateGameInterface NACH
+        // StopLoadingDialog (Cfile:1321080). Denselben Weg nimmt die Verify-Suite.
         setupGameUi(host, log)
       }
     }
 
-    // First render, then count - in this order: the grids of the
-    // Original UI only exposes its children in OnFrame (grid.lua:40-48, the
-    // Engine frame pump, Cfile:1118936). A snapshot BEFORE the first frame
-    // sees it without a layout and wrongly reports it as broken.
-    // The engine gets the STATUS of all ConVars - Apply(true) has it
-    // The boat is set, and anyone who joins afterwards would never have it otherwise
+    // Erst rendern, dann zählen — und zwar in dieser Reihenfolge: die Grids der
+    // Original-UI legen ihre Kinder erst in OnFrame aus (grid.lua:40-48, die
+    // Frame-Pumpe der Engine, Cfile:1118936). Ein Snapshot VOR dem ersten Frame
+    // sieht sie ohne Layout und meldet sie zu Unrecht als kaputt.
+    // Die Engine holt sich den STAND aller ConVars — Apply(true) hat sie beim
+    // Boot gesetzt, und wer sich erst danach anschließt, hätte sie sonst nie
     // gesehen.
     if (conVarChanged) {
       const all = host.pull<[string, string | number | boolean][]>(`(function()
@@ -255,12 +255,12 @@ export class GameUi {
    * (economy.lua:251) rechnen lassen. Sie schreibt den Text in die Controls.
    */
   beat(eco: EcoSnapshot, units: LuaUnitSnapshot[], gameTick = 0): void {
-    // The state of the units in the UI VM (the engine reflects it on the client side:
-    // UserUnit::UpdateUnitData @0x8C0750). Only then can the UI show it.
+    // Der Zustand der Units in die UI-VM (die Engine spiegelt ihn clientseitig:
+    // UserUnit::UpdateUnitData @0x8C0750). Erst danach kann die UI ihn zeigen.
     const seen = new Set<number>()
-    // ONE eval for the whole beat, not one per unit: every eval call
-    // compiles its own Lua chunk. At 50 units and 10 beats/s would be
-    // that 500 chunks per second — work that no one needs.
+    // EIN eval für den ganzen Beat, nicht eines pro Unit: jeder eval-Aufruf
+    // kompiliert einen eigenen Lua-Chunk. Bei 50 Einheiten und 10 Beats/s wären
+    // das 500 Chunks pro Sekunde — Arbeit, die niemand braucht.
     const lines: string[] = []
     for (const u of units) {
       seen.add(u.id)
@@ -268,9 +268,9 @@ export class GameUi {
         `__uiSetUnit(${u.id}, '${u.name}', ${u.army ?? 1}, ${u.x}, ${u.y}, ${u.z}, ` +
           `${u.health}, ${u.maxHealth}, ${u.fraction ?? 1}, ${u.idle === true})`,
       )
-      // The build queue of a factory (construction.lua displays it).
-      // ALWAYS send, even empty: otherwise the last queue remains in the UI copy
-      // and the transition “last entry finished → empty” never arrives.
+      // Die Bau-Warteschlange einer Fabrik (construction.lua zeigt sie an).
+      // IMMER senden, auch leer: sonst bleibt in der UI-Kopie die letzte Queue
+      // stehen, und der Übergang „letzter Eintrag fertig → leer" kommt nie an.
       const q = u.buildQueue ?? []
       const items = q.map((i) => `{ id = '${i.id}', count = ${i.count} }`).join(',')
       lines.push(`__uiSetBuildQueue(${u.id}, { ${items} })`)
@@ -286,31 +286,31 @@ export class GameUi {
       ${eco.massIncome}, ${eco.energyIncome},
       ${eco.massRequested}, ${eco.energyRequested},
       ${eco.massExpense}, ${eco.energyExpense})`)
-    // The PLAY TIME (score.lua shows it as a clock; it stands still during break).
+    // Die SPIELZEIT (score.lua zeigt sie als Uhr; sie steht bei Pause still).
     lines.push(`__uiSetGameTick(${gameTick})`)
-    // The BEAT DISTRIBUTOR of the original UI — not a single panel.
+    // Der BEAT-VERTEILER der Original-UI — nicht ein einzelnes Panel.
     //
-    // The engine calls EXACTLY ONE Lua function per Sim beat:
-    // Moho::UI_LuaBeat() → gamemain.OnBeat() (Cfile:1262940-1262967). There
-    // ALL update functions registered via AddBeatFunction run:
-    // economy._BeatFunction, avatars.AvatarUpdate (the ACU icon on the right!),
+    // Die Engine ruft pro Sim-Beat GENAU EINE Lua-Funktion:
+    // Moho::UI_LuaBeat() → gamemain.OnBeat() (Cfile:1262940-1262967). Dort
+    // laufen ALLE per AddBeatFunction registrierten Update-Funktionen:
+    // economy._BeatFunction, avatars.AvatarUpdate (das ACU-Icon rechts!),
     // commandmode.OnCommandModeBeat, connectivity.PingUpdate, …
     //
-    // Previously we called Economy._BeatFunction() DIRECTLY - this worked exactly
-    // Panel, and all other registered beat functions remained dead.
+    // Vorher riefen wir Economy._BeatFunction() DIREKT — damit lief genau ein
+    // Panel, und alle anderen registrierten Beat-Funktionen blieben tot.
     //
-    // The queue guard runs BEFORE the Lua beat — same order as
+    // Der Queue-Wächter läuft VOR dem Lua-Beat — dieselbe Reihenfolge wie
     // CUIManager::DoBeat (Cfile:1273907-1273911: erst
-    // UI_FactoryCommandQueueHandlerBeat, then UI_LuaBeat). He reports
-    // Factory queue changes as gamemain.OnQueueChanged.
+    // UI_FactoryCommandQueueHandlerBeat, dann UI_LuaBeat). Er meldet
+    // Änderungen der Fabrik-Warteschlange als gamemain.OnQueueChanged.
     lines.push(`__uiFactoryQueueBeat()`)
     lines.push(`import('/lua/ui/game/gamemain.lua').OnBeat()`)
     this.host.eval(lines.join('\n'))
 
-    // The first beat MIT Units is the moment when the engine is DoInitializing
-    // drives (Cfile:1321067: StopLoadingDialog “after the first beat
-    // Sync data"). Only now does gamemain.OnFirstUpdate see its avatars -
-    // previously its 3-s fork with `SelectUnits(nil)` deleted every selection.
+    // Der erste Beat MIT Units ist der Moment, in dem die Engine DoInitializing
+    // fährt (Cfile:1321067: StopLoadingDialog „nach dem ersten Beat mit
+    // Sync-Daten"). Erst jetzt sieht gamemain.OnFirstUpdate seine Avatare —
+    // vorher löschte dessen 3-s-Fork mit `SelectUnits(nil)` jede Auswahl.
     if (this.worldInit && units.length > 0) {
       const init = this.worldInit
       this.worldInit = null
@@ -330,12 +330,12 @@ export class GameUi {
     return Number(this.host.eval(`return __uiSelectByIds({ ${list} })`))
   }
 
-  /** How many units are currently selected (UI VM's GetSelectedUnits). */
+  /** Wie viele Units gerade ausgewählt sind (GetSelectedUnits der UI-VM). */
   selectionCount(): number {
     return Number(this.host.eval('return table.getn(GetSelectedUnits() or {})'))
   }
 
-  /** Debug ONLY (CDP Detects): evaluate a Lua expression in the UI VM. */
+  /** NUR Debug (CDP-Abnahmen): einen Lua-Ausdruck in der UI-VM auswerten. */
   debugEval(code: string): unknown {
     return this.host.eval(code)
   }
@@ -370,7 +370,7 @@ export class GameUi {
     return this.renderer.worldViews()
   }
 
-  /** The unit under the mouse cursor (unitview.lua reads it via GetRolloverInfo). */
+  /** Die Unit unter dem Mauszeiger (unitview.lua liest sie über GetRolloverInfo). */
   setRollover(id: number | null): void {
     this.host.eval(id === null ? '__uiSetRollover(nil)' : `__uiSetRollover(${id})`)
   }
@@ -382,9 +382,9 @@ export class GameUi {
    * KEINEN Tick-Scheduler, ihre Threads laufen mit den Bildern (userinit.lua:13-21).
    */
   render(delta = 1 / 60): void {
-    // An error in an OnFrame script must not stop the image pump —
-    // otherwise the entire surface will freeze after the first missing engine part
-    // a. The engine does it the same way (CMauiControl::Frame → RunScript).
+    // Ein Fehler in einem OnFrame-Skript darf die Bild-Pumpe nicht anhalten —
+    // sonst friert nach dem ersten fehlenden Engine-Teil die ganze Oberfläche
+    // ein. Die Engine macht es genauso (CMauiControl::Frame → RunScript).
     try {
       this.renderer.update(delta)
     } catch (err) {
@@ -429,7 +429,7 @@ export class GameUi {
     })
   }
 
-  /** The current command mode (what the next click in the world does). */
+  /** Der aktuelle Command-Mode (was der nächste Klick in der Welt tut). */
   commandMode(): CommandMode {
     return getCommandMode(this.host)
   }
@@ -443,7 +443,7 @@ export class GameUi {
     return footprintOf(this.host, blueprintId)
   }
 
-  /** Cancel command mode - this is what the right click does in the original. */
+  /** Command-Mode abbrechen — das tut im Original der Rechtsklick. */
   cancelCommandMode(): void {
     this.host.eval(`import('/lua/ui/game/commandmode.lua').EndCommandMode(true)`)
   }
@@ -468,7 +468,7 @@ export class GameUi {
     this.host.eval(`IssueBlueprintCommand('${command}', '${blueprintId}', ${count}, false)`)
   }
 
-  /** The seam for commands that go directly to a unit (SetFireState, SetPaused ...). */
+  /** Die Naht für Befehle, die direkt an eine Unit gehen (SetFireState, SetPaused …). */
   connectSim(send: (name: string, ids: number[], value: unknown) => void): void {
     this.host.setGlobal('__uiSimCommand', send)
   }
@@ -519,7 +519,7 @@ export class GameUi {
     this.host.setGlobal('__uiPauseSink', pause)
   }
 
-  /** Mirror the session to the UI VM (see `applySession`). */
+  /** Die Session in die UI-VM spiegeln (siehe `applySession`). */
   setSession(info: SessionInfo, playerName?: string): void {
     applySession(this.host, info, playerName)
   }
@@ -534,15 +534,15 @@ export class GameUi {
    * Bewegungsbefehl.
    */
   private handleMouse(type: string, e: MouseEvent | WheelEvent): boolean {
-    // At ButtonRelease, `e.buttons` is already 0 - the pressed button is then there
-    // only in `e.button`. Both together result in the modifiers
-    // Original Lua expected.
+    // Bei ButtonRelease ist `e.buttons` schon 0 — die gedrückte Taste steht dann
+    // nur noch in `e.button`. Beides zusammen ergibt die Modifiers, die die
+    // Original-Lua erwartet.
     const down = e.buttons | (type === 'ButtonRelease' ? [1, 4, 2][e.button] ?? 0 : 0)
     const mods = `{ Shift = ${e.shiftKey}, Ctrl = ${e.ctrlKey}, Alt = ${e.altKey}, ` +
       `Left = ${(down & 1) !== 0}, Middle = ${(down & 4) !== 0}, Right = ${(down & 2) !== 0} }`
-    // KeyCode of the mouse button (Windows-VK: 1 = left, 2 = right, 4 = middle). The
-    // Dragger remembers it at ButtonPress (button.lua:160 PostDragger) and
-    // only ends when EXACTLY this button is released.
+    // KeyCode der Maustaste (Windows-VK: 1 = links, 2 = rechts, 4 = mitte). Der
+    // Dragger merkt sich ihn beim ButtonPress (button.lua:160 PostDragger) und
+    // beendet sich erst, wenn GENAU diese Taste losgelassen wird.
     const keyCode = [1, 4, 2][e.button] ?? 0
     const call =
       type === 'WheelRotation'
@@ -551,21 +551,21 @@ export class GameUi {
     try {
       return this.host.eval(call) === true
     } catch (err) {
-      // An error in a UI script should not turn off the mouse. The engine
-      // does the same: CMauiControl::HandleEvent calls the Lua HandleEvent
-      // RunScript, an error is logged and the program continues to run.
-      // Without that, the first missing engine part tore (clicking on the
-      // Sound tab → GetVolume) includes the entire operation.
+      // Ein Fehler in einem UI-Skript darf die Maus nicht abschalten. Die Engine
+      // macht es genauso: CMauiControl::HandleEvent ruft das Lua-HandleEvent über
+      // RunScript, ein Fehler wird protokolliert und das Programm läuft weiter.
+      // Ohne das riss der erste fehlende Engine-Teil (ein Klick auf den
+      // Ton-Reiter → GetVolume) die ganze Bedienung mit.
       //
-      // The event is considered CONSUMED: it hit a control (otherwise it would be
-      // no script ran) — it may not also be released into the world as a click.
+      // Das Event gilt als VERBRAUCHT: es hat ein Control getroffen (sonst wäre
+      // kein Skript gelaufen) — es darf nicht auch noch als Klick in die Welt gehen.
       this.reportUiError(err)
       return true
     }
   }
 
   private readonly seenErrors = new Set<string>()
-  /** Report each different Lua error EXACTLY ONCE — not 60 times per second. */
+  /** Jeden verschiedenen Lua-Fehler GENAU EINMAL melden — nicht 60-mal pro Sekunde. */
   private reportUiError(err: unknown): void {
     const msg = (err instanceof Error ? err.message : String(err))
       .replace(/\[string "[\s\S]*?"\]/g, '')
@@ -625,25 +625,25 @@ export class GameUi {
       capture: true,
       passive: false,
     })
-    // The modifier keys for IsKeyDown (mHelp Cfile:1141963) — the
-    // Original UI asks 'Shift' (commandmode.lua:82: Shift holds the
-    // Command mode open after the first command → build queue).
-    // Names as in the EMauiKeyCode enum that resolves SCR_GetEnum.
+    // Die Modifier-Tasten für IsKeyDown (mHelp Cfile:1141963) — die
+    // Original-UI fragt 'Shift' (commandmode.lua:82: Shift hält den
+    // Befehls-Modus nach dem ersten Befehl offen → Bau-Warteschlange).
+    // Namen wie im EMauiKeyCode-Enum, das SCR_GetEnum auflöst.
     const meldeTaste = (e: KeyboardEvent, down: boolean): void => {
       const name = e.key === 'Shift' ? 'Shift' : e.key === 'Control' ? 'Control' : e.key === 'Alt' ? 'Alt' : null
       if (name) this.host.eval(`__uiSetKeyDown('${name}', ${down})`)
     }
 
-    // The engine's KEYBOARD path (wxWndProc @0x96D090 → maui-Dispatch →
-    // CUIKeyHandler), traced from the browser event:
+    // Der TASTATUR-Pfad der Engine (wxWndProc @0x96D090 → maui-Dispatch →
+    // CUIKeyHandler), aus dem Browser-Event nachgezeichnet:
     //   1. KeyDown an __mauiKey (Fokus-Control / Capture-Top). Konsumiert →
-    //      the following character is SWALLOWED (bit 8 semantics,
+    //      das folgende Char wird VERSCHLUCKT (Bit-8-Semantik,
     //      Cfile:1499710-1499717).
-    //   2. Not consumed → Keymap executor (__uiKeyMapExecute): Hotkeys
-    //      from keymapper.lua via ConExecute; Fallbacks Enter→Chat, ~→Console.
-    //   3. Char (real or synthesized from the KeyDown, keys.ts).
-    //      __mauiKey — Edit fields only get their characters via this
-    //      (CMauiEdit only responds to MET_Char,
+    //   2. Nicht konsumiert → Keymap-Executor (__uiKeyMapExecute): Hotkeys
+    //      aus keymapper.lua via ConExecute; Fallbacks Enter→Chat, ~→Konsole.
+    //   3. Char (echt oder aus dem KeyDown synthetisiert, keys.ts) an
+    //      __mauiKey — NUR darüber bekommen Edit-Felder ihre Zeichen
+    //      (CMauiEdit reagiert ausschließlich auf MET_Char,
     //      Cfile:1132299-1132318).
     const mods = (e: KeyboardEvent): string =>
       `{ ${[e.shiftKey && 'Shift = true', e.ctrlKey && 'Ctrl = true', e.altKey && 'Alt = true']
@@ -660,8 +660,8 @@ export class GameUi {
           this.host.eval(`return __mauiKey('KeyDown', ${k.wx}, ${k.vk}, ${m})`) === true
         let acted = consumed
         if (!consumed) {
-          // '~' reaches the console in the original via the char code 126
-          // (Cfile:1262747) — the key itself is VK 0xC0.
+          // '~' erreicht die Konsole im Original über den Char-Code 126
+          // (Cfile:1262747) — die Taste selbst ist VK 0xC0.
           const mauiCode = e.key === '~' ? 126 : k.wx
           acted =
             this.host.eval(
@@ -687,7 +687,7 @@ export class GameUi {
       },
       true,
     )
-    // Window leaves focus → no key is considered held anymore (otherwise
+    // Fenster verlässt den Fokus → keine Taste gilt mehr als gehalten (sonst
     // klemmt Shift nach Alt+Tab dauerhaft).
     target.addEventListener('blur', () => {
       this.host.eval(`__uiSetKeyDown('Shift', false) __uiSetKeyDown('Control', false) __uiSetKeyDown('Alt', false)`)

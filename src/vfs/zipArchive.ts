@@ -8,7 +8,7 @@ import type { RandomAccessFile } from './randomAccess'
  * Bedarf geladen. Damit sind auch 1,3-GB-Archive im Browser kein Problem.
  */
 export interface ZipEntry {
-  /** Path as saved in archive (forward slashes, original casing). */
+  /** Pfad wie im Archiv gespeichert (Forward-Slashes, Original-Casing). */
   name: string
   compressedSize: number
   uncompressedSize: number
@@ -26,7 +26,7 @@ const EOCD_SEARCH_SPAN = 22 + 65535
 export class ZipArchive {
   private constructor(
     private readonly file: RandomAccessFile,
-    /** Key: Path in lowercase letters (game paths are case-insensitive). */
+    /** Key: Pfad in Kleinbuchstaben (Spiel-Pfade sind case-insensitiv). */
     readonly entries: Map<string, ZipEntry>,
   ) {}
 
@@ -41,7 +41,7 @@ export class ZipArchive {
         break
       }
     }
-    if (eocd < 0) throw new Error('No zip archive (End of Central Directory not found)')
+    if (eocd < 0) throw new Error('Kein Zip-Archiv (End of Central Directory nicht gefunden)')
 
     const count = tail.getUint16(eocd + 10, true)
     const cdirSize = tail.getUint32(eocd + 12, true)
@@ -54,7 +54,7 @@ export class ZipArchive {
     let p = 0
     for (let i = 0; i < count; i++) {
       if (cdir.getUint32(p, true) !== CDIR_SIG) {
-        throw new Error(`Zip: Central directory entry ${i} corrupted`)
+        throw new Error(`Zip: Central-Directory-Eintrag ${i} beschädigt`)
       }
       const method = cdir.getUint16(p + 10, true)
       const compressedSize = cdir.getUint32(p + 20, true)
@@ -92,7 +92,7 @@ export class ZipArchive {
       await this.file.slice(entry.localHeaderOffset, entry.localHeaderOffset + 30),
     )
     if (head.getUint32(0, true) !== LOCAL_SIG) {
-      throw new Error(`Zip: Local header of "${entry.name}" corrupted`)
+      throw new Error(`Zip: Local Header von "${entry.name}" beschädigt`)
     }
     const nameLen = head.getUint16(26, true)
     const extraLen = head.getUint16(28, true)
@@ -126,15 +126,15 @@ export class ZipArchive {
     const out = new Map<ZipEntry, Uint8Array>()
     if (entries.length === 0) return out
 
-    // Sort by position - this is the only way to group neighbors together.
+    // Nach Position sortieren — nur so lassen sich Nachbarn zusammenfassen.
     const sorted = [...entries].sort((a, b) => a.localHeaderOffset - b.localHeaderOffset)
-    // End of data upper limit: 30 bytes fixed header + name + extra field. The
-    // Extra field is never big here, a generous serve is enough as a barrier.
+    // Obergrenze des Datenendes: 30 Byte fester Header + Name + Extra-Feld. Das
+    // Extra-Feld ist hier nie groß, ein großzügiger Aufschlag reicht als Schranke.
     const endOf = (e: ZipEntry): number =>
       Math.min(this.file.size, e.localHeaderOffset + 30 + e.name.length + 4096 + e.compressedSize)
 
-    // Form blocks: adjacent entries together, a jump over maxGap
-    // ends the block.
+    // Blöcke bilden: benachbarte Einträge zusammen, ein Sprung über maxGap
+    // beendet den Block.
     const blocks: { lo: number; hi: number; from: number; to: number }[] = []
     let i = 0
     while (i < sorted.length) {
@@ -159,14 +159,14 @@ export class ZipArchive {
         const e = sorted[k]!
         const p = e.localHeaderOffset - b.lo
         if (view.getUint32(p, true) !== LOCAL_SIG) {
-          throw new Error(`Zip: Local header of "${e.name}" corrupted`)
+          throw new Error(`Zip: Local Header von "${e.name}" beschädigt`)
         }
         const start = p + 30 + view.getUint16(p + 26, true) + view.getUint16(p + 28, true)
         out.set(e, this.decompress(e, buf.subarray(start, start + e.compressedSize)))
       }
     }
 
-    // Up to `parallel` blocks in the air at the same time.
+    // Bis zu `parallel` Blöcke gleichzeitig in der Luft.
     let next = 0
     await Promise.all(
       Array.from({ length: Math.min(parallel, blocks.length) }, async () => {
@@ -183,6 +183,6 @@ export class ZipArchive {
     if (entry.method === 8) {
       return inflateSync(raw, { out: new Uint8Array(entry.uncompressedSize) })
     }
-    throw new Error(`Zip: Compression method ${entry.method} not supported (${entry.name})`)
+    throw new Error(`Zip: Kompressionsmethode ${entry.method} nicht unterstützt (${entry.name})`)
   }
 }

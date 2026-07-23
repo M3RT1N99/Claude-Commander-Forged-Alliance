@@ -1,21 +1,21 @@
 __buildTasks = {}
 __nextBuildTask = 1
 
--- Place construction order: Farmer builds the construction site. He runs out of reach
--- first (approach via the navigator).
+-- Bau-Auftrag erteilen: Bauer baut die Baustelle. Ausser Reichweite laeuft er
+-- erst hin (Approach ueber den Navigator).
 --
--- `order` is the order string that the engine passes to OnStartBuild:
--- 'MobileBuild' (a farmer builds a building) or 'FactoryBuild' (a factory
--- builds a unit). The original Lua differentiates after that — FactoryUnit
--- (defaultunits.lua:504-513) switches to theirs for everything except 'Upgrade'
--- BuildingState and then rolls the finished unit off the yard.
---- A pawn's ACTIVE order — the one with the smallest number.
+-- `order` ist der Auftragsstring, den die Engine an OnStartBuild reicht:
+-- 'MobileBuild' (ein Bauer setzt ein Gebaeude) oder 'FactoryBuild' (eine Fabrik
+-- baut eine Einheit). Die Original-Lua unterscheidet danach — FactoryUnit
+-- (defaultunits.lua:504-513) wechselt bei allem ausser 'Upgrade' in ihren
+-- BuildingState und rollt die fertige Einheit anschliessend vom Hof.
+--- Der AKTIVE Auftrag eines Bauers — der mit der kleinsten Nummer.
 ---
---- A farmer works on ONE order, not all at the same time. The engine
---- maintains a COMMAND QUEUE per unit (UNITCOMMAND_BuildMobile lands
---- in it, Shift is attached, without Shift it is emptied). Without this the ACU will build
---- three buildings in parallel - each at full construction rate, and the costs are phased out
---- the rudder. They don't exist in FA.
+--- Ein Bauer arbeitet an EINEM Auftrag, nicht an allen gleichzeitig. Die Engine
+--- fuehrt pro Unit eine BEFEHLS-WARTESCHLANGE (UNITCOMMAND_BuildMobile landet
+--- darin, Shift haengt an, ohne Shift wird sie geleert). Ohne das baut die ACU
+--- drei Gebaeude parallel — jedes mit voller Baurate, und die Kosten laufen aus
+--- dem Ruder. Es gibt sie in FA nicht.
 local function activeTask(builderId)
   local best, bestId = nil, nil
   for tid, task in pairs(__buildTasks) do
@@ -26,10 +26,10 @@ local function activeTask(builderId)
   return best, bestId
 end
 
---- Does a farmer have an ongoing or pending construction contract? The unit mirror
---- reports "idle": in the original, the engine maintains idle sets on the UserArmy
---- (Cfile:1352334-1352374) from the task state — a pawn WITH task is
---- does not run empty, even when it is standing still.
+--- Hat ein Bauer einen laufenden oder wartenden Bau-Auftrag? Der Unit-Spiegel
+--- meldet daraus „idle": im Original pflegt die Engine Idle-Sets am UserArmy
+--- (Cfile:1352334-1352374) aus dem Task-Zustand — ein Bauer MIT Auftrag ist
+--- nicht leerlaufend, auch wenn er gerade stillsteht.
 function __builderBusy(builderId)
   for _, task in pairs(__buildTasks) do
     if task.builder == builderId then return true end
@@ -61,7 +61,7 @@ function __abortBuildTasks(builderId)
       -- Only a site whose build NEVER began vanishes on abort: in the
       -- engine the structure does not exist before the task reached it —
       -- we spawn it at click time, so remove the placeholder to match. A
-      -- started site (__engineBorn) stays, keeps its progress, and dies
+      -- begun site (__engineBorn) stays, keeps its progress, and dies
       -- through the decay path (Unit::OnTick, Cfile:952824-952840).
       if t and not t.__engineBorn and (t.__fraction or 1) <= 0 then t:Destroy() end
       __econClearBuildRequest((b and b.__army) or 1, tid)
@@ -98,8 +98,8 @@ function __decayTick()
   end
 end
 
---- Delete all orders of a pawn (no shift = new row). A new one
---- Order REPLACES the work — the current construction also breaks with the full one
+--- Alle Auftraege eines Bauers loeschen (kein Shift = neue Reihe). Ein neuer
+--- Befehl ERSETZT die Arbeit — auch der laufende Bau bricht mit der vollen
 --- Abbruch-Kette ab.
 function __clearBuildQueue(builderId)
   __abortBuildTasks(builderId)
@@ -121,27 +121,27 @@ function __issueBuildTask(builderId, targetId, order, clear)
   return tid
 end
 
---- Start a job: walk there, ALIGN, call OnStartBuild.
---- Only happens when it is the order's turn (see __buildTick).
+--- Einen Auftrag anfangen: hinlaufen, sich AUSRICHTEN, OnStartBuild rufen.
+--- Passiert erst, wenn der Auftrag an der Reihe ist (siehe __buildTick).
 local function startTask(task, tid)
   local b = __units[task.builder]
   local t = __units[task.target]
   if not b or not t then return end
   task.started = true
 
-  -- The engine sets UnitBeingBuilt BEFORE calling OnStartBuild:
-  -- FactoryUnit.RollOffUnit (defaultunits.lua:570) reads exactly this field.
+  -- Die Engine setzt UnitBeingBuilt, BEVOR sie OnStartBuild ruft:
+  -- FactoryUnit.RollOffUnit (defaultunits.lua:570) liest genau dieses Feld.
   b.UnitBeingBuilt = t
   pcall(function() b:OnStartBuild(t, task.order) end)
   pcall(function() t:OnStartBeingBuilt(b, task.order) end)
 end
 
---- Per Beat: the pawn goes to his active order and TURNS TOWARDS IT.
+--- Pro Beat: der Bauer geht zu seinem aktiven Auftrag und DREHT SICH ZU IHM.
 ---
---- `Economy.NeedToFaceTargetToBuild` (Blueprint) says that the pawn is the target
---- must be viewed - the ACU does this in the original visible before the construction beam
---- comes. Even without the flag, the engine aligns the pawn; his construction arm
---- hangs on a bone that points to the target.
+--- `Economy.NeedToFaceTargetToBuild` (Blueprint) sagt, dass der Bauer das Ziel
+--- ansehen muss — die ACU tut das im Original sichtbar, bevor der Bau-Strahl
+--- kommt. Auch ohne das Flag richtet die Engine den Bauer aus; sein Bau-Arm
+--- haengt an einem Knochen, der auf das Ziel zeigt.
 local function approach(task)
   local b = __units[task.builder]
   local t = __units[task.target]
@@ -155,45 +155,45 @@ local function approach(task)
   local dist = math.sqrt(dx * dx + dz * dz)
 
   if mbd > 0 and dist > mbd then
-    -- Still too far away: run there (the movement makes motion.lua).
+    -- Noch zu weit weg: hinlaufen (die Bewegung macht motion.lua).
     b.__goal = { tp[1], tp[3] }
     b.__faceGoal = false
   elseif b.__goal and mbd > 0 and dist <= mbd then
-    -- Arrived within reach: DELETE the destination. It pointed
-    -- CENTER of the construction site — without this stop, motion.lua drove the farmer
-    -- exactly there, and the ACU was in the middle of the building
-    -- (Scene debug: ACU and factory in identical position).
+    -- IN Reichweite angekommen: das Fahrziel LOESCHEN. Es zeigte aufs
+    -- ZENTRUM der Baustelle — ohne diesen Stopp fuhr motion.lua den Bauer
+    -- exakt dorthin weiter, und die ACU stand mitten IM Gebaeude
+    -- (Szene-Debug: ACU und Fabrik auf identischer Position).
     b.__goal = false
     b.__speed = 0
     b.__faceGoal = { tp[1], tp[3] }
   elseif not b.__goal and dist > 0.01 then
-    -- Within reach: stand still and TURN towards the target.
+    -- In Reichweite: stehen bleiben und sich zum Ziel DREHEN.
     --
-    -- Not with `b.__heading = atan2(...)`: that turned the unit in ZERO time.
-    -- A unit rotates at its `Physics.TurnRate` (degrees/second) — exactly that
-    -- Rate at which it also turns while driving. That's why she only gets here
-    -- a ROTATE TARGET; It is processed in motion.lua, with the same
-    -- Angular velocity like any other rotation.
+    -- Nicht mit `b.__heading = atan2(...)`: das drehte die Unit in NULL Zeit.
+    -- Eine Einheit dreht mit ihrer `Physics.TurnRate` (Grad/Sekunde) — genau die
+    -- Rate, mit der sie auch beim Fahren einlenkt. Deshalb bekommt sie hier nur
+    -- ein DREH-ZIEL; abgearbeitet wird es in motion.lua, mit derselben
+    -- Winkelgeschwindigkeit wie jede andere Drehung.
     b.__faceGoal = { tp[1], tp[3] }
   end
 end
 
--- === The construction queue of a factory ===
+-- === Die Bau-Warteschlange einer Fabrik ===
 --
--- IssueBlueprintCommand("UNITCOMMAND_BuildFactory", id, count) puts in the engine
--- Entries in the factory queue. The factory processes them: one
--- Unit after unit, each as a normal construction site with the order
--- 'FactoryBuild'. The original Lua only sees OnStartBuild/OnStopBuild.
+-- IssueBlueprintCommand("UNITCOMMAND_BuildFactory", id, count) legt in der Engine
+-- Eintraege in die Warteschlange der Fabrik. Die Fabrik arbeitet sie ab: eine
+-- Einheit nach der anderen, jede als ganz normale Baustelle mit dem Auftrag
+-- 'FactoryBuild'. Die Original-Lua sieht davon nur OnStartBuild/OnStopBuild.
 --
--- The entries have the form { id = <blueprintId>, count = <n> } — the same,
--- that the UI expects (construction.lua:1620).
+-- Die Eintraege haben die Form { id = <blueprintId>, count = <n> } — dieselbe,
+-- die die UI erwartet (construction.lua:1620).
 function __queueFactoryBuild(factoryId, bpId, count)
   local f = __units[factoryId]
   if not f then return false end
   f.__buildQueue = f.__buildQueue or {}
   local q = f.__buildQueue
   local n = table.getn(q)
-  -- Same blueprint as last? Then stack (the UI shows stack, none
+  -- Gleicher Blueprint wie zuletzt? Dann stapeln (die UI zeigt Stapel, keine
   -- Einzelposten).
   if n > 0 and q[n].id == bpId then
     q[n].count = q[n].count + (count or 1)
@@ -203,10 +203,10 @@ function __queueFactoryBuild(factoryId, bpId, count)
   return true
 end
 
---- Change a queue entry by `delta` (1-based index) — the end of the sim
---- from Increase/DecreaseBuildCountInQueue (Moho::ISSUE_IncreaseCommandCount
---- Cfile:1257266 / DecreaseCommandCount Cfile:1257378). The counter falls on
---- 0 or below, the entry disappears.
+--- Einen Queue-Eintrag um `delta` aendern (1-basierter Index) — das Sim-Ende
+--- von Increase/DecreaseBuildCountInQueue (Moho::ISSUE_IncreaseCommandCount
+--- Cfile:1257266 / DecreaseCommandCount Cfile:1257378). Faellt der Zaehler auf
+--- 0 oder darunter, verschwindet der Eintrag.
 function __adjustFactoryQueue(factoryId, index, delta)
   local f = __units[factoryId]
   if not f or not f.__buildQueue then return end
@@ -216,7 +216,7 @@ function __adjustFactoryQueue(factoryId, index, delta)
   if item.count <= 0 then table.remove(f.__buildQueue, index) end
 end
 
--- Is there a construction contract currently underway on this unit?
+-- Laeuft an dieser Unit gerade ein Bau-Auftrag?
 local function isBuilding(id)
   for _, task in pairs(__buildTasks) do
     if task.builder == id then return true end
@@ -224,9 +224,9 @@ local function isBuilding(id)
   return false
 end
 
--- Pro Beat BEFORE collecting: any factory with a queue and without a running one
--- Order sets up the next unit. The engine creates them at the factory
--- (Sim::CreateUnit, beingBuilt = 1) — the rest is the same build task as everywhere else.
+-- Pro Beat VOR dem Sammeln: jede Fabrik mit Warteschlange und ohne laufenden
+-- Auftrag setzt die naechste Einheit auf. Die Engine erzeugt sie an der Fabrik
+-- (Sim::CreateUnit, beingBuilt = 1) — der Rest ist derselbe Bau-Task wie ueberall.
 function __factoryTick()
   for id, f in pairs(__units) do
     local q = f.__buildQueue
@@ -236,7 +236,7 @@ function __factoryTick()
       local scriptPath = '/units/' .. item.id .. '/' .. item.id .. '_script.lua'
       local uid, err = __spawnBuildSite(scriptPath, item.id, p[1], p[2], p[3], f.__army or 1)
       if uid < 0 then
-        WARN('Fabrik ' .. tostring(id) .. ' kann ' .. tostring(item.id) .. ' don't build: ' .. tostring(err))
+        WARN('Fabrik ' .. tostring(id) .. ' kann ' .. tostring(item.id) .. ' nicht bauen: ' .. tostring(err))
         table.remove(q, 1)
       else
         __issueBuildTask(id, uid, 'FactoryBuild')
@@ -247,13 +247,13 @@ function __factoryTick()
   end
 end
 
--- Phase 1 (BEFORE the economic tick): Report target step + resource requirements.
+-- Phase 1 (VOR dem Oekonomie-Tick): Sollschritt + Ressourcen-Bedarf anmelden.
 --
--- ONLY THE ACTIVE order of each pawn works - the rest wait in the
--- Queue (shift construction). And the pawn runs to its goal or turns
--- to him before the first construction progress takes place.
+-- NUR DER AKTIVE Auftrag jedes Bauers arbeitet — die uebrigen warten in der
+-- Warteschlange (Shift-Bau). Und der Bauer laeuft zu seinem Ziel bzw. dreht sich
+-- zu ihm, bevor der erste Baufortschritt entsteht.
 function __buildCollect()
-  -- First process the queue: trigger the active order for each farmer.
+  -- Erst die Warteschlange abarbeiten: je Bauer den aktiven Auftrag anstossen.
   local aktiv = {}
   for _, task in pairs(__buildTasks) do
     local a, atid = activeTask(task.builder)
@@ -271,7 +271,7 @@ function __buildCollect()
     task.step = 0
     task.blocked = false
     if not aktiv[tid] then
-      -- Still waiting in the queue: costs nothing, does nothing.
+      -- Wartet noch in der Warteschlange: kostet nichts, tut nichts.
       task.blocked = true
       __econClearBuildRequest(army, tid)
     elseif b and t
@@ -327,7 +327,7 @@ function __buildCollect()
   end
 end
 
--- Phase 2 (AFTER the economy tick): apply the granted limiting rate.
+-- Phase 2 (NACH dem Oekonomie-Tick): gewaehrte LimitingRate anwenden.
 function __buildApply()
   local done = {}
   local n = 0
@@ -336,7 +336,7 @@ function __buildApply()
     local t = __units[task.target]
     local army = (b and b.__army) or 1
     if b and t and task.step > 0 and (t.__fraction or 1) >= 1 and task.order == 'Repair' then
-      -- HP repair of a finished unit: Materialize only increases health
+      -- HP repair of a finished unit: Materialize only raises health
       -- (AdjustHealth, Cfile:953468); FractionComplete stays 1
       -- (Cfile:953455-953466) and OnStopBeingBuilt never re-fires
       -- (Cfile:953470-953476). Done when health == max (Cfile:815498):
@@ -378,7 +378,7 @@ function __buildApply()
         done[n] = tid
       end
     elseif not (task.blocked and b and t) then
-      -- invalid or finished -> remove task; he remains out of reach
+      -- ungueltig oder fertig -> Task entfernen; ausser Reichweite bleibt er
       n = n + 1
       done[n] = tid
     end

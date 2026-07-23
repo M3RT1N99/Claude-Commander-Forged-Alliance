@@ -31,7 +31,7 @@ interface MauiControl {
   color: string | false
   fontSize: number | false
   fontFamily: string | false
-  /** Only with kind === 'border': the 9-slice border (four edges, four corners). */
+  /** Nur bei kind === 'border': der 9-Slice-Rahmen (vier Kanten, vier Ecken). */
   border:
     | false
     | {
@@ -46,7 +46,7 @@ interface MauiControl {
       }
   centerH: boolean
   centerV: boolean
-  /** ItemList / Edit / Scrollbar — what the engine draws itself in the original. */
+  /** ItemList / Edit / Scrollbar — was die Engine im Original selbst zeichnet. */
   list:
     | false
     | {
@@ -132,15 +132,15 @@ export class MauiRenderer {
     this.els.clear()
   }
 
-  /** Pulls the state from the UI VM and writes it to the DOM. */
+  /** Zieht den Zustand aus der UI-VM und schreibt ihn ins DOM. */
   update(deltaSeconds = 1 / 60): void {
-    // First the frame pump: the engine calls OnFrame(delta) on each image
-    // Control that requested SetNeedsFrameUpdate(true) (Cfile:1118936).
-    // The grids of the original UI build their layout there.
+    // Erst die Frame-Pumpe: die Engine ruft pro Bild OnFrame(delta) auf jedem
+    // Control, das SetNeedsFrameUpdate(true) verlangt hat (Cfile:1118936).
+    // Die Grids der Original-UI bauen darin ihr Layout auf.
     this.host.eval(`__mauiFrame(${deltaSeconds})`)
-    // The snapshot comes as a JSON STRING via a JS function — it will NOT
-    // returned from Lua. Any return value would remain in the wasmoon registry
-    // hang (~78 kB per snapshot), and the UI VM was running at 60 frames/s
+    // Der Snapshot kommt als JSON-STRING über eine JS-Funktion — er wird NICHT
+    // aus Lua zurückgegeben. Jeder Rückgabewert bliebe im wasmoon-Registry
+    // hängen (~78 kB pro Snapshot), und bei 60 Bildern/s lief die UI-VM nach
     // Minuten in ihre 2-GB-Grenze ("not enough memory"). Siehe LuaHost.pull().
     const controls = this.host.pull<MauiControl[]>('__mauiSnapshotJson()')
     if (controls.length === 0) return
@@ -158,20 +158,20 @@ export class MauiRenderer {
         this.els.set(c.id, el)
       }
 
-      // Only write what has changed (see `lastCss`). Geometry AND
-      // Contents depend on the same key: if nothing changes, this summarizes it
-      // Don't image the item at all.
+      // Nur schreiben, was sich geändert hat (siehe `lastCss`). Geometrie UND
+      // Inhalt hängen an demselben Schlüssel: ändert sich nichts, fasst dieses
+      // Bild das Element gar nicht an.
       //
-      // Lists, frames and scroll bars are left out - their content is inside
-      // nested data that no cheap key can map.
+      // Listen, Rahmen und Scrollbalken bleiben außen vor — ihr Inhalt steckt in
+      // verschachtelten Daten, die kein billiger Schlüssel abbildet.
       const complex = c.kind === 'itemlist' || c.kind === 'border' || c.kind === 'scrollbar'
-      // The texture is loaded ASYNCHRONOUSLY (DDS from the VFS). That's why yours stands
-      // resolved URL WITH in the key: while it is still loading, it is `null`,
-      // and as soon as it is there, the key changes — the picture is set.
+      // Die Textur wird ASYNCHRON geladen (DDS aus dem VFS). Deshalb steht ihre
+      // aufgelöste URL MIT im Schlüssel: solange sie noch lädt, ist sie `null`,
+      // und sobald sie da ist, ändert sich der Schlüssel — das Bild wird gesetzt.
       //
-      // Without this part, the cache writes "not yet loaded" as
-      // Final state is fixed and half the surface remains empty. (Just as
-      // happened after I installed the cache.)
+      // Ohne diesen Teil schreibt der Zwischenspeicher „noch nicht geladen" als
+      // Endzustand fest, und die halbe Oberfläche bleibt leer. (Genau so
+      // passiert, nachdem ich den Zwischenspeicher eingebaut hatte.)
       const url = c.kind === 'bitmap' && c.texture ? this.texture(c.texture) : null
       const css =
         `${c.hidden ? 1 : 0}|${c.left}|${c.top}|${c.width}|${c.height}|` +
@@ -212,8 +212,8 @@ export class MauiRenderer {
         el.style.whiteSpace = 'pre'
         el.style.overflow = 'hidden'
       } else if (c.kind === 'worldview') {
-        // The world is drawn by the 3D engine, not the Maui renderer. The control
-        // just says WHERE and HOW BIG - there is a hole here.
+        // Die Welt zeichnet die 3D-Engine, nicht der maui-Renderer. Das Control
+        // sagt nur, WO und WIE GROSS — hier bleibt ein Loch.
         el.style.background = 'none'
         el.textContent = ''
       } else if (c.kind === 'scrollbar') {
@@ -222,9 +222,9 @@ export class MauiRenderer {
         el.textContent = c.text === false ? '' : String(c.text)
         el.style.color = c.color ? argb(c.color) : '#ffffff'
         el.style.fontSize = `${c.fontSize || 12}px`
-        // The same font that Lua used to calculate its layout (the TTF
-        // from <GameDir>/fonts, registered via FontFace). A replacement font
-        // would run at a different width than the numbers in the layout.
+        // Dieselbe Schrift, mit der die Lua ihr Layout gerechnet hat (die TTF
+        // aus <GameDir>/fonts, per FontFace registriert). Eine Ersatzschrift
+        // würde anders breit laufen als die Zahlen im Layout.
         if (c.fontFamily) el.style.fontFamily = `"${c.fontFamily}"`
         el.style.lineHeight = `${c.height}px`
         el.style.whiteSpace = 'pre'
@@ -236,13 +236,13 @@ export class MauiRenderer {
       if (!seen.has(id)) {
         el.remove()
         this.els.delete(id)
-        // Also the buffer: the IDs are counted further, but one
-        // Entries left behind would otherwise be stored in memory forever.
+        // Auch den Zwischenspeicher: die IDs werden weitergezählt, aber ein
+        // liegengebliebener Eintrag hielte sonst ewig Speicher.
         this.lastCss.delete(id)
       }
     }
 
-    // Remember the world views - the 3D page queries them per image.
+    // Die Weltansichten merken — die 3D-Seite fragt sie pro Bild ab.
     this.lastWorldViews = controls
       .filter((c) => c.kind === 'worldview' && !c.hidden)
       .map((c) => ({
@@ -258,7 +258,7 @@ export class MauiRenderer {
       }))
   }
 
-  /** The world views of the original Lua (main view, minimap) with their rectangles. */
+  /** Die Weltansichten der Original-Lua (Hauptansicht, Minimap) mit ihren Rechtecken. */
   worldViews(): WorldViewRect[] {
     return this.lastWorldViews
   }
@@ -283,7 +283,7 @@ export class MauiRenderer {
     el.style.background = 'none'
     el.style.overflow = 'visible'
 
-    // Eight tiles as children - they follow the control, so create them once.
+    // Acht Kacheln als Kinder — sie folgen dem Control, also einmal anlegen.
     if (el.children.length !== 8) {
       el.textContent = ''
       for (let i = 0; i < 8; i++) {
@@ -307,7 +307,7 @@ export class MauiRenderer {
       Object.assign(t.style, css)
     }
 
-    // Corners (solid), then edges (tiled) — exactly the six textures that
+    // Ecken (fest), dann Kanten (gekachelt) — genau die sechs Texturen, die
     // SetNewTextures bekommt.
     put(0, b.upperLeft, { left: `${-bw}px`, top: `${-bh}px`, width: `${bw}px`, height: `${bh}px` }, 'no-repeat')
     put(1, b.upperRight, { right: `${-bw}px`, top: `${-bh}px`, width: `${bw}px`, height: `${bh}px` }, 'no-repeat')
@@ -392,7 +392,7 @@ export class MauiRenderer {
     }
   }
 
-  /** DDS from the VFS as a data URL (loaded asynchronously, then cached). */
+  /** DDS aus dem VFS als Data-URL (asynchron nachgeladen, dann gecacht). */
   private texture(path: string): string | null {
     const key = path.replace(/^\/+/, '').toLowerCase()
     const hit = this.textures.get(key)
@@ -412,7 +412,7 @@ export class MauiRenderer {
   }
 }
 
-/** FA colors are 'aarrggbb' (or 'rrggbb'). */
+/** FA-Farben sind 'aarrggbb' (oder 'rrggbb'). */
 function argb(color: string): string {
   const c = String(color).replace(/^#/, '')
   if (c.length === 8) {

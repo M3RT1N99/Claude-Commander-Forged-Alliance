@@ -30,11 +30,11 @@ const GAME =
   process.env.CFA_GAME_DIR ??
   'C:/Program Files (x86)/Steam/steamapps/common/Supreme Commander Forged Alliance'
 
-// The archives where Lua and Blueprints are located. `projectiles.scd` (289 `.bp`
-// + 288 `_script.lua`), `props.scd` (wrecks/claimables) and `effects.scd`
+// Die Archive, in denen Lua und Blueprints liegen. `projectiles.scd` (289 `.bp`
+// + 288 `_script.lua`), `props.scd` (Wracks/Reklamierbares) und `effects.scd`
 // gehören dazu: `Weapon.ProjectileId` zeigt nach `/projectiles/<id>/<id>_proj.bp`
-// (uel0201_unit.bp:225) — without these archives the tool finds the truth
-// not and you start guessing.
+// (uel0201_unit.bp:225) — ohne diese Archive findet das Werkzeug die Wahrheit
+// nicht und man fängt an zu raten.
 const ARCHIVES = [
   'lua.scd',
   'mohodata.scd',
@@ -77,7 +77,7 @@ if (args[0] === '--grep') {
     for (let n = from; n <= Math.min(to, lines.length); n++) console.log(`${n}: ${lines[n - 1]}`)
     break
   }
-  if (!found) console.log(`NOT FOUND: ${path}`)
+  if (!found) console.log(`NICHT GEFUNDEN: ${path}`)
 }
 
 for (const f of files) await f.close()

@@ -4,12 +4,12 @@ import type { LuaHost } from '../lua/host'
  * Session setup — the engine side of SimInit.lua's boot sequence.
  *
  * SimInit.lua documents the order at its top:
- * 1. __blueprints is filled in from preloaded data
- * 2. SimInit.lua runs (globalInit, WaitTicks, SimSync)
- * 3a. ScenarioInfo is set up with info about the scenario <- HERE
- * 4a. SetupSession() is called
- * 5a. Armies, brains and other game facilities are created <- HERE
- * 6a. BeginSession() is called
+ *   1. __blueprints is filled in from preloaded data
+ *   2. SimInit.lua runs (globalInit, WaitTicks, SimSync)
+ *   3a. ScenarioInfo is set up with info about the scenario   <- HERE
+ *   4a. SetupSession() is called
+ *   5a. Armies, brains and other game facilities are created  <- HERE
+ *   6a. BeginSession() is called
  *
  * Steps 3a/5a are engine work: the engine knows the session (map, armies,
  * options) and publishes it to the Sim as the global `ScenarioInfo`, then
@@ -38,15 +38,15 @@ export interface SessionInfo {
 }
 
 /**
- * A two-army skirmish — the sandbox default. Army 2 hosts the self test
+ * A two-army skirmish — the sandbox default. Army 2 hosts the selftest
  * enemies; without a session row the original ARMY_FromLuaState would
  * reject it ("Invalid army 2", Cfile:1358434).
  */
 export const SANDBOX_SESSION: SessionInfo = {
   type: 'skirmish',
   armies: [
-    {name: 'ARMY_1', index: 1, faction: 1, human: true },
-    {name: 'ARMY_2', index: 2, faction: 3, human: false },
+    { name: 'ARMY_1', index: 1, faction: 1, human: true },
+    { name: 'ARMY_2', index: 2, faction: 3, human: false },
   ],
 }
 
@@ -57,7 +57,7 @@ export const SANDBOX_SESSION: SessionInfo = {
 export function setupSession(host: LuaHost, info: SessionInfo): void {
   const armySetup = info.armies
     .map(
-      (a) => ` ['${a.name}'] = {
+      (a) => `      ['${a.name}'] = {
         ArmyIndex = ${a.index},
         ArmyName = '${a.name}',
         Human = ${a.human},
@@ -71,7 +71,7 @@ export function setupSession(host: LuaHost, info: SessionInfo): void {
   host.eval(`
     ScenarioInfo = {
       type = '${info.type}',
-      map = '${info.map ??''}',
+      map = '${info.map ?? ''}',
       Options = {},
       ArmySetup = {
 ${armySetup}

@@ -1,7 +1,7 @@
-// Port of UEFBuildOverlayHiFiPS (effects/mesh.fx:2977-2988), pass P1 the
-// UEFBuild technique: two counter-scrolling samples of the
-// Construction grid (secondary sampler), alpha drops with progress and
-// fades out in the last 5%.
+// Port von UEFBuildOverlayHiFiPS (effects/mesh.fx:2977-2988), Pass P1 der
+// UEFBuild-Technique: zwei gegeneinander scrollende Abtastungen des
+// Bau-Gitters (secondarySampler), Alpha faellt mit dem Fortschritt und
+// blendet in den letzten 5 % aus.
 
   precision highp float;
 

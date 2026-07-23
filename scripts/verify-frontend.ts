@@ -99,21 +99,21 @@ for (const name of await readdir(`${GAME}/fonts`)) {
   if (/\.ttf$/i.test(name)) fonts.add(await readFile(`${GAME}/fonts/${name}`))
 }
 
-console.log(`\n== Boot UI VM (${files.size} Lua files, ${ddsBytes.size} UI textures) ==`)
+console.log(`\n== UI-VM booten (${files.size} Lua-Dateien, ${ddsBytes.size} UI-Texturen) ==`)
 const warnings: string[] = []
 const logs: string[] = []
 const host = await LuaHost.create(files, (level, msg) => {
   if (level === 'WARN') {
     warnings.push(msg)
-    // --warn: show the WARN line IMMEDIATELY. import.lua:51 reports the real one
-    // Error via WARN and then only throws "Error importing '<file>'" -
-    // Without this output you look for the cause in the wrong module.
+    // --warn: die WARN-Zeile SOFORT zeigen. import.lua:51 meldet den echten
+    // Fehler per WARN und wirft danach nur noch „Error importing '<datei>'" —
+    // ohne diese Ausgabe sucht man die Ursache im falschen Modul.
     if (process.argv.includes('--warn')) console.log(`WARN: ${msg.split('\n').slice(0, 3).join(' | ')}`)
   }
   logs.push(`${level}: ${msg}`)
 })
-// The storage of the settings (in the localStorage browser, here a variable).
-// It is part of the test: the prefs must survive a VM restart.
+// Die Ablage der Einstellungen (im Browser der localStorage, hier eine Variable).
+// Sie ist Teil des Tests: die Prefs müssen einen VM-Neustart überleben.
 let prefsStore: string | null = null
 const uiFs = {
   exists: (p: string) => allPaths.has(p),
@@ -129,21 +129,21 @@ const uiFs = {
   },
 }
 installUiEngine(host, uiFs)
-// The root frame is BEFORE SetupUI — CUIManager::SetNewLuaState sets it
-// comes first (Cfile:1273621-1273666), SetupUI comes afterwards (1273680).
+// Der Root-Frame steht VOR SetupUI — CUIManager::SetNewLuaState legt ihn
+// zuerst an (Cfile:1273621-1273666), SetupUI kommt erst danach (1273680).
 createRootFrame(host, 1920, 1080)
 
-console.log('\n== The original menu boots itself ==')
+console.log('\n== Das Original-Menü bootet sich selbst ==')
 startFrontEnd(host)
 check(String(host.eval('return GetCurrentUIState()')) === 'frontend', 'UI-Zustand ist "frontend" (splash.lua hat durchgereicht)')
 
-// The menu moves ON: menuBracketMiddle:Animate pushes the bracket per frame
-// (main.lua:305-326), then ButtonFade forks a thread that handles each button
-// FadeIn()t — and only FadeIn calls `control:Enable()` (main.lua:621) and sets
-// `OnClick` (644). Previously, ALL buttons were intentionally locked (609).
+// Das Menü fährt EIN: menuBracketMiddle:Animate schiebt die Klammer pro Bild
+// (main.lua:305-326), danach forkt ButtonFade einen Thread, der jeden Knopf
+// FadeIn()t — und erst FadeIn ruft `control:Enable()` (main.lua:621) und setzt
+// `OnClick` (644). Vorher sind ALLE Knöpfe absichtlich gesperrt (609).
 //
-// This test is therefore also proof of the frame scheduler from M1:
-// without running UI threads, the menu would remain gray and unclickable forever.
+// Damit ist dieser Test zugleich der Beweis für den Frame-Scheduler aus M1:
+// ohne laufende UI-Threads bliebe das Menü für immer grau und unklickbar.
 for (let i = 0; i < 200; i++) host.eval('__mauiFrame(0.016)')
 
 interface Snap {
@@ -159,53 +159,53 @@ const textures = snap.map((c) => (c.texture ? String(c.texture).toLowerCase() : 
 const texturesOf = (needle: string): number => textures.filter((t) => t.includes(needle)).length
 
 check(snap.length > 20, `${snap.length} maui-Controls stehen im Menü`)
-check(texturesOf('/logo/logo.dds') === 1, 'the logo is hanging in the tree (/scx_menu/logo/logo.dds)')
+check(texturesOf('/logo/logo.dds') === 1, 'das Logo hängt im Baum (/scx_menu/logo/logo.dds)')
 check(texturesOf('border-console-top_bmp.dds') === 1, 'der Konsolen-Rahmen ist da (border-console-top_bmp.dds)')
 
-// main.lua:104-142 — menuTop has seven entries; CreateButtonStd (543) returns
-// Everyone has their own large_btn_up.dds. There have to be exactly that many buttons: one
-// less means an entry starved to death during construction.
+// main.lua:104-142 — menuTop hat sieben Einträge; CreateButtonStd (543) gibt
+// jedem sein large_btn_up.dds. Genau so viele Knöpfe müssen dastehen: einer
+// weniger heißt, ein Eintrag ist beim Bauen verhungert.
 const menuTopCount = 7
 const buttons = texturesOf('large_btn_up.dds')
 check(buttons === menuTopCount, `${buttons} freigegebene Menü-Knöpfe = ${menuTopCount} Einträge in menuTop`)
 if (buttons !== menuTopCount && process.argv.includes('--dump')) {
   for (const c of snap) console.log(`    ${c.kind} ${c.name} ${c.texture || c.text || ''}`)
 }
-// ... and they have to be VISIBLE. The buttons start at Alpha 0 (main.lua:610);
-// only `FadeIn` fades it up to 1 (648/670) via OnFrame. A button with the
-// The right texture, but alpha 0, is simply not there in the image - that's exactly what it was
-// the state that only the browser showed because this test only checked textures.
+// … und sie müssen SICHTBAR sein. Die Knöpfe starten auf Alpha 0 (main.lua:610);
+// erst `FadeIn` blendet sie über OnFrame auf 1 hoch (648/670). Ein Knopf mit der
+// richtigen Textur, aber Alpha 0, ist im Bild schlicht nicht da — genau das war
+// der Zustand, den nur der Browser zeigte, weil dieser Test nur Texturen prüfte.
 const visibleButtons = snap.filter(
   (c) => c.name === 'button' && !c.hidden && c.alpha > 0.9 && String(c.texture).includes('large_btn'),
 ).length
 check(visibleButtons >= menuTopCount, `${visibleButtons} Knöpfe sind voll eingeblendet (Alpha 1)`)
 
-// The seven labels — localized from the original Lua (<LOC _Campaign> …).
+// Die sieben Beschriftungen — lokalisiert aus der Original-Lua (<LOC _Campaign> …).
 const labels = snap.filter((c) => c.kind === 'text' && c.text).map((c) => String(c.text))
 check(
   labels.some((t) => /Kampagne|Campaign/i.test(t)) && labels.some((t) => /Gefecht|Skirmish/i.test(t)),
-  'the buttons have their labels from menuTop',
+  'die Knöpfe tragen ihre Beschriftung aus menuTop',
 )
-// ... with the right characters. `/loc/<sprache>/strings_db.lua` is UTF-8;
-// Anyone who reads the latin1 file and outputs it as UTF-8 encodes every byte
+// … und zwar mit den richtigen Zeichen. `/loc/<sprache>/strings_db.lua` ist UTF-8;
+// wer die Datei latin1 einliest und als UTF-8 wieder ausgibt, kodiert jedes Byte
 // über 0x7F doppelt — im Menü stand „Profil Ã¤ndern".
 const mojibake = labels.filter((t) => /Ã.|â€/.test(t))
 check(mojibake.length === 0, `keine doppelt kodierten Umlaute (${mojibake[0]?.slice(0, 40) ?? '—'})`)
 
-// GetVersion() is visible in the menu (main.lua:172) — and is not an invented one
-// String more, but the version of THIS engine.
+// GetVersion() steht sichtbar im Menü (main.lua:172) — und ist kein erfundener
+// String mehr, sondern die Version DIESER Engine.
 const version = String(host.eval('return GetVersion()'))
 const versionShown = snap.some((c) => c.kind === 'text' && String(c.text) === version)
 check(version !== 'CFA' && version.length > 3, `GetVersion() = "${version}" (aus der package.json)`)
-check(versionShown, 'the version is available as text in the menu (main.lua:172)')
+check(versionShown, 'die Version steht als Text im Menü (main.lua:172)')
 
 console.log('\n== Der Klick auf „Gefecht" trägt bis zur Lobby ==')
-// The honest proof that the chain is standing: the click goes through the dragger
-// (button.lua:120-160 — OnClick only fires in dragger:OnRelease), through
-// TutorialPrompt and MenuHide (a fade animation over frames), and lands
-// in lobby.CreateLobby(main.lua:915). That's where he MUST fail, and that's where
-// EXACTLY one place: InternalCreateLobby (lobbycomm.lua:121) still exists
-// not. Another error would be a hole further forward in the chain.
+// Der ehrliche Beweis, dass die Kette steht: der Klick geht durch den Dragger
+// (button.lua:120-160 — OnClick feuert erst in dragger:OnRelease), durch
+// TutorialPrompt und MenuHide (eine Ausblend-Animation über Frames), und landet
+// in lobby.CreateLobby (main.lua:915). Dort MUSS er scheitern, und zwar an
+// GENAU einer Stelle: InternalCreateLobby (lobbycomm.lua:121) gibt es noch
+// nicht. Ein anderer Fehler wäre ein Loch weiter vorn in der Kette.
 interface Box {
   left: number
   top: number
@@ -227,7 +227,7 @@ const clickText = (pattern: RegExp, label: string): string | null => {
   try {
     host.eval(`__mauiMouse('ButtonPress', ${x}, ${y}, {}, 1)`)
     host.eval(`__mauiMouse('ButtonRelease', ${x}, ${y}, {}, 1)`)
-    // MenuHide/Hide dialogs via images; the callback only comes afterwards.
+    // MenuHide/Dialoge blenden über Bilder aus; der Callback kommt erst danach.
     for (let i = 0; i < 500; i++) host.eval('__mauiFrame(0.016)')
   } catch (e) {
     return (e as Error).message
@@ -237,16 +237,16 @@ const clickText = (pattern: RegExp, label: string): string | null => {
 
 let err = clickText(/Gefecht|Skirmish/i, 'der Gefecht-Knopf ist im Baum zu finden')
 if (err === null && !warnings.some((w) => w.includes('InternalCreateLobby'))) {
-  // The first time the game asks if you want to play the tutorial
-  // (main.lua:855-872, Prefs 'MenuTutorialPrompt'). This is original behavior,
-  // no error - the dialog must therefore be answered first.
-  err = clickText(/^Nein$|^No$/i, 'The tutorial dialog is there and can be closed with “No" beantworten')
+  // Beim ersten Mal fragt das Spiel, ob man das Tutorial spielen will
+  // (main.lua:855-872, Prefs 'MenuTutorialPrompt'). Das ist Original-Verhalten,
+  // kein Fehler — der Dialog muss also erst beantwortet werden.
+  err = clickText(/^Nein$|^No$/i, 'der Tutorial-Dialog steht da und lässt sich mit „Nein" beantworten')
 }
-// A Lua error in an OnFrame does not THROW in the engine: RunScript catches
-// it (lua_call != 0) and logs "Error running %s script in %s: %s"
-// (gpg::Warnf, Cfile:590672; LogScriptWarning Cfile:590508) — the image is running
-// further. The image pump has been doing the same thing since the xpcall (maui.lua). The proof,
-// The fact that the click takes you to the lobby is therefore in the WARN log - not in one
+// Ein Lua-Fehler in einem OnFrame WIRFT in der Engine nicht: RunScript fängt
+// ihn (lua_call != 0) und loggt „Error running %s script in %s: %s"
+// (gpg::Warnf, Cfile:590672; LogScriptWarning Cfile:590508) — das Bild läuft
+// weiter. Die Bild-Pumpe tut seit dem xpcall dasselbe (maui.lua). Der Beweis,
+// dass der Klick bis zur Lobby trägt, steht darum im WARN-Log — nicht in einer
 // hochgeworfenen Exception.
 const lobbySource = err ?? warnings.find((w) => w.includes('InternalCreateLobby')) ?? ''
 const line = lobbySource.split('\n').find((l) => l.includes('InternalCreateLobby')) ?? ''
@@ -258,11 +258,11 @@ check(
 )
 
 console.log('\n== Der Optionen-Dialog: ItemList, Scrollbar und Combo ==')
-// The Options dialog is the first place where the original UI has the three
-// Missing controls need: an ItemList (each dropdown is one -
-// combo.lua:117) and a scrollbar (uiutil.CreateVertScrollbarFor).
-// It is built directly here, not clicked: the menu is based on that
-// Lobby error already cleared up.
+// Der Optionen-Dialog ist der erste Ort, an dem die Original-UI die drei
+// fehlenden Controls braucht: eine ItemList (jedes Dropdown ist eine —
+// combo.lua:117) und einen Scrollbar (uiutil.CreateVertScrollbarFor).
+// Er wird hier direkt gebaut, nicht geklickt: das Menü hat sich nach dem
+// Lobby-Fehler schon abgeräumt.
 {
   let dlgErr: string | null = null
   try {
@@ -277,8 +277,8 @@ console.log('\n== Der Optionen-Dialog: ItemList, Scrollbar und Combo ==')
   }
   check(dlgErr === null, `options.lua baut den Dialog${dlgErr ? ` — ${dlgErr.slice(0, 110)}` : ''}`)
 
-  // The ItemLists of the dropdowns are CLOSED (combo.lua hides them), and
-  // the snapshot only shows what is visible - i.e. counting in the tree, not in the snapshot.
+  // Die ItemLists der Dropdowns sind ZUGEKLAPPT (combo.lua versteckt sie), und
+  // der Snapshot zeigt nur Sichtbares — also im Baum zählen, nicht im Snapshot.
   const lists = Number(
     host.eval(`
       local n = 0
@@ -292,7 +292,7 @@ console.log('\n== Der Optionen-Dialog: ItemList, Scrollbar und Combo ==')
   check(lists > 0, `${lists} ItemLists im Dialog (jedes Dropdown ist eine — combo.lua:117)`)
   check(bars.length > 0, `${bars.length} Scrollbar(s) im Dialog`)
 
-  // And they carry real lines: the combos are filled from the options data
+  // Und sie tragen echte Zeilen: die Combos werden aus den Optionsdaten gefüllt
   // (optionslogic.GetOptionsData → Auflösung, Sprache, Schatten …).
   const rows = Number(
     host.eval(`
@@ -309,16 +309,16 @@ console.log('\n== Der Optionen-Dialog: ItemList, Scrollbar und Combo ==')
   check(rows > 1, `die größte Liste hat ${rows} Zeilen — die Optionen stehen wirklich drin`)
 }
 
-console.log('\n== The slider can be dragged - and reports the new value ==')
-// The train goes through the dragger (slider.lua:49-70: ButtonPress → Dragger,
+console.log('\n== Der Regler lässt sich ziehen — und meldet den neuen Wert ==')
+// Der Zug geht durch den Dragger (slider.lua:49-70: ButtonPress → Dragger,
 // OnMove → CalculateValueFromMouse → SetValue → OnValueChanged); options.lua
-// depends on it `update` (options.lua:713 → SetVolume). Without Dragger OnMove
-// Nothing moves and the controller would be purely decorative.
+// hängt daran sein `update` (options.lua:713 → SetVolume). Ohne Dragger-OnMove
+// bewegt sich nichts, und der Regler wäre reine Dekoration.
 //
-// The test runs AFTER the dialog test — but the dialog is MODAL (uiutil.lua:616
-// MakeInputModal → AddInputCapture), and clicking next to it does nothing.
-// This is exactly what the modality is intended to do; so the capture stack is emptied beforehand,
-// as the dialog itself would do when closing.
+// Der Test läuft NACH dem Dialog-Test — aber der Dialog ist MODAL (uiutil.lua:616
+// MakeInputModal → AddInputCapture), und ein Klick daneben trifft dann nichts.
+// Genau das soll die Modalität tun; also wird der Capture-Stack vorher geleert,
+// wie es der Dialog beim Schließen selbst täte.
 {
   host.eval(`
     while AnyInputCapture() do RemoveInputCapture(GetInputCapture()) end
@@ -360,13 +360,13 @@ console.log('\n== The slider can be dragged - and reports the new value ==')
   check(value < 50, `Zug nach links: 100 → ${Math.round(value)} (Dragger → OnMove → SetValue)`)
   check(
     host.eval('return __sliderTest.changed') !== false,
-    'OnValueChanged fires - options.lua:713 hangs on it (update → SetVolume)',
+    'OnValueChanged feuert — daran hängt options.lua:713 (update → SetVolume)',
   )
 }
 
 console.log('\n== Audio: Handles ohne Ausgabe ==')
-// main.lua:231-249 starts ambient + music and stops it via the HANDLE.
-// Without a return value from PlaySound, StopSound would have nothing to grab onto.
+// main.lua:231-249 startet Ambient + Musik und stoppt sie über das HANDLE.
+// Ohne Rückgabewert von PlaySound hätte StopSound nichts zu greifen.
 const cueList = (): string =>
   String(
     host.eval(`
@@ -380,28 +380,28 @@ const cueList = (): string =>
 const cues = cueList().split(' ').filter(Boolean)
 check(cues.some((c) => c.startsWith('AMB_Menu_Loop:')), `Ambient-Cue angefordert (${cues.length} Cues insgesamt)`)
 check(cues.some((c) => c.startsWith('Main_Menu:')), 'Musik-Cue "Main_Menu" angefordert')
-check(cues.filter((c) => c.endsWith(':an')).length >= 2, 'the cues are RUNNING (state is maintained, not output)')
+check(cues.filter((c) => c.endsWith(':an')).length >= 2, 'die Cues LAUFEN (Zustand wird geführt, nicht ausgegeben)')
 
-// Exit the menu - the engine way: every change of state gives the
-// Root frames free (CUIManager::SetNewLuaState, Cfile:1273600), the tree is
-// then empty, and main.lua:249 stops the music above her in his OnDestroy
-// Act. This is exactly why PlaySound MUST return one.
+// Das Menü verlassen — auf dem Engine-Weg: jeder Zustandswechsel gibt die
+// Root-Frames frei (CUIManager::SetNewLuaState, Cfile:1273600), der Baum ist
+// danach leer, und main.lua:249 stoppt in seinem OnDestroy die Musik über ihr
+// Handle. Genau das ist der Grund, warum PlaySound eins zurückgeben MUSS.
 host.eval('__mauiResetFrames()')
 const stopped = cueList()
   .split(' ')
   .filter((c) => c.startsWith('Main_Menu:'))
-check(stopped.every((c) => c.endsWith(':aus')), 'after clearing, the music on your handle is stopped')
+check(stopped.every((c) => c.endsWith(':aus')), 'nach dem Abräumen ist die Musik über ihr Handle gestoppt')
 
-console.log('\n== The settings survive the restart ==')
-// Two things together, and both were missing:
+console.log('\n== Die Einstellungen überleben den Neustart ==')
+// Zwei Dinge zusammen, und beide fehlten:
 //
-//  1. `SavePreferences()` was a null call (`__uiSavePrefs` was never set)
-//     — every option, every profile, every volume was gone after reloading.
-//     The engine writes Game.prefs as LUA SOURCE; That's exactly what we're doing now.
-//  2. `optionslogic.Apply(true)` calls the engine itself when starting
-//     (Moho::OPTIONS_Apply, Cfile:1368338 — Call_True_Obj = Apply(true)). Without
-//     For this call, the stored value is in the Prefs, but no one is there
-//     carries it into the engine: NOT a single option worked.
+//  1. `SavePreferences()` war ein Nullaufruf (`__uiSavePrefs` wurde nie gesetzt)
+//     — jede Option, jedes Profil, jede Lautstärke war nach dem Neuladen weg.
+//     Die Engine schreibt Game.prefs als LUA-QUELLTEXT; genau das tun wir jetzt.
+//  2. `optionslogic.Apply(true)` ruft die Engine beim Start selbst
+//     (Moho::OPTIONS_Apply, Cfile:1368338 — Call_True_Obj = Apply(true)). Ohne
+//     diesen Aufruf steht der gespeicherte Wert zwar in den Prefs, aber niemand
+//     trägt ihn in die Engine: es wirkte KEINE einzige Option.
 {
   host.eval(`
     local Prefs = import('/lua/user/prefs.lua')
@@ -410,7 +410,7 @@ console.log('\n== The settings survive the restart ==')
   `)
   check(prefsStore !== null && prefsStore.includes('42'), 'die Option landet als Lua-Text in der Ablage')
 
-  // A FRESH VM — same tray. This is the restart.
+  // Eine FRISCHE VM — dieselbe Ablage. Das ist der Neustart.
   const host2 = await LuaHost.create(files, () => {})
   installUiEngine(host2, uiFs)
   createRootFrame(host2, 1920, 1080)
@@ -419,7 +419,7 @@ console.log('\n== The settings survive the restart ==')
   )
   check(restored === 42, `nach dem Neustart steht der Wert wieder da (${restored})`)
 
-  // ... and it WORKS: Apply(true) carries it into the engine via SetVolume
+  // … und er WIRKT: Apply(true) trägt ihn über SetVolume in die Engine
   // (options.lua:735 → SetVolume('Music', value/100)).
   startFrontEnd(host2)
   const musicVolume = Number(host2.eval(`return GetVolume('Music')`))
@@ -430,14 +430,14 @@ console.log('\n== The settings survive the restart ==')
   host2.close()
 }
 
-console.log('\n== ConExecute is a real console — 19 options attached to it ==')
-// options.lua sets half of its options via console commands:
+console.log('\n== ConExecute ist eine echte Konsole — 19 Optionen hängen daran ==')
+// options.lua setzt die Hälfte seiner Optionen über Konsolenbefehle:
 //     set = function(key, value, startup) ConExecute("ui_KeyboardPanSpeed " .. value) end
-// Behind this there are real variables in the engine (Moho::TConVar), which
-// C++ page reads in its loops. As long as ConExecute only LOGGED, everyone was
-// these options are a dummy.
+// Dahinter liegen in der Engine echte Variablen (Moho::TConVar), die die
+// C++-Seite in ihren Schleifen liest. Solange ConExecute nur LOGGTE, war jede
+// dieser Optionen eine Attrappe.
 {
-  // The starting values ​​are in the decomp - not advised.
+  // Die Startwerte stehen in der Decomp — nicht geraten.
   check(
     Math.abs(Number(host.eval(`return __conGet('ui_KeyboardPanSpeed')`)) - 90) < 0.001,
     'ui_KeyboardPanSpeed = 90 (Cfile:421739)',
@@ -446,19 +446,19 @@ console.log('\n== ConExecute is a real console — 19 options attached to it =='
     Math.abs(Number(host.eval(`return __conGet('cam_ZoomAmount')`)) - 0.4) < 0.001,
     'cam_ZoomAmount = 0.4 (Cfile:421825)',
   )
-  // The names are NOT case-sensitive: options.lua writes `ren_Skydome`,
-  // the engine is called Moho::ren_SkyDome. If you compare exactly, you lose it.
+  // Die Namen sind NICHT case-sensitiv: options.lua schreibt `ren_Skydome`,
+  // die Engine heißt Moho::ren_SkyDome. Wer exakt vergleicht, verliert sie.
   host.eval(`ConExecute('ren_Skydome false')`)
-  check(host.eval(`return __conGet('ren_SkyDome')`) === false, 'ren_Skydome ↔ ren_SkyDome (big/small doesn't matter)')
+  check(host.eval(`return __conGet('ren_SkyDome')`) === false, 'ren_Skydome ↔ ren_SkyDome (Groß/Klein egal)')
 
-  // And all the way: change option → optionslogic → ConExecute → ConVar.
+  // Und der ganze Weg: Option ändern → optionslogic → ConExecute → ConVar.
   host.eval(`
     local Prefs = import('/lua/user/prefs.lua')
     Prefs.SetOption('keyboard_pan_speed', 150)
   `)
   check(
     Math.abs(Number(host.eval(`return __conGet('ui_KeyboardPanSpeed')`)) - 150) < 0.001,
-    'a changed option affects the ConVar (90 → 150)',
+    'eine geänderte Option schlägt bis in die ConVar durch (90 → 150)',
   )
 }
 

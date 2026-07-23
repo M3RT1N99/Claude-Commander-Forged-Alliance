@@ -7,7 +7,7 @@ import ENGINE_LUA from '../engine-lua/globals.lua?raw'
  * Diese Funktionen sind im Original C++-Globals (`CScrLuaInitForm` mit
  * mClassName `"<global>"`). Bisher lieferte der Stub-Trap dafür stumme
  * Identitätsfunktionen — mit dem Ergebnis, dass Guards in der Original-Lua
- * kippten (`IsDestroyed(living unit)` → true, `EntityCategoryContains(AIR,
+ * kippten (`IsDestroyed(lebende Unit)` → true, `EntityCategoryContains(AIR,
  * ACU)` → true). Hier sind sie ECHT implementiert.
  *
  * Das Kategorie-System entspricht der Engine: `categories.X` liefert eine
@@ -16,12 +16,12 @@ import ENGINE_LUA from '../engine-lua/globals.lua?raw'
  */
 
 
-/** Installs the real engine globals (vectors, categories, manipulators…). */
+/** Installiert die echten Engine-Globals (Vektoren, Kategorien, Manipulatoren …). */
 export function installEngineGlobals(host: LuaHost): void {
   host.eval(ENGINE_LUA)
 }
 
-/** Wires the terrain height of the loaded map (GetTerrainHeight). */
+/** Verdrahtet die Terrain-Höhe der geladenen Karte (GetTerrainHeight). */
 export function setTerrainSource(host: LuaHost, heightAt: (x: number, z: number) => number): void {
   host.setGlobal('__terrainHeight', heightAt)
 }

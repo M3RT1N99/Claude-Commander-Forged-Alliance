@@ -48,7 +48,7 @@ const check = (ok: boolean, label: string): void => {
   if (!ok) failures++
 }
 
-// --- VFS (all archives, first wins — like in the browser) --------------------
+// --- VFS (alle Archive, erstes gewinnt — wie im Browser) --------------------
 const files = new Map<string, Uint8Array>()
 const allPaths = new Set<string>()
 const openFiles: NodeFile[] = []
@@ -67,13 +67,13 @@ for (const archive of archives) {
   }
 }
 
-// The Lua calls GetTextureDimensions synchronously; reading from the zip is async.
-// So the textures of this test are loaded beforehand. Will be another
-// demands, it BANGS — instead of silently asserting 0×0.
+// Die Lua ruft GetTextureDimensions synchron; das Lesen aus dem Zip ist async.
+// Also werden die Texturen dieses Tests vorher geladen. Wird eine andere
+// verlangt, KNALLT es — statt still 0×0 zu behaupten.
 const textureBytes = new Map<string, Uint8Array>()
 const PRELOAD = [
   'textures/ui/uef/game/resource-panel/resources_panel_bmp.dds',
-  // A real 9-slice frame of the game (orders.lua:427-434 builds it from it).
+  // Ein echter 9-Slice-Rahmen des Spiels (orders.lua:427-434 baut ihn daraus).
   'textures/ui/uef/game/ability_brd/chat_brd_vert_l.dds',
   'textures/ui/uef/game/ability_brd/chat_brd_horz_um.dds',
   'textures/ui/uef/game/ability_brd/chat_brd_ul.dds',
@@ -91,10 +91,10 @@ for (const p of PRELOAD) {
   }
 }
 
-/** Texture dimensions from the real DDS header (the engine reads the same). */
+/** Texturmaße aus dem echten DDS-Header (die Engine liest denselben). */
 const textureSize = (p: string): [number, number] => {
   const bytes = textureBytes.get(p)
-  if (!bytes) throw new Error(`Texture not preloaded: ${p}`)
+  if (!bytes) throw new Error(`Textur nicht vorgeladen: ${p}`)
   const dds = parseDds(bytes)
   return [dds.width, dds.height]
 }
@@ -108,9 +108,9 @@ installUiEngine(host, {
 createRootFrame(host, 800, 600)
 setupUi(host)
 
-console.log('\n== Root frame: GetFrame(0), created via the original frame class ==')
+console.log('\n== Root-Frame: GetFrame(0), erzeugt über die Original-Frame-Klasse ==')
 // InternalCreateFrame → attachControl (7 LazyVars) → DoInit → Control.OnInit
-// (control.lua:42) → ResetLayout() → the circular chain.
+// (control.lua:42) → ResetLayout() → die zirkuläre Kette.
 host.eval(`
   Group = import('/lua/maui/group.lua').Group
   Bitmap = import('/lua/maui/bitmap.lua').Bitmap
@@ -121,7 +121,7 @@ check(Number(host.eval('return root.Right()')) === 800, `root.Right() = 800 (Lef
 check(Number(host.eval('return root.Bottom()')) === 600, `root.Bottom() = 600 (Top + Height)`)
 check(Number(host.eval('return root.Depth()')) === 0, `root.Depth() = 0 (frame.lua:10)`)
 
-console.log('\n== LayoutHelpers calculates — the original file, not TS ==')
+console.log('\n== LayoutHelpers rechnet — die Original-Datei, nicht TS ==')
 host.eval(`
   child = Group(root, 'child')
   child.Width:Set(100)
@@ -132,21 +132,21 @@ check(Number(host.eval('return child.Left()')) === 16, `child.Left() = 16 (AtLef
 check(Number(host.eval('return child.Top()')) === 3, `child.Top() = 3`)
 check(Number(host.eval('return child.Depth()')) === 1, `child.Depth() = 1 (Parent + 1, control.lua:46)`)
 
-console.log('\n== A bitmap is measured by its DDS ==')
-// THIS is the proof: 324×72 is now a constant in hud.ts - fall here
-// them out of the substrate without anyone writing them down.
+console.log('\n== Ein Bitmap misst sich nach seiner DDS ==')
+// DAS ist der Beweis: 324×72 stehen heute als Konstante in hud.ts — hier fallen
+// sie aus dem Substrat heraus, ohne dass jemand sie hinschreibt.
 host.eval(`
   UIUtil = import('/lua/ui/uiutil.lua')
   panel = Bitmap(root, UIUtil.UIFile('/game/resource-panel/resources_panel_bmp.dds'), 'ecoPanel')
 `)
 const w = Number(host.eval('return panel.Width()'))
 const h = Number(host.eval('return panel.Height()'))
-check(w === 324, `panel.Width() = ${w} (from DDS, not from TS)`)
-check(h === 72, `panel.Height() = ${h} (from the DDS)`)
+check(w === 324, `panel.Width() = ${w} (aus der DDS, nicht aus TS)`)
+check(h === 72, `panel.Height() = ${h} (aus der DDS)`)
 
-console.log('\n== The circular layout chain MUST pop if too little is set ==')
-// lazyvar.lua:21 — "circular dependency in lazy evaluation". The error comes
-// not, the layout silently calculates nonsense.
+console.log('\n== Die zirkuläre Layout-Kette MUSS knallen, wenn zu wenig gesetzt ist ==')
+// lazyvar.lua:21 — "circular dependency in lazy evaluation". Kommt der Fehler
+// nicht, rechnet das Layout still Unsinn.
 let circErr = false
 try {
   host.eval(`local g = Group(root, 'unset'); return g.Left()`)
@@ -155,10 +155,10 @@ try {
 }
 check(circErr, 'Zu wenig gesetzte Variablen → "circular dependency" (lazyvar.lua:21)')
 
-console.log('\n== M1: The border is a real control (CMauiBorder) ==')
-// border.lua:11-13 says it itself: "SetTextures will set the BorderWidth and
-// BorderHeight lazy vars." The engine takes the dimensions from the TEXTURES
-// (Cfile:1122728/1122748) — not from a number in the script.
+console.log('\n== M1: Der Border ist ein echtes Control (CMauiBorder) ==')
+// border.lua:11-13 sagt es selbst: "SetTextures will set the BorderWidth and
+// BorderHeight lazy vars." Die Engine nimmt die Maße aus den TEXTUREN
+// (Cfile:1122728/1122748) — nicht aus einer Zahl im Skript.
 const vertDds = parseDds(textureBytes.get('textures/ui/uef/game/ability_brd/chat_brd_vert_l.dds')!)
 const horzDds = parseDds(textureBytes.get('textures/ui/uef/game/ability_brd/chat_brd_horz_um.dds')!)
 host.eval(`
@@ -175,12 +175,12 @@ host.eval(`
 `)
 const bw = Number(host.eval('return brd.BorderWidth()'))
 const bh = Number(host.eval('return brd.BorderHeight()'))
-check(bw === vertDds.width, `BorderWidth() = ${bw} — the width of the vertical DDS (${vertDds.width})`)
-check(bh === horzDds.height, `BorderHeight() = ${bh} — the height of the horizontal DDS (${horzDds.height})`)
-// LayoutAroundControl puts it AROUND the control: Left = child.Left − BorderWidth.
+check(bw === vertDds.width, `BorderWidth() = ${bw} — die Breite der vertical-DDS (${vertDds.width})`)
+check(bh === horzDds.height, `BorderHeight() = ${bh} — die Höhe der horizontal-DDS (${horzDds.height})`)
+// LayoutAroundControl legt ihn UM das Control: Left = child.Left − BorderWidth.
 check(
   Number(host.eval('return brd.Left()')) === 16 - bw,
-  `The frame is on the outside (Left = child.Left − BorderWidth)`,
+  `Der Rahmen liegt außen herum (Left = child.Left − BorderWidth)`,
 )
 const inSnapshot = host.eval(`
   for _, c in ipairs(__mauiSnapshot()) do
@@ -188,12 +188,12 @@ const inSnapshot = host.eval(`
   end
   return false
 `)
-check(inSnapshot === true, 'The border is in the snapshot - the renderer gets its 8 tiles')
+check(inSnapshot === true, 'Der Border steht im Snapshot — der Renderer bekommt seine 8 Kacheln')
 
-console.log('\n== M1: Keyboard focus — whoever types gets the keys alone ==')
-// Cfile:1147634-1147650: if there is a control focus, the keydown ONLY goes to this.
-// If it returns false, the capture stack is NOT asked - the event is
-// "skipped" and from then on belongs to the keymap (M3).
+console.log('\n== M1: Tastatur-Fokus — wer tippt, bekommt die Tasten allein ==')
+// Cfile:1147634-1147650: hat ein Control Fokus, geht das KeyDown NUR an dieses.
+// Liefert es false, wird der Capture-Stack NICHT gefragt — das Event ist
+// "skipped" und gehört ab dann der Keymap (M3).
 host.eval(`
   focusA = Group(root, 'focusA')
   focusA.Left:Set(0) focusA.Top:Set(0) focusA.Width:Set(10) focusA.Height:Set(10)
@@ -204,23 +204,23 @@ host.eval(`
   focusB.HandleEvent = function(self, event) gotB = gotB + 1 return true end
   focusA:AcquireKeyboardFocus(false)
 `)
-check(host.eval('return GetCurrentFocusControl() == focusA') === true, 'AcquireKeyboardFocus sets the focus')
+check(host.eval('return GetCurrentFocusControl() == focusA') === true, 'AcquireKeyboardFocus setzt den Fokus')
 host.eval(`__mauiKey('KeyDown', 65, 65, {})`)
 check(
   Number(host.eval('return gotA')) === 1 && Number(host.eval('return gotB')) === 0,
-  'The KeyDown ONLY goes to the focus control',
+  'Das KeyDown geht NUR an das Fokus-Control',
 )
-// A ButtonPress somewhere else removes focus (Cfile:1147523-1147531).
+// Ein ButtonPress woanders entzieht den Fokus (Cfile:1147523-1147531).
 host.eval(`__mauiMouse('ButtonPress', 900, 900, { Left = true }, 1)`)
 check(
   host.eval('return GetCurrentFocusControl() == nil') === true,
-  'A click next to it removes the keyboard focus',
+  'Ein Klick daneben entzieht den Tastatur-Fokus',
 )
 
-console.log('\n== M1: InputCapture — this is how a dialog becomes modal ==')
-// Cfile:1147376-1147390: if the stack is not empty, the hit test starts at
-// top capture control instead of the root frame. Everything next to it is for the mouse
-// invisible — this is uiutil.lua:615 MakeInputModal.
+console.log('\n== M1: InputCapture — so wird ein Dialog modal ==')
+// Cfile:1147376-1147390: ist der Stack nicht leer, startet der Hit-Test beim
+// obersten Capture-Control statt am Root-Frame. Alles daneben ist für die Maus
+// unsichtbar — das ist uiutil.lua:615 MakeInputModal.
 host.eval(`
   dialog = Bitmap(root)
   dialog:SetSolidColor('ff102030')
@@ -231,30 +231,30 @@ host.eval(`
 `)
 check(
   host.eval(`return __mauiHitTest(150, 150) == outside`) === true,
-  'Without capture, the click hits the control next to it',
+  'Ohne Capture trifft der Klick das Control daneben',
 )
 host.eval('AddInputCapture(dialog)')
-check(host.eval('return AnyInputCapture()') === true, 'AddInputCapture sets the stack')
+check(host.eval('return AnyInputCapture()') === true, 'AddInputCapture setzt den Stack')
 check(
   host.eval(`return __mauiHitTest(150, 150) == nil`) === true,
-  'WITH Capture, clicking next to it no longer hits ANYTHING (modal)',
+  'MIT Capture trifft ein Klick daneben NICHTS mehr (modal)',
 )
 check(
   host.eval(`return __mauiHitTest(550, 550) == dialog`) === true,
-  'The dialog itself remains clickable',
+  'Der Dialog selbst bleibt anklickbar',
 )
 host.eval('RemoveInputCapture(dialog)')
 check(
   host.eval(`return AnyInputCapture() == false and __mauiHitTest(150, 150) == outside`) === true,
-  'RemoveInputCapture releases the mouse again',
+  'RemoveInputCapture gibt die Maus wieder frei',
 )
 
-console.log('\n== M1: The UI VM ticks per IMAGE, not per SIM tick ==')
+console.log('\n== M1: Die UI-VM tickt pro BILD, nicht pro Sim-Tick ==')
 // userinit.lua:13-21 — WaitFrames = coroutine.yield, WaitSeconds pollt
-// CurrentTime(). The UI VM does not have a tick scheduler; their threads are running
-// the pictures. So far they have NOT worked for us at all (the sim scheduler was
-// installed, but nobody ticked it) — that's what they depend on
-// Menu animations and the cursor thread (cursor.lua:34-43).
+// CurrentTime(). Die UI-VM hat keinen Tick-Scheduler; ihre Threads laufen mit
+// den Bildern. Bei uns liefen sie bisher GAR NICHT (der Sim-Scheduler war
+// installiert, aber niemand hat ihn getickt) — daran hängen die
+// Menü-Animationen und der Cursor-Thread (cursor.lua:34-43).
 host.eval(`
   frames = 0
   animThread = ForkThread(function()
@@ -268,7 +268,7 @@ check(Number(host.eval('return frames')) === 0, 'Vor dem ersten Bild hat der Thr
 for (let i = 0; i < 5; i++) host.eval('__mauiFrame(0.016)')
 check(Number(host.eval('return frames')) === 5, `Nach 5 Bildern lief der Thread 5-mal`)
 
-// WaitSeconds polls the clock - after 0.5 s (at 0.1 s/frame) it is further.
+// WaitSeconds pollt die Uhr — nach 0,5 s (bei 0,1 s/Bild) ist er weiter.
 host.eval(`
   waited = false
   ForkThread(function()

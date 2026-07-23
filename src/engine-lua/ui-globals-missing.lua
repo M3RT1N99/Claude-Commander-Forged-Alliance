@@ -1,15 +1,15 @@
 -- =====================================================================
--- UI globals that EXIST in the engine but that we don't have yet.
+-- UI-Globals, die es in der Engine GIBT, die wir aber noch nicht haben.
 --
--- Generated from decomp: all 200 <global> bindings in scr_UserInits
--- (see docs/research/engine-api.md). Anyone who has already implemented this will
--- skipped - the rest gets a function that is loud when CALLED
+-- Erzeugt aus der Decomp: alle 200 <global>-Bindungen in scr_UserInits
+-- (siehe docs/research/engine-api.md). Wer hier schon implementiert ist, wird
+-- uebersprungen — der Rest bekommt eine Funktion, die beim AUFRUF laut
 -- scheitert.
 --
--- This is NOT a stub trap: the original UI Lua REFERENCES many of these
--- Globals loading (uiutil.lua:103 builds keyboard actions from them), she calls
--- but only later. So referencing has to work; Calling has to bang -
--- with the name so that you know what to build next.
+-- Das ist KEIN Stub-Trap: die Original-UI-Lua REFERENZIERT viele dieser
+-- Globals beim Laden (uiutil.lua:103 baut daraus Tastatur-Aktionen), ruft sie
+-- aber erst spaeter. Referenzieren muss also gehen; Aufrufen muss knallen —
+-- mit dem Namen, damit man weiss, was als Naechstes zu bauen ist.
 -- =====================================================================
 
 local NOT_IMPLEMENTED = {

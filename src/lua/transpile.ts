@@ -64,8 +64,8 @@ function consumeNumber(source: string, i: number): number {
 
 export function transpileFaLua(source: string): TranspileResult {
   const stats = { hashComments: 0, notEquals: 0, forInTable: 0, continues: 0, varargArg: 0 }
-  // Chunk list instead of string concatenation: `out[out.length - 1]` on one
-  // Growing string forces V8 to materialize the rope at EVERY character
+  // Chunk-Liste statt String-Konkatenation: `out[out.length - 1]` auf einem
+  // wachsenden String zwingt V8, die Rope bei JEDEM Zeichen zu materialisieren
   // — quadratisch. lua/basetemplates.lua (1,1 MB) brauchte so 164 Sekunden.
   const parts: string[] = []
   let lastChar = ''
@@ -79,7 +79,7 @@ export function transpileFaLua(source: string): TranspileResult {
   let longLevel = 0
   let i = 0
 
-  // Remove UTF-8 BOM (3 files in lua.scd)
+  // UTF-8-BOM entfernen (3 Dateien in lua.scd)
   if (source.charCodeAt(0) === 0xfeff) i = 1
   else if (source.startsWith('ï»¿')) i = 3
 
@@ -114,7 +114,7 @@ export function transpileFaLua(source: string): TranspileResult {
         }
         continue
       }
-      // FA: `#` begins a line comment
+      // FA: `#` beginnt einen Zeilenkommentar
       if (c === '#') {
         stats.hashComments++
         mode = 'lineComment'
@@ -146,10 +146,10 @@ export function transpileFaLua(source: string): TranspileResult {
         continue
       }
       // FA-Lua (5.0) erlaubt Zahl direkt an Keyword/Bezeichner (`0then`,
-      // `7end`); modern lexers read `0t` as a broken number. Number literal
-      // recognize and insert a space after the following letter.
-      // Only if the digit actually starts a number (not part of one
-      // Identifier such as `foo2`) — checked using the last output character.
+      // `7end`); moderne Lexer lesen `0t` als kaputte Zahl. Zahl-Literal
+      // erkennen und bei folgendem Buchstaben ein Leerzeichen einfügen.
+      // Nur wenn die Ziffer wirklich eine Zahl beginnt (nicht Teil eines
+      // Bezeichners wie `foo2`) — geprüft über das letzte Ausgabezeichen.
       const prevChar = lastChar
       const startsNumber =
         (c >= '0' && c <= '9') ||
@@ -162,7 +162,7 @@ export function transpileFaLua(source: string): TranspileResult {
         i = end
         continue
       }
-      // LuaPlus size hint in table constructor: `{&1&4}` → `{}`
+      // LuaPlus-Größenhinweis im Tabellen-Konstruktor: `{&1&4}` → `{}`
       if (c === '{') {
         const hint = /^\{\s*&\d+&\d+/.exec(source.slice(i, i + 24))
         if (hint) {
@@ -186,7 +186,7 @@ export function transpileFaLua(source: string): TranspileResult {
     if (mode === 'shortString') {
       if (c === '\\') {
         const next = source[i + 1] ?? ''
-        // Lua 5.0 allowed unknown escapes ("\m"), 5.1+ didn't
+        // Lua 5.0 ließ unbekannte Escapes durch ("\m"), 5.1+ nicht
         if (!VALID_ESCAPES.has(next) && !/\d/.test(next)) {
           emit(`\\\\${next}`)
         } else {
@@ -267,7 +267,7 @@ function rewriteVarargArg(code: string, stats: { varargArg: number }): string {
     while (i < code.length && isWord(code[i]!)) i++
     if (code.slice(start, i) !== 'function') continue
 
-    // Find parameter list: up to the opening bracket (skip name)
+    // Parameterliste finden: bis zur öffnenden Klammer (Name überspringen)
     let p = i
     while (p < code.length && code[p] !== '(' && code[p] !== '\n') p++
     if (code[p] !== '(') continue
@@ -283,8 +283,8 @@ function rewriteVarargArg(code: string, stats: { varargArg: number }): string {
   }
 
   if (edits.length === 0) return code
-  // A single pass: each individual application would have the complete source code
-  // copy again (square for many edits).
+  // Ein einziger Durchgang: jede Einzelanwendung würde den kompletten Quelltext
+  // erneut kopieren (quadratisch bei vielen Edits).
   edits.sort((a, b) => a.pos - b.pos)
   const parts: string[] = []
   let at = 0
@@ -309,11 +309,11 @@ function rewriteVarargArg(code: string, stats: { varargArg: number }): string {
 function rewriteContinue(code: string, stats: { continues: number }): string {
   interface Frame {
     kind: 'loop' | 'block' | 'function'
-    /** 'end' or 'until' ends the frame */
+    /** 'end' oder 'until' beendet den Rahmen */
     closer: 'end' | 'until'
     id: number
     hasContinue: boolean
-    /** Position directly after the opening `do` (for fuselage encapsulation) */
+    /** Position direkt nach dem öffnenden `do` (für die Rumpf-Kapselung) */
     bodyStart: number
   }
 
@@ -412,8 +412,8 @@ function rewriteContinue(code: string, stats: { continues: number }): string {
         })
         break
       case 'elseif': {
-        // The 'then' of the previous branch closes here; the following
-        // 'then' reopens - net balance remains correct.
+        // Das 'then' des vorherigen Zweigs schließt hier; das folgende
+        // 'then' öffnet neu — Netto-Bilanz bleibt korrekt.
         const top = stack[stack.length - 1]
         if (top?.kind === 'block' && top.closer === 'end') stack.pop()
         break
@@ -424,21 +424,21 @@ function rewriteContinue(code: string, stats: { continues: number }): string {
         if (frame?.hasContinue) {
           if (frame.closer === 'end') {
             // Rumpf kapseln: `for … do do <Rumpf> end ::__cont_N:: end`.
-            // Necessary because a `return` as a final statement is not a label
-            // behind him - in the inner do block it is permissible,
-            // and the label remains visible from the `goto`.
+            // Nötig, weil ein `return` als letztes Statement kein Label
+            // hinter sich duldet — im inneren do-Block ist es zulässig,
+            // und das Label bleibt vom `goto` aus sichtbar.
             edits.push({ start: frame.bodyStart, end: frame.bodyStart, text: ' do' })
             edits.push({ start, end: start, text: `end ::__cont_${frame.id}:: ` })
           } else {
-            // repeat…until: no do block (the until condition sees otherwise
-            // the rump locals no longer)
+            // repeat…until: kein do-Block (die until-Bedingung sieht sonst
+            // die Rumpf-Locals nicht mehr)
             edits.push({ start, end: start, text: `::__cont_${frame.id}:: ` })
           }
         }
         break
       }
       case 'continue': {
-        // Find the nearest loop (not across function boundaries)
+        // nächstliegende Schleife suchen (nicht über Funktionsgrenzen)
         for (let s = stack.length - 1; s >= 0; s--) {
           const frame = stack[s]!
           if (frame.kind === 'function') break
@@ -457,12 +457,12 @@ function rewriteContinue(code: string, stats: { continues: number }): string {
   }
 
   if (edits.length === 0) return code
-  // One pass from the beginning instead of rebuilding the entire string per edit.
+  // Ein Durchgang von vorn statt pro Edit den ganzen String neu zu bauen.
   edits.sort((a, b) => a.start - b.start)
   const parts: string[] = []
   let at = 0
   for (const e of edits) {
-    if (e.start < at) continue // There cannot be overlapping edits
+    if (e.start < at) continue // überlappende Edits kann es nicht geben
     parts.push(code.slice(at, e.start), e.text)
     at = e.end
   }

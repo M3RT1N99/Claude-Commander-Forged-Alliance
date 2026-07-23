@@ -56,7 +56,7 @@ for (let i = 0; i < 10; i++) VK_TO_WX[0x60 + i] = 326 + i // NUMPAD0-9
 for (let i = 0; i < 24; i++) VK_TO_WX[0x70 + i] = 342 + i // F1-F24
 
 export interface FaKeyEvent {
-  /** Windows VK (RawKeyCode of the event). */
+  /** Windows-VK (RawKeyCode des Events). */
   vk: number
   /** wx/maui-KeyCode (Buchstaben = Groß-ASCII, Spezialtasten ≥ 300). */
   wx: number
@@ -69,19 +69,19 @@ export interface FaKeyEvent {
   charCode: number | null
 }
 
-/** Translates a browser KeyboardEvent into engine encoding. */
+/** Übersetzt ein Browser-KeyboardEvent in die Engine-Kodierung. */
 export function translateKey(e: KeyboardEvent): FaKeyEvent | null {
   const vk = CODE_TO_VK[e.code]
   if (vk === undefined) return null
 
-  // wx-KeyCode: special table, otherwise wParam (VK) — for letters/numbers
-  // is this the uppercase ASCII.
+  // wx-KeyCode: Spezialtabelle, sonst wParam (VK) — für Buchstaben/Ziffern
+  // ist das der Großbuchstaben-ASCII.
   const wx = VK_TO_WX[vk] ?? vk
 
-  // Char synthesis (wx 2.4): Modifier/Lock keys do NOT provide a char
-  // (Cfile:1499812-1499818); Special keys the wx-coded character
-  // (Cfile:1499822); printable the real character (browser translates shift),
-  // Ctrl+Letter the control character (HandleChar isASCII, Ctrl+C=3).
+  // Char-Synthese (wx 2.4): Modifier-/Lock-Tasten liefern KEIN Char
+  // (Cfile:1499812-1499818); Spezialtasten das wx-codierte Char
+  // (Cfile:1499822); druckbare das echte Zeichen (Browser übersetzt Shift),
+  // Ctrl+Buchstabe das Steuerzeichen (HandleChar isASCII, Ctrl+C=3).
   let charCode: number | null = null
   if (vk === 0x10 || vk === 0x11 || vk === 0x12 || vk === 0x14 || vk === 0x90 || vk === 0x91) {
     charCode = null

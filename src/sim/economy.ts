@@ -22,9 +22,9 @@ export interface UnitEcon {
   consE: number
   storeM: number
   storeE: number
-  /** Ready built? Construction sites contribute neither production nor storage. */
+  /** Fertig gebaut? Baustellen tragen weder Produktion noch Lager bei. */
   complete: boolean
-  /** Unit:SetProductionActive — separate from consumption (as in the original). */
+  /** Unit:SetProductionActive — getrennt vom Verbrauch (wie im Original). */
   prodActive: boolean
   /** Unit:SetConsumptionActive */
   consActive: boolean
@@ -110,12 +110,12 @@ export function distribute(
 const RES = { ENERGY: 'energy', MASS: 'mass' } as const
 type Res = 'ENERGY' | 'MASS'
 
-/** Resource status of an army. */
+/** Ressourcen-Zustand einer Armee. */
 export class ArmyEconomy {
   // Binär (SSTIArmyVariableData-Ctor @0x6FD390): mStored = 0/0, mMaxStorage =
-  // 0/0. Storage is created EXCLUSIVELY from StorageMass/StorageEnergy
-  // Units (the ACU brings its own storage), starting supplies come from the
-  // Lua-Global SetArmyEconomy(army, mass, energy) — not from TS constants.
+  // 0/0. Lager entsteht AUSSCHLIESSLICH aus StorageMass/StorageEnergy der
+  // Units (die ACU bringt ihr Lager selbst mit), Startvorrat kommt aus dem
+  // Lua-Global SetArmyEconomy(army, mass, energy) — nicht aus TS-Konstanten.
   mass = 0
   energy = 0
   maxMass = 0
@@ -129,21 +129,21 @@ export class ArmyEconomy {
   requestedEnergy = 0
 
   private readonly units = new Map<number, UnitEcon>()
-  /** Transient build requests (set per tick by the build system). */
+  /** Transiente Bau-Requests (pro Tick vom Bau-System gesetzt). */
   private readonly buildReqs = new Map<number, Consumer>()
 
   register(id: number, e: UnitEcon): void {
     this.units.set(id, e)
   }
 
-  /** Register resource requirements of a construction task for this tick. */
+  /** Ressourcen-Bedarf einer Bau-Aufgabe für diesen Tick anmelden. */
   setBuildRequest(taskId: number, mass: number, energy: number): void {
     this.buildReqs.set(taskId, { mass, energy, rate: 0 })
   }
   clearBuildRequest(taskId: number): void {
     this.buildReqs.delete(taskId)
   }
-  /** Granted LimitingRate of the build task (valid after tick()). */
+  /** Gewährte LimitingRate der Bau-Aufgabe (gültig nach tick()). */
   buildRate(taskId: number): number {
     return this.buildReqs.get(taskId)?.rate ?? 0
   }
@@ -163,7 +163,7 @@ export class ArmyEconomy {
     this.units.delete(id)
   }
 
-  /** An economic tick (in the sim beat before the thread stage). */
+  /** Ein Wirtschafts-Tick (im Sim-Beat vor der Thread-Stage). */
   tick(): void {
     let prodM = 0
     let prodE = 0
@@ -172,7 +172,7 @@ export class ArmyEconomy {
     const consumers: Consumer[] = []
     const unitConsumers: [UnitEcon, Consumer][] = []
     for (const u of this.units.values()) {
-      if (!u.complete) continue // Construction sites contribute neither production nor storage
+      if (!u.complete) continue // Baustellen tragen weder Produktion noch Lager bei
       maxM = f(maxM + u.storeM)
       maxE = f(maxE + u.storeE)
       if (u.prodActive) {
@@ -199,8 +199,8 @@ export class ArmyEconomy {
         }
       }
     }
-    // Construction tasks are also consumers (CEconRequest); their granted
-    // LimitingRate scales the construction progress.
+    // Bau-Aufgaben sind ebenfalls Verbraucher (CEconRequest); ihre gewährte
+    // LimitingRate skaliert den Baufortschritt.
     for (const r of this.buildReqs.values()) consumers.push(r)
     this.maxMass = maxM
     this.maxEnergy = maxE
@@ -264,7 +264,7 @@ export class ArmyEconomy {
   }
 }
 
-/** Manages the economy of all armies. */
+/** Verwaltet die Ökonomie aller Armeen. */
 export class EconomyManager {
   private readonly armies = new Map<number, ArmyEconomy>()
 
@@ -296,8 +296,8 @@ export function installEconomy(host: LuaHost, mgr: EconomyManager): void {
       naturalProducer: naturalProducer === true, lastRate: 1,
     })
   })
-  // Separate toggles like in the original (production ≠ consumption), plus that
-  // Finished condition (construction sites contribute nothing).
+  // Getrennte Toggles wie im Original (Produktion ≠ Verbrauch), plus der
+  // Fertig-Zustand (Baustellen tragen nichts bei).
   host.setGlobal('__econSetComplete', (army: number, id: number, v: boolean) => {
     mgr.army(army).setComplete(id, v !== false)
   })
@@ -307,8 +307,8 @@ export function installEconomy(host: LuaHost, mgr: EconomyManager): void {
   host.setGlobal('__econSetConsumptionActive', (army: number, id: number, v: boolean) => {
     mgr.army(army).setConsumptionActive(id, v !== false)
   })
-  // Construction requests: the construction system reports the need before the tick and reads
-  // then returns the granted LimitingRate (CEconRequest::LimitingRate).
+  // Bau-Requests: das Bau-System meldet vor dem Tick den Bedarf an und liest
+  // danach die gewährte LimitingRate zurück (CEconRequest::LimitingRate).
   host.setGlobal('__econSetBuildRequest', (army: number, taskId: number, mass: number, energy: number) => {
     mgr.army(army).setBuildRequest(taskId, mass, energy)
   })
@@ -320,50 +320,50 @@ export function installEconomy(host: LuaHost, mgr: EconomyManager): void {
     mgr.army(army).remove(id)
   })
 
-  // Real Engine Global: SetArmyEconomy(army, mass, energy) sets the
-  // Army starting supply (original: from the scenario/setup session
-  // called). Previously, 150/400 was a TS constant in the code — invented.
+  // Echtes Engine-Global: SetArmyEconomy(army, mass, energy) setzt den
+  // Startvorrat der Armee (Original: aus dem Szenario/SetupSession heraus
+  // gerufen). Vorher standen 150/400 als TS-Konstante im Code — erfunden.
   host.setGlobal('SetArmyEconomy', (army: number | string, mass: number, energy: number) => {
     const a = mgr.army(typeof army === 'number' ? army : (armyIndex.get(army) ?? 1))
     a.mass = mass
     a.energy = energy
   })
-  // Army names → Index (SetArmyEconomy accepts both in the original).
+  // Armee-Namen → Index (SetArmyEconomy akzeptiert im Original beides).
   host.setGlobal('__econSetArmyName', (name: string, index: number) => {
     armyIndex.set(name, index)
   })
 
-  // GiveResource: the real source of startup resources. Every ACU forks in
+  // GiveResource: die echte Quelle der Startressourcen. Jede ACU forkt in
   // OnStopBeingBuilt `GiveInitialResources` (uel0001_script.lua:159-163):
-  // according to WaitTicks(5) she gives the army her own camp
-  // (Economy.StorageEnergy = 4000, StorageMass = 650). That's exactly where they come from
-  // Starting values ​​— not from a TS constant.
+  // nach WaitTicks(5) schenkt sie der Armee ihr eigenes Lager
+  // (Economy.StorageEnergy = 4000, StorageMass = 650). Genau daher kommen die
+  // Startwerte — nicht aus einer TS-Konstante.
   host.setGlobal('__econGive', (army: number, res: string, amount: number) => {
     mgr.army(army).give(res.toUpperCase() === 'MASS' ? 'MASS' : 'ENERGY', amount)
   })
   host.setGlobal('__econStored', (army: number, res: string) => mgr.army(army).stored((res === 'MASS' ? 'MASS' : 'ENERGY')))
   host.setGlobal('__econStoredRatio', (army: number, res: string) => mgr.army(army).storedRatio(res === 'MASS' ? 'MASS' : 'ENERGY'))
-  // The brain getters deliver PER-TICK values ​​— raw field reads
-  // CEconomy.mTotals without scaling (GetEconomyIncome Cfile:739923, Usage =
+  // Die Brain-Getter liefern PER-TICK-Werte — rohe Feld-Reads aus
+  // CEconomy.mTotals ohne Skalierung (GetEconomyIncome Cfile:739923, Usage =
   // mLastUseActual Cfile:739997, Requested = mLastUseRequested Cfile:740071;
-  // Filling per tick: HandleResourceManagement ×0.1 Cfile:954011-954028,
-  // Takeover func_ArmyProcessEconomy Cfile:1106790). The original Lua does the math
-  // SELF high: defaultweapons.lua:970 `GetEconomyIncome('ENERGY') * 10
-  // # per tick to per seconds`, xab1401 (Paragon) as well. Our internal
-  // Fields remain per second (HUD/Worker) — only the bridge scales.
+  // Befüllung pro Tick: HandleResourceManagement ×0.1 Cfile:954011-954028,
+  // Übernahme func_ArmyProcessEconomy Cfile:1106790). Die Original-Lua rechnet
+  // SELBST hoch: defaultweapons.lua:970 `GetEconomyIncome('ENERGY') * 10
+  // # per tick to per seconds`, xab1401 (Paragon) ebenso. Unsere internen
+  // Felder bleiben pro Sekunde (HUD/Worker) — nur die Bridge skaliert.
   host.setGlobal('__econIncome', (army: number, res: string) => mgr.army(army).income(res === 'MASS' ? 'MASS' : 'ENERGY') * DT)
 
   host.setGlobal('__econUsage', (army: number, res: string) => mgr.army(army).usage(res === 'MASS' ? 'MASS' : 'ENERGY') * DT)
   host.setGlobal('__econRequested', (army: number, res: string) => mgr.army(army).requested(res === 'MASS' ? 'MASS' : 'ENERGY') * DT)
   host.setGlobal('__econTrend', (army: number, res: string) => mgr.army(army).trend(res === 'MASS' ? 'MASS' : 'ENERGY'))
 
-  // The Brain is NOT an engine object with flanged fields, but the
-  // Original class `AIBrain` from /lua/aibrain.lua:342 — it derives from
-  // moho.aibrain_methods (the C++ base we deliver) and brings your
-  // own logic (e.g. ESRegisterUnitMassStorage, aibrain.lua:500).
-  // There was previously a hand-built TS table here: exactly the replica it was
-  // is not allowed to give. The engine creates the Brain and calls OnCreateHuman —
-  // as in the original when building the armies.
+  // Das Brain ist KEIN Engine-Objekt mit angeflanschten Feldern, sondern die
+  // Original-Klasse `AIBrain` aus /lua/aibrain.lua:342 — sie leitet von
+  // moho.aibrain_methods ab (die C++-Basis, die wir liefern) und bringt ihre
+  // eigene Logik mit (z. B. ESRegisterUnitMassStorage, aibrain.lua:500).
+  // Vorher stand hier ein handgebautes TS-Table: genau der Nachbau, den es
+  // nicht geben darf. Die Engine erzeugt das Brain und ruft OnCreateHuman —
+  // wie im Original beim Aufbau der Armeen.
   host.eval(BRAIN_LUA)
   void RES
 }

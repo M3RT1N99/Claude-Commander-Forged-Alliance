@@ -18,8 +18,8 @@ import { parseXwb, wavFromEntry, type XwbBank } from '../src/formats/xwb'
 import { parseXsb, type XsbBank } from '../src/formats/xsb'
 import { parseXgs } from '../src/formats/xgs'
 
-// Like scripts/gameFiles.ts (there GAME_DIR) — duplicated here so that the suite
-// remains executable without the Lua loader (--import register-lua).
+// Wie scripts/gameFiles.ts (dort GAME_DIR) — hier dupliziert, damit die Suite
+// ohne den Lua-Loader (--import register-lua) lauffähig bleibt.
 const GAME_DIR =
   process.env.CFA_GAME_DIR ??
   'C:/Program Files (x86)/Steam/steamapps/common/Supreme Commander Forged Alliance'
@@ -31,10 +31,10 @@ const check = (ok: boolean, label: string): void => {
   if (!ok) failures++
 }
 
-// ── 1. Wave Banks: all 78 .xwb from sounds/ ────────────────────────────────
+// ── 1. Wave Banks: alle 78 .xwb aus sounds/ ────────────────────────────────
 console.log('\n== Wave Banks (sounds/*.xwb) ==')
 const xwbFiles = readdirSync(SOUNDS_DIR).filter((f) => f.endsWith('.xwb')).sort()
-check(xwbFiles.length === 78, `78 .xwb files found (${xwbFiles.length})`)
+check(xwbFiles.length === 78, `78 .xwb-Dateien gefunden (${xwbFiles.length})`)
 
 const banksByName = new Map<string, XwbBank>()
 const fileByBankName = new Map<string, string>()
@@ -57,26 +57,26 @@ for (const f of xwbFiles) {
     xwbErrors.push(`${f}: ${err instanceof Error ? err.message : String(err)}`)
   }
 }
-check(xwbErrors.length === 0, `parse all banks (${xwbErrors.length} error)`)
+check(xwbErrors.length === 0, `alle Banks parsen (${xwbErrors.length} Fehler)`)
 for (const e of xwbErrors.slice(0, 5)) console.log(`      ${e}`)
-// Reference value measured (explore-xwb.mjs): a reading that is too small
-// Otherwise, dwEntryCount would remain invisible green.
-check(totalWaves === 1737, `1737 waves total (${totalWaves}) in ${banksByName.size} banks`)
+// Referenzwert gemessen (explore-xwb.mjs): ein zu klein gelesenes
+// dwEntryCount bliebe sonst unsichtbar grün.
+check(totalWaves === 1737, `1737 Waves gesamt (${totalWaves}) in ${banksByName.size} Banks`)
 for (const [k, n] of [...formatHisto].sort((a, b) => b[1] - a[1])) {
   console.log(`  ·  ${String(n).padStart(5)} × ${k}`)
 }
-check(nonPcm === 0, `every wave is PCM16 (${nonPcm} deviant) — no codec necessary`)
-// File and bank names must not be equated: the .xsb replaces
-// the INNER name (XAS_Weapons.xwb is called 'XAS_Weapon' inside).
+check(nonPcm === 0, `jede Wave ist PCM16 (${nonPcm} Abweichler) — kein Codec nötig`)
+// Datei- und Bankname dürfen nicht gleichgesetzt werden: die .xsb löst über
+// den INNEREN Namen auf (XAS_Weapons.xwb heißt innen 'XAS_Weapon').
 check(
   banksByName.has('XAS_Weapon') && !banksByName.has('XAS_Weapons'),
-  `XAS_Weapons.xwb has the inner bank name 'XAS_Weapon' (resolution via bank name, not file name)`,
+  `XAS_Weapons.xwb trägt den inneren Banknamen 'XAS_Weapon' (Auflösung über Bankname, nicht Dateiname)`,
 )
 
-// ── 2. Sound Banks: all 80 .xsb, each cue up to (bank, wave) ────────────────
+// ── 2. Sound Banks: alle 80 .xsb, jede Cue bis (Bank, Wave) ────────────────
 console.log('\n== Sound Banks (sounds/*.xsb) ==')
 const xsbFiles = readdirSync(SOUNDS_DIR).filter((f) => f.endsWith('.xsb')).sort()
-check(xsbFiles.length === 80, `80 .xsb files found (${xsbFiles.length})`)
+check(xsbFiles.length === 80, `80 .xsb-Dateien gefunden (${xsbFiles.length})`)
 
 const soundBanks = new Map<string, XsbBank>()
 let totalCues = 0
@@ -94,8 +94,8 @@ for (const f of xsbFiles) {
         cuesWithVariants++
         maxVariants = Math.max(maxVariants, cue.variantCount)
       }
-      // End-to-end: the reference must point to a real, parsed bank
-      // and the wave index exist.
+      // Ende-zu-Ende: der Verweis muss in eine echte, geparste Bank zeigen
+      // und der Wave-Index existieren.
       const bank = banksByName.get(sb.waveBanks[cue.waveBankIndex]!)
       if (!bank || cue.waveIndex >= bank.entries.length) badWaveRefs++
     }
@@ -103,17 +103,17 @@ for (const f of xsbFiles) {
     xsbErrors.push(`${f}: ${err instanceof Error ? err.message : String(err)}`)
   }
 }
-check(xsbErrors.length === 0, `parse all sound banks (${xsbErrors.length} error)`)
+check(xsbErrors.length === 0, `alle Sound Banks parsen (${xsbErrors.length} Fehler)`)
 for (const e of xsbErrors.slice(0, 5)) console.log(`      ${e}`)
-check(totalCues === 1896, `1896 total cues (${totalCues}) — number from docs/research/effects-audio.md`)
+check(totalCues === 1896, `1896 Cues gesamt (${totalCues}) — Zahl aus docs/research/effects-audio.md`)
 check(
   badWaveRefs === 0,
-  `each cue points to an existing wave index in an existing bank (${badWaveRefs} broken)`,
+  `jede Cue zeigt in eine existierende Bank auf einen existierenden Wave-Index (${badWaveRefs} kaputt)`,
 )
-// Document Stage 1 Decision: FA has NO cue variation tables
-// (the parser would throw) but track variation events with 2-6 waves.
+// Stufe-1-Entscheidung dokumentieren: FA hat KEINE Cue-Variationstabellen
+// (der Parser würde werfen), aber Track-Variation-Events mit 2–6 Waves.
 console.log(
-  `  · ${cuesWithVariants} of ${totalCues} Cues have wave variations (playlist, max. ${maxVariants}) — level 1 takes entry 0`,
+  `  ·  ${cuesWithVariants} von ${totalCues} Cues haben Wave-Variationen (Playlist, max. ${maxVariants}) — Stufe 1 nimmt Eintrag 0`,
 )
 
 // ── 3. Voice-Banks: gleiche Formate, eigene Verzeichnisse ──────────────────
@@ -147,18 +147,18 @@ for (const lang of ['US', 'DE']) {
     }
   }
 }
-check(voiceErrors.length === 0, `parse all voice banks (${voiceErrors.length} error)`)
+check(voiceErrors.length === 0, `alle Voice-Banks parsen (${voiceErrors.length} Fehler)`)
 for (const e of voiceErrors.slice(0, 5)) console.log(`      ${e}`)
-check(voiceCues === 2550, `2550 voice cues total (${voiceCues}) — reference value measured`)
-check(voiceBad === 0, `all voice wave references valid (${voiceBad} broken)`)
+check(voiceCues === 2550, `2550 Voice-Cues gesamt (${voiceCues}) — Referenzwert gemessen`)
+check(voiceBad === 0, `alle Voice-Wave-Verweise gültig (${voiceBad} kaputt)`)
 console.log(`  ·  ${voiceWaves} Voice-Waves`)
 
 // ── 4. Stichproben: Cue → WAV mit plausiblem Header ────────────────────────
-console.log('\n== Samples up to PCM ==')
+console.log('\n== Stichproben bis zum PCM ==')
 const samples: { xsb: string; cue: string; expectChannels: number; expectRate: number }[] = [
-  // Music: Streaming bank, stereo 44.1 kHz (cue list from lua/UserMusic.lua)
+  // Musik: Streaming-Bank, Stereo 44,1 kHz (Cue-Liste aus lua/UserMusic.lua)
   { xsb: 'Music.xsb', cue: 'Main_Menu', expectChannels: 2, expectRate: 44100 },
-  // Unit loop from blueprint example UEL0201 (Audio.AmbientMove)
+  // Unit-Loop aus dem Blueprint-Beispiel UEL0201 (Audio.AmbientMove)
   { xsb: 'UEL.xsb', cue: 'UEL0201_Move_Loop', expectChannels: 1, expectRate: 32000 },
   // Explosion mit eigener Bank-Liste (Explosions + ExplosionsStream)
   { xsb: 'Explosions.xsb', cue: 'UEF_Nuke_Impact', expectChannels: 1, expectRate: 32000 },
@@ -172,18 +172,18 @@ for (const s of samples) {
   const cue = sb?.cues.get(s.cue)
   check(cue !== undefined, `${s.xsb} kennt Cue "${s.cue}"`)
   if (!sb || !cue) continue
-  // No `!` walkthrough: if a bank failed before, the suite should be here
-  // Count FAIL and continue running, do not abort with a TypeError.
+  // Kein `!`-Durchmarsch: schlug vorher eine Bank fehl, soll die Suite hier
+  // FAIL zählen und weiterlaufen, nicht mit einem TypeError abbrechen.
   const bankName = sb.waveBanks[cue.waveBankIndex]
   const bank = bankName !== undefined ? banksByName.get(bankName) : undefined
   const entry = bank?.entries[cue.waveIndex]
   const file = bankName !== undefined ? fileByBankName.get(bankName) : undefined
   check(
     entry !== undefined && file !== undefined,
-    `${s.cue}: Bank "${bankName}" parsed and wave ${cue.waveIndex} present`,
+    `${s.cue}: Bank "${bankName}" geparst und Wave ${cue.waveIndex} vorhanden`,
   )
   if (!entry || !file || bankName === undefined) continue
-  // Read the bank file again — the file name comes above the INSIDE
+  // Die Bank-Datei erneut lesen — der Dateiname kommt über den INNEREN
   // Banknamen (XAS_Weapon ≠ XAS_Weapons.xwb).
   const wav = wavFromEntry(readFileSync(`${SOUNDS_DIR}/${file}`), entry)
   if (!probeWav) probeWav = wav
@@ -209,14 +209,14 @@ for (const s of samples) {
   )
   check(
     deviation < 0.05,
-    `${s.cue}: Duration field (${secondsFromDuration.toFixed(3)} s) vs. bytes/byte rate (${secondsFromBytes.toFixed(3)} s), deviation ${(deviation * 100).toFixed(2)} %`,
+    `${s.cue}: Duration-Feld (${secondsFromDuration.toFixed(3)} s) vs. Bytes/Byterate (${secondsFromBytes.toFixed(3)} s), Abweichung ${(deviation * 100).toFixed(2)} %`,
   )
 }
 
-// ── 5. Sample WAV on record ──────────────────────── ────────────────────────
+// ── 5. Probe-WAV auf Platte ────────────────────────────────────────────────
 console.log('\n== Probe-WAV ==')
-// Primarily the session scratchpad (job); it falls on other computers
-// Path visible on os.tmpdir() - the suite remains portable.
+// Vorrangig der Session-Scratchpad (Auftrag); auf fremden Rechnern fällt der
+// Pfad sichtbar auf os.tmpdir() zurück — die Suite bleibt damit portabel.
 const PROBE_DIRS = [
   process.env.CFA_AUDIO_PROBE_DIR,
   'C:/Users/Marti/AppData/Local/Temp/claude/c--Users-Marti-Documents-02Projekte-Claude-Commander-Forged-Alliance/795d25b0-6aed-4269-81c5-1f3b66283dbf/scratchpad',
@@ -233,7 +233,7 @@ if (probeWav) {
       /* nächster Kandidat */
     }
   }
-  check(probePath !== null, `Probe directory can be created (${probePath ?? PROBE_DIRS.join(' | ')})`)
+  check(probePath !== null, `Probe-Verzeichnis anlegbar (${probePath ?? PROBE_DIRS.join(' | ')})`)
   if (probePath !== null) {
     writeFileSync(probePath, probeWav)
     const back = readFileSync(probePath)
@@ -241,11 +241,11 @@ if (probeWav) {
       back.length === probeWav.length &&
         back.toString('ascii', 0, 4) === 'RIFF' &&
         back.toString('ascii', 8, 12) === 'WAVE',
-      `probe.wav written and RIFF-Magic verified (${back.length} B): ${probePath}`,
+      `probe.wav geschrieben und RIFF-Magic verifiziert (${back.length} B): ${probePath}`,
     )
   }
 } else {
-  check(false, 'no sample WAV is generated')
+  check(false, 'kein Stichproben-WAV erzeugt')
 }
 
 // --- XACT global settings (SupCom.xgs): categories for the volume path ----
@@ -266,7 +266,7 @@ console.log('\n== SupCom.xgs: Kategorien, Hierarchie, Volumes ==')
   check(
     units !== undefined && world !== undefined && global !== undefined &&
       units.c.parent === world.i && world.c.parent === global.i && global.c.parent === -1,
-    'Hierarchy: Units → World → Global (root -1)',
+    'Hierarchie: Units → World → Global (Wurzel -1)',
   )
   // Volume byte decoding: 0xB4 = 0 dB (Units), Interface -5 dB, Global +6 dB.
   const iface = byName.get('Interface')
@@ -274,7 +274,7 @@ console.log('\n== SupCom.xgs: Kategorien, Hierarchie, Volumes ==')
     Math.abs(units!.c.volumeDb) < 0.1 &&
       Math.abs(iface!.c.volumeDb + 5) < 0.1 &&
       Math.abs(global!.c.volumeDb - 6) < 0.1,
-    `dB decoding: Units ${units!.c.volumeDb.toFixed(1)}, Interface ${iface!.c.volumeDb.toFixed(1)}, Global ${global!.c.volumeDb.toFixed(1)}`,
+    `dB-Dekodierung: Units ${units!.c.volumeDb.toFixed(1)}, Interface ${iface!.c.volumeDb.toFixed(1)}, Global ${global!.c.volumeDb.toFixed(1)}`,
   )
   check(
     xgs.variables.some((v) => v.name === 'SpeedOfSound' && Math.abs(v.initial - 343.5) < 0.01),
@@ -288,7 +288,7 @@ console.log('\n== SupCom.xgs: Kategorien, Hierarchie, Volumes ==')
   check(anyMusicCue?.category === music!.i, `Music.xsb-Cues → Kategorie ${music!.i} (Music)`)
   const ifaceBank = parseXsb(readFileSync(`${SOUNDS_DIR}/Interface.xsb`))
   const menuCue = ifaceBank.cues.get('X_Main_Menu_On')
-  check(menuCue?.category === iface!.i, `Interface.xsb 'X_Main_Menu_On' → Category ${iface!.i} (Interface)`)
+  check(menuCue?.category === iface!.i, `Interface.xsb 'X_Main_Menu_On' → Kategorie ${iface!.i} (Interface)`)
 }
 
 console.log(failures === 0 ? '\nAUDIO BESTANDEN' : `\n${failures} CHECK(S) FEHLGESCHLAGEN`)

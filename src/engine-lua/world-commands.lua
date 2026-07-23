@@ -1,35 +1,35 @@
 -- =====================================================================
--- The engine part of the world view: Click -> Command.
+-- Der Engine-Teil der Weltansicht: Klick -> Befehl.
 --
--- NOTHING is decided here. The UI-Lua maintains the status ("what is it doing
--- next click?") in commandmode.lua; the engine QUESTIONS it, calculates the
--- Geometry and sends the command to the Sim. Then it reports it
--- executed command (commandmode.OnCommandIssued, commandmode.lua:146).
+-- Hier wird NICHTS entschieden. Die UI-Lua haelt den Zustand ("was tut der
+-- naechste Klick?") in commandmode.lua; die Engine FRAGT ihn ab, rechnet die
+-- Geometrie und schickt den Befehl an die Sim. Danach meldet sie den
+-- ausgefuehrten Befehl zurueck (commandmode.OnCommandIssued, commandmode.lua:146).
 --
--- This Lua code was previously in TS template literals (`host.eval(\`…\`)`) —
--- forbidden (CLAUDE.md): no tool there sees it as Lua.
+-- Dieser Lua-Code stand vorher in TS-Template-Literalen (`host.eval(\`…\`)`) —
+-- verboten (CLAUDE.md): dort sieht ihn kein Werkzeug als Lua.
 --
--- And he had a real mistake: the selection came back as a LUA TABLE, and
--- an EMPTY Lua table becomes `{}` in JS — not `[]`. `selection.length`
--- was then `undefined`, the test for 0 came to nothing, and the `for…of` threw
--- "selection is not iterable". That's why the queries here return JSON-TEXT
--- (LuaHost.pull), which becomes a real array in JS.
+-- Und er hatte einen echten Fehler: die Auswahl kam als LUA-TABELLE zurueck, und
+-- eine LEERE Lua-Tabelle wird in JS zu `{}` — nicht zu `[]`. `selection.length`
+-- war dann `undefined`, die Pruefung auf 0 lief ins Leere, und der `for…of` warf
+-- "selection is not iterable". Deshalb geben die Abfragen hier JSON-TEXT zurueck
+-- (LuaHost.pull), der in JS ein echtes Array wird.
 --
--- STANDARD LUA 5.4 (goes raw in host.eval, not through the FA transpiler).
+-- STANDARD-LUA 5.4 (geht roh in host.eval, nicht durch den FA-Transpiler).
 -- =====================================================================
 
---- The selected entities as JSON — the same list as orders.lua and
+--- Die ausgewaehlten Einheiten als JSON — dieselbe Liste, mit der orders.lua und
 --- construction.lua arbeiten (GetSelectedUnits).
---- What the click into the world means for EVERY unit - and that
---- it is not the worldview that decides, but the BLUEPRINT:
+--- Dazu, was der Klick in die Welt fuer JEDE Einheit bedeutet — und das
+--- entscheidet nicht die Weltansicht, sondern der BLUEPRINT:
 ---
---- canMove RULEUCC_Move is in the CommandCaps -> Move command
---- isFactory the unit builds units -> COLLECTION POINT
+---   canMove    RULEUCC_Move steht in den CommandCaps  -> Bewegungsbefehl
+---   isFactory  die Einheit baut Einheiten             -> SAMMELPUNKT
 ---
---- A building does not have a RULEUCC_Move (uel0201 has it, ueb0101 does not). Become
---- Send movement orders to everyone anyway, allowing factories to pass through the area
---- drive - and the sim even teleported you to the click point
---- (motion.lua). The engine has its own binding for this:
+--- Ein Gebaeude hat kein RULEUCC_Move (uel0201 hat es, ueb0101 nicht). Wer den
+--- Bewegungsbefehl trotzdem an alle schickt, laesst Fabriken durch die Gegend
+--- fahren — und die Sim hat sie bis eben sogar an den Klickpunkt teleportiert
+--- (motion.lua). Die Engine hat dafuer eine eigene Bindung:
 --- `IssueFactoryRallyPoint(units, pos)` (sim_SimInits, Cfile:1008266).
 function __uiSelectionJson()
   local sel = GetSelectedUnits()
@@ -37,19 +37,19 @@ function __uiSelectionJson()
   local parts = {}
   for i, u in ipairs(sel) do
     local bp = u:GetBlueprint()
-    -- The CommandCaps are under GENERAL, not at the top of the Blueprint
-    -- (uel0001_unit.bp:787, and ui-globals.lua:433 reads it the same way). Who she
-    -- searches at the top level, gets nil — and then no unit can
-    -- run more because `canMove` is always false. That's exactly what happened.
+    -- Die CommandCaps stehen unter GENERAL, nicht oben im Blueprint
+    -- (uel0001_unit.bp:787, und ui-globals.lua:433 liest sie genauso). Wer sie
+    -- auf der obersten Ebene sucht, bekommt nil — und dann kann keine Einheit
+    -- mehr laufen, weil `canMove` immer false ist. Genau so passiert.
     local caps = (bp.General and bp.General.CommandCaps) or {}
-    -- And the second part: a FACTORY has RULEUCC_Move in its CommandCaps —
-    -- That's exactly why a move command sets the COLLECTION POINT on it in the original.
-    -- PHYSICS decides who can really drive: `MotionType`. One unit
-    -- with RULEUMT_None has no drive (and no navigator in the sim).
+    -- Und der zweite Teil: eine FABRIK hat RULEUCC_Move in ihren CommandCaps —
+    -- genau deshalb setzt ein Move-Befehl auf sie im Original den SAMMELPUNKT.
+    -- Wer wirklich fahren kann, entscheidet die PHYSIK: `MotionType`. Eine Unit
+    -- mit RULEUMT_None hat keinen Antrieb (und in der Sim keinen Navigator).
     local immobile = bp.Physics.MotionType == 'RULEUMT_None'
     local canMove = caps.RULEUCC_Move == true and not immobile
-    -- FACTORY is in the categories of the blueprint (ueb0101_unit.bp) — the same
-    -- List from which the category system builds its expressions.
+    -- FACTORY steht in den Categories des Blueprints (ueb0101_unit.bp) — dieselbe
+    -- Liste, aus der das Kategorie-System seine Ausdruecke baut.
     local isFactory = false
     for _, c in ipairs(bp.Categories or {}) do
       if c == 'FACTORY' then isFactory = true end
@@ -68,8 +68,8 @@ function __uiSelectionJson()
   return '[' .. table.concat(parts, ',') .. ']'
 end
 
---- The command mode as the original Lua runs it (commandmode.lua:109).
---- Return as JSON: { mode = 'build'|'order'|false, name = <string>|false }
+--- Der Command-Mode, wie die Original-Lua ihn fuehrt (commandmode.lua:109).
+--- Rueckgabe als JSON: { mode = 'build'|'order'|false, name = <string>|false }
 function __uiCommandModeJson()
   local cm = import('/lua/ui/game/commandmode.lua').GetCommandMode()
   local mode = cm[1]
@@ -81,9 +81,9 @@ function __uiCommandModeJson()
   return '{"mode":' .. str(mode) .. ',"name":' .. str(name) .. '}'
 end
 
---- The footprint mass of a blueprint (Footprint.SizeX/SizeZ).
---- The engine defaults pre-occupy every field (RUnitBlueprint-Ctor @0x51E480),
---- that's why the original Lua accesses it unchecked.
+--- Die Footprint-Masse eines Blueprints (Footprint.SizeX/SizeZ).
+--- Die Engine-Defaults belegen jedes Feld vor (RUnitBlueprint-Ctor @0x51E480),
+--- deshalb greift die Original-Lua ungeprueft darauf zu.
 function __uiFootprintJson(blueprintId)
   local bp = __blueprints[blueprintId]
   if not bp then return 'null' end
@@ -92,11 +92,11 @@ function __uiFootprintJson(blueprintId)
   return '[' .. tostring(sx) .. ',' .. tostring(sz) .. ']'
 end
 
---- Report back the executed command (commandmode.lua:146). The Lua ended
---- then enter command mode (except when holding the shift key) and set the
---- Order buttons back.
+--- Den ausgefuehrten Befehl zurueckmelden (commandmode.lua:146). Die Lua beendet
+--- daraufhin den Command-Mode (ausser bei gehaltener Shift-Taste) und setzt die
+--- Order-Buttons zurueck.
 ---
---- The field layout is that of the engine: CommandType, Blueprint, Target.Position,
+--- Das Feld-Layout ist das der Engine: CommandType, Blueprint, Target.Position,
 --- Clear (commandmode.lua:147-160).
 function __uiCommandIssued(commandType, blueprint, x, y, z, clear)
   import('/lua/ui/game/commandmode.lua').OnCommandIssued({

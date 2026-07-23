@@ -13,11 +13,11 @@
 -- suspicion.
 -- =====================================================================
 
--- All engine globals in this file are created FIRST. Reason: config.lua:56
--- appends a metatable to _G that allows access to a NON-EXISTENT
--- Global makes a mistake (“access to nonexistent global variable”) — the
--- Original engine built in our anti-stub rule itself. An 'if
--- __uiFrames then` on a never assigned global would pop afterwards.
+-- Alle Engine-Globals dieser Datei werden ZUERST angelegt. Grund: config.lua:56
+-- haengt eine Metatable an _G, die den Zugriff auf ein NICHT EXISTIERENDES
+-- Global zum Fehler macht ("access to nonexistent global variable") — die
+-- Original-Engine hat unsere Anti-Stub-Regel selbst eingebaut. Ein `if
+-- __uiFrames then` auf einem nie zugewiesenen Global wuerde danach knallen.
 __uiFrames = {}
 __uiSessionActive = false
 __uiSavePrefs = false
@@ -31,7 +31,7 @@ __uiOverlayFilters = {}
 __uiTeamColorMode = 'FactionColor'
 __cursor = false
 __prefs = {}
--- World point -> screen. Only the 3D side can do that; she gets stuck here.
+-- Weltpunkt -> Bildschirm. Das kann nur die 3D-Seite; sie haengt sich hier ein.
 __uiWorldProject = false
 
 -- === Cursor (_c_CreateCursor, Cfile:1129627-1129631) ===
@@ -49,14 +49,14 @@ end
 
 -- === Kameras ===
 --
--- There are SEVERAL: 'WorldCamera' (the main view), 'MiniMap', 'CameraHead2'.
--- worldview.lua:593 gets it via GetCamera(name), minimap.lua via yours
--- own name. The camera itself is the 3D page (TypeScript) — it says here
--- the access, not the bill.
+-- Es gibt MEHRERE: 'WorldCamera' (die Hauptansicht), 'MiniMap', 'CameraHead2'.
+-- worldview.lua:593 holt sie ueber GetCamera(name), minimap.lua ueber ihren
+-- eigenen Namen. Die Kamera selbst ist die 3D-Seite (TypeScript) — hier steht
+-- der Zugriff, nicht die Rechnung.
 __uiCameras = {}
 __uiCameraBridge = false
 
---- GetCamera(name) — the camera object to a name (scr_UserInits).
+--- GetCamera(name) — das Kamera-Objekt zu einem Namen (scr_UserInits).
 function GetCamera(name)
   local key = tostring(name or 'WorldCamera')
   if not __uiCameras[key] then
@@ -67,8 +67,8 @@ function GetCamera(name)
   return __uiCameras[key]
 end
 
---- The bridge to the 3D page. If it is missing, NOTHING is claimed: a camera that
---- no one renders, no zoom either.
+--- Die Bruecke zur 3D-Seite. Fehlt sie, wird NICHTS behauptet: eine Kamera, die
+--- niemand rendert, hat auch keinen Zoom.
 function __uiCameraGet(name, what)
   if not __uiCameraBridge then return nil end
   return __uiCameraBridge('get', name, what)
@@ -84,9 +84,9 @@ function __uiCameraMove(name, pos, hpr, zoom, seconds)
   __uiCameraBridge('move', name, pos, hpr, zoom, seconds)
 end
 
---- "UIZoomTo(units,[seconds])" (Cfile:1292715): the main camera moves to the
---- Center of the given units. gamemain.OnFirstUpdate zooms at startup like this
---- to the ACU; The avatar icons then jump to their unit.
+--- "UIZoomTo(units,[seconds])" (Cfile:1292715): die Hauptkamera faehrt auf die
+--- Mitte der gegebenen Einheiten. gamemain.OnFirstUpdate zoomt so beim Start
+--- auf die ACU; die Avatar-Icons springen damit zu ihrer Einheit.
 function UIZoomTo(units, seconds)
   local n, cx, cy, cz = 0, 0, 0, 0
   for _, u in ipairs(units or {}) do
@@ -100,16 +100,16 @@ function UIZoomTo(units, seconds)
   __uiCameraMove('WorldCamera', { cx / n, cy / n, cz / n }, nil, nil, seconds)
 end
 
---- avatars.lua:42 jumps to the next idle engineer with a click.
+--- avatars.lua:42 springt damit per Klick zum naechsten leerlaufenden Ingenieur.
 function UISelectAndZoomTo(unit, seconds)
   if not unit then return end
   SelectUnits({ unit })
   UIZoomTo({ unit }, seconds)
 end
 
--- GetCursor() (Cfile:1274426) — the current cursor object. uimain.lua:23 sets
--- it new at EVERY change of state; splash.lua:27/52 blinds it during the
--- films out. Previously it threw it out of the miss list and took the splash with it.
+-- GetCursor() (Cfile:1274426) — das aktuelle Cursor-Objekt. uimain.lua:23 setzt
+-- es bei JEDEM Zustandswechsel neu; splash.lua:27/52 blendet es waehrend der
+-- Filme aus. Vorher warf es aus der Fehl-Liste und riss den Splash mit.
 function GetCursor()
   return __cursor or nil
 end
@@ -127,20 +127,20 @@ local function prefPath(key)
   return parts
 end
 
--- The engine gives a COPY to the Lua, not a reference: cfunc_GetPreferenceL
+-- Die Engine gibt eine KOPIE in die Lua, keine Referenz: cfunc_GetPreferenceL
 -- ruft `Moho::SCR_Copy(&a1, v5, esi0)` (Cfile:1370179), cfunc_GetOptionsL
--- exactly the same (Cfile:1370017). This is not a detail, but the reason why
+-- genauso (Cfile:1370017). Das ist kein Detail, sondern der Grund, warum
 -- `Prefs.SetOption` ueberhaupt funktioniert:
 --
---   SetOption gets the options table with optionslogic.GetCurrent(),
---   changes ONE value in it and passes it to SetCurrent(). SetCurrent
---   then compares them against GetCurrent() — and calls `item.set` only for those
---   Values ​​that DIFFER (optionslogic.lua:100-123).
+--   SetOption holt sich mit optionslogic.GetCurrent() die Options-Tabelle,
+--   aendert EINEN Wert darin und uebergibt sie an SetCurrent(). SetCurrent
+--   vergleicht sie dann gegen GetCurrent() — und ruft `item.set` nur fuer die
+--   Werte, die sich UNTERSCHEIDEN (optionslogic.lua:100-123).
 --
--- If we published the living table, the "old" table would be the same as
--- the "new": SetOption would have already changed the value in the profile, the comparison
--- I couldn't find any difference and `set` would NEVER work. The option landed dutifully in the
--- Prefs - and still had no effect.
+-- Gaeben wir die lebende Tabelle heraus, waere die "alte" Tabelle dieselbe wie
+-- die "neue": SetOption haette den Wert schon im Profil geaendert, der Vergleich
+-- faende keinen Unterschied, und `set` liefe NIE. Die Option landete brav in den
+-- Prefs — und wirkte trotzdem nichts.
 local function deepCopy(value)
   if type(value) ~= 'table' then return value end
   local out = {}
@@ -175,11 +175,11 @@ function SavePreferences()
   __prefsFlush()
 end
 
--- The way out: the engine writes Game.prefs as LUA SOURCE TEXT
--- (checked in the installation: `PreGameData = { CurrentMapDir = '...' }`).
--- __prefsSerialize() (prefs.lua) does exactly this text; __uiSavePrefs sets it
--- (in the browser: localStorage). Without the catch, SavePreferences() was a
--- Zero call and every setting gone after reload.
+-- Der Weg nach draussen: die Engine schreibt Game.prefs als LUA-QUELLTEXT
+-- (nachgesehen in der Installation: `PreGameData = { CurrentMapDir = '...' }`).
+-- __prefsSerialize() (prefs.lua) macht genau diesen Text; __uiSavePrefs legt ihn
+-- ab (im Browser: localStorage). Ohne den Haken war SavePreferences() ein
+-- Nullaufruf und jede Einstellung nach dem Neuladen weg.
 function __prefsFlush()
   if __uiSavePrefs then
     __uiSavePrefs(__prefsSerialize())
@@ -189,38 +189,38 @@ end
 -- GetOptions(key): the engine's option store (video, sound, gameplay).
 -- prefs.lua:44 reads 'primary_adapter' when it creates a profile.
 -- GetOptions(key) — "obj GetOptions()" (Cfile:1369977), Rumpf:
--- CUserPrefs::LookupCurrentOption (Cfile:1370017). It is the option of
--- CURRENT PROFILE, not a global table: optionslogic.lua includes it
--- `Prefs.SetToCurrentProfile('options', curOptions)` (line 60) right there
--- and reads it again with `Prefs.GetFromCurrentProfile('options')` (line 48).
--- If you read GetPreference('options') instead, you'll never see the change —
--- prefs.SetOption('mainmenu_bgmovie', false) fizzled out silently, and the menu
+-- CUserPrefs::LookupCurrentOption (Cfile:1370017). Es ist die Option des
+-- AKTUELLEN PROFILS, nicht eine globale Tabelle: optionslogic.lua legt sie mit
+-- `Prefs.SetToCurrentProfile('options', curOptions)` (Zeile 60) genau dort ab
+-- und liest sie mit `Prefs.GetFromCurrentProfile('options')` (Zeile 48) wieder.
+-- Wer stattdessen GetPreference('options') liest, sieht die Aenderung nie —
+-- prefs.SetOption('mainmenu_bgmovie', false) verpuffte still, und das Menue
 -- baute weiter seinen Film.
 function GetOptions(key)
   local profile = GetPreference('profile')
   if not profile or not profile.current or not profile.profiles then return nil end
   local current = profile.profiles[profile.current]
   if not current or not current.options then return nil end
-  -- Here too a COPY (Moho::SCR_Copy, Cfile:1370017) — see GetPreference.
+  -- Auch hier eine KOPIE (Moho::SCR_Copy, Cfile:1370017) — siehe GetPreference.
   if key == nil then return deepCopy(current.options) end
   return deepCopy(current.options[key])
 end
 
 -- =====================================================================
--- UserUnit — the UI's view of a unit.
+-- UserUnit — die Sicht der UI auf eine Unit.
 --
--- This is NOT the sim unit. The engine maintains a mirrored one on the client side
--- Structure (UserUnit::mUnitVarDat, filled by UserUnit::UpdateUnitData
--- @0x8C0750, Cfile:1363724) and publishes 36 methods on it
--- (Cfile:1364828-1367242). The UI only calls a handful of them - the rest of them
--- Data comes as a plain field from the rollover info.
+-- Das ist NICHT die Sim-Unit. Die Engine haelt clientseitig eine gespiegelte
+-- Struktur (UserUnit::mUnitVarDat, gefuellt von UserUnit::UpdateUnitData
+-- @0x8C0750, Cfile:1363724) und veroeffentlicht 36 Methoden darauf
+-- (Cfile:1364828-1367242). Die UI ruft davon nur eine Handvoll — der Rest der
+-- Daten kommt als Plain-Feld aus der Rollover-Info.
 --
--- This is fed per Sim beat from the worker snapshot.
+-- Gefuettert wird das pro Sim-Beat aus dem Worker-Snapshot.
 -- =====================================================================
 __uiUnits = {}
 
--- The UserUnit class of the UI VM (Cfile: 35 bindings). She is NOT a moho class:
--- the engine gives the UI its own objects. Global, so that the engine comparison
+-- Die UserUnit-Klasse der UI-VM (Cfile: 35 Bindungen). Sie ist KEINE moho-Klasse:
+-- die Engine gibt der UI eigene Objekte. Global, damit der Engine-Abgleich
 -- (scripts/coverage-engine.ts) sie pruefen kann.
 __userUnitMethods = {}
 local UserUnitMeta = __userUnitMethods
@@ -237,8 +237,8 @@ function UserUnitMeta:GetFuelRatio() return self.fuelRatio or -1 end
 function UserUnitMeta:GetShieldRatio() return self.shieldRatio or 0 end
 function UserUnitMeta:GetWorkProgress() return self.workProgress or 0 end
 function UserUnitMeta:IsDead() return self.dead == true end
--- The mirror now reports idle REAL (units.lua readRow: no target, none
--- Construction order, no production) — nil is an error here, not an idle.
+-- Der Spiegel meldet idle jetzt ECHT (units.lua readRow: kein Ziel, kein
+-- Bau-Auftrag, keine Produktion) — nil ist hier ein Fehler, kein Idle.
 function UserUnitMeta:IsIdle() return self.idle == true end
 function UserUnitMeta:IsStunned() return false end
 function UserUnitMeta:IsAutoMode() return false end
@@ -264,18 +264,18 @@ end
 
 function UserUnitMeta:GetFireState() return self.fireState or 0 end
 
--- SetCustomName: gamemain.OnFirstUpdate names the ACU with the player name
--- (gamemain.lua:84); unitview.lua:205 shows it in rollover. The name lives on
--- the UI copy — the original engine also syncs it into the sim (later,
--- with the UnitData sync).
+-- SetCustomName: gamemain.OnFirstUpdate tauft die ACU auf den Spielernamen
+-- (gamemain.lua:84); unitview.lua:205 zeigt ihn im Rollover. Der Name lebt in
+-- der UI-Kopie — die Original-Engine synct ihn zusaetzlich in die Sim (spaeter,
+-- mit dem UnitData-Sync).
 function UserUnitMeta:SetCustomName(name) self.customName = name end
--- The build queue of a factory: { { id = <blueprintId>, count = <n> }, ... }
--- (construction.lua:1620). It is mirrored out of the sim; empty means empty.
+-- Die Bau-Warteschlange einer Fabrik: { { id = <blueprintId>, count = <n> }, ... }
+-- (construction.lua:1620). Sie wird aus der Sim gespiegelt; leer heisst leer.
 function UserUnitMeta:GetBuildQueue() return self.buildQueue or {} end
 
--- GetAttachedUnitsList(units): the transported/docked units of the
--- Selection (construction.lua:1630). Without transporters in the sim is the list
--- empty - that is a fact, not a gap.
+-- GetAttachedUnitsList(units): die transportierten/angedockten Einheiten der
+-- Selektion (construction.lua:1630). Ohne Transporter in der Sim ist die Liste
+-- leer — das ist eine Tatsache, keine Luecke.
 function GetAttachedUnitsList(units)
   local out = {}
   for _, u in ipairs(units or {}) do
@@ -284,7 +284,7 @@ function GetAttachedUnitsList(units)
   return out
 end
 
--- From the engine per beat: the state of a unit from the sim.
+-- Von der Engine pro Beat: der Zustand einer Unit aus der Sim.
 function __uiSetUnit(id, blueprintId, army, x, y, z, health, maxHealth, workProgress, idle)
   local u = __uiUnits[id]
   if not u then
@@ -304,9 +304,9 @@ function __uiSetUnit(id, blueprintId, army, x, y, z, health, maxHealth, workProg
   u.dead = false
 end
 
--- Mirror the construction queue of a factory in the sim. The engine holds them
--- in the UI copy of the unit; construction.lua reads it over
--- SetCurrentFactoryForQueueDisplay and display them as a stack.
+-- Die Bau-Warteschlange einer Fabrik aus der Sim spiegeln. Die Engine haelt sie
+-- in der UI-Kopie der Unit; construction.lua liest sie ueber
+-- SetCurrentFactoryForQueueDisplay und zeigt sie als Stapel an.
 function __uiSetBuildQueue(id, items)
   local u = __uiUnits[id]
   if not u then return end
@@ -319,18 +319,18 @@ function __uiRemoveUnit(id)
   __uiUnits[id] = nil
 end
 
--- === The lists from which the avatar bar lives (top right) ===
+-- === Die Listen, aus denen die Avatar-Leiste lebt (rechts oben) ===
 --
 --   "table GetArmyAvatars() - return a table of avatar units for the army"
 --   (mHelp, Cfile:1360874)
 --
--- avatars.lua:658 uses this to build the clickable icons (the ACU!), gamemain.lua:79
--- gives the ACU the player name when starting. Without these lists, that remains
--- Avatar bar EMPTY — that's exactly what I saw.
+-- avatars.lua:658 baut daraus die anklickbaren Icons (die ACU!), gamemain.lua:79
+-- gibt der ACU beim Start den Spielernamen. Ohne diese Listen bleibt die
+-- Avatar-Leiste LEER — genau das war zu sehen.
 --
--- An "avatar" is a unit of your own army in the COMMAND category
--- (the commander; with Nomads/Sub-Commander more). Filtering is done via the
--- Blueprint categories — no special list, no advised selection.
+-- Ein „Avatar" ist eine Unit der eigenen Armee in der Kategorie COMMAND
+-- (der Kommandeur; bei Nomads/Sub-Commander mehr). Gefiltert wird ueber die
+-- Kategorien des Blueprints — keine Sonderliste, keine geratene Auswahl.
 local function unitsOfFocusArmy(pred)
   local out = {}
   for _, u in pairs(__uiUnits) do
@@ -351,17 +351,17 @@ local function hasCategory(bp, want)
 end
 
 function GetArmyAvatars()
-  -- The criterion of the engine (UserUnit-Ctor, Cfile:1362979-1362982): a
-  -- Avatar is any unit with bp.General.QuickSelectPriority > 0 (Ctor-Default
-  -- 0, Cfile:656079 — in vanilla only the four ACU-.bp set it to 1).
-  -- The sorting is ASCROWING: before the first STRICTLY larger entry
-  -- (Cfile:1352238-1352239); with the same priority it remains
-  -- Order of creation - here the unit ID (the Sim assigns it in ascending order).
+  -- Das Kriterium der Engine (UserUnit-Ctor, Cfile:1362979-1362982): ein
+  -- Avatar ist jede Unit mit bp.General.QuickSelectPriority > 0 (Ctor-Default
+  -- 0, Cfile:656079 — in Vanilla setzen es nur die vier ACU-.bp auf 1).
+  -- Einsortiert wird AUFSTEIGEND: vor dem ersten STRIKT groesseren Eintrag
+  -- (Cfile:1352238-1352239); bei gleicher Prioritaet bleibt die
+  -- Entstehungsreihenfolge — hier die Unit-ID (die Sim vergibt sie aufsteigend).
   local out = unitsOfFocusArmy(function(bp)
     return (bp.General.QuickSelectPriority or 0) > 0
   end)
-  -- If the list is empty, the engine returns NIL, not an empty table
-  -- (cfunc_GetArmyAvatarsL, Cfile:1360921: nothing works without entries
+  -- Bei leerer Liste liefert die Engine NIL, keine leere Tabelle
+  -- (cfunc_GetArmyAvatarsL, Cfile:1360921: ohne Eintraege wird nichts
   -- gepusht) — avatars.lua:666 prueft `if avatars then`.
   if not out then return nil end
   table.sort(out, function(a, b)
@@ -373,12 +373,12 @@ function GetArmyAvatars()
   return out
 end
 
--- Idle engineers/factories (the two buttons under the avatars).
--- "Idle" is the state that the sim reports (u.idle).
+-- Leerlaufende Ingenieure/Fabriken (die zwei Knoepfe unter den Avataren).
+-- „Idle" ist der Zustand, den die Sim meldet (u.idle).
 function GetIdleEngineers()
   -- mIsEngineer (UserUnit-Ctor, Cfile:1362995-1363014): Kategorie ENGINEER,
-  -- but NOT COMMAND, SCOUT or UNTARGETABLE - otherwise they would be there
-  -- idling ACU in the engineering tab.
+  -- aber NICHT COMMAND, SCOUT oder UNTARGETABLE — sonst stuende die
+  -- leerlaufende ACU mit in der Ingenieurs-Lasche.
   return unitsOfFocusArmy(function(bp, u)
     return u.idle == true and hasCategory(bp, 'ENGINEER')
       and not hasCategory(bp, 'COMMAND')
@@ -393,13 +393,13 @@ function GetIdleFactories()
   end)
 end
 
--- "IsKeyDown(keyCode)" (mHelp Cfile:1141963; Body 1141975-1142000): the
--- String is resolved into an EMauiKeyCode using SCR_GetEnum and
--- MAUI_KeyIsDown asked. The original UI asks for exactly ONE name: 'Shift'
--- (commandmode.lua:82 — if the player holds Shift, the command mode remains
--- active after the first command: the build queue). The condition comes
--- from the browser keyboard events (gameUi.attachEvents -> __uiSetKeyDown);
--- headless, no key is pressed - that is also the truth.
+-- "IsKeyDown(keyCode)" (mHelp Cfile:1141963; Rumpf 1141975-1142000): der
+-- String wird per SCR_GetEnum in ein EMauiKeyCode aufgeloest und
+-- MAUI_KeyIsDown gefragt. Die Original-UI fragt genau EINEN Namen: 'Shift'
+-- (commandmode.lua:82 — haelt der Spieler Shift, bleibt der Befehls-Modus
+-- nach dem ersten Befehl aktiv: die Bau-Warteschlange). Der Zustand kommt
+-- aus den Browser-Tastatur-Events (gameUi.attachEvents -> __uiSetKeyDown);
+-- headless ist keine Taste gedrueckt — auch das ist die Wahrheit.
 __uiKeysDown = {}
 
 function __uiSetKeyDown(name, down)
@@ -410,13 +410,13 @@ function IsKeyDown(keyCode)
   return __uiKeysDown[keyCode] == true
 end
 
--- "Validate a list of units" (mHelp, Cfile:1360576; Body 1360596-1360650):
--- filters a unit list for live UserUnits (not IsDead, not
--- DestroyQueued), order is preserved. There is ALWAYS a return
--- Table, also empty (AssignNewTable + PushStack — different than that
--- Avatar lists!); without session nil (return 0, Cfile:1360604).
--- Filter controlgroups.lua:102 (ctrl groups) and selection.lua:82/132/165
--- thus dead units from saved lists.
+-- "Validate a list of units" (mHelp, Cfile:1360576; Rumpf 1360596-1360650):
+-- filtert eine Unit-Liste auf lebende UserUnits (nicht IsDead, nicht
+-- DestroyQueued), Reihenfolge bleibt erhalten. Rueckgabe ist IMMER eine
+-- Tabelle, auch leer (AssignNewTable + PushStack — anders als die
+-- Avatar-Listen!); ohne Session nil (return 0, Cfile:1360604).
+-- controlgroups.lua:102 (Strg-Gruppen) und selection.lua:82/132/165 filtern
+-- damit tote Einheiten aus gemerkten Listen.
 function ValidateUnitsList(units)
   if not __uiScenarioInfo then return nil end
   local out = {}
@@ -430,23 +430,23 @@ function ValidateUnitsList(units)
   return out
 end
 
--- "Get a list of units assisting me" (mHelp, Cfile:1360671): the Guards of the
--- given units. orders.lua:932 asks one of the drones
--- PODSTAGING PLATFORM - and the UEF-ACU CARRIES this category
--- (uel0001_unit.bp:125); So the path runs with every ACU selection. Our
--- Sim does not yet have a guard/assist system: the mirror does not know one
--- Wizards, the empty list is the TRUE answer. As soon as the Sim Assist
--- learns, the mirror has to deliver the guards here.
+-- "Get a list of units assisting me" (mHelp, Cfile:1360671): die Guards der
+-- gegebenen Units. orders.lua:932 fragt so die Drohnen einer
+-- PODSTAGINGPLATFORM ab — und die UEF-ACU TRAEGT diese Kategorie
+-- (uel0001_unit.bp:125); der Pfad laeuft also bei jeder ACU-Auswahl. Unsere
+-- Sim fuehrt noch kein Guard/Assist-System: der Spiegel kennt keine
+-- Assistenten, die leere Liste ist die WAHRE Antwort. Sobald die Sim Assist
+-- lernt, muss der Spiegel die Guards hierher liefern.
 function GetAssistingUnitsList(units)
   return {}
 end
 
 -- === Selektion ===
 --
--- ATTENTION: GetSelectedUnits() returns `nil`, not `{}`, if the selection is EMPTY
--- (Cfile:1361395: lua_pushnil). The entire original UI also checks
+-- ACHTUNG: GetSelectedUnits() liefert bei LEERER Auswahl `nil`, nicht `{}`
+-- (Cfile:1361395: lua_pushnil). Die gesamte Original-UI prueft mit
 -- `if GetSelectedUnits() then` (construction.lua:1891, orders.lua:1250,
--- buildmode.lua:50). An empty table would be wrong here.
+-- buildmode.lua:50). Ein leeres Table waere hier still falsch.
 __uiSelection = false
 
 function GetSelectedUnits()
@@ -454,8 +454,8 @@ function GetSelectedUnits()
   return __uiSelection
 end
 
--- SelectUnits(nil) means "deselect everything" (uiutil.lua:103) and is legal.
--- Return: the accepted units (Cfile:1361553).
+-- SelectUnits(nil) heisst "alles abwaehlen" (uiutil.lua:103) und ist legal.
+-- Rueckgabe: die akzeptierten Units (Cfile:1361553).
 function SelectUnits(units)
   local old = __uiSelection or {}
   local new = {}
@@ -466,8 +466,8 @@ function SelectUnits(units)
   end
   __uiSelection = new
 
-  -- The engine notifies the UI via the SelectionListener
-  -- (Moho::SelectionListener::Receive @0x869060, Cfile:1294170), the
+  -- Die Engine benachrichtigt die UI ueber den SelectionListener
+  -- (Moho::SelectionListener::Receive @0x869060, Cfile:1294170), der
   -- gamemain.OnSelectionChanged(old, new, added, removed) ruft.
   __uiNotifySelectionChanged(old, new)
   return new
@@ -481,15 +481,15 @@ function AddSelectUnits(units)
   SelectUnits(cur)
 end
 
--- calculate added/removed and call gamemain.OnSelectionChanged — exactly what
--- what CWldSession::SetSelection (Cfile:1329207) does before overwriting.
+-- added/removed berechnen und gamemain.OnSelectionChanged rufen — genau das,
+-- was CWldSession::SetSelection (Cfile:1329207) vor dem Ueberschreiben tut.
 function __uiNotifySelectionChanged(old, new)
-  -- The SelectionListener originally only exists DURING a session
-  -- (the engine registers it when the session starts). There is none before
-  -- Receiver: SetupUI calls SelectUnits(nil) via SetCurrentLayout
-  -- (uiutil.lua:103), and that would otherwise be gamemain.OnSelectionChanged
-  -- trigger before the order panel is even built
-  -- (orders.lua:1087 then accesses a nil grid).
+  -- Der SelectionListener existiert im Original nur WAEHREND einer Sitzung
+  -- (die Engine registriert ihn beim Session-Start). Vorher gibt es keine
+  -- Empfaenger: SetupUI ruft ueber SetCurrentLayout ein SelectUnits(nil)
+  -- (uiutil.lua:103), und das wuerde sonst gamemain.OnSelectionChanged
+  -- ausloesen, bevor das Order-Panel ueberhaupt gebaut ist
+  -- (orders.lua:1087 greift dann auf ein nil-Grid zu).
   if not __uiSessionActive then return end
 
   local inOld = {}
@@ -511,8 +511,8 @@ function __uiNotifySelectionChanged(old, new)
   end
 end
 
--- The engine selects: Mouse picking provides the unit IDs that UI-VM does
--- from it UserUnits and calls SelectUnits.
+-- Die Engine waehlt aus: Maus-Picking liefert die Unit-Ids, die UI-VM macht
+-- daraus UserUnits und ruft SelectUnits.
 function __uiSelectByIds(ids)
   local units = {}
   for _, id in ipairs(ids or {}) do
@@ -524,12 +524,12 @@ function __uiSelectByIds(ids)
 end
 
 -- === Oekonomie (Sim -> UI) ===
--- GetEconomyTotals() returns exactly the five tables that economy.lua:271-275
--- reads, each with the keys MASS and ENERGY.
+-- GetEconomyTotals() liefert genau die fuenf Tabellen, die economy.lua:271-275
+-- liest, jeweils mit den Schluesseln MASS und ENERGY.
 --
--- IMPORTANT: the values ​​are PER TICK, not per second — economy.lua:277-279
--- multiplies it itself with GetSimTicksPerSecond(). Anyone here values ​​pro
--- second, shows ten times as much.
+-- WICHTIG: die Werte sind PRO TICK, nicht pro Sekunde — economy.lua:277-279
+-- multipliziert sie selbst mit GetSimTicksPerSecond(). Wer hier Werte pro
+-- Sekunde einspeist, zeigt das Zehnfache an.
 __uiEcon = {
   maxStorage = { MASS = 0, ENERGY = 0 },
   stored = { MASS = 0, ENERGY = 0 },
@@ -546,14 +546,14 @@ function GetSimTicksPerSecond()
   return 10
 end
 
--- Fed by the engine per sim beat (the worker sends the state).
+-- Von der Engine pro Sim-Beat gefuettert (der Worker schickt den Zustand).
 function __uiSetEconomy(maxM, maxE, storedM, storedE, incM, incE, reqM, reqE, useM, useE)
   local e = __uiEcon
   e.maxStorage.MASS = maxM
   e.maxStorage.ENERGY = maxE
   e.stored.MASS = storedM
   e.stored.ENERGY = storedE
-  -- per tick (the sim calculates in units per second)
+  -- pro Tick (die Sim rechnet in Einheiten pro Sekunde)
   e.income.MASS = incM * 0.1
   e.income.ENERGY = incE * 0.1
   e.lastUseRequested.MASS = reqM * 0.1
@@ -562,22 +562,22 @@ function __uiSetEconomy(maxM, maxE, storedM, storedE, incM, incE, reqM, reqE, us
   e.lastUseActual.ENERGY = useE * 0.1
 end
 
--- === Command data of the selection ===
+-- === Kommando-Daten der Selektion ===
 --
 -- GetUnitCommandData(unitSet) -> orders, toggles, buildableCategories
--- (Cfile:1264504-1264646). The engine charges per unit
--- CommandCaps/ToggleCaps and the precompiled build category from the
--- Blueprint (bp.Economy.BuildableCategory) and accumulates via selection
--- as ASSOCIATION (EntityCategory::Add).
+-- (Cfile:1264504-1264646). Die Engine verrechnet pro Unit die
+-- CommandCaps/ToggleCaps und die vorkompilierte Bau-Kategorie aus dem
+-- Blueprint (bp.Economy.BuildableCategory) und akkumuliert ueber die Selektion
+-- als VEREINIGUNG (EntityCategory::Add).
 --
--- orders/toggles are ARRAYS of cap strings — orders.lua:891 iterates over them
+-- orders/toggles sind ARRAYS von Cap-Strings — orders.lua:891 iteriert sie
 -- mit `for index, availOrder in availableOrders do`.
 --
--- If you select EMPTY, the engine returns EMPTY TABLES, not nil: the two
--- AssignNewTable calls (Cfile:1264740, :1264765) are BEHIND the loop
--- via the units and therefore always run. Anyone who gives nothing back here kills
--- orders.lua:891 (`for index, availOrder in availableOrders do`) for everyone
--- Deselection — and with it the entire UI VM.
+-- Bei LEERER Auswahl liefert die Engine LEERE TABELLEN, nicht nil: die beiden
+-- AssignNewTable-Aufrufe (Cfile:1264740, :1264765) stehen HINTER der Schleife
+-- ueber die Units und laufen deshalb immer. Wer hier nil zurueckgibt, toetet
+-- orders.lua:891 (`for index, availOrder in availableOrders do`) bei jeder
+-- Abwahl — und damit die ganze UI-VM.
 function GetUnitCommandData(units)
   if type(units) ~= 'table' or table.getn(units) == 0 then return {}, {}, nil end
 
@@ -611,13 +611,13 @@ function GetUnitCommandData(units)
   return orders, toggles, cats
 end
 
--- === The seam to the sim ===
+-- === Die Naht zur Sim ===
 --
--- In the original, the engine sends every UI command to the UI as ProcessInfo
+-- Im Original schickt die Engine jeden Befehl der UI als ProcessInfo an den
 -- SimDriver (cfunc_SetFireStateL: sSimDriver->ProcessInfo(entityId,
--- "SetFireState", value)) — the UI doesn't SET anything, it ASKS. Here it is
--- the same seam: a function that the engine sets. If it's missing, it BANGS -
--- an order that fizzles out quietly is worse than none at all.
+-- "SetFireState", value)) — die UI SETZT nichts, sie BITTET. Hier ist es
+-- dieselbe Naht: eine Funktion, die die Engine setzt. Fehlt sie, KNALLT es —
+-- ein Befehl, der still verpufft, ist schlimmer als gar keiner.
 __uiSimCommand = false
 
 local function idsOf(units)
@@ -633,25 +633,25 @@ local function sendSim(name, units, value)
   __uiSimCommand(name, idsOf(units), value)
 end
 
--- === SimCallback — calling Lua functions in the sim ===
+-- === SimCallback — Lua-Funktionen in der Sim aufrufen ===
 --
 -- mHelp woertlich (Cfile:1359123-1359128): "SimCallback(callback[,bool]):
 -- Execute a lua function in sim. callback = { Func = function name (in the
 -- SimCallbacks.lua module) to call, Args = Arguments as a lua object }. If
 -- bool is specified and true, sends the current selection with the command."
 --
--- The way in the original (cfunc_SimCallbackL, Cfile:1359139-1359305): Become Args
--- IMMEDIATELY serialized (SCR_ToByteStream — a snapshot, not a reference;
--- Functions in it are a hard bug, CMarshaller Cfile:999128), the
--- Selection is included as an entity ID set. The Sim page (Moho::Sim::LuaSimCallback,
--- Cfile:1076180-1076287) builds unit objects (empty set -> nil) and calls
+-- Der Weg im Original (cfunc_SimCallbackL, Cfile:1359139-1359305): Args werden
+-- SOFORT serialisiert (SCR_ToByteStream — ein Snapshot, keine Referenz;
+-- Funktionen darin sind ein harter Fehler, CMarshaller Cfile:999128), die
+-- Auswahl geht als Entity-ID-Set mit. Die Sim-Seite (Moho::Sim::LuaSimCallback,
+-- Cfile:1076180-1076287) baut daraus Unit-Objekte (leeres Set -> nil) und ruft
 -- import('/lua/SimCallbacks.lua').DoCallback(name, args, units).
 __uiSimCallbackSink = false
 
--- The serialization snapshot (SCR_ToByteStream): the args become one
+-- Der Serialisierungs-Snapshot (SCR_ToByteStream): die Args werden zu einem
 -- LUA-KONSTRUKTOR-Literal serialisiert (string.format('%q') escaped
--- Lua-safe) that the Sim VM evaluates upon receipt — one copy, none
--- Reference. Functions/user data pop like in the original ("Unable to marshal
+-- Lua-sicher), das die Sim-VM beim Empfang auswertet — eine Kopie, keine
+-- Referenz. Funktionen/Userdata knallen wie im Original ("Unable to marshal
 -- lua function", CMarshaller Cfile:999128).
 local function marshalArgs(v, depth)
   local t = type(v)
@@ -684,7 +684,7 @@ end
 
 function SimCallback(callback, addSelection)
   if type(callback) ~= 'table' or type(callback.Func) ~= 'string' then
-    -- Cfile:1359229-1359231: Func must be a string.
+    -- Cfile:1359229-1359231: Func muss ein String sein.
     error('SimCallback: callback.Func must be a string', 2)
   end
   if not __uiSimCallbackSink then
@@ -695,46 +695,46 @@ function SimCallback(callback, addSelection)
   __uiSimCallbackSink(callback.Func, marshalArgs(callback.Args), ids)
 end
 
--- === Commands with a blueprint as a target ===
+-- === Befehle mit einem Blueprint als Ziel ===
 --
 -- IssueBlueprintCommand(command, blueprintId, count, clear) — construction.lua:884
--- This sends a unit into the queue of the selected factory
--- ("UNITCOMMAND_BuildFactory"), or an upgrade to a building
--- ("UNITCOMMAND_Upgrade", construction.lua:876). There is a POSITION here
--- not - what needs to be placed runs via command mode.
+-- schickt damit eine Einheit in die Warteschlange der ausgewaehlten Fabrik
+-- ("UNITCOMMAND_BuildFactory"), oder ein Upgrade an ein Gebaeude
+-- ("UNITCOMMAND_Upgrade", construction.lua:876). Eine POSITION gibt es hier
+-- nicht — was platziert werden muss, laeuft ueber den Command-Mode.
 --
--- The UI doesn't execute the command, it sends it: sendSim -> Engine -> Sim.
+-- Die UI fuehrt den Befehl nicht aus, sie schickt ihn: sendSim -> Engine -> Sim.
 function IssueBlueprintCommand(command, blueprintId, count, clear)
   local sel = GetSelectedUnits()
   if not sel then return end
   sendSim(command, sel, { blueprint = blueprintId, count = count or 1, clear = clear == true })
 end
 
--- === The armies of the session ===
+-- === Die Armeen der Session ===
 --
--- "armyInfo GetArmiesTable()" (scr_UserInits). The UI reads from this:
---   .armiesTable List of armies (nickname, faction, color, iconColor, human …)
---   .focusArmy which army the player sees (1-based)
+-- "armyInfo GetArmiesTable()" (scr_UserInits). Die UI liest daraus:
+--   .armiesTable  Liste der Armeen (nickname, faction, color, iconColor, human …)
+--   .focusArmy    welche Armee der Spieler sieht (1-basiert)
 --   .numArmies
 --
 -- Nutzer: avatars.lua:30, chat.lua:1027, score.lua:193, createunit.lua:320,
--- worldview.lua:318 (`GetArmiesTable().focusArmy - 1` — who are the ping owners
--- 0-based, the table 1-based).
+-- worldview.lua:318 (`GetArmiesTable().focusArmy - 1` — die Ping-Owner sind
+-- 0-basiert, die Tabelle 1-basiert).
 --
--- The armies come from the SESSION (scenario + lobby), not from the UI. Until it
--- If there is a real session, the engine page enters it here (__uiSetArmies);
--- without a session the list is EMPTY — that's the truth, not a dummy.
+-- Die Armeen kommen aus der SESSION (Szenario + Lobby), nicht aus der UI. Bis es
+-- eine echte Session gibt, traegt sie die Engine-Seite hier ein (__uiSetArmies);
+-- ohne Session ist die Liste LEER — das ist die Wahrheit, keine Attrappe.
 --
--- Which fields there are for each army is NOT up for debate - the engine sets
+-- Welche Felder je Armee drinstehen, steht NICHT zur Debatte — die Engine setzt
 -- sie in cfunc_GetArmiesTableL (Cfile:1267023-1267111) einzeln:
 --   name, nickname, faction, color, iconColor, showScore, civilian, human,
 --   outOfGame, authorizedCommandSources
--- and above numArmies + focusArmy (1-based; -1 remains -1).
+-- und oben numArmies + focusArmy (1-basiert; -1 bleibt -1).
 --
--- IMPORTANT: `faction` is 0-BASED (mVarDat.mFaction). The Lua calculates everywhere
--- `faction + 1` to index in /lua/factions.lua (gamemain.lua:109,
--- orders.lua:675, avatars.lua:664). Whoever enters 1..4 here gives every player
--- the wrong faction — silent.
+-- WICHTIG: `faction` ist 0-BASIERT (mVarDat.mFaction). Die Lua rechnet ueberall
+-- `faction + 1`, um in /lua/factions.lua zu indizieren (gamemain.lua:109,
+-- orders.lua:675, avatars.lua:664). Wer hier 1..4 eintraegt, gibt jedem Spieler
+-- die falsche Fraktion — still.
 __uiArmies = {}
 __uiFocusArmy = 1
 
@@ -822,33 +822,33 @@ function SetFocusArmy(index)
   __uiFocusArmy = index
 end
 
--- === The current session ===
+-- === Die laufende Session ===
 --
 -- mHelp woertlich:
---   SessionGetScenarioInfo() "Return the table of scenario info that was
+--   SessionGetScenarioInfo()  "Return the table of scenario info that was
 --                              originally passed to the sim on launch."
---   SessionRequestPause() "Pause the world simulation."
---   SessionResume() "Resume the world simulation."
+--   SessionRequestPause()     "Pause the world simulation."
+--   SessionResume()           "Resume the world simulation."
 --   SessionIsPaused()         "Return true iff the session is paused."
 --   SessionGetLocalCommandSource()  "Return the local command source. Returns 0
 --                                    if the local client can't issue commands."
 --
--- The scenario info is EXACTLY the table that went to the sim at startup
--- (ScenarioInfo from <map>_scenario.lua) — the engine returns it unchanged
--- back. diplomacy.lua:34 accesses `.Options.TeamLock` unchecked, so
--- it has to be there as soon as a session is running. Without session: nil - the truth.
+-- Die Szenario-Info ist GENAU die Tabelle, die beim Start an die Sim ging
+-- (ScenarioInfo aus <map>_scenario.lua) — die Engine gibt sie unveraendert
+-- zurueck. diplomacy.lua:34 greift ungeprueft auf `.Options.TeamLock` zu, also
+-- muss sie da sein, sobald eine Session laeuft. Ohne Session: nil — die Wahrheit.
 __uiScenarioInfo = false
 __uiSessionPaused = false
 __uiPauseSink = false
 __uiCommandSources = {}
 __uiLocalCommandSource = 0
 
---- Set up a SESSION (which CWldSession does at startup).
+--- Eine SESSION aufsetzen (was CWldSession beim Start tut).
 ---
---- Accessed from the engine page with the same information as the sim
---- gets (src/sim/session.ts) — the UI doesn't invent ANYTHING here, it mirrors it
---- session. Without a session everything remains empty and the session globals pop
---- exactly as in the original ("no active session.", Cfile:1330339).
+--- Aufgerufen von der Engine-Seite mit denselben Angaben, die auch die Sim
+--- bekommt (src/sim/session.ts) — die UI erfindet hier NICHTS, sie spiegelt die
+--- Session. Ohne Session bleibt alles leer, und die Session-Globals knallen
+--- genau wie im Original ("no active session.", Cfile:1330339).
 function __uiSessionBegin(sessionType, mapPath, mapName)
   __uiArmies = {}
   __uiFocusArmy = 1
@@ -864,10 +864,10 @@ function __uiSessionBegin(sessionType, mapPath, mapName)
   }
 end
 
---- Enlist an army. `faction` is 1..4 (as in the Sim's ArmySetup); the
---- armiesTable carries them 0-based because that's what the engine does.
---- The color comes from /lua/GameColors.lua (PlayerColors/ArmyColors) — the
---- Table of the game, not from the air.
+--- Eine Armee eintragen. `faction` ist 1..4 (wie im ArmySetup der Sim); die
+--- armiesTable traegt sie 0-basiert, weil die Engine das so tut.
+--- Die Farbe kommt aus /lua/GameColors.lua (PlayerColors/ArmyColors) — der
+--- Tabelle des Spiels, nicht aus der Luft.
 function __uiSessionAddArmy(index, name, nickname, faction, human)
   local colors = import('/lua/GameColors.lua').GameColors
   __uiArmies[index] = {
@@ -892,15 +892,15 @@ function __uiSessionAddArmy(index, name, nickname, faction, human)
   }
 end
 
---- The command sources (the clients). In single player, exactly one - the player.
---- The engine provides the local index 1-based, 0 if the client does not
+--- Die Befehlsquellen (die Clients). Im Einzelspieler genau eine — der Spieler.
+--- Die Engine liefert den lokalen Index 1-basiert, 0 wenn der Client nicht
 --- befehligen darf (Cfile:1330618: `mLocalCmdSrc + 1`, 255 -> 0).
 function __uiSessionSetCommandSources(name, localIndex)
   __uiCommandSources = { name }
   __uiLocalCommandSource = localIndex or 0
 end
 
---- Which army the player sees (1-based; -1 = observer).
+--- Welche Armee der Spieler sieht (1-basiert; -1 = Beobachter).
 function __uiSessionSetFocusArmy(index)
   __uiFocusArmy = index or 1
 end
@@ -917,9 +917,9 @@ function SessionIsPaused()
   return __uiSessionPaused == true
 end
 
--- Pause is an intervention in the SIM, not in the UI: the engine holds it
--- WORLD (CWldSession::RequestPause). Without a session the engine throws
--- "SessionRequestPause(): no active session." - here too, instead of still nothing
+-- Pause ist ein Eingriff in die SIM, nicht in die UI: die Engine haelt die
+-- WELT an (CWldSession::RequestPause). Ohne Session wirft die Engine
+-- "SessionRequestPause(): no active session." — hier ebenso, statt still nichts
 -- zu tun.
 function SessionRequestPause()
   if not __uiScenarioInfo then error('SessionRequestPause(): no active session.', 2) end
@@ -939,14 +939,14 @@ function SessionResume()
   __uiPauseSink(false)
 end
 
---- "Return a table of command sources." (mHelp). Without session: error.
+--- "Return a table of command sources." (mHelp). Ohne Session: Fehler.
 function SessionGetCommandSourceNames()
   if not __uiScenarioInfo then error('SessionGetCommandSourceNames(): no active session.', 2) end
   return __uiCommandSources
 end
 
 --- "Return the local command source. Returns 0 if the local client can't issue
---- commands." — 1-based, NOT the army.
+--- commands." — 1-basiert, NICHT die Armee.
 function SessionGetLocalCommandSource()
   if not __uiScenarioInfo then error('SessionGetLocalCommandSource(): no active session.', 2) end
   return __uiLocalCommandSource
@@ -956,15 +956,15 @@ function SessionIsActive()
   return __uiScenarioInfo ~= false
 end
 
--- === Restart the session ===
+-- === Neustart der Session ===
 --
--- cfunc_RestartSessionL (Cfile:1263968-1263985): ONLY if a session is running
--- AND it is restartable (the same flag provides SessionCanRestart,
--- Cfile:1330810-1330826), the frame action is set to CREATE_SESSION —
--- the main loop then runs teardown + restart with the UNCHANGED ones
--- Session info (func_DoPreload, Cfile:1320748-1320784). Otherwise: No-Op, NONE
--- Mistake. The engine page hangs here as __uiRestartSink; without
--- The session simply cannot be restarted (mCanRestart = false).
+-- cfunc_RestartSessionL (Cfile:1263968-1263985): NUR wenn eine Session laeuft
+-- UND sie restartbar ist (dasselbe Flag liefert SessionCanRestart,
+-- Cfile:1330810-1330826), wird die Frame-Action auf CREATE_SESSION gesetzt —
+-- der Haupt-Loop faehrt dann Teardown + Neustart mit den UNVERAENDERTEN
+-- Session-Infos (func_DoPreload, Cfile:1320748-1320784). Sonst: No-Op, KEIN
+-- Fehler. Die Engine-Seite haengt sich hier als __uiRestartSink ein; ohne
+-- Sink ist die Session schlicht nicht restartbar (mCanRestart = false).
 __uiRestartSink = false
 
 function SessionCanRestart()
@@ -976,12 +976,12 @@ function RestartSession()
   __uiRestartSink()
 end
 
--- === The clients of the session ===
+-- === Die Clients der Session ===
 --
--- Fields per client from cfunc_GetSessionClientsL (Cfile:1321886-1321957):
+-- Felder je Client aus cfunc_GetSessionClientsL (Cfile:1321886-1321957):
 -- name, uid, connected, ping, quiet, local, authorizedCommandSources,
--- ejectedBy. In single player there is exactly one client - the player
--- (same source as SessionGetCommandSourceNames).
+-- ejectedBy. Im Einzelspieler gibt es genau einen Client — den Spieler
+-- (dieselbe Quelle wie SessionGetCommandSourceNames).
 function GetSessionClients()
   if not __uiScenarioInfo then error('GetSessionClients(): no active session.', 2) end
   local clients = {}
@@ -1003,34 +1003,34 @@ end
 -- === Chat ===
 --
 -- "SessionSendChatMessage([client-or-clients,] message)" (mHelp,
--- Cfile:1322062). The path in the original (cfunc, Cfile:1322106-1322227):
---   * 1 argument: all clients; (int, msg): A client index (1-based,
---     validated); (table, msg): Set of indexes — indexes in the
+-- Cfile:1322062). Der Weg im Original (cfunc, Cfile:1322106-1322227):
+--   * 1 Argument: alle Clients; (int, msg): EIN Client-Index (1-basiert,
+--     validiert); (table, msg): Menge von Indizes — Indizes in die
 --     GetSessionClients-Liste.
---   * msg will be serialized IMMEDIATELY (Snapshot! chat.lua:759 sets msg.echo
---     only AFTER sending - the delivered copy remains untouched);
+--   * msg wird SOFORT serialisiert (Snapshot! chat.lua:759 setzt msg.echo
+--     erst NACH dem Senden — die zugestellte Kopie bleibt unberuehrt);
 --     > 1024 Bytes serialisiert -> "Message too long." (Cfile:1322198-1322204).
 --   * Zustellung ASYNCHRON (THREAD_InvokeAsync, Cfile:1320454): beim
 --     naechsten Frame ruft func_ReceiveChat (Cfile:1263605-1263646)
---     gamemain.ReceiveChat(senderName, msgTable) — the sender is present,
---     if it is in the receiver mask (loopback).
--- Chat runs on the NETWORK LAYER (client manager), not via Sim/Sync —
--- In single player this means: completely in this VM.
+--     gamemain.ReceiveChat(senderName, msgTable) — der Sender ist dabei,
+--     wenn er in der Empfaengermaske steht (Loopback).
+-- Chat laeuft auf der NETZSCHICHT (Client-Manager), nicht ueber Sim/Sync —
+-- im Einzelspieler heisst das: komplett in dieser VM.
 function SessionSendChatMessage(clientsOrMsg, msg)
   if not __uiScenarioInfo then error('GameSendChatMessage(): No active game.', 2) end
   local targets, message
   if msg == nil then
     message = clientsOrMsg
-    targets = false -- all
+    targets = false -- alle
   else
     message = msg
     targets = clientsOrMsg
   end
   if type(message) ~= 'table' then error("Can't encode message.", 2) end
 
-  -- The serialization snapshot (SCR_ToByteStream): a deep copy NOW,
-  -- with byte counting as an approximation of the ByteStream size for the
-  -- 1024 limit (Cfile:1322198-1322204). Functions/Userdata pop as in
+  -- Der Serialisierungs-Snapshot (SCR_ToByteStream): eine tiefe Kopie JETZT,
+  -- mit Byte-Zaehlung als Naeherung der ByteStream-Groesse fuer die
+  -- 1024er-Grenze (Cfile:1322198-1322204). Funktionen/Userdata knallen wie im
   -- Original ("Can't encode message.").
   local function snapshot(v, bytes, depth)
     local t = type(v)
@@ -1058,7 +1058,7 @@ function SessionSendChatMessage(clientsOrMsg, msg)
   local n = table.getn(__uiCommandSources)
   local localIncluded = false
   if targets == false then
-    localIncluded = true -- Mask (1 << N) - 1: all, including the transmitter
+    localIncluded = true -- Maske (1 << N) - 1: alle, auch der Sender
   elseif type(targets) == 'number' then
     if targets < 1 or targets > n then
       error('Invalid client index ' .. tostring(targets), 2)
@@ -1079,7 +1079,7 @@ function SessionSendChatMessage(clientsOrMsg, msg)
   end
 
   if localIncluded then
-    -- Deliver the copy from the snapshot — NOT the original table.
+    -- Die Kopie aus dem Snapshot zustellen — NICHT die Original-Tabelle.
     local nick = __uiCommandSources[__uiLocalCommandSource] or 'Player'
     ForkThread(function()
       WaitFrames(1)
@@ -1088,31 +1088,31 @@ function SessionSendChatMessage(clientsOrMsg, msg)
   end
 end
 
--- === The WldUIProvider — the seam between world loading and UI ===
+-- === Der WldUIProvider — die Naht zwischen Welt-Laden und UI ===
 --
--- InternalCreateWldUIProvider(self) (cfunc, Cfile:28934) builds the
--- CLuaWldUIProvider around the Lua object and registers it as the provider
--- (Moho::WLD_SetUIProvider, Cfile:29710). The engine then calls its
+-- InternalCreateWldUIProvider(self) (cfunc, Cfile:28934) baut den
+-- CLuaWldUIProvider um das Lua-Objekt und registriert ihn als DEN Provider
+-- (Moho::WLD_SetUIProvider, Cfile:29710). Die Engine ruft dann seine
 -- Methoden per RunScript (Cfile:1295316-1295350): StartLoadingDialog beim
 -- Weltstart (func_DoPreload, Cfile:1320770), UpdateLoadingDialog(elapsed)
--- per image while loading, StopLoadingDialog after the FIRST beat with
--- Sync data (DoInitializing, Cfile:1321067) — and only AFTER
+-- pro Bild waehrend des Ladens, StopLoadingDialog nach dem ERSTEN Beat mit
+-- Sync-Daten (DoInitializing, Cfile:1321067) — und erst DANACH
 -- CreateGameInterface (= gamemain.CreateUI). gamemain.lua:225 haengt an
--- exactly this hook the loading dialog and the InitialAnimations.
+-- genau diesen Haken den Lade-Dialog und die InitialAnimations.
 __uiWldProvider = false
 
 function InternalCreateWldUIProvider(luaobj)
   __uiWldProvider = luaobj
 end
 
--- "FlushEvents() -- flush mouse/keyboard events" (Cfile:1274567): flushes the
--- UI Manager input queue (sub_84DA80). gamemain.lua:297 is what it calls at the end
--- of StopLoadingDialog, so that clicks buffered during loading are not saved
--- break through fresh game. Our events run SYNCHRONOUSLY (__mauiMouse
--- processed immediately, there is no queue) — an empty queue is emptied.
+-- "FlushEvents() -- flush mouse/keyboard events" (Cfile:1274567): leert die
+-- Eingabe-Queue des UI-Managers (sub_84DA80). gamemain.lua:297 ruft es am Ende
+-- von StopLoadingDialog, damit waehrend des Ladens gepufferte Klicks nicht ins
+-- frische Spiel durchschlagen. Unsere Events laufen SYNCHRON (__mauiMouse
+-- verarbeitet sofort, es gibt keine Queue) — geleert wird eine leere Queue.
 function FlushEvents() end
 
---- "Return true if the active session is a replay session." — we play live.
+--- "Return true iff the active session is a replay session." — wir spielen live.
 function SessionIsReplay()
   return false
 end
@@ -1124,13 +1124,13 @@ end
 -- === Konsolen-Ausgabe ===
 --
 -- "handler AddConsoleOutputReciever(func(text))" / "RemoveConsoleOutputReciever(handler)"
--- (Mispelling in the original: “Reciever”). consoleecho.lua:35 depends on this
--- to the console output to display in-game.
+-- (Schreibfehler im Original: "Reciever"). consoleecho.lua:35 haengt sich damit
+-- an die Konsolenausgabe, um sie im Spiel einzublenden.
 __uiConsoleReceivers = {}
 
 function AddConsoleOutputReciever(func)
   table.insert(__uiConsoleReceivers, func)
-  return func -- the handle is the function itself
+  return func -- das Handle ist die Funktion selbst
 end
 
 function RemoveConsoleOutputReciever(handler)
@@ -1141,37 +1141,37 @@ function RemoveConsoleOutputReciever(handler)
   end
 end
 
---- A console line to all recipients (the engine calls this with every output).
+--- Eine Konsolenzeile an alle Empfaenger (die Engine ruft das bei jeder Ausgabe).
 function __uiConsoleOutput(text)
   for _, func in ipairs(__uiConsoleReceivers) do
     pcall(func, text)
   end
 end
 
--- === Commands to the current selection ===
+-- === Befehle an die aktuelle Auswahl ===
 --
 -- mHelp woertlich:
 --   IssueCommand(command, [string], [clear])                 Cfile: luadef_IssueCommand
 --   IssueUnitCommand(unitList, command, [string], [clear])
 --   IssueDockCommand(clear)
 --
--- The second argument is NOT always a string: construction.lua:980 passes
--- a TABLE (orderData with TaskName/Enhancement) for an ACU upgrade. The
--- Engine passes it on to the sim unchanged - so we do that too, instead
--- to bend them into a string.
+-- Das zweite Argument ist NICHT immer ein String: construction.lua:980 uebergibt
+-- eine TABELLE (orderData mit TaskName/Enhancement) fuer ein ACU-Upgrade. Die
+-- Engine reicht sie unveraendert an die Sim durch — also tun wir das auch, statt
+-- sie zu einem String zu verbiegen.
 -- "string GetUnitCommandFromCommandCap(string) - given a RULEUCC type command"
--- (mHelp, Cfile:1264832). The path in the original (cfunc, Cfile:1264844-1264889):
--- Parse input via REnumType::SetLexical (case-insensitive, prefix optional,
--- Cfile:1381888-1381946), then Moho::UnitCommandCapToCommandType
--- (Cfile:1242230-1242328), returned via GetLexical and EUnitCommandType
--- stores its names WITHOUT the "UNITCOMMAND_" prefix (mPrefix,
--- Cfile:696168-696248; Proof: UICommandGraph::LoadPathParams sets the
+-- (mHelp, Cfile:1264832). Der Weg im Original (cfunc, Cfile:1264844-1264889):
+-- Eingabe per REnumType::SetLexical parsen (case-insensitiv, Praefix optional,
+-- Cfile:1381888-1381946), dann Moho::UnitCommandCapToCommandType
+-- (Cfile:1242230-1242328), Rueckgabe per GetLexical — und EUnitCommandType
+-- speichert seine Namen OHNE das "UNITCOMMAND_"-Praefix (mPrefix,
+-- Cfile:696168-696248; Beweis: UICommandGraph::LoadPathParams setzt den
 -- Praefix per STR_Printf("%s%s", ...) selbst davor, Cfile:1244372-1244378).
--- The stop button (orders.lua:205) puts the result directly into IssueCommand —
--- There, SetLexical parses the prefix-less name in the same way.
+-- Der Stop-Knopf (orders.lua:205) steckt das Ergebnis direkt in IssueCommand —
+-- dort parst SetLexical den Praefix-losen Namen genauso.
 local CAP_TO_COMMAND = {
-  -- The FULL mapping from func_UnitCommandCapToCommandType
-  -- (Cfile:1242230-1242328); unmapped caps return 'None'.
+  -- Das VOLLSTAENDIGE Mapping aus func_UnitCommandCapToCommandType
+  -- (Cfile:1242230-1242328); nicht gemappte Caps liefern 'None'.
   move = 'Move', stop = 'Stop', attack = 'Attack', guard = 'Guard',
   patrol = 'Patrol', retaliatetoggle = 'None', repair = 'Repair',
   capture = 'Capture', transport = 'TransportUnloadUnits',
@@ -1190,7 +1190,7 @@ function GetUnitCommandFromCommandCap(cap)
   local key = string.gsub(string.lower(cap), '^ruleucc_', '')
   local cmd = CAP_TO_COMMAND[key]
   if not cmd then
-    -- SetLexical throws for unknown enum names (Cfile:1381940-1381946).
+    -- SetLexical wirft bei unbekannten Enum-Namen (Cfile:1381940-1381946).
     error('GetUnitCommandFromCommandCap: unbekannter Command-Cap "' .. cap .. '"', 2)
   end
   return cmd
@@ -1206,18 +1206,18 @@ function IssueUnitCommand(unitList, command, data, clear)
   sendSim(command, unitList or {}, { data = data, clear = clear == true })
 end
 
--- "IssueDockCommand(clear)" — dock the selection (carrier/transport).
+-- "IssueDockCommand(clear)" — die Auswahl andocken (Traeger/Transport).
 function IssueDockCommand(clear)
   local sel = GetSelectedUnits()
   if not sel then return end
   sendSim('UNITCOMMAND_Dock', sel, { clear = clear == true })
 end
 
--- === Construction templates ===
+-- === Bau-Vorlagen ===
 --
--- The engine keeps ONE active template (a list of blueprint + offset) that
--- sets the world view as a group with the next click. construction.lua:946
--- sets it, commandmode.lua:120 clears it away when canceling.
+-- Die Engine haelt EINE aktive Vorlage (eine Liste aus Blueprint + Versatz), die
+-- die Weltansicht beim naechsten Klick als Gruppe setzt. construction.lua:946
+-- setzt sie, commandmode.lua:120 raeumt sie beim Abbruch weg.
 __uiBuildTemplate = false
 
 function SetActiveBuildTemplate(template)
@@ -1232,13 +1232,13 @@ function ClearBuildTemplates()
   __uiBuildTemplate = false
 end
 
--- === Command feedback in the world ===
+-- === Befehls-Rueckmeldung in der Welt ===
 --
--- AddCommandFeedbackBlip(spec, duration): the engine sets a short-lived mesh
--- to the target position (commandmode.lua:133-176 — flag, crosshairs, construction flag).
--- Drawing is renderer work; The order is carried out here so that the
--- Renderer can pick it up. Nothing is invented: position, mesh and texture
--- come from the Lua.
+-- AddCommandFeedbackBlip(spec, duration): die Engine setzt ein kurzlebiges Mesh
+-- an die Zielposition (commandmode.lua:133-176 — Fahne, Fadenkreuz, Bau-Flagge).
+-- Das Zeichnen ist Renderer-Arbeit; hier wird der Auftrag gefuehrt, damit der
+-- Renderer ihn abholen kann. Erfunden wird nichts: Position, Mesh und Textur
+-- kommen aus der Lua.
 __uiBlips = {}
 -- Push sink to the renderer (flat args — wasmoon-friendly); false until
 -- the browser connects, then the queue path below stays for headless runs.
@@ -1260,7 +1260,7 @@ function AddCommandFeedbackBlip(spec, duration)
   end
 end
 
--- The renderer fetches the accumulated blips (and empties the list).
+-- Der Renderer holt die aufgelaufenen Blips ab (und leert die Liste).
 function __uiTakeBlips()
   local out = __uiBlips
   __uiBlips = {}
@@ -1269,39 +1269,39 @@ end
 
 -- === Klang ===
 --
--- PlaySound(sound) takes exactly the Sound{} object from the blueprint
--- (bp.Audio.UISelection, selection.lua:5) — Bank + Cue. The output itself is
--- a separate engine part (FMOD banks in sounds.scd), which does not yet exist.
+-- PlaySound(sound) nimmt genau das Sound{}-Objekt aus dem Blueprint
+-- (bp.Audio.UISelection, selection.lua:5) — Bank + Cue. Die Ausgabe selbst ist
+-- ein eigenes Engine-Teil (FMOD-Baenke in sounds.scd), das es noch nicht gibt.
 --
--- Therefore: the requested cues are LOGGED and the absence of them
--- Output is reported loudly ONCE. Nothing is invented, nothing becomes
--- secretive - and a test can check that the right cue came.
--- The signatures come from the Decomp mHelp strings:
+-- Deshalb: die angeforderten Cues werden PROTOKOLLIERT und das Fehlen der
+-- Ausgabe wird EINMAL laut gemeldet. Nichts wird erfunden, nichts wird
+-- verschwiegen — und ein Test kann pruefen, dass die richtige Cue kam.
+-- Die Signaturen kommen aus den mHelp-Strings der Decomp:
 --
 --   handle = PlaySound(sndParams, prepareOnly)   Cfile:1348030
 --   StartSound(handle)                           Cfile:1348174
 --   StopSound(handle, [immediate=false])         Cfile:1348237
 --   bool = SoundIsPrepared(handle)               Cfile:1348102
 --   PauseSound(categoryString, bPause)           Cfile:1347882  <- KATEGORIE,
---   PlayVoice(params, duck) Cfile:1348652 no handle
+--   PlayVoice(params, duck)                      Cfile:1348652     kein Handle
 --
--- The HANDLE is the point: main.lua:231-249 starts the menu music and stops
--- them via this exact handle (`StopSound(musicHandle)` in StopMusic and
--- OnDestroy). Without a return value, StopSound would have nothing to stop - the music
--- the menu would continue forever as soon as there was an output.
+-- Das HANDLE ist der Punkt: main.lua:231-249 startet die Menuemusik und stoppt
+-- sie ueber genau dieses Handle (`StopSound(musicHandle)` in StopMusic und
+-- OnDestroy). Ohne Rueckgabewert haette StopSound nichts zu stoppen — die Musik
+-- liefe im Menue ewig weiter, sobald es eine Ausgabe gibt.
 __uiAudioSink = false
--- Stop seam: StopSound reports the handle ID so that the output is ongoing
--- Sources (music, loops) actually stop - not just set the flag.
+-- Stop-Naht: StopSound meldet die Handle-ID, damit die Ausgabe laufende
+-- Quellen (Musik, Loops) wirklich beendet — nicht nur das Flag setzt.
 __uiAudioStopSink = false
 __uiNextSoundId = 1
 __uiSoundsRequested = {}
 local warnedNoAudio = false
 
 -- EnableWorldSounds()/DisableWorldSounds() (Cfile:1348520-1348545, 0 Argumente):
--- the switch for the WORLD sounds (weapons, units — not the UI cues).
--- gamemain.OnFirstUpdate() switches it on when the game starts (gamemain.lua:78),
--- Turn splash/NIS off. Real condition; the audio output reads it,
--- as soon as they exist.
+-- der Schalter fuer die WELT-Gerausche (Waffen, Einheiten — nicht die UI-Cues).
+-- gamemain.OnFirstUpdate() schaltet sie beim Spielstart an (gamemain.lua:78),
+-- splash/NIS schalten sie aus. Echter Zustand; die Audio-Ausgabe liest ihn,
+-- sobald es sie gibt.
 __uiWorldSounds = false
 
 function EnableWorldSounds()
@@ -1318,9 +1318,9 @@ local function newHandle(params, kind)
     Cue = params.Cue,
     kind = kind,
     id = __uiNextSoundId,
-    -- A handle is "prepared" as soon as the bank has loaded the cue. We load
-    -- nothing — so that's it immediately. movie.lua:37-49 is waiting for it; an eternal one
-    -- false would block the splash movie.
+    -- Ein Handle ist "prepared", sobald die Bank die Cue geladen hat. Wir laden
+    -- nichts — also ist es das sofort. movie.lua:37-49 wartet darauf; ein ewiges
+    -- false wuerde den Splash-Film blockieren.
     prepared = true,
     playing = false,
     stopped = false,
@@ -1376,8 +1376,8 @@ function StopAllSounds()
   end
 end
 
--- PauseSound/PauseVoice work on CATEGORIES (“music”, “voice”, …), not on
--- Handles — therefore a separate state.
+-- PauseSound/PauseVoice arbeiten auf KATEGORIEN ("music", "voice", …), nicht auf
+-- Handles — deshalb ein eigener Zustand.
 __uiSoundCategoriesPaused = {}
 function PauseSound(category, bPause)
   __uiSoundCategoriesPaused[category] = bPause == true
@@ -1393,14 +1393,14 @@ end
 --   SetMovieVolume(volume): 0.0 - 2.0   Cfile:1302838
 --   GetMovieVolume()                    Cfile:1302900
 --
--- The categories are in the original Lua: options.lua:700/729/735/745 sets
--- "Global", "World", "Interface" and "Music". The range of values ​​is 0..1 — the
--- Option is a controller 0..100 and divides itself by 100 (options.lua:710).
+-- Die Kategorien stehen in der Original-Lua: options.lua:700/729/735/745 setzt
+-- "Global", "World", "Interface" und "Music". Der Wertebereich ist 0..1 — die
+-- Option ist ein Regler 0..100 und teilt selbst durch 100 (options.lua:710).
 --
--- The starting value is 1.0 because that is exactly what the option specifies (default = 100,
--- options.lua:697) and `set` calls SetVolume(value/100) at startup. There is none
--- invented number, but the one that the original Lua itself a line later
--- sets. There is no output yet (M12) — the status is only maintained.
+-- Der Startwert ist 1.0, weil genau das die Option vorgibt (default = 100,
+-- options.lua:697) und `set` beim Start SetVolume(value/100) ruft. Es ist keine
+-- erfundene Zahl, sondern die, die die Original-Lua eine Zeile spaeter selbst
+-- setzt. Ausgabe gibt es noch keine (M12) — der Zustand wird nur gefuehrt.
 __uiVolumes = { Global = 1.0, World = 1.0, Interface = 1.0, Music = 1.0 }
 __uiMovieVolume = 1.0
 
@@ -1422,26 +1422,26 @@ function GetMovieVolume()
   return __uiMovieVolume
 end
 
--- === Construction queue of the displayed factory ===
+-- === Bau-Warteschlange der angezeigten Fabrik ===
 --
--- cfunc_SetCurrentFactoryForQueueDisplayL (Cfile:1257038-1257087) remembers the
--- Unit as WeakPtr (sCurrentBuildFactory) and returns the queue.
--- construction.lua:1764 depends on exactly this: `currentCommandQueue = SetCurrent...`,
--- and the engine calls construction.OnQueueChanged(newQueue) with every change.
+-- cfunc_SetCurrentFactoryForQueueDisplayL (Cfile:1257038-1257087) merkt sich die
+-- Unit als WeakPtr (sCurrentBuildFactory) und liefert die Warteschlange zurueck.
+-- construction.lua:1764 haengt genau daran: `currentCommandQueue = SetCurrent...`,
+-- und die Engine ruft bei jeder Aenderung construction.OnQueueChanged(newQueue).
 --
--- The entries are { id = <blueprintId>, count = <n> } (construction.lua:1620).
+-- Die Eintraege sind { id = <blueprintId>, count = <n> } (construction.lua:1620).
 __uiQueueFactory = false
--- The copy of the last reported queue (engine's sCurrentBuildQueue) —
--- the Beat Watcher compares against this.
+-- Die Kopie der zuletzt gemeldeten Queue (sCurrentBuildQueue der Engine) —
+-- der Beat-Waechter vergleicht dagegen.
 __uiQueueCopy = {}
 
 function SetCurrentFactoryForQueueDisplay(unit)
   __uiQueueFactory = unit or false
   if not unit then return {} end
   local q = unit:GetBuildQueue()
-  -- The engine IMMEDIATELY copies the queue to sCurrentBuildQueue (Cfile:1257076,
-  -- sub_837070) — otherwise the next beat reported a ghost update for them
-  -- Ad that construction.lua just built himself.
+  -- Die Engine kopiert die Queue SOFORT in sCurrentBuildQueue (Cfile:1257076,
+  -- sub_837070) — sonst meldete der naechste Beat ein Geister-Update fuer die
+  -- Anzeige, die construction.lua gerade selbst aufgebaut hat.
   __uiQueueCopy = q
   return q
 end
@@ -1450,16 +1450,16 @@ function ClearCurrentFactoryForQueueDisplay()
   __uiQueueFactory = false
 end
 
--- === The queue guard (Moho::UI_FactoryCommandQueueHandlerBeat) ===
+-- === Der Queue-Waechter (Moho::UI_FactoryCommandQueueHandlerBeat) ===
 --
--- CUIManager::DoBeat calls it per sim beat BEFORE UI_LuaBeat
--- (Cfile:1273907-1273911). It compares the queue of those displayed
--- Factory STRUCTURAL (id + count per entry) with the copy and calls
+-- CUIManager::DoBeat ruft ihn pro Sim-Beat VOR UI_LuaBeat
+-- (Cfile:1273907-1273911). Er vergleicht die Warteschlange der angezeigten
+-- Fabrik STRUKTURELL (id + count je Eintrag) mit der Kopie und ruft bei
 -- Aenderung gamemain.OnQueueChanged(neueQueue) (Cfile:1256936-1256950).
--- If NO factory is displayed anymore, but the copy is still filled, fires
--- exactly once OnQueueChanged(nil) (Cfile:1256928-1256932).
--- The comparison must be structural: the mirror replaces the table every
--- Beat - a reference comparison reported a change ten times per second.
+-- Ist KEINE Fabrik mehr angezeigt, aber die Kopie noch gefuellt, feuert
+-- genau einmal OnQueueChanged(nil) (Cfile:1256928-1256932).
+-- Der Vergleich muss strukturell sein: der Spiegel ersetzt die Tabelle jeden
+-- Beat — ein Referenzvergleich meldete zehnmal pro Sekunde eine Aenderung.
 local function queueEqual(a, b)
   if #a ~= #b then return false end
   for i = 1, #a do
@@ -1483,18 +1483,18 @@ function __uiFactoryQueueBeat()
 end
 
 -- "IncreaseBuildCountInQueue(queueIndex, count)" (cfunc,
--- Cfile:1257189-1257270) and "DecreaseBuildCountInQueue(queueIndex, count)"
--- (Cfile:1257301-1257380): affect the CURRENTLY displayed queue
--- (sCurrentBuildQueue[index-1], 1-based from Lua), only on
--- UNITCOMMAND_BuildFactory entries (Cfile:1257258-1257263), and range
--- the sim driver (ISSUE_IncreaseCommandCount Cfile:1257266 or
+-- Cfile:1257189-1257270) und "DecreaseBuildCountInQueue(queueIndex, count)"
+-- (Cfile:1257301-1257380): wirken auf die AKTUELL angezeigte Queue
+-- (sCurrentBuildQueue[index-1], 1-basiert aus der Lua), nur auf
+-- UNITCOMMAND_BuildFactory-Eintraege (Cfile:1257258-1257263), und reichen an
+-- den Sim-Driver durch (ISSUE_IncreaseCommandCount Cfile:1257266 bzw.
 -- DecreaseCommandCount Cfile:1257378). construction.lua:895/988-990 haengt
--- Right click (less) and left click (more) on it.
+-- Rechtsklick (weniger) und Linksklick (mehr) daran.
 --
--- Known gap (documented, no guessing): the original canceled via
--- the command system also supports the STRAIGHT RUNNING construction; our sim has it
--- Current entry is already decremented when it is set up - a Decrease occurs
--- Position 1 does not abort the active construction (yet).
+-- Bekannte Luecke (dokumentiert, kein Raten): das Original storniert ueber
+-- das Kommando-System auch den GERADE LAUFENDEN Bau; unsere Sim hat den
+-- laufenden Eintrag beim Aufsetzen bereits dekrementiert — ein Decrease auf
+-- Position 1 bricht den aktiven Bau (noch) nicht ab.
 local function adjustQueueCount(name, queueIndex, count)
   local f = __uiQueueFactory
   if not f or f.dead then return end
@@ -1509,15 +1509,15 @@ function DecreaseBuildCountInQueue(queueIndex, count)
   adjustQueueCount('ISSUE_DecreaseCommandCount', queueIndex, count)
 end
 
--- === Script bits (the toggles of a unit) ===
+-- === Script-Bits (die Umschalter einer Unit) ===
 --
--- Shield on/off, weapon on/off, stealth, production... are listed as BITMASK on the
--- Unit (mUnitVarDat.mScriptbits). cfunc_GetScriptBitL (Cfile:1360150ff) takes
--- a unit list and a BIT INDEX (argument 2 is a number), skips
--- Units that do not have the appropriate ToggleCap ((1 << bit) & mToggleCaps), and
--- provides the status.
+-- Schild an/aus, Waffe an/aus, Stealth, Produktion … stehen als BITMASKE auf der
+-- Unit (mUnitVarDat.mScriptbits). cfunc_GetScriptBitL (Cfile:1360150ff) nimmt
+-- eine Unit-Liste und einen BIT-INDEX (Argument 2 ist eine Zahl), ueberspringt
+-- Units, die die passende ToggleCap nicht haben ((1 << bit) & mToggleCaps), und
+-- liefert den Zustand.
 --
--- The bit order is the registration order of the RULEUTC enums
+-- Die Bit-Reihenfolge ist die Registrierungs-Reihenfolge der RULEUTC-Enums
 -- (Cfile:656794-656810):
 --   0 ShieldToggle  1 WeaponToggle  2 JammingToggle  3 IntelToggle
 --   4 ProductionToggle  5 StealthToggle  6 GenericToggle  7 SpecialToggle
@@ -1555,8 +1555,8 @@ function GetScriptBit(units, bit)
   return false
 end
 
--- ToggleScriptBit(units, bit, value) — the UI sends the request to the Sim
--- (there it calls Unit:OnScriptBitSet/OnScriptBitClear, unit.lua:309/353).
+-- ToggleScriptBit(units, bit, value) — die UI schickt den Wunsch an die Sim
+-- (dort ruft er Unit:OnScriptBitSet/OnScriptBitClear, unit.lua:309/353).
 function ToggleScriptBit(units, bit, value)
   local on = value == true
   for _, u in ipairs(units or {}) do
@@ -1570,11 +1570,11 @@ function ToggleScriptBit(units, bit, value)
   sendSim('ToggleScriptBit', units, { bit = bit, value = on })
 end
 
--- === Pause (Stop production of a factory/farmer) ===
+-- === Pause (Produktion einer Fabrik/eines Bauers anhalten) ===
 --
 -- cfunc_GetIsPausedL (Cfile:1359337ff, Hilfetext: "Is anyone ins this list
--- builder paused?"): true as soon as ONE living unit in the list has mIsPaused.
--- cfunc_SetPausedL sends the request to the sim — the UI doesn't set anything itself.
+-- builder paused?"): true, sobald EINE lebende Unit der Liste mIsPaused traegt.
+-- cfunc_SetPausedL schickt den Wunsch an die Sim — die UI setzt nichts selbst.
 function GetIsPaused(units)
   for _, u in ipairs(units or {}) do
     if not u:IsDead() and u.paused == true then return true end
@@ -1589,10 +1589,10 @@ function SetPaused(units, paused)
   sendSim('SetPaused', units, paused == true)
 end
 
--- === The UI VM clock ===
+-- === Die Uhr der UI-VM ===
 --
--- The UI VM does NOT have a tick scheduler. `userinit.lua:13-21` (the engine is loading
--- the file itself) defines:
+-- Die UI-VM hat KEINEN Tick-Scheduler. `userinit.lua:13-21` (die Engine laedt
+-- die Datei selbst) definiert:
 --
 --   WaitFrames = coroutine.yield
 --   function WaitSeconds(n)
@@ -1601,9 +1601,9 @@ end
 --       while CurrentTime() < later do WaitFrames(1) end
 --   end
 --
--- So a UI thread waits for IMAGES, and `WaitSeconds` polls the real clock.
--- That's why the UI VM overwrites the tick-based WaitSeconds here
--- threads.lua (this only applies in the sim). __uiTime increments __mauiFrame(delta).
+-- Ein UI-Thread wartet also auf BILDER, und `WaitSeconds` pollt die echte Uhr.
+-- Deshalb ueberschreibt die UI-VM hier das Tick-basierte WaitSeconds aus
+-- threads.lua (das gilt nur in der Sim). __uiTime zaehlt __mauiFrame(delta) hoch.
 function CurrentTime()
   return __uiTime
 end
@@ -1620,14 +1620,14 @@ function WaitSeconds(n)
   end
 end
 
--- === Session extra select list ===
+-- === Extra-Select-Liste der Session ===
 --
--- Moho::CWldSession holds a WeakSet<UserEntity> (Cfile:29945-29947) which is the
--- UI filled with three globals: AddToSessionExtraSelectList /
+-- Moho::CWldSession haelt eine WeakSet<UserEntity> (Cfile:29945-29947), die die
+-- UI ueber drei Globals fuellt: AddToSessionExtraSelectList /
 -- RemoveFromSessionExtraSelectList / ClearSessionExtraSelectList
--- (Cfile:1361771-1361788). construction.lua:924 puts the attached ones there
--- units that should also remain marked; the world view reads
--- the list while drawing.
+-- (Cfile:1361771-1361788). construction.lua:924 legt dort die angehaengten
+-- Einheiten ab, die zusaetzlich markiert bleiben sollen; die Weltansicht liest
+-- die Liste beim Zeichnen.
 __uiExtraSelect = {}
 
 function AddToSessionExtraSelectList(unit)
@@ -1644,19 +1644,19 @@ end
 
 -- === Feuerhaltung (Retaliate-Button) ===
 --
--- cfunc_GetFireStateL (@0x8BB500, Cfile:1359840-1359898) — exactly this process:
+-- cfunc_GetFireStateL (@0x8BB500, Cfile:1359840-1359898) — genau dieser Ablauf:
 --
---   state = 3 -- Sentinel "no one has seen it yet"
---   for every living unit WITH RULEUCC_RetaliateToggle (mCommandCaps & 0x20):
---     state == 3 -> state = fireState of the unit
+--   state = 3                      -- Sentinel "noch keiner gesehen"
+--   fuer jede lebende Unit MIT RULEUCC_RetaliateToggle (mCommandCaps & 0x20):
+--     state == 3          -> state = fireState der Unit
 --     state ~= fireState  -> state = -1   (gemischt)
---   state == 3 (no suitable unit) -> -1
+--   state == 3 (keine passende Unit) -> -1
 --
--- The 0x20 is not a coincidence: the RULEUCC enums are in a fixed order
--- registered (Cfile:656671-656719), bit 5 is RULEUCC_RetaliateToggle.
+-- Das 0x20 ist kein Zufall: die RULEUCC-Enums werden in fester Reihenfolge
+-- registriert (Cfile:656671-656719), Bit 5 ist RULEUCC_RetaliateToggle.
 --
--- The states are 0 = ReturnFire, 1 = HoldFire, 2 = HoldGround
--- (orders.lua:419-421); the Ctor starts with ReturnFire (Cfile:772277).
+-- Die Zustaende sind 0 = ReturnFire, 1 = HoldFire, 2 = HoldGround
+-- (orders.lua:419-421); der Ctor startet mit ReturnFire (Cfile:772277).
 local RETALIATE_CAP = 'RULEUCC_RetaliateToggle'
 
 local function canRetaliate(u)
@@ -1681,11 +1681,11 @@ function GetFireState(units)
   return state
 end
 
--- SetFireState(units, id) — orders.lua:526 returns the STRING
--- retaliateStateInfo('ReturnFire'/'HoldFire'/'HoldGround'). The engine sends
--- it as ProcessInfo to the Sim (cfunc_SetFireStateL); there it is a command
--- to the unit. Until the command path to the SIM is established, the state will be in the
--- UI mirroring — the same place where the engine holds it.
+-- SetFireState(units, id) — orders.lua:526 uebergibt den STRING aus
+-- retaliateStateInfo ('ReturnFire'/'HoldFire'/'HoldGround'). Die Engine schickt
+-- ihn als ProcessInfo an die Sim (cfunc_SetFireStateL); dort ist er ein Befehl
+-- an die Unit. Bis der Befehlsweg zur Sim steht, wird der Zustand in der
+-- UI-Spiegelung gefuehrt — dieselbe Stelle, an der die Engine ihn auch haelt.
 local FIRE_STATE_ID = { ReturnFire = 0, HoldFire = 1, HoldGround = 2 }
 
 function SetFireState(units, id)
@@ -1697,8 +1697,8 @@ function SetFireState(units, id)
   sendSim('SetFireState', units, state)
 end
 
--- ToggleFireState(units, currentFireState) — cfunc_ToggleFireStateL: one
--- further in the round (orders.lua:588-593 passes the current status).
+-- ToggleFireState(units, currentFireState) — cfunc_ToggleFireStateL: eins
+-- weiter in der Runde (orders.lua:588-593 reicht den aktuellen Zustand rein).
 function ToggleFireState(units, current)
   local next = (tonumber(current) or -1) + 1
   if next > 2 or next < 0 then next = 0 end
@@ -1708,8 +1708,8 @@ function ToggleFireState(units, current)
   sendSim('SetFireState', units, next)
 end
 
--- GetRolloverInfo(): the unit under the mouse pointer (unitview.lua reads from it
--- most values ​​as plain fields, not via UserUnit methods).
+-- GetRolloverInfo(): die Unit unter dem Mauszeiger (unitview.lua liest daraus
+-- die meisten Werte als Plain-Felder, nicht ueber UserUnit-Methoden).
 function GetRolloverInfo()
   return __uiRollover or nil
 end
@@ -1720,18 +1720,18 @@ function __uiSetRollover(id)
     __uiRollover = false
     return
   end
-  -- The organic fields come from the BLUEPRINT - the same source from which the
-  -- Sim registers their production/maintenance (units.lua __econRegister). One
-  -- Construction sites produce nothing (construction sites are invisible to the economy).
+  -- Die Oeko-Felder kommen aus dem BLUEPRINT — derselben Quelle, aus der die
+  -- Sim ihre Produktion/Unterhalt registriert (units.lua __econRegister). Eine
+  -- Baustelle produziert nichts (Baustellen sind fuer die Oekonomie unsichtbar).
   local bp = __blueprints[u.blueprintId]
   local eco = (bp and bp.Economy) or {}
   local fertig = (u.workProgress or 1) >= 1
   __uiRollover = {
     userUnit = u,
     blueprintId = u.blueprintId,
-    -- 0-BASED: unitview.lua:89-90 calculates `info.armyIndex + 1` for
-    -- GetFocusArmy()/armiesTable — just like the engine does its army indexes
-    -- 0-based to which rollover info is given.
+    -- 0-BASIERT: unitview.lua:89-90 rechnet `info.armyIndex + 1` fuer
+    -- GetFocusArmy()/armiesTable — genau wie die Engine ihre Armee-Indizes
+    -- 0-basiert an die Rollover-Info gibt.
     armyIndex = (u.army or 1) - 1,
     health = u.health,
     maxHealth = u.maxHealth,
@@ -1747,17 +1747,17 @@ function __uiSetRollover(id)
   }
 end
 
--- === Overlays (WorldView view filter) ===
--- multifunction.lua:272 switches the map overlays. The WorldView
--- renders them; Until it exists, it is a pure state - but a real state,
--- no silence.
+-- === Overlays (Ansichtsfilter der WorldView) ===
+-- multifunction.lua:272 schaltet damit die Karten-Overlays um. Die WorldView
+-- rendert sie; bis es sie gibt, ist das reiner Zustand — aber echter Zustand,
+-- kein Schweigen.
 __uiOverlayFilters = {}
 __uiTeamColorMode = 'FactionColor'
 
--- MapBorderAdd(blueprintid) (Cfile:1269840) / MapBorderClear(): the decorative one
--- Worldview MAP EDGE — WorldMesh blueprints from the skin
--- (uiutil.lua:142-158, UpdateWorldBorderState; the option is called
--- 'world_border'). Real condition; the 3D page renders the meshes as soon as they are
+-- MapBorderAdd(blueprintid) (Cfile:1269840) / MapBorderClear(): der dekorative
+-- KARTENRAND der Weltansicht — WorldMesh-Blueprints aus dem Skin
+-- (uiutil.lua:142-158, UpdateWorldBorderState; die Option heisst
+-- 'world_border'). Echter Zustand; die 3D-Seite rendert die Meshes, sobald sie
 -- WorldMesh kann.
 __uiMapBorders = {}
 
@@ -1781,22 +1781,22 @@ function TeamColorMode(mode)
 end
 
 -- === Audio / Sprache ===
--- Localization.lua:43 asks whether there is voice output set to music for the language,
--- and then sets the audio language. There is no audio system yet - that
--- is being told honestly here instead of pretending.
+-- Localization.lua:43 fragt, ob es fuer die Sprache vertonte Sprachausgabe gibt,
+-- und setzt danach die Audio-Sprache. Ein Audio-System gibt es noch nicht — das
+-- wird hier ehrlich gesagt, statt so zu tun.
 __uiAudioLanguage = 'us'
 function HasLocalizedVO(la) return false end
 function AudioSetLanguage(la) __uiAudioLanguage = la end
 
 -- === Console ===
--- ConExecute/ConExecuteSave are in console.lua — with a real one
--- ConVar table. 19 of the 37 options work exactly this way.
+-- ConExecute/ConExecuteSave stehen in console.lua — mit einer echten
+-- ConVar-Tabelle. 19 der 37 Optionen wirken ueber genau diesen Weg.
 
--- === Front-end: status, entries, data ===
+-- === Front-End: Zustand, Einstiege, Daten ===
 --
--- There is exactly ONE UI VM for the entire application (Moho::USER_GetLuaState is
--- a singleton, Cfile:1368027). Splash, main menu, lobby and game UI are running
--- everyone in it - what changes is only the state:
+-- Es gibt genau EINE UI-VM fuer die ganze Anwendung (Moho::USER_GetLuaState ist
+-- ein Singleton, Cfile:1368027). Splash, Hauptmenue, Lobby und Spiel-UI laufen
+-- alle darin — was wechselt, ist nur der Zustand:
 --
 --   UIS_none=0  UIS_splash=1  UIS_frontend=2  UIS_game=3  UIS_lobby=4
 --                                              (Cfile:1262301-1262311)
@@ -1808,16 +1808,16 @@ function GetCurrentUIState()
   return UI_STATE_NAMES[__uiState]
 end
 
--- CUIManager::SetNewLuaState: New frames, set state, then SetupUI()
--- the Original-uimain.lua (Cfile:1273680). SetupUI restarts with EVERY change
--- — the cursor is attached to it (uimain.lua:22-25).
+-- CUIManager::SetNewLuaState: Frames neu, Zustand setzen, dann SetupUI() aus
+-- der Original-uimain.lua (Cfile:1273680). SetupUI laeuft bei JEDEM Wechsel neu
+-- — der Cursor haengt daran (uimain.lua:22-25).
 function __uiSetNewLuaState(state)
   __mauiResetFrames()
   __uiState = state
   import('/lua/ui/uimain.lua').SetupUI()
 end
 
--- The thin Lua wrappers around UI_StartSplashScreens (Cfile:1262357) and
+-- Die duennen Lua-Wrapper um UI_StartSplashScreens (Cfile:1262357) und
 -- UI_StartFrontEnd (Cfile:1262476). mHelp: "kill current UI and start ...".
 function EngineStartSplashScreens()
   __uiSetNewLuaState(1)
@@ -1829,29 +1829,29 @@ function EngineStartFrontEndUI()
   import('/lua/ui/uimain.lua').StartFrontEndUI()
 end
 
--- FrontEndData puts the engine itself in the UI globals (Cfile:1268751/1268831):
--- Campaign briefing, replay file name, selected map. Get/Set are only
+-- FrontEndData legt die Engine selbst in die UI-Globals (Cfile:1268751/1268831):
+-- Kampagnen-Briefing, Replay-Dateiname, ausgewaehlte Karte. Get/Set sind nur
 -- Tabellenzugriffe.
 FrontEndData = {}
 function GetFrontEndData(key) return FrontEndData[key] end
 function SetFrontEndData(key, value) FrontEndData[key] = value end
 
--- ClearFrame (Cfile:1264066) — all children of a root frame gone.
+-- ClearFrame (Cfile:1264066) — alle Kinder eines Root-Frames weg.
 function ClearFrame(index)
   GetFrame(index or 0):ClearChildren()
 end
 
--- FlushEvents (Cfile:1274594): "flush mouse/keyboard events". After construction
--- of the menu (main.lua:992) should be the clicks that occur during loading
--- have accrued, DO NOT add them later. The events come to us
--- individually from the DOM — there is no queue to empty; the
--- but running draggers do.
+-- FlushEvents (Cfile:1274594): "flush mouse/keyboard events". Nach dem Aufbau
+-- des Menues (main.lua:992) sollen die Klicks, die waehrend des Ladens
+-- aufgelaufen sind, NICHT nachtraeglich zuschlagen. Bei uns kommen die Events
+-- einzeln aus dem DOM — es gibt keine Warteschlange, die zu leeren waere; der
+-- laufende Dragger aber schon.
 function FlushEvents()
   __mauiDragger = false
 end
 
 -- ExitApplication (Cfile:1263877): "request that the application shut down"
--- (main.lua:980, the exit button).
+-- (main.lua:980, der Exit-Knopf).
 function ExitApplication()
   __uiExitRequested = true
   LOG('ExitApplication')
@@ -1883,34 +1883,34 @@ function GetVolume(category)
   return v
 end
 
--- WorldIsLoading: true between DoPreload(StartLoadingDialog) and
--- DoInitializing (StopLoadingDialog) — maintained by the provider chain
--- (ui-boot.lua). uimain.lua:120 (EscapeHandler) checks it before every ESC.
+-- WorldIsLoading: wahr zwischen DoPreload (StartLoadingDialog) und
+-- DoInitializing (StopLoadingDialog) — gepflegt von der Provider-Kette
+-- (ui-boot.lua). uimain.lua:120 (EscapeHandler) prueft es vor jedem ESC.
 __uiWorldLoading = false
 
 function WorldIsLoading()
   return __uiWorldLoading == true
 end
 
--- === Keymap — the CUIKeyHandler of the engine ===
+-- === Keymap — der CUIKeyHandler der Engine ===
 --
--- The engine has ONE key mapping (key -> CONSOLE COMMAND, no
--- Lua call): CUIKeyHandler::AddKeyMapTable (Cfile:1259176-1259264) parses each
+-- Die Engine fuehrt EINE Tastenzuordnung (Taste -> KONSOLENBEFEHL, kein
+-- Lua-Call): CUIKeyHandler::AddKeyMapTable (Cfile:1259176-1259264) parst jeden
 -- Schluessel mit IN_ParseKeyModifiers (Cfile:1259566-1259700: Split an '-',
--- the LAST token is the key name from the keyNames table,
+-- der LETZTE Token ist der Tastenname aus der keyNames-Tabelle,
 -- case-insensitiv; Modifier: Shift=0x80000000, Ctrl=0x40000000,
--- Alt=0x20000000) and reads from the value ONLY value['action'] (mandatory string) and
--- value['keyRepeat'] (optional) — category/order ignores the engine.
--- The action is triggered by the key handler below (__uiKeyMapExecute).
+-- Alt=0x20000000) und liest vom Wert NUR value['action'] (Pflicht-String) und
+-- value['keyRepeat'] (optional) — category/order ignoriert die Engine.
+-- Ausgeloest wird die Aktion vom Key-Handler unten (__uiKeyMapExecute) ueber
 -- Moho::CON_Execute (Cfile:1259059).
-__uiKeyMap = {}      -- Raw table (keyString -> action table), for Remove
+__uiKeyMap = {}      -- Roh-Tabelle (keyString -> action-Table), fuer Remove
 __uiKeyNames = {}    -- VK (Zahl) -> Anzeigename (SetKeyNameTable)
-__uiKeyVks = {}      -- lower(name) -> VK
+__uiKeyVks = {}      -- lower(Name) -> VK
 __uiKeyActions = {}  -- (VK + Modifier-Bits) -> Konsolenbefehl-String
 __uiKeyRepeatOk = {} -- (VK + Modifier-Bits) -> true (Auto-Repeat erlaubt)
 
 -- SetKeyNameTable (Cfile:1259403-1259473): keyNames mit HEX-VK-Strings
--- (STR_Xtoi); > 0xFF gives a warning and is discarded.
+-- (STR_Xtoi); > 0xFF gibt eine Warnung und wird verworfen.
 function SetKeyNameTable(names)
   __uiKeyNames = {}
   __uiKeyVks = {}
@@ -1925,8 +1925,8 @@ function SetKeyNameTable(names)
   end
 end
 
--- IN_ParseKeyModifiers (Cfile:1259566-1259700): returns the uint key
--- or nil (unknown key/modifier -> warning, like the engine).
+-- IN_ParseKeyModifiers (Cfile:1259566-1259700): liefert den uint-Schluessel
+-- oder nil (unbekannte Taste/Modifier -> Warnung, wie die Engine).
 local function parseKeyString(s)
   local tokens = {}
   for token in string.gmatch(tostring(s), '[^-]+') do
@@ -1960,7 +1960,7 @@ function IN_AddKeyMapTable(map)
     __uiKeyMap[keyStr] = action
     local keyInt = parseKeyString(keyStr)
     if keyInt then
-      -- The engine reads value['action'] via GetString (required).
+      -- Die Engine liest value['action'] per GetString (Pflichtfeld).
       local act = type(action) == 'table' and action.action or nil
       if type(act) == 'string' then
         __uiKeyActions[keyInt] = act
@@ -1993,19 +1993,19 @@ function IN_ClearKeyMap()
   __uiKeyRepeatOk = {}
 end
 
--- The KEY HANDLER behind the maui dispatch (CUIKeyHandler::sub_838D10,
--- Cfile:1258983-1259080). It runs if __mauiKey('KeyDown', ...) is false
+-- Der KEY-HANDLER hinter dem maui-Dispatch (CUIKeyHandler::sub_838D10,
+-- Cfile:1258983-1259080). Er laeuft, wenn __mauiKey('KeyDown', ...) false
 -- lieferte ("skipped"). Ablauf woertlich:
 --   1. Existiert IRGENDEIN Fokus-Control -> sofort Skip (Cfile:1259003-1259005)
---      — a focused edit turns off ALL hotkeys.
+--      — ein fokussiertes Edit schaltet ALLE Hotkeys ab.
 --   2. Schluessel = VK | Modifier-Bits (Cfile:1259010-1259023).
---   3. Auto-repeat only if the key allows keyRepeat (Cfile:1259049).
+--   3. Auto-Repeat nur, wenn der Schluessel keyRepeat erlaubt (Cfile:1259049).
 --   4. Treffer -> CON_Execute(action) (Cfile:1259059).
---   5. No hit: Enter -> chat.ActivateChat (only in game,
+--   5. Kein Treffer: Enter -> chat.ActivateChat (nur im Spiel,
 --      Cfile:1263522-1263568), '~' (maui-Code 126) -> uimain.ToggleConsole
 --      (Cfile:1262747-1262777).
--- Return: true if an action ran (the browser page then suppresses it
--- the standard behavior).
+-- Rueckgabe: true, wenn eine Aktion lief (die Browser-Seite unterdrueckt dann
+-- das Standard-Verhalten).
 function __uiKeyMapExecute(vk, shift, ctrl, alt, isRepeat, mauiCode)
   if __mauiFocus and not __mauiFocus.__destroyed then return false end
   local key = vk
@@ -2019,9 +2019,9 @@ function __uiKeyMapExecute(vk, shift, ctrl, alt, isRepeat, mauiCode)
     return true
   end
   if mauiCode == 13 and GetCurrentUIState() == 'game' then
-    -- Errors in Lua that the engine calls are logged, not thrown
-    -- (RunScript -> gpg::Warnf) — otherwise a missing part would break (e.g. this
-    -- Edit control of the chat) includes the entire key handler.
+    -- Fehler in Lua, die die Engine ruft, werden geloggt, nicht geworfen
+    -- (RunScript -> gpg::Warnf) — sonst risse ein fehlendes Teil (z. B. das
+    -- Edit-Control des Chats) den ganzen Tasten-Handler mit.
     local ok, err = pcall(function()
       import('/lua/ui/game/chat.lua').ActivateChat({
         Shift = shift or nil, Ctrl = ctrl or nil, Alt = alt or nil,
@@ -2041,37 +2041,37 @@ function __uiKeyMapExecute(vk, shift, ctrl, alt, isRepeat, mauiCode)
 end
 
 -- IN_InitKeyHandler / CUIKeyHandler::LoadKeyMappings (Cfile:1259476-1259528):
--- the engine loads ITSELF keyNames.lua (SetKeyNameTable) when UI boots and
--- keymapper.GetKeyMappings() -> AddKeyMapTable — it doesn't wait for
--- that lobby.lua does it.
+-- die Engine laedt beim UI-Boot SELBST keyNames.lua (SetKeyNameTable) und
+-- keymapper.GetKeyMappings() -> AddKeyMapTable — sie wartet nicht darauf,
+-- dass lobby.lua es tut.
 function __uiInitKeyMap()
   SetKeyNameTable(import('/lua/keymap/keyNames.lua').keyNames)
   IN_AddKeyMapTable(import('/lua/keymap/keymapper.lua').GetKeyMappings())
 end
 
 -- === Session / Umgebung ===
--- GetVersion is a CORE global (Cfile:599401) and returns the version of the
--- ENGINE, not the game data: Moho::GetEngineVersion (@0x4D3D30) is
--- simply `STR_Printf("%1.1f.%i", 1.5, 3764)` — compiled in. The engine here
--- are we; So the string says which engine is running. __engineVersion sets
--- the host from the package.json (uiEngine.ts).
+-- GetVersion ist ein CORE-Global (Cfile:599401) und liefert die Version der
+-- ENGINE, nicht die der Spieldaten: Moho::GetEngineVersion (@0x4D3D30) ist
+-- schlicht `STR_Printf("%1.1f.%i", 1.5, 3764)` — einkompiliert. Die Engine hier
+-- sind wir; also sagt der String, welche Engine laeuft. __engineVersion setzt
+-- der Host aus der package.json (uiEngine.ts).
 function GetVersion()
   return __engineVersion or 'unbekannt'
 end
 function DebugFacilitiesEnabled() return false end
--- SessionIsReplay/SessionIsMultiplayer/SessionIsActive are WAY UP
--- defined (in the session globals). There were silent second versions here,
--- which overshadowed the real ones - SessionIsMultiplayer was always there
--- false, no matter how many command sources the session has.
--- === The PLAYTIME — it comes from the SIM, not the UI clock ===
+-- SessionIsReplay/SessionIsMultiplayer/SessionIsActive sind WEITER OBEN
+-- definiert (bei den Session-Globals). Hier standen stille Zweitfassungen,
+-- die die echten ueberschatteten — SessionIsMultiplayer war dadurch immer
+-- false, egal wie viele Befehlsquellen die Session hat.
+-- === Die SPIELZEIT — sie kommt aus der SIM, nicht aus der UI-Uhr ===
 --
--- The UI has its own clock (CurrentTime, seconds since start, 60 Hz frames);
--- the PLAYTIME counts in Sim ticks (10 Hz) and stands still when the Sim
--- paused. The engine side reports the tick per beat (__uiSetGameTick).
+-- Die UI hat ihre eigene Uhr (CurrentTime, Sekunden seit Start, 60 Hz Frames);
+-- die SPIELZEIT zaehlt in Sim-Ticks (10 Hz) und steht still, wenn die Sim
+-- pausiert. Die Engine-Seite meldet den Tick pro Beat (__uiSetGameTick).
 --
---   "string GetGameTime()" — a FORMATTED string (Cfile:1266614) that
+--   "string GetGameTime()" — ein FORMATIERTER String (Cfile:1266614), die
 --   Engine formatiert %H:%M:%S (wxTimeSpan::Format, Cfile:1266640). score.lua
---   literally shows it as a clock at the top right (score.lua:230).
+--   zeigt ihn woertlich als Uhr oben rechts (score.lua:230).
 __uiGameTick = 0
 function __uiSetGameTick(t) __uiGameTick = t or 0 end
 function GameTick() return __uiGameTick end
@@ -2086,7 +2086,7 @@ function GetCommandLineArg() return nil end
 
 -- === Frames ===
 -- GetFrame(0) is the root of the UI tree. The frame itself only exists once
--- the maui substrate is built (docs/PLAN-UI.md, step 2) — until then this
+-- the maui substrate is built (docs/PLAN-UI.md, Schritt 2) — until then this
 -- must FAIL rather than hand out a fake root that silently swallows controls.
 function GetFrame(index)
   if not __uiFrames or not __uiFrames[index] then
@@ -2094,10 +2094,10 @@ function GetFrame(index)
   end
   return __uiFrames[index]
 end
--- One head = one root frame; the engine counts from 0 (Cfile:1273621, loop
--- about the heads). `#__uiFrames` would be 0 here because the only entry is the
--- Index 0 is — uimain.lua:61 (`GetNumRootFrames() > 1` → multihead.lua).
--- Never noticed that, a later multihead test did.
+-- Ein Head = ein Root-Frame; die Engine zaehlt ab 0 (Cfile:1273621, Schleife
+-- ueber die Heads). `#__uiFrames` waere hier 0, weil der einzige Eintrag der
+-- Index 0 ist — uimain.lua:61 (`GetNumRootFrames() > 1` → multihead.lua) haette
+-- das nie gemerkt, ein spaeterer Multihead-Test schon.
 function GetNumRootFrames()
   local n = 0
   while __uiFrames[n] do n = n + 1 end

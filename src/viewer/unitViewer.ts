@@ -21,7 +21,7 @@ import { ShadowRenderer } from './shadow'
 import DEPTH_UNIT_VS from './shaders/depthUnit.vert.glsl?raw'
 import DEPTH_FS from './shaders/depth.frag.glsl?raw'
 
-/** A unit placed in the scene (sandbox mode). */
+/** Eine in die Szene gesetzte Einheit (Sandbox-Modus). */
 export class SceneUnit {
   playing = false
   time = 0
@@ -81,12 +81,12 @@ export class UnitViewer {
   animationSpeed = 1
   readonly s3tcSupported: boolean
 
-  /** Sandbox: additional units, auxiliary objects + update hooks */
+  /** Sandbox: zusätzliche Einheiten, Hilfsobjekte + Update-Hooks */
   private readonly units: SceneUnit[] = []
   private readonly helpers: THREE.Object3D[] = []
   private readonly updateHooks: ((dt: number) => void)[] = []
 
-  /** Heightfield of the current map (for sampling/picking) */
+  /** Heightfield der aktuellen Karte (für Sampling/Picking) */
   private heightfield: {
     data: Uint16Array
     width: number
@@ -175,7 +175,7 @@ export class UnitViewer {
     this.worldViewRects = views
   }
 
-  /** The Minimap cartographic camera: top view of the entire map. */
+  /** Die kartografische Kamera der Minimap: Draufsicht auf die ganze Karte. */
   private readonly mapCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 4000)
 
   private renderWorldViews(): void {
@@ -196,7 +196,7 @@ export class UnitViewer {
       this.bloom.setSize(size.x, size.y)
     }
 
-    // No WorldView (Unit Viewer, Map Viewer): the entire area.
+    // Keine WorldView (Unit-Viewer, Karten-Viewer): die ganze Fläche.
     if (this.worldViewRects.length === 0) {
       this.renderer.setRenderTarget(this.bloom.target)
       this.renderer.setScissorTest(false)
@@ -217,7 +217,7 @@ export class UnitViewer {
       const w = Math.max(1, Math.round(view.width * dpr))
       const h = Math.max(1, Math.round(view.height * dpr))
       const x = Math.round(view.left * dpr)
-      // WebGL counts from BOTTOM, the UI from above.
+      // WebGL zählt von UNTEN, die UI von oben.
       const y = Math.round((height - view.top - view.height) * dpr)
       this.renderer.setViewport(x, y, w, h)
       this.renderer.setScissor(x, y, w, h)
@@ -236,12 +236,12 @@ export class UnitViewer {
     this.bloom.composite(this.renderer)
   }
 
-  /** Top view of the entire map, fitted into the control's aspect ratio. */
+  /** Draufsicht auf die ganze Karte, in das Seitenverhältnis des Controls gepasst. */
   private mapCameraFor(w: number, h: number): THREE.OrthographicCamera {
     const hf = this.heightfield
     const mapW = hf ? hf.width : 256
     const mapH = hf ? hf.height : 256
-    // Show the entire map without distorting it.
+    // Die Karte ganz zeigen, ohne sie zu verzerren.
     const scale = Math.max(mapW / w, mapH / h)
     const halfW = (w * scale) / 2
     const halfH = (h * scale) / 2
@@ -264,7 +264,7 @@ export class UnitViewer {
     this.animPlaying = false
     this.heightfield = null
     this.mapLighting = null
-    // Tool mode: the viewer fog returns (it is off on the map).
+    // Werkzeug-Modus: der Viewer-Nebel kommt zurück (auf der Karte ist er aus).
     this.scene.fog = new THREE.Fog(0x10141c, 60, 220)
     this.updateHooks.length = 0
     for (const unit of this.units) {
@@ -346,7 +346,7 @@ export class UnitViewer {
 
     const material = createUnitMaterial(textures, teamColor, this.animator.skinMatrices, shader)
     const mesh = new THREE.Mesh(geometry, material)
-    // Skinning can go beyond the static bounding sphere
+    // Skinning kann über die statische Bounding-Sphere hinausgehen
     mesh.frustumCulled = false
     this.scene.add(mesh)
     this.current = mesh
@@ -354,7 +354,7 @@ export class UnitViewer {
     this.frameObject(geometry)
   }
 
-  /** Starts an animation on the current model (null = bindpose). */
+  /** Startet eine Animation auf dem aktuellen Modell (null = Bindpose). */
   playAnimation(anim: ScaAnim | null, boneNames: string[]): void {
     if (!this.animator) return
     this.animator.setAnimation(anim, boneNames)
@@ -367,7 +367,7 @@ export class UnitViewer {
   // Sandbox-API
   // -------------------------------------------------------------------------
 
-  /** Adds a unit to the scene (terrain remains). */
+  /** Fügt eine Einheit zur Szene hinzu (Terrain bleibt bestehen). */
   addUnit(
     model: ScmModel,
     textures: UnitTextures,
@@ -377,9 +377,9 @@ export class UnitViewer {
     const geometry = this.scmGeometry(model)
 
     const animator = new UnitAnimator(model)
-    // On the map, units calculate with the MAP light (mesh.fx
-    // ComputeLight, same scmap values ​​as terrain) — without map
-    // (Unit Viewer tool) with the tool fallback.
+    // Auf der Karte rechnen Einheiten mit dem KARTEN-Licht (mesh.fx
+    // ComputeLight, dieselben scmap-Werte wie das Terrain) — ohne Karte
+    // (Unit-Viewer-Werkzeug) mit dem Werkzeug-Fallback.
     const material = createUnitMaterial(
       textures,
       teamColor,
@@ -411,10 +411,10 @@ export class UnitViewer {
     return unit
   }
 
-  /** The light of the loaded map — set in setMap, read by addUnit. */
+  /** Das Licht der geladenen Karte — gesetzt in setMap, gelesen von addUnit. */
   private mapLighting: MapLighting | null = null
 
-  /** The map light for materials that are created outside (construction sites). */
+  /** Das Karten-Licht für Materialien, die außerhalb entstehen (Baustellen). */
   get lighting(): MapLighting | null {
     return this.mapLighting
   }
@@ -496,7 +496,7 @@ export class UnitViewer {
     return mesh
   }
 
-  /** Remove a wreck again (reclaim/destruction). */
+  /** Ein Wrack wieder entfernen (Reclaim/Zerstörung). */
   removeWreck(mesh: THREE.Mesh): void {
     this.scene.remove(mesh)
     mesh.geometry.dispose()
@@ -534,8 +534,8 @@ export class UnitViewer {
     this.updateHooks.push(hook)
   }
 
-  /** Auxiliary object (selection ring or similar) — is removed when the scene changes. */
-  /** The world camera — the particle system needs its axes (billboard). */
+  /** Hilfsobjekt (Auswahl-Ring o. Ä.) — wird beim Szenenwechsel entfernt. */
+  /** Die Welt-Kamera — das Partikelsystem braucht ihre Achsen (Billboard). */
   get worldCamera(): THREE.Camera {
     return this.camera
   }
@@ -545,7 +545,7 @@ export class UnitViewer {
     this.helpers.push(obj)
   }
 
-  /** Selectively remove an auxiliary object (e.g. the ring of a dead unit). */
+  /** Ein Hilfsobjekt gezielt entfernen (z. B. der Ring einer toten Einheit). */
   removeHelper(obj: THREE.Object3D): void {
     const i = this.helpers.indexOf(obj)
     if (i >= 0) this.helpers.splice(i, 1)
@@ -577,7 +577,7 @@ export class UnitViewer {
     return this.units.find((u) => u.mesh === hit.object) ?? null
   }
 
-  /** Height of current map at world position (bilinear), 0 without map. */
+  /** Höhe der aktuellen Karte an Weltposition (bilinear), 0 ohne Karte. */
   heightAt(x: number, z: number): number {
     const hf = this.heightfield
     if (!hf) return 0
@@ -622,7 +622,7 @@ export class UnitViewer {
       const py = origin.y + dir.y * t
       const above = py - this.heightAt(px, pz) > 0
       if (prevAbove && !above) {
-        // binary refinement between prevT and t
+        // binäre Verfeinerung zwischen prevT und t
         let lo = prevT
         let hi = t
         for (let i = 0; i < 20; i++) {
@@ -648,7 +648,7 @@ export class UnitViewer {
     return null
   }
 
-  /** Align camera to a position (RTS-like close-up view). */
+  /** Kamera auf eine Position ausrichten (RTS-artige Nahansicht). */
   focusOn(pos: THREE.Vector3, distance = 40): void {
     if (this.rts.enabled) {
       this.rts.goalTarget.copy(pos)
@@ -657,8 +657,8 @@ export class UnitViewer {
     }
     const dir = new THREE.Vector3(0.4, 0.75, 0.65).normalize()
     this.camera.position.copy(pos).addScaledVector(dir, distance)
-    // Adjust clipping to the new distance (frameObject sets near for
-    // Map totals very high - close-up view would otherwise be clipped)
+    // Clipping an die neue Distanz anpassen (frameObject setzt near für
+    // Karten-Totalen sehr hoch — Nahsicht würde sonst weggeclippt)
     this.camera.near = Math.max(distance / 100, 0.05)
     this.camera.far = Math.max(this.camera.far, distance * 50)
     this.camera.updateProjectionMatrix()
@@ -679,13 +679,13 @@ export class UnitViewer {
    * ui_KeyboardPanSpeed und cam_ZoomAmount in ihren Schleifen abfragt.
    */
   private readonly conVars = new Map<string, string | number | boolean>(
-    // The starting values ​​are COMPILED IN the engine - they are there, beforehand
-    // a single line of Lua is running (`float Moho::cam_ZoomAmount = 0.4;`). Exactly
-    // That's why in FA you can move the camera before the UI is up.
-    // As soon as optionslogic.Apply(true) goes through, it overwrites them with the
+    // Die Startwerte sind in der Engine EINKOMPILIERT — sie stehen dort, bevor
+    // eine einzige Zeile Lua läuft (`float Moho::cam_ZoomAmount = 0.4;`). Genau
+    // deshalb kann man in FA die Kamera schon bewegen, bevor die UI oben ist.
+    // Sobald optionslogic.Apply(true) durchläuft, überschreibt es sie mit den
     // gespeicherten Optionen (ConExecute → __uiConSink → setConVar).
     //
-    // All values ​​from the decomp, none guessed:
+    // Alle Werte aus der Decomp, keiner geraten:
     Object.entries({
       cam_ZoomAmount: 0.40000001, // Cfile:421825
       cam_NearZoom: 5.0, // Cfile: float Moho::cam_NearZoom = 5.0
@@ -697,7 +697,7 @@ export class UnitViewer {
       ui_ScreenEdgeScrollView: true, // Cfile:421730
     }),
   )
-  /** CTRL speeds up panning and rotating (Cfile:1300005-1300007). */
+  /** STRG beschleunigt Schwenken und Drehen (Cfile:1300005-1300007). */
   private ctrlDown = false
 
   private rts = {
@@ -729,7 +729,7 @@ export class UnitViewer {
   }
 
   private rtsPitch(dist: number): number {
-    // Original feeling: above ~60 units top view, below tilt
+    // Original-Gefühl: oberhalb ~60 Einheiten Draufsicht, darunter kippen
     const t = Math.min(Math.max((dist - 6) / 54, 0), 1)
     const base = 0.6 + (1.45 - 0.6) * Math.sqrt(t)
     return Math.min(Math.max(base + this.rts.pitchOffset, 0.35), 1.5)
@@ -737,19 +737,19 @@ export class UnitViewer {
 
   private updateRtsCamera(dt: number): void {
     const r = this.rts
-    // Continuous pan (edge ​​scroll/arrow keys). The invoice is in the engine
+    // Dauer-Pan (Kanten-Scroll/Pfeiltasten). Die Rechnung steht in der Engine
     // (Moho::CameraImpl::CameraPan, Cfile:1149107):
     //
-    //   step = (mTargetZoom / viewport height) · cam_PanSpeed ​​· input
+    //   schritt = (mTargetZoom / Viewport-Höhe) · cam_PanSpeed · eingabe
     //
-    // and `eingabe` is ±ui_KeyboardPanSpeed ​​(CUIWorldView, Cfile:1300002-1300066),
-    // while holding down CTRL times ui_KeyboardPanAccelerateMultiplier. They are both
-    // Keyboard pan speed options and their accelerator
-    // (options.lua:200-227) — previously it said `r.dist * 0.9`, a fictional one
-    // number, and the two controllers did nothing.
+    // und `eingabe` ist ±ui_KeyboardPanSpeed (CUIWorldView, Cfile:1300002-1300066),
+    // bei gedrücktem STRG mal ui_KeyboardPanAccelerateMultiplier. Beides sind die
+    // Optionen „Tastatur-Schwenkgeschwindigkeit" und ihr Beschleuniger
+    // (options.lua:200-227) — vorher stand hier `r.dist * 0.9`, eine erfundene
+    // Zahl, und die beiden Regler taten nichts.
     //
-    // The engine does NOT multiply by image time — it multiplies per IMAGE. The
-    // is no oversight on our part; it is the well-known behavior of FA.
+    // Die Engine multipliziert NICHT mit der Bildzeit — sie pant pro BILD. Das
+    // ist kein Versehen von uns; es ist das bekannte Verhalten von FA.
     if (r.panX !== 0 || r.panZ !== 0) {
       let input = this.conVarNumber('ui_KeyboardPanSpeed')
       if (this.ctrlDown) input *= this.conVarNumber('ui_KeyboardPanAccelerateMultiplier')
@@ -766,7 +766,7 @@ export class UnitViewer {
     }
     r.goalTarget.y = this.heightAt(r.goalTarget.x, r.goalTarget.z)
 
-    // exponential smoothing
+    // exponentielle Glättung
     const k = 1 - Math.exp(-10 * dt)
     r.target.lerp(r.goalTarget, k)
     r.dist += (r.goalDist - r.dist) * k
@@ -788,7 +788,7 @@ export class UnitViewer {
     this.camera.lookAt(r.target)
   }
 
-  /** Current camera zoom distance (for strategic icon thresholds). */
+  /** Aktuelle Kamera-Zoomdistanz (für Strategic-Icon-Schwellen). */
   getRtsDistance(): number {
     return this.rts.enabled
       ? this.rts.dist
@@ -796,20 +796,20 @@ export class UnitViewer {
   }
 
   /**
-   * Mouse wheel: Zoom to the cursor.
+   * Mausrad: Zoom zum Cursor.
    *
-   * The formula comes from the engine (Moho::CameraImpl::CameraZoom, Cfile:1149978):
+   * Die Formel kommt aus der Engine (Moho::CameraImpl::CameraZoom, Cfile:1149978):
    *
-   * v4 = cam_ZoomAmount * delta * -0.69314718 * 1.442695… (= -ln2 · log2e = -1)
-   * mNearZoom *= 2^v4 (F2XM1/FSCALE)
-   * clamp on [cam_NearZoom, GetMaxZoom()]
+   *   v4 = cam_ZoomAmount * delta * -0.69314718 * 1.442695…   (= -ln2 · log2e = -1)
+   *   mNearZoom *= 2^v4                                        (F2XM1/FSCALE)
+   *   clamp auf [cam_NearZoom, GetMaxZoom()]
    *
-   * So simply: `dist *= 2^(-cam_ZoomAmount · delta)`, clamped.
+   * also schlicht: `dist *= 2^(-cam_ZoomAmount · delta)`, geklemmt.
    *
-   * This previously read `Math.pow(1.25, ±1)` — a made-up number. And because
-   * `cam_ZoomAmount` IS the Zoom Wheel Sensitivity option
-   * (options.lua:85-96 → ConExecute("cam_ZoomAmount " .. value/100)), did that
-   * Regulator until nothing.
+   * Vorher stand hier `Math.pow(1.25, ±1)` — eine erfundene Zahl. Und weil
+   * `cam_ZoomAmount` die Option „Empfindlichkeit des Zoomrads" IST
+   * (options.lua:85-96 → ConExecute("cam_ZoomAmount " .. value/100)), tat der
+   * Regler bis eben nichts.
    */
   rtsZoom(wheelDelta: number, clientX: number, clientY: number): void {
     if (!this.rts.enabled) return
@@ -817,13 +817,13 @@ export class UnitViewer {
     const oldDist = r.goalDist
     const zoomAmount = this.conVarNumber('cam_ZoomAmount')
     const nearZoom = this.conVarNumber('cam_NearZoom')
-    // Sign: `wheelDelta` is the DOM-`deltaY` — POSITIVE means wheel after
-    // DOWN, and this zooms OUT. The engine formula reduces the distance
-    // positive delta (`dist *= 2^(-cam_ZoomAmount · delta)`), so that must
-    // Wheel delta can be rotated. Without this rotation, the zooming was inverted.
+    // Vorzeichen: `wheelDelta` ist das DOM-`deltaY` — POSITIV heißt Rad nach
+    // UNTEN, und das zoomt HERAUS. Die Engine-Formel verkleinert die Distanz bei
+    // positivem delta (`dist *= 2^(-cam_ZoomAmount · delta)`), also muss das
+    // Rad-Delta gedreht werden. Ohne diese Drehung war das Zoomen invertiert.
     const delta = wheelDelta > 0 ? -1 : 1
     const factor = Math.pow(2, -zoomAmount * delta)
-    // GetMaxZoom() is card dependent in the engine; here it is the card size.
+    // GetMaxZoom() ist in der Engine kartenabhängig; hier ist es die Kartengröße.
     const maxDist = this.heightfield
       ? Math.max(this.heightfield.width, this.heightfield.height) * 1.4
       : 800
@@ -850,7 +850,7 @@ export class UnitViewer {
 
   private conVarBool(name: string): boolean {
     const value = this.conVars.get(name)
-    // The console returns 0/1 (options.lua sets numbers) or true/false.
+    // Die Konsole liefert 0/1 (options.lua setzt Zahlen) oder true/false.
     if (typeof value === 'number') return value !== 0
     return value === true
   }
@@ -864,7 +864,7 @@ export class UnitViewer {
     this.conVars.set(name, value)
   }
 
-  /** CTRL pressed? Accelerates pan/rotate (MAUI_KeyIsDown(MKEY_CONTROL)). */
+  /** STRG gedrückt? Beschleunigt Schwenken/Drehen (MAUI_KeyIsDown(MKEY_CONTROL)). */
   setCtrlDown(down: boolean): void {
     this.ctrlDown = down
   }
@@ -881,7 +881,7 @@ export class UnitViewer {
       : true
   }
 
-  /** Are the arrow keys allowed to pan? (`ui_ArrowKeysScrollView`, options.lua:185-199) */
+  /** Dürfen die Pfeiltasten schwenken? (`ui_ArrowKeysScrollView`, options.lua:185-199) */
   arrowKeysPan(): boolean {
     return this.conVars.has('ui_ArrowKeysScrollView')
       ? this.conVarBool('ui_ArrowKeysScrollView')
@@ -926,7 +926,7 @@ export class UnitViewer {
     this.controls.update()
   }
 
-  /** World position → Canvas client coordinates (zero if behind camera). */
+  /** Weltposition → Canvas-Client-Koordinaten (null wenn hinter der Kamera). */
   worldToScreen(pos: THREE.Vector3): { x: number; y: number } | null {
     const p = pos.clone().project(this.camera)
     if (p.z > 1) return null
@@ -940,9 +940,9 @@ export class UnitViewer {
   async setMap(scmap: ScmapData, vfs: GameVfs): Promise<void> {
     this.clearContent()
 
-    // The map light — same scmap values ​​for terrain AND units
-    // (mesh.fx ComputeLight); previously the units calculated with invented ones
-    // Constants and seemed dark/foreign in the scene.
+    // Das Karten-Licht — für Terrain UND Einheiten dieselben scmap-Werte
+    // (mesh.fx ComputeLight); vorher rechneten die Einheiten mit erfundenen
+    // Konstanten und wirkten dunkel/fremd in der Szene.
     this.mapLighting = {
       sunDirection: new THREE.Vector3(...scmap.lighting.sunDirection).normalize(),
       sunColor: new THREE.Color(...scmap.lighting.sunColor),
@@ -950,9 +950,9 @@ export class UnitViewer {
       shadowFillColor: new THREE.Color(...scmap.lighting.shadowFillColor),
       lightingMultiplier: scmap.lighting.lightingMultiplier,
     }
-    // No distance fog on the map: the fog belongs to the unit viewer tool
-    // (Ground grid look). In the original there is no such fog — it
-    // MeshBasic objects (projectiles, rings) beyond ~220 m tinted dark blue.
+    // Kein Distanznebel auf der Karte: der Fog gehört zum Unit-Viewer-Werkzeug
+    // (Bodenraster-Optik). Im Original gibt es keinen solchen Nebel — er
+    // tönte MeshBasic-Objekte (Projektile, Ringe) jenseits ~220 m dunkelblau.
     this.scene.fog = null
 
     const { width, height } = scmap
@@ -978,7 +978,7 @@ export class UnitViewer {
       maxHeightRaw * scmap.heightScale + 50,
     )
 
-    // Heightmap → Float texture (raw values; scaling in shader)
+    // Heightmap → Float-Textur (Roh-Werte; Skalierung im Shader)
     const heightData = new Float32Array(scmap.heightmap.length)
     for (let i = 0; i < scmap.heightmap.length; i++) heightData[i] = scmap.heightmap[i]!
     const heightTex = new THREE.DataTexture(heightData, hmW, hmH, THREE.RedFormat, THREE.FloatType)
@@ -1026,8 +1026,8 @@ export class UnitViewer {
 
     const embedded = (dds: Uint8Array | null): THREE.Texture => {
       if (!dds) return dummy
-      // Embedded masks/watermaps have the same line orientation
-      // like the heightmap (verified numerically: scripts/check-orientation.ts)
+      // Eingebettete Masken/Watermaps haben dieselbe Zeilen-Orientierung
+      // wie die Heightmap (numerisch verifiziert: scripts/check-orientation.ts)
       const tex = ddsToTexture(dds, this.s3tcSupported)
       tex.wrapS = THREE.ClampToEdgeWrapping
       tex.wrapT = THREE.ClampToEdgeWrapping
@@ -1118,7 +1118,7 @@ export class UnitViewer {
     if (this.mapDecals.stats.instances > 0) {
       console.log(
         `map decals: ${this.mapDecals.stats.instances} albedo instances, ` +
-          `${this.mapDecals.stats.textures} texture sets`+
+          `${this.mapDecals.stats.textures} texture sets` +
           (this.mapDecals.stats.skippedTypes.size > 0
             ? `, skipped ${[...this.mapDecals.stats.skippedTypes]
                 .map(([t, n]) => `type${t}=${n}`)
@@ -1147,7 +1147,7 @@ export class UnitViewer {
       const skyPath = scmap.water.texPathCubemap.replace(/^\//, '').toLowerCase()
       const skyCube = vfs.exists(skyPath)
         ? ddsToCubeTexture(await vfs.read(skyPath), this.s3tcSupported)
-        : zero
+        : null
       if (!skyCube) console.warn(`water sky cube not found: ${skyPath}`)
 
       const waterMat = createWaterMaterial({
@@ -1187,10 +1187,10 @@ export class UnitViewer {
       this.scene.add(this.skyDome.group)
     }
 
-    // Terrain skirt (terrain.fx TerrainSkirtPS:584): constant dark gray
+    // Terrain skirt (terrain.fx TerrainSkirtPS :584): constant dark grey
     // outside the map. The engine builds the skirt strip on the C++ side
     // (HighFidelityTerrain::DrawTerrainSkirt :489); a large ground quad
-    // under the map gives the same constant-gray surround.
+    // under the map gives the same constant-grey surround.
     const skirtGeo = new THREE.PlaneGeometry(width * 9, height * 9)
     skirtGeo.rotateX(-Math.PI / 2)
     skirtGeo.translate(width / 2, -0.02, height / 2)
@@ -1234,7 +1234,7 @@ export class UnitViewer {
     }
 
     // Map props (trees, rocks) — one InstancedMesh per blueprint, lit with
-    // the same scmap values ​​as terrain and units (render-details.md par. 2).
+    // the same scmap values as terrain and units (render-details.md par. 2).
     this.mapProps = await MapProps.load(
       scmap.props,
       vfs,

@@ -24,7 +24,7 @@ import { open, readdir, type FileHandle } from 'node:fs/promises'
 import { ZipArchive, type ZipEntry } from '../src/vfs/zipArchive'
 import type { RandomAccessFile } from '../src/vfs/randomAccess'
 
-/** Counts how much is actually read. */
+/** Zählt mit, wie viel wirklich gelesen wird. */
 class CountingFile implements RandomAccessFile {
   reads = 0
   bytes = 0
@@ -64,7 +64,7 @@ const open2 = async (archive: string): Promise<[CountingFile, ZipArchive]> => {
   return [f, await ZipArchive.open(f)]
 }
 
-console.log('\n== lua.scd: the files are in one piece - so ONE access for many ==')
+console.log('\n== lua.scd: die Dateien liegen am Stück — also EIN Zugriff für viele ==')
 {
   const [f, zip] = await open2('lua.scd')
   const luas = [...zip.entries.values()].filter((e) => e.name.toLowerCase().endsWith('.lua'))
@@ -76,15 +76,15 @@ console.log('\n== lua.scd: the files are in one piece - so ONE access for many =
   const readsMany = f.reads
   const bytesMany = f.bytes
 
-  check(many.size === luas.length, `${many.size} read from ${luas.length} Lua files`)
-  check(readsMany < 20, `${readsMany} archive accesses instead of ${luas.length * 2} (read() individually)`)
-  // Some waste is allowed (headers, small gaps) - but not multiples.
+  check(many.size === luas.length, `${many.size} von ${luas.length} Lua-Dateien gelesen`)
+  check(readsMany < 20, `${readsMany} Archiv-Zugriffe statt ${luas.length * 2} (read() einzeln)`)
+  // Etwas Verschnitt ist erlaubt (Header, kleine Lücken) — aber kein Vielfaches.
   check(
     bytesMany < payload * 1.3,
     `${(bytesMany / 1048576).toFixed(1)} MB gelesen für ${(payload / 1048576).toFixed(1)} MB Nutzlast`,
   )
 
-  // Byte for byte same as the single path.
+  // Byte für Byte dasselbe wie der Einzelweg.
   const sample = luas.slice(0, 40)
   let same = 0
   for (const e of sample) {
@@ -96,7 +96,7 @@ console.log('\n== lua.scd: the files are in one piece - so ONE access for many =
   await f.close()
 }
 
-console.log('\n== units.scd: the blueprints are FAR apart - don't read the archive ==')
+console.log('\n== units.scd: die Blueprints liegen WEIT auseinander — nicht das Archiv leerlesen ==')
 {
   const [f, zip] = await open2('units.scd')
   const bps = [...zip.entries.entries()]
@@ -111,12 +111,12 @@ console.log('\n== units.scd: the blueprints are FAR apart - don't read the archi
   f.bytes = 0
   const many = await zip.readMany(bps)
 
-  check(many.size === bps.length, `${many.size} Blueprints read (payload ${(payload / 1048576).toFixed(1)} MB)`)
+  check(many.size === bps.length, `${many.size} Blueprints gelesen (Nutzlast ${(payload / 1048576).toFixed(1)} MB)`)
   check(
     span > 500 * 1048576,
-    `they are scattered across ${(span / 1048576).toFixed(0)} MB (models/animations in between)`,
+    `sie sind über ${(span / 1048576).toFixed(0)} MB verstreut (Modelle/Animationen dazwischen)`,
   )
-  // THE point: don't read the whole thing. Without maxGap it was 1350 MB.
+  // DER Punkt: nicht die ganze Spanne lesen. Ohne maxGap waren es 1350 MB.
   check(
     f.bytes < 50 * 1048576,
     `${(f.bytes / 1048576).toFixed(1)} MB gelesen — nicht die ${(span / 1048576).toFixed(0)} MB dazwischen`,

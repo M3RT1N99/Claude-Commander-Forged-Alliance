@@ -4,7 +4,7 @@ import type { ScmModel } from '../formats/scm'
 import type { ScaAnim } from '../formats/sca'
 import type { BpObject } from '../formats/blueprint'
 
-/** Loaded render assets of a unit for the sandbox. */
+/** Geladene Render-Assets einer Unit für die Sandbox. */
 export interface SandboxUnitAssets {
   id: string
   model: ScmModel

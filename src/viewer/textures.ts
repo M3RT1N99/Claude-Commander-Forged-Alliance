@@ -120,8 +120,8 @@ function dataTexture(rgba: Uint8Array, dds: DdsImage, flipY: boolean): THREE.Dat
   tex.wrapS = THREE.RepeatWrapping
   tex.wrapT = THREE.RepeatWrapping
   tex.anisotropy = 4
-  // Default false — identical behavior to CompressedTexture, which
-  // DirectX UVs of the game data then fit without flipping.
+  // Standard false — identisches Verhalten wie CompressedTexture, die
+  // DirectX-UVs der Spieldaten passen dann ohne Flip.
   tex.flipY = flipY
   tex.needsUpdate = true
   return tex

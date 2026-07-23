@@ -1,24 +1,24 @@
 __diskwatch = {}
--- Installation language. The original init scripts set them exactly like this
+-- Sprache der Installation. Die Original-Init-Skripte setzen sie genau so
 -- (viewerinit.lua:5, editorinit.lua:5: `__language = 'us'`); Localization.lua:150
--- she reads while loading.
+-- liest sie beim Laden.
 __language = 'us'
--- false, not nil: `x = nil` does not create the key at all, and config.lua:56
--- makes accessing a non-existent global an error.
+-- false, nicht nil: `x = nil` legt den Schluessel gar nicht an, und config.lua:56
+-- macht den Zugriff auf ein nicht existierendes Global zum Fehler.
 __currentSource = false
 
--- DiskToLocal(path): a path from the HOST file system back to the VFS path of the
--- game. The LuaHost mounts each VFS file under `/mod/<path>`
--- (src/lua/host.ts: FS_PREFIX) — exactly this prefix has to be removed here.
+-- DiskToLocal(path): ein Pfad des HOST-Dateisystems zurueck in den VFS-Pfad des
+-- Spiels. Der LuaHost mountet jede VFS-Datei unter `/mod/<pfad>`
+-- (src/lua/host.ts: FS_PREFIX) — genau dieser Praefix muss hier wieder weg.
 --
--- This is not a cosmetic: `lua/system/Blueprints.lua:70-83` has one of its OWN
--- GetSource() which takes the chunk name from `debug.getinfo(n).source` and puts it
--- through DiskToLocal. SetBackwardsCompatId turns this into the BlueprintId
--- (`bp.BlueprintId = lower(bp.Source)`, lines 104-107) — and a projectile is called
--- so `/projectiles/tdfgauss01/tdfgauss01_proj.bp`, EXACTLY the string that is in
--- `Weapon.ProjectileId` is written. With `/mod` in front of it, CreateProjectile finds it
--- Blueprint never ("Invalid blueprint") and no weapon fires.
--- Units never noticed this: SetShortId cuts down to the file name anyway.
+-- Das ist kein Kosmetikum: `lua/system/Blueprints.lua:70-83` hat ein EIGENES
+-- GetSource(), das den Chunk-Namen aus `debug.getinfo(n).source` nimmt und ihn
+-- durch DiskToLocal schickt. Daraus macht SetBackwardsCompatId die BlueprintId
+-- (`bp.BlueprintId = lower(bp.Source)`, Zeile 104-107) — und ein Projektil heisst
+-- damit `/projectiles/tdfgauss01/tdfgauss01_proj.bp`, GENAU der String, der in
+-- `Weapon.ProjectileId` steht. Mit `/mod` davor findet CreateProjectile den
+-- Blueprint nie („Invalid blueprint") und keine Waffe schiesst.
+-- Units fiel das nie auf: SetShortId schneidet ohnehin bis zum Dateinamen ab.
 __fsPrefix = '/mod'
 
 function DiskToLocal(path)
@@ -30,103 +30,103 @@ function DiskToLocal(path)
 end
 
 -- =====================================================================
--- LuaPlus dialect: nil, numbers and strings HAVE metatables.
+-- LuaPlus-Dialekt: nil, Zahlen und Strings HABEN Metatables.
 --
 -- FAs eigenes config.lua sagt es in seinem Kommentar (config.lua:6):
 --   "Disable the LuaPlus bit where you can add attributes to nil, numbers,
 --    and strings."
--- But it only switches off WRITE there (__newindex) — the __index part
--- is commented out (config.lua:14-16). So in FA `nil.foo` returns `nil`,
--- instead of banging, and the original Lua relies on that. Example:
+-- Es schaltet dort aber nur das SCHREIBEN ab (__newindex) — der __index-Teil
+-- ist auskommentiert (config.lua:14-16). In FA liefert `nil.foo` also `nil`,
+-- statt zu knallen, und die Original-Lua verlaesst sich darauf. Beispiel:
 --
 --   uiutil.lua:343  skins[currentSkin()].cursors or skins['default'].cursors
 --
--- During the first SetupUI() the skin is still unset (lazyvar.lua:110: on
--- unset LazyVar is 0), skins[0] is nil — and the line works
--- anyway, because the `.cursors` on nil results in nil and the `or` takes effect.
+-- Beim ersten SetupUI() ist der Skin noch ungesetzt (lazyvar.lua:110: ein
+-- ungesetzter LazyVar ist 0), skins[0] ist nil — und die Zeile funktioniert
+-- trotzdem, weil das `.cursors` auf nil eben nil ergibt und das `or` greift.
 --
--- Standard Lua 5.4 does not recognize these metatables; `debug.setmetatable` can
--- set. Without this, not a single original UI script will run.
--- (Strings already have a metatable in 5.4 - this remains untouched.)
+-- Standard-Lua 5.4 kennt diese Metatables nicht; `debug.setmetatable` kann sie
+-- setzen. Ohne das laeuft kein einziges Original-UI-Skript.
+-- (Strings haben in 5.4 bereits eine Metatable — die bleibt unangetastet.)
 -- =====================================================================
 do
   local readsNil = { __index = function() return nil end }
   debug.setmetatable(nil, readsNil)
   debug.setmetatable(0, readsNil)
 
-  -- BOOLEANS may CARRY attributes - reading AND writing.
+  -- BOOLEANS duerfen Attribute TRAGEN — Lesen UND Schreiben.
   --
-  -- config.lua:21-23 clears the LuaPlus attributes only for nil, numbers and
+  -- config.lua:21-23 raeumt die LuaPlus-Attribute nur fuer nil, Zahlen und
   -- Strings ab (`metacleanup(nil) / metacleanup(0) / metacleanup('')`).
-  -- Booleans are NOT there — and the original UI takes advantage of that:
+  -- Booleans stehen dort NICHT — und die Original-UI nutzt das aus:
   --
   --   commandmode.lua:113  function EndCommandMode(isCancel)
   --   commandmode.lua:114      modeData.isCancel = isCancel or false
   --
-  -- `modeData` is `false` as long as no command mode is running (commandmode.lua:75).
-  -- So in FA, this line writes the attribute to a BOOLEAN — and reads it
-  -- again five lines later (l. 119). Without this metatable, everyone dies
-  -- Command that is issued without an active command mode (a normal right-click
+  -- `modeData` ist `false`, solange kein Command-Mode laeuft (commandmode.lua:75).
+  -- In FA schreibt diese Zeile das Attribut also auf einen BOOLEAN — und liest es
+  -- fuenf Zeilen spaeter wieder (Z. 119). Ohne diese Metatable stirbt jeder
+  -- Befehl, der ohne aktiven Command-Mode erteilt wird (ein normaler Rechtsklick-
   -- Move!) mit "attempt to index a boolean value (upvalue 'modeData')".
   --
-  -- LuaPlus keeps the attributes per TYPE (one metatable per type), not per value —
-  -- therefore a common table is the correct image.
+  -- LuaPlus haelt die Attribute pro TYP (eine Metatable je Typ), nicht pro Wert —
+  -- deshalb ist eine gemeinsame Tabelle das richtige Abbild.
   local boolAttrs = {}
   debug.setmetatable(true, {
     __index = boolAttrs,
     __newindex = function(_, k, v) boolAttrs[k] = v end,
   })
 
-  -- FUNCTIONS can also carry attributes — the same LuaPlus property.
-  -- multifunction.lua:979 attaches a field to a function:
+  -- FUNKTIONEN koennen ebenfalls Attribute tragen — dieselbe LuaPlus-Eigenschaft.
+  -- multifunction.lua:979 haengt ein Feld an eine Funktion:
   --
   --     bg.MouseClickFunc.OnDestroy = function(self) ... end
   --
-  -- In standard Lua this is "attempt to index a function value". Without this
-  -- Metatable dies right there the strategic view menu (the flap
-  -- the multifunction display).
+  -- In Standard-Lua ist das "attempt to index a function value". Ohne diese
+  -- Metatable stirbt genau dort das strategische Ansichts-Menue (der Aufklapper
+  -- der Multifunktionsanzeige).
   local funcAttrs = {}
   debug.setmetatable(function() end, {
     __index = funcAttrs,
     __newindex = function(_, k, v) funcAttrs[k] = v end,
   })
 
-  -- Coroutines also need a metatable because config.lua:35 hangs
+  -- Coroutines brauchen ebenfalls eine Metatable, denn config.lua:35 haengt
   -- ihre eigene daran:  local thread_mt = { Destroy = KillThread }
-  -- This is exactly the thread object with :Destroy() that the original Lua in the
-  -- TrashBag sets — the engine provides the coroutine, config.lua the method.
-  -- In Lua 5.4, a thread does not have a metatable; getmetatable() would give nil and
+  -- Genau das ist das Thread-Objekt mit :Destroy(), das die Original-Lua in den
+  -- TrashBag legt — die Engine liefert die Coroutine, config.lua die Methode.
+  -- In Lua 5.4 hat ein Thread keine Metatable; getmetatable() gaebe nil und
   -- config.lua:35 stuerbe an setmetatable(nil, ...).
   debug.setmetatable(coroutine.create(function() end), {})
 
   -- ---------------------------------------------------------------------
-  -- COMPARISONS ABOUT TYPE LIMITATIONS DO NOT MATTER IN FA.
+  -- VERGLEICHE UEBER TYPGRENZEN KNALLEN IN FA NICHT.
   --
-  -- The engine has patched luaV_lessthan (Cfile:1442257):
+  -- Die Engine hat luaV_lessthan gepatcht (Cfile:1442257):
   --
   --     if ( l->tt != r->tt )
-  --         return l_tt < r->tt;      // <-- the TYPE TAGS, no error!
+  --         return l_tt < r->tt;      // <-- die TYP-TAGS, kein Fehler!
   --     if ( l_tt == LUA_TNUMBER ) ...
   --
-  -- and luaV_lessequal the same (Cfile:1442275). Standard Lua throws here
-  -- "attempt to compare number with nil" — FA silently returns the result of the
+  -- und luaV_lessequal genauso (Cfile:1442275). Standard-Lua wirft hier
+  -- "attempt to compare number with nil" — FA liefert still das Ergebnis des
   -- Tag-Vergleichs (nil=0, boolean=1, lightuserdata=2, number=3, string=4,
   -- table=5, function=6, userdata=7, thread=8).
   --
-  -- This is not a curiosity, the original UI COUNTS on it:
+  -- Das ist kein Kuriosum, die Original-UI RECHNET damit:
   --
-  --   diplomacy.lua:24 parent.Items = {} -- Attribute on `false`
-  --   diplomacy.lua:107 parent = Group(inParent) -- now a control...
+  --   diplomacy.lua:24   parent.Items = {}        -- Attribut auf `false`
+  --   diplomacy.lua:107  parent = Group(inParent) -- jetzt ein Control ...
   --   diplomacy.lua:123  if table.getsize(parent.Items) > 0 then
   --
-  -- `parent.Items` is nil on the fresh control, table.getsize(nil) returns
-  -- nil (utils.lua:279), and `nil > 0` is simply false in FA — the line
-  -- skips the cleanup block. In standard Lua, the diplomacy rider dies
-  -- right there.
+  -- `parent.Items` ist auf dem frischen Control nil, table.getsize(nil) liefert
+  -- nil (utils.lua:279), und `nil > 0` ist in FA schlicht false — die Zeile
+  -- ueberspringt den Aufraeum-Block. In Standard-Lua stirbt der Diplomatie-Reiter
+  -- genau dort.
   --
-  -- With the SAME types, everything stays as usual: Lua compares numbers/strings
-  -- itself (the meta method is then not called at all), and nil<nil or
-  -- Table<table without __lt goes into call_orderTM — there is a bang, as in
+  -- Bei GLEICHEN Typen bleibt alles wie gehabt: Zahlen/Strings vergleicht Lua
+  -- selbst (die Metamethode wird dann gar nicht gerufen), und nil<nil oder
+  -- Tabelle<Tabelle ohne __lt geht in call_orderTM — dort knallt es, wie im
   -- Original.
   local TYPE_TAG = {
     ['nil'] = 0, boolean = 1, number = 3, string = 4,
@@ -138,9 +138,9 @@ do
     error('attempt to compare two ' .. type(a) .. ' values', 3)
   end
 
-  -- Lua 5.4 looks for the meta method at the FIRST operand and, if it doesn't have one,
-  -- at the SECOND. So it's enough to hang them on the types, the one
-  -- Have type metatable — every mixed comparison has at least one of these.
+  -- Lua 5.4 sucht die Metamethode beim ERSTEN Operanden und, wenn er keine hat,
+  -- beim ZWEITEN. Es reicht also, sie an die Typen zu haengen, die eine
+  -- Typ-Metatable haben — jeder gemischte Vergleich hat mindestens einen davon.
   for _, mt in ipairs({
     debug.getmetatable(nil), debug.getmetatable(0), debug.getmetatable(''),
     debug.getmetatable(true), debug.getmetatable(function() end),
@@ -150,28 +150,28 @@ do
   end
 end
 
--- Engine hook: Execute module in given environment (import.lua calls this).
--- Additionally tracks the currently loaded file for GetSource() (the
--- Blueprint pipeline derives the BlueprintId from this).
--- HOOKS — the mechanism by which FA subsequently patches its own modules.
+-- Engine-Hook: Modul in gegebener Umgebung ausfuehren (import.lua ruft das).
+-- Verfolgt zusaetzlich das aktuell geladene File fuer GetSource() (die
+-- Blueprint-Pipeline leitet daraus die BlueprintId ab).
+-- HOOKS — der Mechanismus, mit dem FA seine eigenen Module nachtraeglich patcht.
 --
 -- bin/SupComDataPath.lua sagt:
 --
 --     hook = { '/schook' }
 --
--- The engine then loads the file of the same name for EACH module
--- the hook directory — IN THE SAME environment, right after the original.
--- The hook sees everything that the module has just created and can do it
--- supplement or replace.
+-- Die Engine laedt danach zu JEDEM Modul zusaetzlich die gleichnamige Datei aus
+-- dem Hook-Verzeichnis — IN DERSELBEN Umgebung, direkt nach dem Original.
+-- Der Hook sieht also alles, was das Modul gerade angelegt hat, und kann es
+-- ergaenzen oder ersetzen.
 --
--- This is not a cure, but necessary: ​​`lua/maui/window.lua` just puts an empty one
--- `styles = {}` (line 71) and explicitly says "you MUST
--- hook in a styles table in your product". That's exactly what it does
--- `schook/lua/maui/window.lua` — it fills styles.backgrounds with the frames of the
--- Minimap. Without hooks, window.lua:160 dies to `styles.backgrounds` (nil), and
--- thus the MINIMAP, the chat window and the console.
+-- Das ist keine Kuer, sondern noetig: `lua/maui/window.lua` legt nur ein leeres
+-- `styles = {}` an (Zeile 71) und sagt im Kopfkommentar ausdruecklich "you MUST
+-- hook in a styles table in your product". Genau das tut
+-- `schook/lua/maui/window.lua` — es fuellt styles.backgrounds mit den Rahmen der
+-- Minimap. Ohne Hooks stirbt window.lua:160 an `styles.backgrounds` (nil), und
+-- damit die MINIMAP, das Chat-Fenster und die Konsole.
 --
--- The sim also depends on it: schook/lua/simInit.lua, SessionInit.lua,
+-- Auch die Sim haengt daran: schook/lua/simInit.lua, SessionInit.lua,
 -- sim/weapon.lua, SimSync.lua, UserSync.lua.
 __hookPaths = { '/schook' }
 
@@ -196,10 +196,10 @@ local function runHooks(name, env)
     end
 end
 
--- exists(path): is the file in the VFS? A CORE binding (scr_CoreInits, i.e
--- both VMs, docs/research/engine-api.md). The sim needs them to
--- Script class of a blueprint to resolve: exists
--- `<id>_script.lua` does not apply, the default from the blueprint type applies
+-- exists(pfad): liegt die Datei im VFS? Eine KERN-Bindung (scr_CoreInits, also
+-- beide VMs, docs/research/engine-api.md). Die Sim braucht sie, um die
+-- Skript-Klasse eines Blueprints aufzuloesen: existiert
+-- `<id>_script.lua` nicht, gilt der Default aus dem Blueprint-Typ
 -- (func_FindBlueprintScriptModule, Cfile:914189-914360).
 function exists(name)
   return __mountModule(name) ~= false
@@ -208,8 +208,8 @@ end
 function doscript(name, env)
     local fsPath = __mountModule(name)
     if not fsPath then error("module not found: " .. tostring(name), 2) end
-    -- Without env, the module runs in the global environment (Blueprints/Boot).
-    -- Explicit nil as 4th load argument would set _ENV to nil.
+    -- Ohne env laeuft das Modul im globalen Environment (Blueprints/Boot).
+    -- Explizites nil als 4. load-Argument wuerde _ENV auf nil setzen.
     local chunk, err = loadfile(fsPath, "t", env or _G)
     if not chunk then error(err, 2) end
     local prev = __currentSource
@@ -220,12 +220,12 @@ function doscript(name, env)
     return r
 end
 
--- Engine function: Path of the file just loaded via doscript
+-- Engine-Funktion: Pfad des gerade per doscript geladenen Files
 function GetSource()
     return __currentSource
 end
 
--- Run boot scripts in global _ENV; gives error message or nil
+-- Boot-Skripte im globalen _ENV ausfuehren; gibt Fehlermeldung oder nil
 function __runGlobal(fsPath)
     local chunk, err = loadfile(fsPath, "t")
     if not chunk then return err end

@@ -38,7 +38,7 @@ import { findFiles } from '../src/vfs/glob'
 import { GameFiles } from './gameFiles'
 import { SANDBOX_SESSION } from '../src/sim/session'
 
-// --- Everything that goes wrong ends up here ------------------------------------
+// --- Alles, was schiefgeht, landet hier ------------------------------------
 interface Fund {
   wo: 'SIM' | 'UI'
   schritt: string
@@ -58,7 +58,7 @@ const tue = (name: string): void => {
 
 const game = await GameFiles.open()
 
-// --- The SIM, exactly like in the worker (luaSimWorker.ts) ------------------------
+// --- Die SIM, exakt wie im Worker (luaSimWorker.ts) -------------------------
 tue('Sim booten')
 const sim = await LuaHost.create(game.luaFiles, (level, msg) => {
   if (level === 'WARN') melde('SIM', msg)
@@ -69,7 +69,7 @@ const nProj = game.loadProjectiles(sim)
 const nProps = game.loadProps(sim)
 console.log(`   ${nProj} Projektil-, ${nProps} Prop-Blueprints`)
 
-// --- The UI VM, exactly like in the browser (GameUi.create) -----------------------
+// --- Die UI-VM, exakt wie im Browser (GameUi.create) ------------------------
 tue('UI booten (18 Panels aus gamemain.lua)')
 const ui = await LuaHost.create(game.luaFiles, (level, msg) => {
   if (level === 'WARN') melde('UI', msg)
@@ -77,8 +77,8 @@ const ui = await LuaHost.create(game.luaFiles, (level, msg) => {
 installUiEngine(ui, {
   exists: (p) => game.exists(p),
   find: (dir, pattern) => findFiles(game.paths, dir, pattern),
-  // Texture dimensions: the test does not have DDS decoding — the dimensions do not matter here,
-  // Errors are checked, not pixels.
+  // Texturmaße: der Test hat keine DDS-Dekodierung — die Maße sind hier egal,
+  // geprüft werden Fehler, nicht Pixel.
   textureSize: () => [64, 64],
   stringAdvance: (t, _f, s) => t.length * s * 0.5,
   fontMetrics: (_f, s) => [s * 0.8, s * 0.2],
@@ -88,11 +88,11 @@ setupUi(ui)
 const bpPaths = [...game.paths].filter((p) => /^units\/[^/]+\/[^/]+_unit\.bp$/.test(p))
 loadUiBlueprints(ui, bpPaths)
 applySession(ui, { ...SANDBOX_SESSION, map: 'SCMP_009' })
-// The world start of the engine, as in the browser (gameUi.ts): DoPreload
+// Der Weltstart der Engine, wie im Browser (gameUi.ts): DoPreload
 // (StartGameUI + StartLoadingDialog, Cfile:1320735) -> DoInitializing
-// (Frame reset + SetupUI + StartGameUI again, then StopLoadingDialog,
+// (Frame-Reset + SetupUI + StartGameUI erneut, dann StopLoadingDialog,
 // Cfile:1321030-1321090). Erst StopLoadingDialog forkt InitialAnimations —
-// Without this chain, score, economy and avatars will never work.
+// ohne diese Kette fahren Score, Economy und Avatare nie ein.
 startSessionLoading(ui)
 ui.eval('__mauiResetFrames()')
 ui.eval('__uiSetupUi()')
@@ -107,7 +107,7 @@ ui.setGlobal('__uiSimCommand', (name: string, ids: number[], value: unknown) => 
 ui.setGlobal('__uiPauseSink', () => {})
 const simBefehle: { name: string; ids: number[]; value: unknown }[] = []
 
-/** An image of the UI (frame pump + snapshot — like MauiRenderer.update). */
+/** Ein Bild der UI (Frame-Pumpe + Snapshot — wie MauiRenderer.update). */
 const uiFrame = (n = 1): void => {
   for (let i = 0; i < n; i++) {
     try {
@@ -119,7 +119,7 @@ const uiFrame = (n = 1): void => {
   }
 }
 
-/** Mirror the sim state to the UI — gameUi.beat() does this in the browser. */
+/** Den Sim-Zustand in die UI spiegeln — das tut im Browser gameUi.beat(). */
 const spiegle = (): void => {
   const units = sim.pull<
     { id: number; name: string; x: number; y: number; z: number; health: number; maxHealth: number; fraction: number; moving: boolean; army: number; idle: boolean; buildQueue: { id: string; count: number }[] }[]
@@ -129,7 +129,7 @@ const spiegle = (): void => {
       `__uiSetUnit(${u.id}, '${u.name}', ${u.army}, ${u.x}, ${u.y}, ${u.z}, ${u.health}, ` +
         `${u.maxHealth}, ${u.fraction}, ${u.idle === true})`,
     )
-    // As in the browser (gameUi.ts): ALWAYS mirror the queue, even empty.
+    // Wie im Browser (gameUi.ts): die Queue IMMER spiegeln, auch leer.
     const items = (u.buildQueue ?? []).map((i) => `{ id = '${i.id}', count = ${i.count} }`).join(',')
     ui.eval(`__uiSetBuildQueue(${u.id}, { ${items} })`)
   }
@@ -140,14 +140,14 @@ const spiegle = (): void => {
       `${e.expenseMass}, ${e.expenseEnergy})`,
   )
   ui.eval(`__uiSetGameTick(${Number(sim.eval('return __gameTick'))})`)
-  // Queue guard BEFORE the beat distributor — order from CUIManager::DoBeat
-  // (Cfile:1273907-1273911), then UI_LuaBeat -> gamemain.OnBeat (Cfile:1262940):
-  // ALL registered beat functions are running (economy, avatars, commandmode ...).
+  // Queue-Waechter VOR dem Beat-Verteiler — Reihenfolge aus CUIManager::DoBeat
+  // (Cfile:1273907-1273911), dann UI_LuaBeat -> gamemain.OnBeat (Cfile:1262940):
+  // ALLE registrierten Beat-Funktionen laufen (economy, avatars, commandmode ...).
   ui.eval(`__uiFactoryQueueBeat()`)
   ui.eval(`import('/lua/ui/game/gamemain.lua').OnBeat()`)
 }
 
-/** A beat of the Sim + an image of the UI — the beat of the running game. */
+/** Ein Beat der Sim + ein Bild der UI — der Takt des laufenden Spiels. */
 const takt = (n = 1): void => {
   for (let i = 0; i < n; i++) {
     try {
@@ -160,7 +160,7 @@ const takt = (n = 1): void => {
   }
 }
 
-// --- The game -----------------------------------------------------------------
+// --- Die Partie -------------------------------------------------------------
 tue('ACU spawnen (uel0001)')
 for (const id of ['uel0001', 'ueb0101', 'ueb1101', 'uel0201', 'uel0101']) {
   await game.giveUnit(sim, id)
@@ -169,13 +169,13 @@ const acu = spawnLuaUnit(sim, 'uel0001', { x: 100, y: 20, z: 100 }, 1)
 takt(10)
 console.log(`   ACU ${acu}, Masse ${engine.economy.army(1).mass.toFixed(0)}`)
 
-tue('Wait for the loading fade (otherwise the faction picture will catch every click)')
-// gamemain.lua:274-292: the faction image is at depth 200 above EVERYTHING and
-// faded only after 1.5 s over ~2 s - that's how long each hit test only hits
-// this bitmap. In the original, the player only clicks after the fade.
+tue('Lade-Fade abwarten (das Fraktionsbild fängt sonst jeden Klick)')
+// gamemain.lua:274-292: das Fraktionsbild liegt auf Depth 200 über ALLEM und
+// faded erst nach 1,5 s über ~2 s aus — solange trifft jeder Hit-Test nur
+// dieses Bitmap. Der Spieler klickt im Original auch erst nach dem Fade.
 uiFrame(260)
 
-tue('Select ACU (SelectUnits → gamemain.OnSelectionChanged)')
+tue('ACU auswählen (SelectUnits → gamemain.OnSelectionChanged)')
 spiegle()
 try {
   ui.eval(`__uiSelectByIds({ ${acu} })`)
@@ -185,8 +185,8 @@ try {
 uiFrame(3)
 
 tue('Bau-Icon klicken (echter Maus-Weg: Hit-Test → Dragger → construction.lua)')
-// Exactly the way of a player: look for a building icon in the construction menu and use it
-// Click on the MOUSE (through the engine's hit test, not via an internal call).
+// Genau der Weg eines Spielers: ein Gebäude-Icon im Bau-Menü suchen und mit der
+// MAUS anklicken (durch den Hit-Test der Engine, nicht per internem Aufruf).
 uiFrame(1)
 const icon = ui.eval(`
   -- Die T1-LANDFABRIK (ueb0101) — das, was ein Spieler zuerst baut. Genommen wird
@@ -212,11 +212,11 @@ const icon = ui.eval(`
   return erstes
 `) as string
 if (!icon) {
-  melde('UI', 'No building icon in the construction menu (construction.lua provides nothing)')
+  melde('UI', 'Kein Gebäude-Icon im Bau-Menü (construction.lua liefert nichts)')
 } else {
   const [bpId, mx, my] = icon.split('|')
   console.log(`   Icon ${bpId} bei ${mx},${my}`)
-  // A click is pressing AND releasing - and the MODIFIERS are part of it
+  // Ein Klick ist Druecken UND Loslassen — und die MODIFIER gehoeren dazu
   // ({ Left = true }): button.lua feuert OnClick erst im Dragger-Release.
   ui.eval(`__mauiMouse('ButtonPress', ${mx}, ${my}, { Left = true }, 1)`)
   ui.eval(`__mauiMouse('ButtonRelease', ${mx}, ${my}, { Left = true }, 1)`)
@@ -226,7 +226,7 @@ const cm = getCommandMode(ui)
 console.log(`   Command-Mode: ${JSON.stringify(cm)}`)
 if (cm.mode === false) melde('UI', 'Der Klick aufs Bau-Icon startet KEINEN Bau-Modus')
 
-tue('Set building (worldClick → construction site + construction order)')
+tue('Gebäude setzen (worldClick → Baustelle + Bau-Auftrag)')
 const simFassade = {
   move: (id: number, x: number, z: number): void => {
     sim.eval(`local u=__units[${id}] if u then u:GetNavigator():SetGoal({ ${x}, 0, ${z} }) end`)
@@ -241,14 +241,14 @@ const simFassade = {
     army: number,
     queue = false,
   ): Promise<number> => {
-    // As in the browser: the blueprint (+ skeleton) only comes into the sim during construction.
+    // Wie im Browser: das Blueprint (+ Skelett) kommt erst beim Bau in die Sim.
     await game.giveUnit(sim, bpId)
     const uid = spawnBuildSite(sim, bpId, pos, army)
     issueBuildTask(sim, builderId, uid, !queue)
     return uid
   },
 }
-// A build mode must be running; otherwise we take the factory directly.
+// Ein Bau-Modus muss laufen; sonst nehmen wir die Fabrik direkt.
 console.log(`   Auswahl vor dem Klick: ${String(ui.eval('return __uiSelectionJson()'))}`)
 console.log(`   Command-Mode vor dem Klick: ${JSON.stringify(getCommandMode(ui))}`)
 let msg: string | null = null
@@ -259,15 +259,15 @@ try {
 }
 console.log(`   ${msg ?? 'kein Befehl'}`)
 if (!msg?.startsWith('Bau')) {
-  // The build mode didn't come about - then we set the factory directly, so that
-  // the run continues (and the find at the top is in the list).
+  // Der Bau-Modus kam nicht zustande — dann setzen wir die Fabrik direkt, damit
+  // der Durchlauf weiterläuft (und der Fund oben steht in der Liste).
   const site = spawnBuildSite(sim, 'ueb0101', { x: 112, y: 20, z: 112 }, 1)
   issueBuildTask(sim, acu, site)
 }
 
-tue('Build until finished (economy pays, farmer goes there)')
-// What is checked is the building that was REALLY clicked - not a solid one
-// wired. (The run takes the first clickable building icon.)
+tue('Bauen bis fertig (Ökonomie zahlt, Bauer fährt hin)')
+// Geprüft wird das Gebäude, das WIRKLICH geklickt wurde — nicht ein fest
+// verdrahtetes. (Der Durchlauf nimmt das erste klickbare Gebäude-Icon.)
 const gebaut = (icon.split('|')[0] || 'ueb0101').toLowerCase()
 let fabrik = 0
 for (let i = 0; i < 400 && fabrik === 0; i++) {
@@ -280,13 +280,13 @@ console.log(fabrik ? `   ${gebaut} ${fabrik} fertig` : `   ${gebaut} NICHT ferti
 if (!fabrik) {
   const f2 = sim.pull<{ id: number; name: string; fraction: number }[]>('__readAllUnitsJson()')
     .find((u) => u.name === gebaut)
-  if (!f2 || f2.fraction <= 0) melde('SIM', 'The construction site is not growing (construction chain is hanging)')
+  if (!f2 || f2.fraction <= 0) melde('SIM', 'Die Baustelle wächst nicht (Bau-Kette hängt)')
   else console.log(`   Fortschritt: ${(f2.fraction * 100).toFixed(0)}% — Kette läuft`)
-  // The construction is not finished (expensive + little income) — the FABRIK chain
-  // (selection, collection point, queue, production) is not allowed
-  // hang out: spawn a finished T1 land factory, stop the expensive ACU construction
-  // (otherwise he would eat up all his income) and fill the warehouse with that
-  // Original way of scenario scripts (SetArmyEconomy, real Engine-Global).
+  // Der Bau wird nicht fertig (teuer + wenig Einkommen) — die FABRIK-Kette
+  // (Auswahl, Sammelpunkt, Warteschlange, Produktion) darf davon nicht
+  // abhängen: eine fertige T1-Landfabrik spawnen, den teuren ACU-Bau stoppen
+  // (er fräße sonst alles Einkommen) und das Lager füllen — mit dem
+  // Original-Weg der Szenario-Skripte (SetArmyEconomy, echtes Engine-Global).
   fabrik = spawnLuaUnit(sim, 'ueb0101', { x: 120, y: 20, z: 120 }, 1)
   sim.eval(`__clearBuildQueue(${acu})`)
   sim.eval(`SetArmyEconomy(1, 4000, 100000)`)
@@ -295,7 +295,7 @@ if (!fabrik) {
 }
 
 if (fabrik) {
-  tue('Select factory + set collection point')
+  tue('Fabrik auswählen + Sammelpunkt setzen')
   spiegle()
   ui.eval(`__uiSelectByIds({ ${fabrik} })`)
   uiFrame(2)
@@ -312,18 +312,18 @@ if (fabrik) {
   console.log(`   Befehl an die Sim: ${JSON.stringify(simBefehle[0] ?? null)}`)
   queueFactoryBuild(sim, fabrik, 'uel0201', 2)
 
-  tue('Construction queue: the guard reports, Decrease goes through the seam')
-  // The queue guard (UI_FactoryCommandQueueHandlerBeat, Cfile:1256904) must
-  // report the new 2-queue as gamemain.OnQueueChanged — COUNTED on the module.
+  tue('Bau-Warteschlange: der Wächter meldet, Decrease geht durch die Naht')
+  // Der Queue-Wächter (UI_FactoryCommandQueueHandlerBeat, Cfile:1256904) muss
+  // die neue 2er-Queue als gamemain.OnQueueChanged melden — GEZÄHLT am Modul.
   ui.eval(`
     __qtest = { n = 0 }
     local gm = import('/lua/ui/game/gamemain.lua')
     local orig = gm.OnQueueChanged
     gm.OnQueueChanged = function(q) __qtest.n = __qtest.n + 1 return orig(q) end
   `)
-  spiegle() // Queue into the UI copy + guard is running (before OnBeat)
+  spiegle() // Queue in die UI-Kopie + Wächter läuft (vor OnBeat)
   const ev1 = Number(ui.eval('return __qtest.n'))
-  if (ev1 < 1) melde('UI', 'OnQueueChanged does not fire — the queue guard does not report the new queue')
+  if (ev1 < 1) melde('UI', 'OnQueueChanged feuert nicht — der Queue-Wächter meldet die neue Warteschlange nicht')
   else console.log(`   OnQueueChanged gefeuert (${ev1}×) — die Queue-Anzeige lebt`)
   // Rechtsklick aufs Queue-Icon = DecreaseBuildCountInQueue (construction.lua:895).
   simBefehle.length = 0
@@ -335,16 +335,16 @@ if (fabrik) {
   const dec = simBefehle[0]
   if (dec?.name !== 'ISSUE_DecreaseCommandCount') melde('UI', `Decrease schickt keinen ISSUE_DecreaseCommandCount (${JSON.stringify(dec ?? null)})`)
   else console.log(`   Naht: ${dec.name} an Fabrik ${dec.ids.join(',')} ${JSON.stringify(dec.value)}`)
-  // The sim end (in the browser main.ts routes the command; here directly):
+  // Das Sim-Ende (im Browser routet main.ts den Befehl; hier direkt):
   sim.eval(`__adjustFactoryQueue(${fabrik}, 1, -1)`)
   spiegle()
   const ev2 = Number(ui.eval('return __qtest.n'))
   const restCount = Number(ui.eval(`local q = __uiUnits[${fabrik}].buildQueue return (q[1] and q[1].count) or 0`))
-  if (ev2 <= ev1) melde('UI', 'The guard does not report the changed queue (Decrease invisible)')
+  if (ev2 <= ev1) melde('UI', 'Der Wächter meldet die geänderte Queue nicht (Decrease unsichtbar)')
   if (restCount !== 1) melde('SIM', `__adjustFactoryQueue: erwartet count=1, ist ${restCount}`)
   else console.log(`   nach Decrease: count=${restCount}, OnQueueChanged ${ev2}×`)
-  // ... and Increase (left click, construction.lua:988) restores the tank
-  // here — the production step awaits BOTH.
+  // … und Increase (Linksklick, construction.lua:988) stellt den Panzer wieder
+  // her — der Produktions-Schritt erwartet BEIDE.
   simBefehle.length = 0
   ui.eval(`IncreaseBuildCountInQueue(1, 1)`)
   if (simBefehle[0]?.name !== 'ISSUE_IncreaseCommandCount') melde('UI', `Increase schickt keinen ISSUE_IncreaseCommandCount (${JSON.stringify(simBefehle[0] ?? null)})`)
@@ -365,9 +365,9 @@ if (fabrik) {
 tue('Feind spawnen + Kampf (Zielerfassung, Schuss, Treffer, Tod, Wrack)')
 const feind = spawnLuaUnit(sim, 'uel0201', { x: 106, y: 20, z: 106 }, 2)
 let tot = false
-// The Emitter Channel: Muzzle flashes/impacts must be present DURING combat
-// World position can be reported (__readAllEmittersJson — the fodder for
-// particle system). The maximum over the fight is counted.
+// Der Emitter-Kanal: Mündungsfeuer/Einschläge müssen WÄHREND des Kampfes mit
+// Weltposition gemeldet werden (__readAllEmittersJson — das Futter fürs
+// Partikelsystem). Gezählt wird das Maximum über den Kampf.
 let maxEmitter = 0
 let emitterBeispiel = ''
 let emitterBp = ''
@@ -392,13 +392,13 @@ for (let i = 0; i < 400 && !tot; i++) {
     console.log(`   nach ${i + 1} Beats: Feind ${String(hp)}`)
   }
 }
-console.log(tot ? '   Der Feind ist gefallen' : 'The enemy is still alive (no fight?)')
-if (!tot) melde('SIM', 'The enemy was not killed - the weapons are not effective')
+console.log(tot ? '   Der Feind ist gefallen' : '   Der Feind lebt noch (kein Kampf?)')
+if (!tot) melde('SIM', 'Der Feind wurde nicht getötet — die Waffen greifen nicht')
 if (maxEmitter > 0) console.log(`   Emitter gemeldet: max. ${maxEmitter} gleichzeitig (z. B. ${emitterBeispiel})`)
-else melde('SIM', 'NO emitter reported during combat — muzzle flashes/impacts do not reach the renderer')
+else melde('SIM', 'KEIN Emitter während des Kampfes gemeldet — Mündungsfeuer/Einschläge erreichen den Renderer nicht')
 if (emitterBp) {
-  // The blueprint RPC for the particle system: the sim delivers the PARARED
-  // Emitter BP as JSON (__emitterBpJson) — with texture and curves.
+  // Der Blueprint-RPC fürs Partikelsystem: die Sim liefert das GEPARSTE
+  // Emitter-BP als JSON (__emitterBpJson) — mit Textur und Kurven.
   const bp = sim.pull<{ Texture?: string; EmitRateCurve?: { Keys?: unknown[] } } | null>(
     `__emitterBpJson('${emitterBp}')`,
   )
@@ -413,9 +413,9 @@ const wracks = Number(sim.eval('local n = 0 for _ in pairs(__props) do n = n + 1
 console.log(`   ${wracks} Wrack(s) auf dem Feld`)
 
 tue('Hover: unitview zeigt Name + HP der Unit unter dem Cursor')
-// Exactly the browser way: main.ts reports the unit under the mouse via
+// Genau der Browser-Weg: main.ts meldet die Unit unter der Maus per
 // __uiSetRollover; unitview.lua liest GetRolloverInfo() in seinem OnFrame
-// (unitview.lua:422-433) and fills name, HP bar and stats.
+// (unitview.lua:422-433) und fuellt Name, HP-Balken und Statistiken.
 spiegle()
 ui.eval(`__uiSetRollover(${acu})`)
 uiFrame(5)
@@ -433,7 +433,7 @@ if (uv.indexOf('name=""') >= 0 || uv.indexOf('nicht erreichbar') >= 0) {
 ui.eval('__uiSetRollover(nil)')
 uiFrame(2)
 
-tue('The tabs at the top (menu, diplomacy) + deselect')
+tue('Die Reiter oben (Menü, Diplomatie) + Abwahl')
 try {
   ui.eval(`import('/lua/ui/game/tabs.lua').BuildContent('main')`)
   uiFrame(30)
@@ -449,18 +449,18 @@ try {
   melde('UI', `Abwahl: ${(e as Error).message}`)
 }
 
-do('InitialAnimations: das Fraktionsbild faded, die Panels fahren ein')
-// The fade needs 1.5 s waiting time + ~2 s fading (gamemain.lua:279-291,
-// delta/2 per image) — only then does the original Lua fork InitialAnimations
-// and score.lua:406 calls controls.bg:Show(). The clock at the top right (score.lua:230,
-// GetGameTime) must be VISIBLE and RUNNING at the end.
+tue('InitialAnimations: das Fraktionsbild faded, die Panels fahren ein')
+// Der Fade braucht 1,5 s Wartezeit + ~2 s Ausblenden (gamemain.lua:279-291,
+// delta/2 pro Bild) — erst danach forkt die Original-Lua InitialAnimations
+// und score.lua:406 ruft controls.bg:Show(). Die Uhr oben rechts (score.lua:230,
+// GetGameTime) muss am Ende SICHTBAR sein und LAUFEN.
 try {
   uiFrame(380)
   const uhr = String(
     ui.eval(`
       for _, c in pairs(__mauiControls) do
         if not c.__destroyed and tostring(c.__text or ''):find('^%d%d:%d%d:%d%d$') then
-          -- running clock, not the (rightly hidden) campaign timer
+          -- laufende Uhr, nicht der (zu Recht versteckte) Kampagnen-Timer
           if tostring(c.__text) ~= '00:00:00' then
             local n = c
             while n do
@@ -480,12 +480,12 @@ try {
   melde('UI', `InitialAnimations: ${(e as Error).message}`)
 }
 
-// --- The report ------------------------------------------------------------
+// --- Der Bericht ------------------------------------------------------------
 console.log('\n' + '='.repeat(72))
 console.log(`DURCHLAUF: ${schritte.length} Schritte, ${funde.length} Meldungen`)
 console.log('='.repeat(72))
 
-// Summarize by text (same message 300× is ONE find).
+// Nach Text zusammenfassen (dieselbe Meldung 300× ist EIN Fund).
 const gezaehlt = new Map<string, { n: number; wo: string; schritt: string }>()
 for (const f of funde) {
   const key = `${f.wo} ${f.text}`
@@ -495,25 +495,25 @@ for (const f of funde) {
 }
 const sortiert = [...gezaehlt.entries()].sort((a, b) => b[1].n - a[1].n)
 
-// Familiar noise - not a find, but an open construction site with a ticket.
+// Bekanntes Rauschen — kein Fund, sondern eine offene Baustelle mit Ticket.
 const bekannt = [
   'Audio: keine Ausgabe angeschlossen',
   'MetaImpact: keine Impuls-Physik',
 ]
-let real = 0
-for (const [key, v] of sorted) {
+let echte = 0
+for (const [key, v] of sortiert) {
   const text = key.slice(v.wo.length + 1)
-  const known = known.some((b) => text.includes(b))
-  if (!known) real++
-  console.log(`\n[${v.wo}] ×${v.n}${known ? ' (bekannt)' : ''} — first in: ${v.schritt}`)
-  console.log(` ${text}`)
+  const known = bekannt.some((b) => text.includes(b))
+  if (!known) echte++
+  console.log(`\n[${v.wo}] ×${v.n}${known ? ' (bekannt)' : ''}  — zuerst in: ${v.schritt}`)
+  console.log(`   ${text}`)
 }
 
 console.log('\n' + '='.repeat(72))
-if (real === 0) {
+if (echte === 0) {
   console.log('DURCHLAUF SAUBER — keine unbekannten Fehler, keine fehlenden Engine-Teile.')
 } else {
-  console.log(`${echte} open points (see above).`)
+  console.log(`${echte} offene Punkte (siehe oben).`)
 }
 await game.close()
 process.exit(0)

@@ -49,9 +49,9 @@ for (const archive of ['mohodata.scd', 'lua.scd']) {
 const unitsFile = await NodeFile.open(`${GAME}/gamedata/units.scd`)
 openFiles.push(unitsFile)
 const unitsZip = await ZipArchive.open(unitsFile)
-// The sim also needs the SKELETON of the unit: turrets and muzzles
-// depend on bone names (weapon.lua:67). It comes from the same SCM file,
-// which the renderer also reads.
+// Die Sim braucht auch das SKELETT der Unit: Waffentuerme und Muendungen
+// haengen an Knochennamen (weapon.lua:67). Es kommt aus derselben SCM-Datei,
+// die auch der Renderer liest.
 const assetExists = (p: string): boolean => unitsZip.get(p.toLowerCase()) != null
 const readAsset = async (p: string): Promise<Uint8Array | null> => {
   const e = unitsZip.get(p.toLowerCase())
@@ -70,51 +70,51 @@ const near = (a: number, b: number, eps = 0.2): boolean => Math.abs(a - b) < eps
 const warnings: string[] = []
 const host = await LuaHost.create(files, (level, msg) => { if (level === 'WARN') warnings.push(msg) })
 const { economy: eco } = installEngine(host)
-// Flat test area - EXPLICIT because the engine crashes without a map (no silent 0 value).
+// Flaches Testgelaende — EXPLIZIT, weil die Engine ohne Karte knallt (kein stiller 0-Wert).
 setTerrainSource(host, FLAT_TEST_TERRAIN)
 loadUnitBlueprint(host, 'uel0001', acuBp)
 setUnitBones(host, 'uel0001', await bonesFromBlueprint('uel0001', acuBp, readAsset, assetExists))
 
 const beat = (): void => { eco.tick(); simTick(host) }
 
-console.log('\n== Spawn ACU — registers its blueprint economy (ProdE=20, ProdM=1) ==')
+console.log('\n== ACU spawnen — registriert ihre Blueprint-Ökonomie (ProdE=20, ProdM=1) ==')
 const acu = spawnLuaUnit(host, 'uel0001', { x: 128, y: 20, z: 128 }, 1)
-check(acu > 0, `spawned, Unit #${acu}`)
+check(acu > 0, `gespawnt, Unit #${acu}`)
 const army = eco.army(1)
-check(army.energy === 0 && army.mass === 0, `Army starts at 0/0 (SSTIArmyVariableData-Ctor)`)
+check(army.energy === 0 && army.mass === 0, `Armee startet bei 0/0 (SSTIArmyVariableData-Ctor)`)
 
-console.log('\n== Bearing comes ONLY from the units (ACU: 4000 E / 650 M) ==')
+console.log('\n== Lager kommt AUSSCHLIESSLICH aus den Units (ACU: 4000 E / 650 M) ==')
 beat()
 check(army.maxEnergy === 4000, `maxEnergie = ${army.maxEnergy} (= ACU Economy.StorageEnergy)`)
 check(army.maxMass === 650, `maxMasse = ${army.maxMass} (= ACU Economy.StorageMass)`)
 
-console.log('\n== Starting supply: the ACU forks GiveInitialResources (uel0001_script.lua:159) ==')
+console.log('\n== Startvorrat: die ACU forkt GiveInitialResources (uel0001_script.lua:159) ==')
 // OnStopBeingBuilt -> ForkThread(GiveInitialResources) -> WaitTicks(5) ->
 // brain:GiveResource('Energy', StorageEnergy) + ('Mass', StorageMass).
-// No TS starting value: the original Lua gives the army its own camp.
+// Kein TS-Startwert: die Original-Lua schenkt der Armee ihr eigenes Lager.
 for (let i = 0; i < 10; i++) beat()
-check(army.energy === 4000, `Energy ${army.energy} = full storage (gifted by the ACU)`)
-check(army.mass === 650, `Dimensions ${army.mass} = full bearing (gifted by the ACU)`)
+check(army.energy === 4000, `Energie ${army.energy} = volles Lager (von der ACU geschenkt)`)
+check(army.mass === 650, `Masse ${army.mass} = volles Lager (von der ACU geschenkt)`)
 
-console.log('\n== Income from the real blueprint ==')
-check(army.incomeEnergy === 20, `Energy Income = ${army.incomeEnergy} (from Blueprint)`)
-check(army.incomeMass === 1, `Mass Income = ${army.incomeMass} (from Blueprint)`)
-// Empty the stock, then it grows with exactly the blueprint income.
+console.log('\n== Einkommen aus dem echten Blueprint ==')
+check(army.incomeEnergy === 20, `Energie-Einkommen = ${army.incomeEnergy} (aus Blueprint)`)
+check(army.incomeMass === 1, `Masse-Einkommen = ${army.incomeMass} (aus Blueprint)`)
+// Vorrat leeren, dann wächst er mit genau dem Blueprint-Einkommen.
 army.energy = 0
 for (let i = 0; i < 10; i++) beat()
 check(near(army.energy, 20), `Energie nach 1 s ab 0: ${army.energy.toFixed(1)} (= 20/s)`)
 
-console.log('\n== brain:GetEconomyStored / GetEconomyIncome (moho, reads live state) ==')
+console.log('\n== brain:GetEconomyStored / GetEconomyIncome (moho, liest Live-Zustand) ==')
 const brainE = Number(host.eval(`return __units[${acu}]:GetAIBrain():GetEconomyStored('ENERGY')`))
 check(near(brainE, army.energy, 0.01), `GetEconomyStored('ENERGY') = ${brainE.toFixed(1)} == ${army.energy.toFixed(1)}`)
-// PER TICK, not per second: GetEconomyIncome is a raw field read from
-// CEconomy.mTotals (Cfile:739923), filled with ×0.1 per tick
-// (HandleResourceManagement, Cfile:954011-954028). The key witness is this
-// Original Lua itself: defaultweapons.lua:970 calculates
+// PER TICK, nicht pro Sekunde: GetEconomyIncome ist ein roher Feld-Read aus
+// CEconomy.mTotals (Cfile:739923), befüllt pro Tick mit ×0.1
+// (HandleResourceManagement, Cfile:954011-954028). Der Kronzeuge ist die
+// Original-Lua selbst: defaultweapons.lua:970 rechnet
 // `GetEconomyIncome('ENERGY') * 10 # per tick to per seconds`.
 const brainInc = Number(host.eval(`return __units[${acu}]:GetAIBrain():GetEconomyIncome('ENERGY')`))
-check(near(brainInc, 2.0, 0.001), `GetEconomyIncome('ENERGY') = ${brainInc} (per TICK: 20/s ÷ 10)`)
-check(near(brainInc * 10, 20, 0.001), 'the defaultweapons calculation (×10) results in 20/s again')
+check(near(brainInc, 2.0, 0.001), `GetEconomyIncome('ENERGY') = ${brainInc} (pro TICK: 20/s ÷ 10)`)
+check(near(brainInc * 10, 20, 0.001), 'die defaultweapons-Rechnung (×10) ergibt wieder 20/s')
 
 console.log('\n== SetProductionActive(false): Einkommen stoppt ==')
 host.eval(`__units[${acu}]:SetProductionActive(false)`)
@@ -122,14 +122,14 @@ beat()
 check(army.incomeEnergy === 0, `Energie-Einkommen = ${army.incomeEnergy} nach Abschalten (0)`)
 host.eval(`__units[${acu}]:SetProductionActive(true)`)
 beat()
-check(army.incomeEnergy === 20, `Income back = ${army.incomeEnergy} after switching on again`)
+check(army.incomeEnergy === 20, `Einkommen zurück = ${army.incomeEnergy} nach Wiederanschalten`)
 
-console.log('\n== Stable: Large consumer, stock stuck at 0 (no negative value) ==')
+console.log('\n== Stall: Groß-Verbraucher, Vorrat klemmt bei 0 (kein negativer Wert) ==')
 army.energy = 0
 army.register(9999, { prodM: 0, prodE: 0, consM: 0, consE: 1000, storeM: 0, storeE: 0, complete: true, prodActive: true, consActive: true })
 for (let i = 0; i < 3; i++) beat()
 check(army.energy >= 0, `Energie bleibt >= 0 (${army.energy.toFixed(2)})`)
-check(army.expenseEnergy > 0 && army.expenseEnergy <= army.incomeEnergy + 0.01, `Output throttled to income (${army.expenseEnergy.toFixed(1)}/s, LimitingRate < 1)`)
+check(army.expenseEnergy > 0 && army.expenseEnergy <= army.incomeEnergy + 0.01, `Ausgabe auf Einkommen gedrosselt (${army.expenseEnergy.toFixed(1)}/s, LimitingRate < 1)`)
 
 if (warnings.length > 0) {
   console.log(`\n${warnings.length} WARN (erste 3):`)

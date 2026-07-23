@@ -11,8 +11,8 @@
   --text: #cdd6e4;
   --text-dim: #7c8aa5;
   --accent: #3d8bff;
-  /* The game's accent colors — from lua/skins/skins.lua:27-28
-     (fontColor FFbadbdb, bodyColor FF6FAFAF), not invented. */
+  /* Die Akzentfarben des Spiels — aus lua/skins/skins.lua:27-28
+     (fontColor FFbadbdb, bodyColor FF6FAFAF), nicht erfunden. */
   --fa-teal: #badbdb;
   --fa-teal-dim: #6fafaf;
   --rail-w: 196px;
@@ -64,7 +64,7 @@ body {
   min-height: 0;
 }
 
-/* --- Main menu: the navigation bar on the left ----------------------------- */
+/* --- Hauptmenü: die Navigationsleiste links ------------------------------- */
 
 #menu {
   width: var(--rail-w);
@@ -166,13 +166,13 @@ body.sidebar-collapsed {
   --sidebar-w: 0px;
 }
 
-/* --- Game mode: the game gets the whole screen ------------------- */
+/* --- Spielmodus: das Spiel bekommt den ganzen Bildschirm ------------------- */
 /*
- * Not cosmetic, but 1:1: the original UI calculates its layout against the
- * Root frame (= window size). If there was a web frame next to it, that would be fine
- * Orders panel (left 17) behind the sidebar — in the original the game fills
- * the screen. The launcher frame disappears as soon as a session
- * running (ESC brings it back until the real main menu is there).
+ * Nicht Kosmetik, sondern 1:1: die Original-UI rechnet ihr Layout gegen den
+ * Root-Frame (= Fenstergröße). Läge daneben noch ein Web-Rahmen, säße das
+ * Orders-Panel (links 17) hinter der Seitenleiste — im Original füllt das Spiel
+ * den Bildschirm. Der Launcher-Rahmen verschwindet also, sobald eine Session
+ * läuft (ESC bringt ihn zurück, bis das echte Hauptmenü da ist).
  */
 body.ingame #menu,
 body.ingame #sidebar,
@@ -185,9 +185,9 @@ body.ingame {
   --sidebar-w: 0px;
 }
 
-/* The game UI (maui tree + minimap/icons) belongs in the game. Outside the
-   In game mode, the launcher frame is there - both would be on top of each other
-   Mud. */
+/* Die Spiel-UI (maui-Baum + Minimap/Icons) gehört ins Spiel. Außerhalb des
+   Spielmodus liegt der Launcher-Rahmen dort — beides übereinander wäre nur
+   Matsch. */
 body:not(.ingame) #maui-root,
 body:not(.ingame) #hud {
   display: none;
@@ -308,7 +308,7 @@ select.inline {
 }
 
 /* ------------------------------------------------------------------ */
-/* In-game HUD (SupCom style, original textures)                        */
+/* In-Game-HUD (SupCom-Stil, Original-Texturen)                        */
 /* ------------------------------------------------------------------ */
 
 #hud {
@@ -316,22 +316,22 @@ select.inline {
   top: 0;
   right: 0;
   bottom: 0;
-  /* Starts where the viewport begins: to the right of menu + sidebar. */
+  /* Beginnt dort, wo der Viewport beginnt: rechts von Menü + Seitenleiste. */
   left: calc(var(--rail-w) + var(--sidebar-w));
   pointer-events: none;
   z-index: 20;
   font-family: 'Segoe UI', system-ui, sans-serif;
 }
 
-/* Original “mini” layout (economy_mini/orders_mini/unitview) ------------- */
+/* Original-„mini“-Layout (economy_mini/orders_mini/unitview) ------------- */
 
 #hud {
   font-family: Arial, sans-serif;
 }
 
-/* Orders, unit view and construction menu are drawn by the original Lua (maui layer).
-   The rules were here — with hand-counted pixels. They are gone:
-   the layout now comes from orders_mini.lua and unitview_mini.lua. */
+/* Orders, Unit-View und Bau-Menue zeichnet die Original-Lua (maui-Layer).
+   Die Regeln dafuer standen hier — mit handgezaehlten Pixeln. Sie sind weg:
+   das Layout kommt jetzt aus orders_mini.lua und unitview_mini.lua. */
 
 
 #strat-layer {
@@ -341,8 +341,8 @@ select.inline {
   pointer-events: none;
 }
 
-/* Life bar + construction progress (the engine draws them in the original above the
-   world; here the world is a canvas, so they are on top of it as a layer). */
+/* Lebensbalken + Baufortschritt (die Engine zeichnet sie im Original über der
+   Welt; hier ist die Welt ein Canvas, also liegen sie als Schicht darüber). */
 #bar-layer {
   position: absolute;
   inset: 0;
@@ -356,8 +356,8 @@ select.inline {
   top: 0;
 }
 
-/* A row of bars (life or construction progress) - the construction bar sits as in
-   Original UNDER the life bar. */
+/* Eine Balkenzeile (Leben bzw. Bau-Fortschritt) — der Bau-Balken sitzt wie im
+   Original UNTER dem Lebensbalken. */
 .bar-row {
   height: 3px;
   background: rgba(0, 0, 0, 0.65);
@@ -374,7 +374,7 @@ select.inline {
   width: 0;
 }
 
-/* The construction progress is YELLOW - as in the original. */
+/* Der Bau-Fortschritt ist GELB — wie im Original. */
 .build-fill {
   height: 100%;
   width: 0;
@@ -388,4 +388,5 @@ select.inline {
   image-rendering: pixelated;
 }
 
-/* Minimap frame from the original 9-slice parts */
+/* Minimap-Rahmen aus den Original-9-Slice-Teilen */
+

@@ -20,7 +20,7 @@ import { bpGet } from '../formats/blueprint'
  */
 export class BuildPreview {
   private mesh: THREE.Mesh | null = null
-  /** The scene entry - it has to be REMOVED FROM THE HIT LIST when cleaning up. */
+  /** Der Szenen-Eintrag — er muss beim Aufräumen AUS DER TREFFERLISTE raus. */
   private unit: SceneUnit | null = null
   private blueprintId = ''
   private loading = ''
@@ -30,7 +30,7 @@ export class BuildPreview {
     private readonly loadAssets: (id: string) => Promise<SandboxUnitAssets | null>,
   ) {}
 
-  /** No more build mode (or cursor off map): ghost disappears. */
+  /** Kein Bau-Modus mehr (oder Cursor außerhalb der Karte): Geist verschwindet. */
   hide(): void {
     if (this.mesh) this.mesh.visible = false
   }
@@ -52,14 +52,14 @@ export class BuildPreview {
     )
 
     if (this.blueprintId !== blueprintId) {
-      // A different building: remove the old model, load the new one.
+      // Ein anderes Gebäude: das alte Modell weg, das neue laden.
       this.dispose()
       this.blueprintId = blueprintId
       if (this.loading === blueprintId) return
       this.loading = blueprintId
       const assets = await this.loadAssets(blueprintId)
       this.loading = ''
-      // The mode may have already moved on while charging.
+      // Während des Ladens kann der Modus schon weitergezogen sein.
       if (!assets || this.blueprintId !== blueprintId) return
 
       const unit = this.viewer.addUnit(
@@ -70,13 +70,13 @@ export class BuildPreview {
       )
       this.unit = unit
       this.mesh = unit.mesh
-      // The SIZE is in the blueprint: `Display.UniformScale`. The model itself
-      // is built in model units, not world meters — any real unit
-      // is scaled with it (main.ts:addLuaUnitToScene). Without this line stood
-      // the ghost is many times too big on the map.
+      // Die GRÖSSE steht im Blueprint: `Display.UniformScale`. Das Modell selbst
+      // ist in Modell-Einheiten gebaut, nicht in Weltmetern — jede echte Einheit
+      // wird damit skaliert (main.ts:addLuaUnitToScene). Ohne diese Zeile stand
+      // der Geist um ein Vielfaches zu groß auf der Karte.
       const scale = bpGet(assets.bp, 'Display.UniformScale')
       if (typeof scale === 'number' && scale > 0) this.mesh.scale.setScalar(scale)
-      // Translucent - otherwise the spirit of a finished building is not visible
+      // Durchscheinend — sonst ist der Geist von einem fertigen Gebäude nicht zu
       // unterscheiden.
       const mat = this.mesh.material as THREE.Material
       mat.transparent = true
@@ -91,7 +91,7 @@ export class BuildPreview {
     }
   }
 
-  /** Where is the mind right now? (For the self-test — it must sit on the grid.) */
+  /** Wo steht der Geist gerade? (Für den Selbsttest — er muss auf dem Raster sitzen.) */
   debugPosition(): string | null {
     if (!this.mesh || !this.mesh.visible) return null
     const p = this.mesh.position

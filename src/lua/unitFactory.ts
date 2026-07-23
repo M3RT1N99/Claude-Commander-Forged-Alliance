@@ -7,7 +7,7 @@ import BLUEPRINTS_LUA from '../engine-lua/blueprints.lua?raw'
 /**
  * Spawnt Units über die Original-Lua-Klassen und exponiert ihren Zustand für
  * Renderer/Sim. Eine Unit entsteht wie in der Engine:
- *   `units/<id>/<id>_script.lua` setzt `TypeClass = <Class>` (leitet von den
+ *   `units/<id>/<id>_script.lua` setzt `TypeClass = <Klasse>` (leitet von den
  *   Fraktions-/Default-Klassen bis `moho.unit_methods` ab). Wir instanziieren
  *   TypeClass, setzen den Engine-Zustand (Blueprint, Position, Health) und
  *   rufen `OnCreate` — reines Original-Verhalten.
@@ -25,14 +25,14 @@ export interface LuaUnitState {
   heading: number
   health: number
   maxHealth: number
-  /** Mesh blueprint ID if the script called SetMesh */
+  /** Mesh-Blueprint-ID, falls das Skript SetMesh gerufen hat */
   mesh: string | null
 }
 
 
 export function installUnitFactory(host: LuaHost): void {
-  // The skeleton first: units.lua puts the resting pose on the unit when spawning
-  // (u.__bones), and the weapons are already checking their turret bones in OnCreate.
+  // Das Skelett zuerst: units.lua legt beim Spawn die Ruhepose an die Unit
+  // (u.__bones), und die Waffen prüfen ihre Turm-Knochen schon in OnCreate.
   host.eval(BONES_LUA)
   host.eval(SETUP_LUA)
 }
@@ -67,8 +67,8 @@ export function loadUnitBlueprint(host: LuaHost, id: string, bpBytes: Uint8Array
  * Sie müssen VOR dem ersten Schuss da sein: eine Waffe ruft mitten im Tick
  * `unit:CreateProjectile(bp.ProjectileId, …)` (weapon.lua:321), und die Engine
  * schlägt den Blueprint in ihrer Map nach — kein Treffer heißt in der Engine
- * „CreateProjectile: Invalid blueprint %s" (Cfile:930793), not “load
- * just after".
+ * „CreateProjectile: Invalid blueprint %s" (Cfile:930793), nicht „lade mal
+ * eben nach".
  *
  * Die BlueprintId ist der volle kleingeschriebene Pfad MIT `.bp`
  * (SetBackwardsCompatId, Blueprints.lua:104-107) — genau der String, der in
@@ -84,7 +84,7 @@ export function loadProjectileBlueprints(host: LuaHost, paths: string[]): number
   return Number(host.eval('local n = 0 for _ in pairs(__registered.Projectile) do n = n + 1 end return n'))
 }
 
-/** Spawns a unit via its original class; returns unit ID or throws. */
+/** Spawnt eine Unit über ihre Original-Klasse; liefert Unit-ID oder wirft. */
 /**
  * Das Skelett eines Blueprints in die Sim geben.
  *
@@ -127,7 +127,7 @@ export interface SimBone {
   rotation: [number, number, number, number]
 }
 
-/** The skeleton from a parsed SCM into the form the sim needs. */
+/** Das Skelett aus einer geparsten SCM in die Form, die die Sim braucht. */
 export function toSimBones(model: { bones: ScmBone[] }): SimBone[] {
   return model.bones.map((b) => ({
     name: b.name,
@@ -184,7 +184,7 @@ export function spawnBuildSite(
   return res.id
 }
 
-/** Reads the current state of a spawned Lua unit. */
+/** Liest den aktuellen Zustand einer gespawnten Lua-Unit. */
 export function readLuaUnit(host: LuaHost, id: number): LuaUnitState | null {
   return host.eval(`return __readUnit(${id})`) as LuaUnitState | null
 }

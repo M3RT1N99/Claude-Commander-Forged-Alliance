@@ -3,8 +3,8 @@ import type { LuaHost } from '../lua/host'
 /**
  * Der Engine-Teil der Weltansicht: Klick → Befehl.
  *
- * Hier wird NICHTS entschieden. Die UI-Lua hält den Zustand ("what does the next one do?
- *Click?") in `commandmode.lua`; die Engine FRAGT ihn ab (`GetCommandMode()`),
+ * Hier wird NICHTS entschieden. Die UI-Lua hält den Zustand ("was tut der nächste
+ * Klick?") in `commandmode.lua`; die Engine FRAGT ihn ab (`GetCommandMode()`),
  * rechnet die Geometrie (Snap, Höhe) und schickt den Befehl an die Sim. Danach
  * meldet sie den ausgeführten Befehl zurück an die Lua
  * (`commandmode.OnCommandIssued`), die daraus ihren Modus beendet, das
@@ -28,14 +28,14 @@ import type { LuaHost } from '../lua/host'
  */
 export interface CommandMode {
   mode: 'order' | 'build' | 'buildanchored' | false
-  /** For 'order' the RULEUCC_* name, for 'build' the blueprint ID. */
+  /** Bei 'order' der RULEUCC_*-Name, bei 'build' die Blueprint-ID. */
   name: string | false
 }
 
 export interface WorldCommandSim {
   /** queue=true (held Shift) appends instead of replacing (Cfile:1240965). */
   move(id: number, x: number, z: number, queue?: boolean): void
-  /** Attack (CAttackTargetTask): Unit `id` attacks the target unit. */
+  /** Attack (CAttackTargetTask): Unit `id` greift die Ziel-Unit an. */
   attack(id: number, targetId: number, queue?: boolean): void
   /** Repair (dispatch 0x14): resume building the unfinished target. */
   repair(id: number, targetId: number, queue?: boolean): void
@@ -50,34 +50,34 @@ export interface WorldCommandSim {
     blueprintId: string,
     pos: { x: number; y: number; z: number },
     army: number,
-    /** Shift held → the build order is attached to the row instead of replacing it. */
+    /** Shift gehalten → der Bau-Auftrag hängt an die Reihe an, statt sie zu ersetzen. */
     queue?: boolean,
   ): Promise<number>
 }
 
-/** A selected entity as reported by the UI VM (__uiSelectionJson). */
+/** Eine ausgewählte Einheit, wie die UI-VM sie meldet (__uiSelectionJson). */
 export interface SelectedUnit {
   id: number
   army: number
-  /** RULEUCC_Move is in the CommandCaps of the blueprint. */
+  /** RULEUCC_Move steht in den CommandCaps des Blueprints. */
   canMove: boolean
   /** RULEUCC_Repair — darf Bauten weiterbauen (repair task, dispatch 0x14). */
   canRepair: boolean
-  /** FACTORY category — it gets a rally point instead of a move command. */
+  /** Kategorie FACTORY — sie bekommt einen Sammelpunkt statt eines Move-Befehls. */
   isFactory: boolean
 }
 
-/** The command mode as the original Lua runs it (commandmode.lua:109). */
+/** Der Command-Mode, wie die Original-Lua ihn führt (commandmode.lua:109). */
 export function getCommandMode(host: LuaHost): CommandMode {
   return host.pull<CommandMode>('__uiCommandModeJson()')
 }
 
-/** Footprint dimensions from the UI VM blueprint (Footprint.SizeX/SizeZ). */
+/** Footprint-Maße aus dem Blueprint der UI-VM (Footprint.SizeX/SizeZ). */
 export function footprintOf(host: LuaHost, blueprintId: string): [number, number] {
   const fp = host.pull<[number, number] | null>(
     `__uiFootprintJson('${blueprintId.replaceAll("'", '')}')`,
   )
-  if (!fp) throw new Error(`No blueprint '${blueprintId}' in UI VM`)
+  if (!fp) throw new Error(`Kein Blueprint '${blueprintId}' in der UI-VM`)
   return fp
 }
 
@@ -120,17 +120,17 @@ export async function worldClick(
     repairTargetId?: number
   } = { queue: false },
 ): Promise<string | null> {
-  // pull() returns JSON — an EMPTY Lua table would arrive as `{}` in JS,
-  // not as `[]`, and `for…of` then threw "selection is not iterable".
+  // pull() liefert JSON — eine LEERE Lua-Tabelle wuerde als `{}` in JS ankommen,
+  // nicht als `[]`, und `for…of` warf dann "selection is not iterable".
   const selection = host.pull<SelectedUnit[]>('__uiSelectionJson()')
   if (selection.length === 0) return null
 
   const cm = getCommandMode(host)
 
-  // The attack button (orders.lua:151 AttackOrderBehavior) sets the
-  // Command mode 'order' with RULEUCC_Attack — the next click attacks.
-  // Attack on GROUND (without target unit) is a separate task (CFireAtTask)
-  // and not yet built — that's what the return text says instead of ending silently.
+  // Der Attack-Button (orders.lua:151 AttackOrderBehavior) setzt den
+  // Command-Mode 'order' mit RULEUCC_Attack — der nächste Klick greift an.
+  // Attack auf BODEN (ohne Ziel-Unit) ist ein eigener Task (CFireAtTask)
+  // und noch nicht gebaut — das sagt der Rückgabetext, statt still zu enden.
   if (cm.mode === 'order' && cm.name === 'RULEUCC_Attack') {
     if (opts.enemyTargetId === undefined) return 'Attack auf Boden: noch kein Weg (CFireAtTask fehlt)'
     let n = 0
@@ -175,15 +175,15 @@ export async function worldClick(
     return `Bau: ${cm.name} auf ${pos.x.toFixed(1)}, ${pos.z.toFixed(1)}${wer}`
   }
 
-  // Without build mode, the default command is attached to the unit's COMMAND-CAPS:
+  // Ohne Bau-Modus hängt der Standardbefehl an den COMMAND-CAPS der Einheit:
   //
-  //   Click on ENEMY → Attack (the engine's default)
+  //   Klick auf FEIND             → Attack (der Default der Engine)
   //   RULEUCC_Move (Panzer, ACU)  → Bewegungsbefehl
-  //   Factory without Move → COLLECTION POINT (IssueFactoryRallyPoint,
-  //                                 its own engine binding, Cfile:1008266)
+  //   Fabrik ohne Move            → SAMMELPUNKT (IssueFactoryRallyPoint,
+  //                                 eine eigene Engine-Bindung, Cfile:1008266)
   //
-  // If you send the move command to everything, you also send it to buildings - and that
-  // then drove through the area instead of getting to a meeting point.
+  // Wer den Move-Befehl an alles schickt, schickt ihn auch an Gebäude — und die
+  // fuhren dann durch die Gegend, statt einen Sammelpunkt zu bekommen.
   const y = elevation(hit.x, hit.z)
   if (opts.enemyTargetId !== undefined) {
     let n = 0

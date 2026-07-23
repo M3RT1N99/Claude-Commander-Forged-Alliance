@@ -60,13 +60,13 @@ const host = await LuaHost.create(files, (level, msg) => {
 })
 
 installEngine(host)
-// Flat test area - EXPLICIT because the engine crashes without a map (no silent 0 value).
+// Flaches Testgelaende — EXPLIZIT, weil die Engine ohne Karte knallt (kein stiller 0-Wert).
 setTerrainSource(host, FLAT_TEST_TERRAIN)
 
-// Discovery trap: report missing engine globals (no guessing).
+// Discovery-Trap: fehlende Engine-Globals melden (kein Raten).
 const missing = new Set<string>()
 
-console.log('\n== Import cascade: Unit.lua + defaultunits.lua ==')
+console.log('\n== Import-Kaskade: Unit.lua + defaultunits.lua ==')
 try {
   const unitType = host.eval(`return type(import('/lua/sim/Unit.lua').Unit)`)
   check(unitType === 'table', `import('/lua/sim/Unit.lua').Unit -> ${unitType}`)
@@ -82,9 +82,9 @@ try {
     for _ in pairs(d) do n = n + 1 end
     return n
   `)
-  check(typeof kinds === 'number' && kinds >= 20, `defaultunits.lua defines ${kinds} classes`)
+  check(typeof kinds === 'number' && kinds >= 20, `defaultunits.lua definiert ${kinds} Klassen`)
 
-  // Check derivation: StructureUnit inherits (transitively) from Unit
+  // Ableitung prüfen: StructureUnit erbt (transitiv) von Unit
   const derives = host.eval(`
     local d = import('/lua/defaultunits.lua')
     local Unit = import('/lua/sim/Unit.lua').Unit
@@ -98,7 +98,7 @@ try {
     end
     return derivesFrom(d.StructureUnit, Unit)
   `)
-  check(derives === true, 'StructureUnit inherits from Unit (class hierarchy linked)')
+  check(derives === true, 'StructureUnit erbt von Unit (Klassenhierarchie verlinkt)')
 } catch (err) {
   check(false, `defaultunits.lua: ${(err as Error).message.slice(0, 140)}`)
 }

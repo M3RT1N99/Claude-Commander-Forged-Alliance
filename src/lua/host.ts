@@ -32,7 +32,7 @@ export class LuaHost {
     private readonly factory: LuaFactory,
     private readonly luaWasm: unknown,
     readonly lua: LuaEngine,
-    /** Key: lowercase VFS path without leading slash. */
+    /** Key: kleingeschriebener VFS-Pfad ohne führenden Slash. */
     private readonly files: Map<string, Uint8Array>,
     private readonly log: LogSink,
   ) {}
@@ -52,23 +52,23 @@ export class LuaHost {
     return host
   }
 
-  /** Transpiles a module, mounts it into the VM FS, provides the FS path. */
+  /** Transpiliert ein Modul, mountet es ins VM-FS, liefert den FS-Pfad. */
   private mountModule(name: string): string | null {
     const key = name.replace(/^\/+/, '').toLowerCase()
     const bytes = this.files.get(key)
     if (!bytes) return null
     const fsPath = `${FS_PREFIX}/${key}`
     if (!this.mounted.has(fsPath)) {
-      // Byte in, byte out. The transpiler works on text, the VM wants that
-      // ORIGINAL BYTES — Lua is byte-transparent, and the engine transcodes
-      // nothing: it reads the file as it is in the .scd (the loc files are
-      // UTF-8, `loc/de/strings_db.lua` contains "ä" as C3 A4).
+      // Byte rein, Byte raus. Der Transpiler arbeitet auf Text, die VM will die
+      // ORIGINAL-BYTES — Lua ist byte-transparent, und die Engine transkodiert
+      // nichts: sie liest die Datei, wie sie im .scd steht (die Loc-Dateien sind
+      // UTF-8, `loc/de/strings_db.lua` enthält „ä" als C3 A4).
       //
-      // A string may NOT be mounted directly here: Emscripten encoded
-      // it as UTF-8, and every byte above 0x7F would be double encoded — in the menu
+      // Ein String darf hier NICHT direkt gemountet werden: Emscripten kodiert
+      // ihn als UTF-8, und jedes Byte über 0x7F wäre doppelt kodiert — im Menü
       // stand „Profil Ã¤ndern".
       const { code } = transpileFaLua(bytesToLatin1(bytes))
-      // @ts-expect-error luaWasm is the internal Emscripten module
+      // @ts-expect-error luaWasm ist das interne Emscripten-Modul
       this.factory.mountFileSync(this.luaWasm, fsPath, latin1ToBytes(code))
       this.mounted.add(fsPath)
     }
@@ -78,30 +78,30 @@ export class LuaHost {
   private async boot(): Promise<void> {
     const g = this.lua.global
 
-    // --- Engine globals that expect the original scripts ---------------
+    // --- Engine-Globals, die die Original-Skripte erwarten ---------------
     g.set('LOG', (...a: unknown[]) => this.log('LOG', a.map(str).join('')))
     g.set('SPEW', (...a: unknown[]) => this.log('SPEW', a.map(str).join('')))
     g.set('WARN', (...a: unknown[]) => this.log('WARN', a.map(str).join('')))
     g.set('_ALERT', (...a: unknown[]) => this.log('WARN', a.map(str).join('')))
     g.set('FileCollapsePath', collapsePath)
-    // `?? false`, NOT `null`: a JS function may never be `null`
-    // return — the VM then dies deep in foreign Lua ("Cannot read
-    // properties of null"). Since the hook mechanism for EVERY module additionally
-    // asks for `/schook/<modul>` (which usually doesn't exist).
-    // this path constantly.
+    // `?? false`, NICHT `null`: eine JS-Funktion darf wasmoon niemals `null`
+    // zurückgeben — die VM stirbt dann tief in fremder Lua ("Cannot read
+    // properties of null"). Seit der Hook-Mechanismus für JEDES Modul zusätzlich
+    // nach `/schook/<modul>` fragt (und das meistens nicht existiert), trifft
+    // dieser Pfad ständig.
     g.set('__mountModule', (name: string) => this.mountModule(name) ?? false)
 
     // Kompat-Schicht (Lua-5.0-Bibliotheksfunktionen) + Basis-Engine-Globals
     this.lua.doStringSync(COMPAT_LUA)
     this.lua.doStringSync(BOOT_LUA)
 
-    // Load original module system (defines import(), __modules)
+    // Original-Modulsystem laden (definiert import(), __modules)
     this.runModuleGlobally('/lua/system/import.lua')
-    // Load class system (defines global class)
+    // Klassensystem laden (definiert globales Class)
     this.runModuleGlobally('/lua/system/class.lua')
   }
 
-  /** Runs a module in the GLOBAL environment (for boot scripts). */
+  /** Führt ein Modul im GLOBALEN Environment aus (für Boot-Skripte). */
   private runModuleGlobally(name: string): void {
     const fsPath = this.mountModule(name)
     if (!fsPath) throw new Error(`Boot-Modul nicht gefunden: ${name}`)
@@ -109,7 +109,7 @@ export class LuaHost {
     if (err) throw new Error(`Fehler in ${name}: ${err}`)
   }
 
-  /** Loads a module over the original `import()` and returns the module table. */
+  /** Lädt ein Modul über das Original-`import()` und gibt die Modultabelle. */
   importModule(name: string): unknown {
     return this.lua.doStringSync(`return import(${JSON.stringify(name)})`)
   }
@@ -145,17 +145,17 @@ export class LuaHost {
     return JSON.parse(payload) as T
   }
 
-  /** Sets/overrides a global symbol (engine function, table). */
+  /** Setzt/überschreibt ein globales Symbol (Engine-Funktion, Tabelle). */
   setGlobal(name: string, value: unknown): void {
-    // A JS function must NEVER return `null` to Lua: wasmoon checks
-    // the return value with `typeof target !== 'object'` and then takes action
-    // `target.then` to (wasmoon/dist/index.js:1020-1026). For `null` is
-    // `typeof` but "object" — the VM dies with "Cannot read properties of null
-    // (reading 'then')", somewhere deep in an original Lua file that
-    // has nothing to do with it. (Found as GetTextureDimensions for a
-    // missing DDS `null` returned: selecting the ACU knocked down the entire UI VM.)
+    // Eine JS-Funktion darf NIEMALS `null` nach Lua zurückgeben: wasmoon prüft
+    // den Rückgabewert mit `typeof target !== 'object'` und greift danach auf
+    // `target.then` zu (wasmoon/dist/index.js:1020-1026). Für `null` ist
+    // `typeof` aber "object" — die VM stirbt mit "Cannot read properties of null
+    // (reading 'then')", und zwar irgendwo tief in einer Original-Lua-Datei, die
+    // damit nichts zu tun hat. (Gefunden, als GetTextureDimensions für eine
+    // fehlende DDS `null` lieferte: die Auswahl der ACU riss die ganze UI-VM um.)
     //
-    // `undefined` is the correct value — it becomes `nil` in Lua.
+    // `undefined` ist der richtige Wert — daraus wird in Lua `nil`.
     if (typeof value === 'function') {
       const fn = value as (...args: unknown[]) => unknown
       this.lua.global.set(name, (...args: unknown[]) => {
@@ -176,12 +176,12 @@ export class LuaHost {
     this.files.set(path.replace(/^\/+/, '').toLowerCase(), bytes)
   }
 
-  /** Checks whether a module path exists in the host VFS. */
+  /** Prüft, ob ein Modul-Pfad im Host-VFS vorhanden ist. */
   hasFile(path: string): boolean {
     return this.files.has(path.replace(/^\/+/, '').toLowerCase())
   }
 
-  /** Runs a boot module in the global environment (public to setup). */
+  /** Führt ein Boot-Modul im globalen Environment aus (öffentlich für Setup). */
   loadGlobal(name: string): void {
     this.runModuleGlobally(name)
   }
@@ -241,7 +241,7 @@ export class LuaHost {
   }
 }
 
-/** Engine bootstrap in Lua: doscript + __runGlobal based on loadfile. */
+/** Engine-Bootstrap in Lua: doscript + __runGlobal auf Basis von loadfile. */
 
 /**
  * Bytes ↔ Text, ein Byte = ein Zeichen (echtes Latin-1).
@@ -254,7 +254,7 @@ export class LuaHost {
  */
 function bytesToLatin1(bytes: Uint8Array): string {
   let out = ''
-  const CHUNK = 0x8000 // String.fromCharCode does not take any number of arguments
+  const CHUNK = 0x8000 // String.fromCharCode nimmt nicht beliebig viele Argumente
   for (let i = 0; i < bytes.length; i += CHUNK) {
     out += String.fromCharCode(...bytes.subarray(i, i + CHUNK))
   }
@@ -273,7 +273,7 @@ function str(v: unknown): string {
   return String(v)
 }
 
-/** FA `FileCollapsePath`: resolves `..`/`.` segments in a VFS path. */
+/** FA `FileCollapsePath`: löst `..`/`.`-Segmente in einem VFS-Pfad auf. */
 function collapsePath(path: string): string {
   const absolute = path.startsWith('/')
   const parts: string[] = []

@@ -19,7 +19,7 @@ const targets = (await (await fetch(`http://127.0.0.1:${port}/json`)).json()) as
 }[]
 const page = targets.find((t) => t.type === 'page' && t.url.includes('localhost'))
 if (!page) {
-  console.log('no page found:', targets.map((t) => `${t.type} ${t.url}`).join(', '))
+  console.log('keine Seite gefunden:', targets.map((t) => `${t.type} ${t.url}`).join(', '))
   process.exit(1)
 }
 const ws = new WebSocket(page.webSocketDebuggerUrl)
@@ -42,7 +42,7 @@ const evaluate = async (expr: string): Promise<unknown> => {
     }),
   )
   const res = (await done) as { result?: { value?: unknown }; exceptionDetails?: unknown }
-  if (res.exceptionDetails) return `ERROR: ${JSON.stringify(res.exceptionDetails).slice(0, 200)}`
+  if (res.exceptionDetails) return `FEHLER: ${JSON.stringify(res.exceptionDetails).slice(0, 200)}`
   return res.result?.value
 }
 
@@ -55,9 +55,9 @@ const info = await evaluate(`(() => {
     controls: document.querySelectorAll('#maui-root > div').length,
   })
 })()`)
-console.log('Condition:', info)
+console.log('Zustand:', info)
 
-// Screenshot via CDP — with page RUNNING, not with frozen virtual time.
+// Screenshot ueber CDP — mit LAUFENDER Seite, nicht mit eingefrorener virtueller Zeit.
 const shotId = ++id
 const shotDone = new Promise<unknown>((r) => pending.set(shotId, r))
 ws.send(JSON.stringify({ id: shotId, method: 'Page.captureScreenshot', params: { format: 'png' } }))

@@ -1,4 +1,4 @@
-/** Diagnosis: WaterRamp pixels + water parameters of a card (debug tool). */
+/** Diagnose: WaterRamp-Pixel + Wasser-Parameter einer Karte (Debug-Werkzeug). */
 import { readFile, open, type FileHandle } from 'node:fs/promises'
 import { ZipArchive } from '../src/vfs/zipArchive'
 import type { RandomAccessFile } from '../src/vfs/randomAccess'
@@ -66,4 +66,4 @@ for (let z = 180; z < 210; z++) {
     max = Math.max(max, h)
   }
 }
-console.log('Terrain around spawn: min', min.toFixed(2), 'max', max.toFixed(2))
+console.log('Terrain um Spawn: min', min.toFixed(2), 'max', max.toFixed(2))

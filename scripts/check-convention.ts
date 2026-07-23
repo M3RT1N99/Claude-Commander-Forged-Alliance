@@ -38,8 +38,8 @@ async function main() {
         const [r0, r1, r2, r3] = b.rotation
         const q =
           quatOrder === 'wxyz'
-            ? new Quaternion(r1!, r2!, r3!, r0!) // stored w,x,y,z
-            : new Quaternion(r0!, r1!, r2!, r3!) // stored x,y,z,w
+            ? new Quaternion(r1!, r2!, r3!, r0!) // gespeichert w,x,y,z
+            : new Quaternion(r0!, r1!, r2!, r3!) // gespeichert x,y,z,w
         const local = new Matrix4().compose(new Vector3(...b.position), q, new Vector3(1, 1, 1))
         const world =
           b.parent >= 0 ? new Matrix4().multiplyMatrices(worlds[b.parent]!, local) : local

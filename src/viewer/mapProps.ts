@@ -61,7 +61,7 @@ export interface MapPropsStats {
 
 interface PropVariant {
   defines: { [key: string]: boolean }
-  /** AlphaFunc Greater reference (0-1); 0 = test disabled. */
+  /** AlphaFunc-Greater reference (0-1); 0 = test disabled. */
   alphaRef: number
   /** SrcAlpha/InvSrcAlpha blending (VertexNormal technique, mesh.fx:3936). */
   blend: boolean
@@ -72,10 +72,10 @@ interface PropVariant {
 /**
  * Prop shader name -> render variant (prop.frag.glsl + material state),
  * per the mesh.fx techniques:
- * NormalMappedAlpha (:4024-4037) — alpha test 0x80, blending DISABLED
- * VertexNormal (:3934-3947) — alpha test 0x23 WITH alpha blending
- * NormalMappedTerrain (:4688-4699) — opaque, no test
- * The Undulating/Bloating variants also sway the vertices in the
+ *   NormalMappedAlpha (:4024-4037)  — alpha test 0x80, blending DISABLED
+ *   VertexNormal      (:3934-3947)  — alpha test 0x23 WITH alpha blending
+ *   NormalMappedTerrain (:4688-4699) — opaque, no test
+ * The Undulating/Bloating variants additionally sway the vertices in the
  * original (tree movement, mesh.fx UndulatingNormalMappedVS) — that vertex
  * motion is still missing; lighting/alpha test match NormalMappedAlpha.
  */
@@ -198,10 +198,10 @@ export class MapProps {
           xAxis.set(...p.rotationX)
           yAxis.set(...p.rotationY)
           zAxis.set(...p.rotationZ)
-          basis.makeBasic(xAxis, yAxis, zAxis)
+          basis.makeBasis(xAxis, yAxis, zAxis)
           matrices.push(
             new THREE.Matrix4()
-              .copy(base)
+              .copy(basis)
               .scale(
                 new THREE.Vector3(
                   p.scale[0] * uniformScale,
@@ -213,7 +213,7 @@ export class MapProps {
           )
         }
 
-        // One InstanceMesh per LOD; the shader draws only the band
+        // One InstancedMesh per LOD; the shader draws only the band
         // (previous cutoff, own cutoff] — together that is Mesh::ComputeLOD.
         let near = 0
         for (const lod of lods) {
@@ -244,7 +244,7 @@ export class MapProps {
             uniforms: {
               ...(shadow ?? {}),
               environmentMap: { value: envCube },
-              albedoMap: { value: albedo ?? gray },
+              albedoMap: { value: albedo ?? grey },
               normalsMap: { value: normals ?? flatNormal },
               specTeamMap: { value: specTeam ?? blackSpec },
               sunDirection: { value: lighting.sunDirection },
@@ -267,7 +267,7 @@ export class MapProps {
             blendDst: variant.blend ? THREE.OneMinusSrcAlphaFactor : THREE.ZeroFactor,
             blendSrcAlpha: THREE.ZeroFactor,
             blendDstAlpha: THREE.OneFactor,
-            // Foliage cross planes are visible from both sides — like that
+            // Foliage cross planes are visible from both sides — like the
             // unit path we render SCM double-sided.
             side: THREE.DoubleSide,
           })
@@ -287,7 +287,7 @@ export class MapProps {
             const depthMaterial = new THREE.ShaderMaterial({
               vertexShader: DEPTH_PROP_VS,
               fragmentShader: variant.defines.ALPHATEST ? DEPTH_CLIP_FS : DEPTH_FS,
-              uniforms: { albedoMap: { value: albedo ?? gray } },
+              uniforms: { albedoMap: { value: albedo ?? grey } },
               side: THREE.DoubleSide,
             })
             out.disposables.push(depthMaterial)
@@ -305,7 +305,7 @@ export class MapProps {
 
     if (out.stats.missing.length > 0) {
       console.warn(
-        `map props: ${out.stats.missing.length} blueprint(s) not renderable: `+
+        `map props: ${out.stats.missing.length} blueprint(s) not renderable: ` +
           out.stats.missing.slice(0, 5).join(', ') +
           (out.stats.missing.length > 5 ? ', …' : ''),
       )

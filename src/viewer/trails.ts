@@ -26,7 +26,7 @@ import { applyBlend } from './particleMaterial'
  *    Partikel-Semantik (Size skaliert dort das ±1-Quad).
  */
 
-/** The fields of a TrailEmitterBlueprint (effects-audio.md). */
+/** Die Felder eines TrailEmitterBlueprints (effects-audio.md). */
 export interface TrailBpData {
   Lifetime?: number
   TrailLength?: number
@@ -42,7 +42,7 @@ export interface TrailBpData {
 const MAX_POINTS = 64
 
 const VERTEX = /* glsl */ `
-  attribute vec3 tDirection; // Track direction at point (world)
+  attribute vec3 tDirection; // Spur-Richtung am Punkt (Welt)
   attribute vec2 tLife;      // x = startTime (Tick), y = lifetime (Ticks)
   attribute vec2 tUv;        // x = Quer-U (0/1), y = repeatvee (längs)
   attribute float tWidth;    // ±Halbbreite (Vorzeichen = Ribbon-Seite)
@@ -53,7 +53,7 @@ const VERTEX = /* glsl */ `
   varying vec2 vUv1;
 
   void main() {
-    // TrailVS (particle.fx:355-392): Point and direction in the view space,
+    // TrailVS (particle.fx:355-392): Punkt und Richtung in den View-Space,
     // Quer-Versatz = normalize(cross((0,0,1), dirView)) * Width.
     vec3 posView = (viewMatrix * vec4(position, 1.0)).xyz;
     vec3 dirView = mat3(viewMatrix) * tDirection;
@@ -76,7 +76,7 @@ const FRAGMENT = /* glsl */ `
   varying vec2 vUv1;
 
   void main() {
-    // TrailPS (particle.fx:395-401): live segments only (0 < t < 1).
+    // TrailPS (particle.fx:395-401): nur lebende Segmente (0 < t < 1).
     if (vUv1.x <= 0.0 || vUv1.x >= 1.0) discard;
     gl_FragColor = texture2D(uRamp, vUv1) * texture2D(uTex, vUv0);
   }
@@ -89,7 +89,7 @@ interface SharedBp {
   halfWidth: number
 }
 
-/** A living ribbon: the point ring of a trail emitter. */
+/** Ein lebendes Ribbon: der Punkte-Ring eines Trail-Emitters. */
 class TrailInstance {
   readonly mesh: THREE.Mesh
   private readonly geometry: THREE.BufferGeometry
@@ -101,7 +101,7 @@ class TrailInstance {
   private count = 0
   private write = 0
   private prev: [number, number, number] | null = null
-  /** Tick of the last placed point — to clean up spilled tracks. */
+  /** Tick des letzten gelegten Punkts — zum Aufräumen ausgelaufener Spuren. */
   lastPointTick = 0
   private readonly originTime: number
 
@@ -127,9 +127,9 @@ class TrailInstance {
     g.setAttribute('tLife', this.life)
     g.setAttribute('tUv', this.uv)
     g.setAttribute('tWidth', this.width)
-    // Triangle strip as an index list: two consecutive pairs of points
-    // form two triangles. The ring is NOT connected via the wrap —
-    // The trail has long since expired there anyway (MAX_POINTS >> TrailLength).
+    // Triangle-Strip als Indexliste: je zwei aufeinanderfolgende Punkt-Paare
+    // bilden zwei Dreiecke. Der Ring wird NICHT über den Umbruch verbunden —
+    // dort ist die Spur ohnehin längst ausgelaufen (MAX_POINTS >> TrailLength).
     const idx = new Uint16Array((MAX_POINTS - 1) * 6)
     for (let i = 0; i < MAX_POINTS - 1; i++) {
       const a = i * 2
@@ -143,7 +143,7 @@ class TrailInstance {
     this.mesh.renderOrder = 19
   }
 
-  /** One segment point per Sim tick — how the engine lays the track. */
+  /** Ein Segment-Punkt pro Sim-Tick — wie die Engine die Spur legt. */
   addPoint(x: number, y: number, z: number, tick: number): void {
     this.lastPointTick = tick
     let dx = 0
@@ -180,8 +180,8 @@ class TrailInstance {
       this.width.set([side === 0 ? -w : w], v)
     }
     for (const a of [this.pos, this.dir, this.life, this.uv, this.width]) a.needsUpdate = true
-    // Draw until the last written pair (the ring runs linearly until
-    // MAX_POINTS is reached - older segments are discarded by the pixel shader).
+    // Zeichnen bis zum letzten geschriebenen Paar (der Ring läuft linear, bis
+    // MAX_POINTS erreicht ist — ältere Segmente discardet der Pixelshader).
     this.geometry.setDrawRange(0, (Math.min(this.count, MAX_POINTS) - 1) * 6)
   }
 
@@ -202,7 +202,7 @@ export class TrailSystem {
 
   registerBp(bpId: string, bp: TrailBpData, tex: THREE.Texture, ramp: THREE.Texture): void {
     if (this.shared.has(bpId)) return
-    // Samplers like ParticleSampler0Wrap (WRAP/WRAP) or Sampler1 (CLAMP).
+    // Sampler wie ParticleSampler0Wrap (WRAP/WRAP) bzw. Sampler1 (CLAMP).
     tex.wrapS = THREE.RepeatWrapping
     tex.wrapT = THREE.RepeatWrapping
     ramp.wrapS = THREE.ClampToEdgeWrapping
@@ -229,7 +229,7 @@ export class TrailSystem {
     })
   }
 
-  /** Per Sim-Tick: the current position of the trail emitter as a segment. */
+  /** Pro Sim-Tick: die aktuelle Position des Trail-Emitters als Segment. */
   point(emitterId: number, bpId: string, x: number, y: number, z: number, tick: number, scale: number): void {
     const shared = this.shared.get(bpId)
     if (!shared) return
@@ -242,7 +242,7 @@ export class TrailSystem {
     inst.addPoint(x, y, z, tick)
   }
 
-  /** Set the clock + clear off traces that have leaked (emitter gone, segments dead). */
+  /** Uhr stellen + ausgelaufene Spuren (Emitter weg, Segmente tot) abräumen. */
   update(timeTicks: number): void {
     for (const s of this.shared.values()) {
       s.material.uniforms.uTime!.value = timeTicks
@@ -256,7 +256,7 @@ export class TrailSystem {
     }
   }
 
-  /** Number of live ribbons (for self-test). */
+  /** Anzahl lebender Ribbons (für den Selbsttest). */
   totalTrails(): number {
     return this.instances.size
   }

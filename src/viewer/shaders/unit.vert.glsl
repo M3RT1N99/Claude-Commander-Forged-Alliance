@@ -16,7 +16,7 @@
     vUv0 = uv;
     vUv1 = scmUv1;
 
-    // FA skinning is rigid: exactly one bone per vertex
+    // FA-Skinning ist rigid: genau ein Bone pro Vertex
     mat4 skin = boneMatrices[int(scmBoneIndex + 0.5)];
     vec4 skinned = skin * vec4(position, 1.0);
     mat3 skinRot = mat3(skin);

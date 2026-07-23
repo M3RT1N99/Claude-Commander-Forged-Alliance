@@ -5,9 +5,9 @@
 -- (Cfile:942105-942152). They are PER TICK, not per second:
 --
 --   turnRate    = bp.TurnRate       * turnMult  * 0.0017453292  (deg/s -> rad/tick)
---   maxSpeed ​​= bp.MaxSpeed ​​* speedMult * 0.1 (units/tick)
+--   maxSpeed    = bp.MaxSpeed       * speedMult * 0.1           (units/tick)
 --   maxReverse  = bp.MaxSpeedReverse* speedMult * 0.1
---   maxAccel = bp.MaxAcceleration* accMult * 0.01 (units/tick^2)
+--   maxAccel    = bp.MaxAcceleration* accMult   * 0.01          (units/tick^2)
 --   maxBrake    = (bp.MaxBrake ~= 0      and bp.MaxBrake      or bp.MaxAcceleration) * accMult * 0.01
 --   maxSteer    = (bp.MaxSteerForce ~= 0 and bp.MaxSteerForce or bp.MaxAcceleration) * accMult * 0.01
 --   turnRadius  = bp.TurnRadius == 0 and inf or bp.TurnRadius / turnMult
@@ -125,8 +125,8 @@ function __advanceMotion()
     local goal = u.__goal
     local p = u.__pos
 
-    -- ROTATE TARGET without driving target: the unit stands and turns to the target - with
-    -- their `Physics.TurnRate` (degrees/second), not immediately. The farmer sees his
+    -- DREH-ZIEL ohne Fahr-Ziel: die Unit steht und dreht sich zum Ziel — mit
+    -- ihrer `Physics.TurnRate` (Grad/Sekunde), nicht sofort. Der Bauer sieht sein
     -- Gebaeude an, bevor er anfaengt (build.lua setzt __faceGoal).
     if not goal and u.__faceGoal and p then
       local f = u.__faceGoal
@@ -151,18 +151,18 @@ function __advanceMotion()
       local dist = math.sqrt(dx * dx + dz * dz)
       local speed = u.__speed or 0
 
-      -- IMMOVEABLE (MaxSpeed ​​0): no target, no movement. Point.
+      -- UNBEWEGLICH (MaxSpeed 0): kein Ziel, keine Bewegung. Punkt.
       --
-      -- Previously it said `if m.maxSpeed <= 0 or dist <= ...` — and the branch
-      -- SET the position on the target. A building is there for everyone
-      -- Movement command TELEPORTED to the click point. A unit without
-      -- Drive does not move; It doesn't slide to its destination "quickly" either.
+      -- Vorher stand hier `if m.maxSpeed <= 0 or dist <= ...` — und der Zweig
+      -- SETZT die Position auf das Ziel. Ein Gebaeude ist damit bei jedem
+      -- Bewegungsbefehl an den Klickpunkt TELEPORTIERT. Eine Einheit ohne
+      -- Antrieb bewegt sich nicht; sie rutscht auch nicht „schnell" ans Ziel.
       if m.maxSpeed <= 0 then
         u.__goal = false
         u.__speed = 0
-      -- Close enough: arrive exactly on target this tick — except for one
-      -- STANDING unit occupies the cell: then to the next free cell
-      -- continue driving (occupancy instead of pushing, movement-path.md §6).
+      -- Nah genug: diesen Tick exakt auf dem Ziel ankommen — außer eine
+      -- STEHENDE Unit belegt die Zelle: dann zur nächsten freien Zelle
+      -- weiterfahren (Occupancy statt Pushing, movement-path.md §6).
       elseif dist <= math.max(speed, 0.05) then
         if blockedAt(u, goal[1], goal[2]) then
           local nx, nz = freeSpotNear(u, goal[1], goal[2])
@@ -181,17 +181,17 @@ function __advanceMotion()
           u.__speed = 0
         end
       else
-        -- Heading/Forward FROM THE BEGINNING OF THE TICK: the engine's cap cascade calculates
-        -- against the orientation BEFORE the rotation (CAiPathSpline::Generate).
+        -- Heading/Forward VOM TICK-ANFANG: die Cap-Kaskade der Engine rechnet
+        -- gegen die Ausrichtung VOR der Drehung (CAiPathSpline::Generate).
         local h0 = u.__heading or 0
         local fwdX = math.sin(h0)
         local fwdZ = math.cos(h0)
         local speedFrac = speed / m.maxSpeed -- Cfile:766083: |v|*10 / MaxSpeed
 
         -- Turn toward the goal. Effektive Drehrate = max(turnRate,
-        -- v / turnRadius), clamped to PI (Cfile:766161-766163 + 942169-942170):
-        -- a fast unit may set its TurnRadius circle with omega = v/r
-        -- hold, even beyond the nominal turn rate (ships).
+        -- v / turnRadius), auf PI geklemmt (Cfile:766161-766163 + 942169-942170):
+        -- eine schnelle Einheit darf ihren TurnRadius-Kreis mit omega = v/r
+        -- halten, auch ueber die nominelle TurnRate hinaus (Schiffe).
         local wanted = atan2(dx, dz)
         local diff = wanted - h0
         while diff > PI do diff = diff - 2 * PI end
@@ -208,38 +208,38 @@ function __advanceMotion()
           u.__heading = h0 + (diff > 0 and turn or -turn)
         end
 
-        -- The engine's speed cap cascade, 1:1 (sub_699760 @0x699760,
-        -- Cfile:942291-942328; called from CAiPathSpline::Generate 766232ff):
+        -- Die Speed-Cap-Kaskade der Engine, 1:1 (sub_699760 @0x699760,
+        -- Cfile:942291-942328; gerufen aus CAiPathSpline::Generate 766232ff):
         local cap
         if m.rotateOnSpot and m.rotateOnSpotThreshold > speedFrac then
-          -- GATE 1 (942301): RotateOnSpot ONLY below the speed threshold
-          -- (Default 50% MaxSpeed). align = dot(normalize(target), forward)
-          -- with heading before rotation (942303-942306): worse than
-          -- 0.98 (~11.5 degrees) -> stand and turn; otherwise full MaxSpeed
-          -- (the bow cap is skipped, 942307-942308).
+          -- GATE 1 (942301): RotateOnSpot NUR unterhalb der Speed-Schwelle
+          -- (Default 50 % MaxSpeed). align = dot(normalize(ziel), forward)
+          -- mit dem Heading vor der Drehung (942303-942306): schlechter als
+          -- 0.98 (~11.5 Grad) -> stehen und drehen; sonst voller MaxSpeed
+          -- (der Bogen-Cap wird uebersprungen, 942307-942308).
           local align = (dx * fwdX + dz * fwdZ) / dist
           cap = (align < 0.98) and 0 or m.maxSpeed
         else
-          -- Arc geometry (942310-942314): the circle by position and
-          -- Target, tangential to heading. cross = dz*fwd.x - fwd.z*dx;
+          -- Bogen-Geometrie (942310-942314): der Kreis durch Position und
+          -- Ziel, tangential zum Heading. cross = dz*fwd.x - fwd.z*dx;
           -- r = dist^2 * 0.5 / cross.
           local cross = dz * fwdX - fwdZ * dx
           local absR = 0
           if cross ~= 0 then absR = math.abs((dist * dist) * 0.5 / cross) end
           if absR < m.turnRadius then
-            -- GATE 2 (942316-942321): only turns Narrower than the TurnRadius
+            -- GATE 2 (942316-942321): nur Kurven ENGER als der TurnRadius
             -- drosseln — v = turnRate * |r| * 0.5.
             cap = (absR == 0) and m.maxSpeed or (m.turnRate * absR * 0.5)
           else
-            -- further arc: turnRadius acts like after the min terminal
-            -- "no cap" (942315/942327).
+            -- weiter Bogen: turnRadius wirkt nach der min-Klemme wie
+            -- "kein Cap" (942315/942327).
             cap = m.turnRadius
           end
         end
         if cap > m.maxSpeed then cap = m.maxSpeed end
 
-        -- Stopping kinematics (Cfile:766249-766262): within one
-        -- Brake ticks exactly the remaining distance, otherwise v = sqrt(2*brake*dist).
+        -- Anhalte-Kinematik (Cfile:766249-766262): innerhalb eines
+        -- Brems-Ticks exakt die Restdistanz, sonst v = sqrt(2*brake*dist).
         local stopCap = (dist <= m.brake) and dist or math.sqrt(2 * m.brake * dist)
         if stopCap < cap then cap = stopCap end
 

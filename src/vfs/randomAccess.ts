@@ -4,11 +4,11 @@
  */
 export interface RandomAccessFile {
   readonly size: number
-  /** Reads [start, end) as ArrayBuffer. */
+  /** Liest [start, end) als ArrayBuffer. */
   slice(start: number, end: number): Promise<ArrayBuffer>
 }
 
-/** Random access to a blob/file (File System Access API, <input>). */
+/** Wahlfreier Zugriff auf ein Blob/File (File System Access API, <input>). */
 export class BlobFile implements RandomAccessFile {
   constructor(private readonly blob: Blob) {}
 
@@ -31,18 +31,18 @@ export class HttpRangeFile implements RandomAccessFile {
   static async open(url: string, knownSize?: number): Promise<HttpRangeFile> {
     if (knownSize !== undefined) return new HttpRangeFile(url, knownSize)
     const res = await fetch(url, { method: 'HEAD' })
-    if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`)
+    if (!res.ok) throw new Error(`HTTP ${res.status} für ${url}`)
     return new HttpRangeFile(url, Number(res.headers.get('content-length') ?? 0))
   }
 
   async slice(start: number, end: number): Promise<ArrayBuffer> {
-    // Empty slice (e.g. 0-byte zip entry) — no request, otherwise arises
-    // an invalid range `bytes=X-(X-1)` that the server rejects.
+    // Leere Slice (z. B. 0-Byte-Zip-Eintrag) — kein Request, sonst entsteht
+    // eine ungültige Range `bytes=X-(X-1)`, die der Server ablehnt.
     if (end <= start) return new ArrayBuffer(0)
     const res = await fetch(this.url, {
       headers: { Range: `bytes=${start}-${end - 1}` },
     })
-    if (!res.ok) throw new Error(`HTTP ${res.status} for ${this.url}`)
+    if (!res.ok) throw new Error(`HTTP ${res.status} für ${this.url}`)
     return res.arrayBuffer()
   }
 }

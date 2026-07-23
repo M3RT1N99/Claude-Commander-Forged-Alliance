@@ -1,7 +1,7 @@
 // sky.fx DecalVS (:175-197): the "planets" are camera-facing billboards.
 // Per instance: world position + rotation + size + atlas sub-rect (uv.xy
 // offset, uv.zw extent); corner runs -1..1. viewRight/viewUp come from the
-// view matrix rows (camera base in world space).
+// view matrix rows (camera basis in world space).
 attribute vec2 corner;
 attribute vec4 planetPos;  // xyz world, w rotation
 attribute vec2 planetSize;

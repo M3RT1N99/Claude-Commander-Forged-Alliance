@@ -32,7 +32,7 @@ const GAME =
   process.env.CFA_GAME_DIR ??
   'C:/Program Files (x86)/Steam/steamapps/common/Supreme Commander Forged Alliance'
 
-// Preload all Lua files. mohodata.scd = base, lua.scd overlaid.
+// Alle Lua-Dateien vorladen. mohodata.scd = Basis, lua.scd überlagert.
 const files = new Map<string, Uint8Array>()
 const openFiles: NodeFile[] = []
 for (const archive of ['mohodata.scd', 'lua.scd']) {
@@ -57,12 +57,12 @@ const host = await LuaHost.create(files, (level, msg) => {
 })
 
 console.log('\n== Boot: Modulsystem + Klassensystem ==')
-check(host.eval('return type(import)') === 'function', 'import() is defined')
-// Class is a callable table (ClassMeta:__call), not a function
-check(host.eval('return type(Class)') === 'table', 'Class is defined (callable table)')
-check(host.eval('return type(__modules)') === 'table', '__modules table exists')
+check(host.eval('return type(import)') === 'function', 'import() ist definiert')
+// Class ist eine aufrufbare Tabelle (ClassMeta:__call), keine Funktion
+check(host.eval('return type(Class)') === 'table', 'Class ist definiert (callable table)')
+check(host.eval('return type(__modules)') === 'table', '__modules-Tabelle existiert')
 
-console.log('\n== Class instantiation (original class.lua) ==')
+console.log('\n== Class-Instanziierung (Original class.lua) ==')
 const greet = host.eval(`
   TestClass = Class() {
       greeting = 'hello',
@@ -72,7 +72,7 @@ const greet = host.eval(`
   obj.name = 'acu'
   return obj:Greet()
 `)
-check(greet === 'hello acu', `Instance method + inheritance: "${greet}"`)
+check(greet === 'hello acu', `Instanz-Methode + Vererbung: "${greet}"`)
 
 console.log('\n== Vererbung (2 Ebenen) ==')
 const inh = host.eval(`
@@ -80,9 +80,9 @@ const inh = host.eval(`
   Derived = Class(Base) { kind = 'derived' }
   return Derived():Kind()
 `)
-check(inh === 'derived', `Derivation overwrites field: "${inh}"`)
+check(inh === 'derived', `Ableitung überschreibt Feld: "${inh}"`)
 
-console.log('\n== import() loads a real original module ==')
+console.log('\n== import() lädt ein echtes Original-Modul ==')
 try {
   const utilsType = host.eval(`return type(import('/lua/system/utils.lua'))`)
   check(utilsType === 'table', `import('/lua/system/utils.lua') -> ${utilsType}`)
@@ -91,7 +91,7 @@ try {
 }
 
 if (warnings.length > 0) {
-  console.log(`\n${warnings.length} WARN from the Lua boot (first 5):`)
+  console.log(`\n${warnings.length} WARN aus dem Lua-Boot (erste 5):`)
   for (const w of warnings.slice(0, 5)) console.log(`  ${w.slice(0, 100)}`)
 }
 

@@ -31,7 +31,7 @@ export interface ScaAnim {
   duration: number
   boneNames: string[]
   boneParents: Int32Array
-  /** Root delta: overall movement of the animation [px,py,pz, qw,qx,qy,qz] */
+  /** Root-Delta: Gesamtbewegung der Animation [px,py,pz, qw,qx,qy,qz] */
   rootDelta: Float32Array
   /** Frame-Zeiten (numFrames) */
   times: Float32Array
@@ -72,11 +72,11 @@ export function parseSca(data: Uint8Array): ScaAnim {
   const expectedEnd = animDataOffset + KEY_BYTES + numFrames * frameBytes
   if (expectedEnd > data.byteLength) {
     throw new Error(
-      `SCA: File too short (${data.byteLength} B, expected ${expectedEnd} B) — layout error?`,
+      `SCA: Datei zu kurz (${data.byteLength} B, erwartet ${expectedEnd} B) — Layout-Fehler?`,
     )
   }
 
-  // --- Bone Names & Parents --------------------------------------------------
+  // --- Bone-Namen & Parents ---------------------------------------------------
   const boneNames: string[] = []
   let p = namesOffset
   for (let i = 0; i < numBones; i++) {
@@ -91,7 +91,7 @@ export function parseSca(data: Uint8Array): ScaAnim {
   }
 
   // --- Keys ---------------------------------------------------------------------
-  // Version < 5 stores quaternions as (x,y,z,w) → rotate to (w,x,y,z).
+  // Version < 5 speichert Quaternions als (x,y,z,w) → nach (w,x,y,z) rotieren.
   const oldQuatOrder = version < 5
 
   const readKey = (offset: number, out: Float32Array, outIdx: number): void => {

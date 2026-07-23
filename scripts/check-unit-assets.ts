@@ -47,7 +47,7 @@ for (const path of bpPaths) {
   if (has(`${base}_lod0.scm`)) meshOk++
   else meshMissing.push(id)
 
-  // current logic
+  // aktuelle Logik
   const currentAlbedo = has(`${base}_albedo.dds`) || has(`${base}_lod1_albedo.dds`)
 
   // Blueprint-LOD-Overrides
@@ -83,11 +83,11 @@ for (const path of bpPaths) {
   }
 }
 
-console.log(`\nUnits total: ${bpPaths.length}`)
+console.log(`\nUnits gesamt: ${bpPaths.length}`)
 console.log(`Mesh (<id>_lod0.scm) vorhanden: ${meshOk}, fehlend: ${meshMissing.length}`)
-console.log(`  Missing meshes: ${meshMissing.slice(0, 20).join(', ')}${meshMissing.length > 20 ? '…' : ''}`)
-console.log(`Albedo with current logic: ${texOkCurrent}`)
+console.log(`  Fehlende Meshes: ${meshMissing.slice(0, 20).join(', ')}${meshMissing.length > 20 ? '…' : ''}`)
+console.log(`Albedo mit aktueller Logik: ${texOkCurrent}`)
 console.log(`Albedo über Display.Mesh.LODs auflösbar: ${texFixableViaLod}`)
 console.log(`Albedo weiterhin fehlend: ${texMissing.length}`)
 console.log(`  ${texMissing.slice(0, 20).join(', ')}${texMissing.length > 20 ? '…' : ''}`)
-console.log(`Total units with LOD-AlbedoName override: ${lodOverrides}`)
+console.log(`Units mit LOD-AlbedoName-Override insgesamt: ${lodOverrides}`)

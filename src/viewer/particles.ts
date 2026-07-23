@@ -20,7 +20,7 @@ import type { SpawnedParticle, EmitterBpData } from '../effects/emitterRuntime'
 
 const CAPACITY = 1024
 
-/** The 4 corners of the ±1 quad (particle.fx: Corner), two triangles. */
+/** Die 4 Ecken des ±1-Quads (particle.fx: Corner), zwei Dreiecke. */
 function quadGeometry(): { position: THREE.BufferAttribute; index: THREE.BufferAttribute } {
   const corners = new Float32Array([-1, -1, 0, 1, -1, 0, 1, 1, 0, -1, 1, 0])
   const idx = new Uint16Array([0, 1, 2, 0, 2, 3])
@@ -45,8 +45,8 @@ class Batch {
   private count = 0
 
   constructor(bp: EmitterBpData, texture: THREE.Texture, ramp: THREE.Texture) {
-    // Sampler states from particle.fx:33-51: the particle texture wraps in U
-    // (frame strips) and clamps in V; the ramp is stuck in both axes.
+    // Sampler-Zustände aus particle.fx:33-51: die Partikeltextur wickelt in U
+    // (Frame-Strips) und klemmt in V; die Ramp klemmt in beiden Achsen.
     texture.wrapS = THREE.RepeatWrapping
     texture.wrapT = THREE.ClampToEdgeWrapping
     ramp.wrapS = THREE.ClampToEdgeWrapping
@@ -77,8 +77,8 @@ class Batch {
     this.time = mk(4)
     this.tex = mk(3)
     this.drag = mk(3)
-    // Dead slots (lifetime 0) degenerate in the shader - the buffer can be full
-    // can be drawn without empty slots being visible.
+    // Tote Slots (lifetime 0) degenerieren im Shader — der Puffer darf voll
+    // gezeichnet werden, ohne dass leere Slots sichtbar sind.
     g.setAttribute('pPos', this.pos)
     g.setAttribute('pSize', this.size)
     g.setAttribute('pVelocity', this.vel)
@@ -91,7 +91,7 @@ class Batch {
 
     this.mesh = new THREE.Mesh(g, this.material)
     this.mesh.frustumCulled = false
-    // Draw additive/modulating particles after the opaque meshes.
+    // Additive/modulierende Partikel nach den opaken Meshes zeichnen.
     this.mesh.renderOrder = 20
   }
 
@@ -135,11 +135,11 @@ export class ParticleSystem {
   private readonly camUp = new THREE.Vector3()
 
   constructor(
-    /** Appends the batch mesh to the scene (e.g. viewer.addHelper). */
+    /** Hängt das Batch-Mesh in die Szene (z. B. viewer.addHelper). */
     private readonly attach: (mesh: THREE.Mesh) => void,
   ) {}
 
-  /** Batch per emitter blueprint — created on the first particle of this type. */
+  /** Batch je Emitter-Blueprint — beim ersten Partikel dieses Typs angelegt. */
   batchFor(bpId: string, bp: EmitterBpData, texture: THREE.Texture, ramp: THREE.Texture): void {
     if (this.batches.has(bpId)) return
     const batch = new Batch(bp, texture, ramp)
@@ -164,7 +164,7 @@ export class ParticleSystem {
     for (const b of this.batches.values()) b.update(timeTicks, this.camRight, this.camUp)
   }
 
-  /** Total number of slots with particles spawned each (for self-test). */
+  /** Gesamtzahl der Slots mit je gespawnten Partikeln (für den Selbsttest). */
   totalParticles(): number {
     let n = 0
     for (const b of this.batches.values()) n += b.particleCount

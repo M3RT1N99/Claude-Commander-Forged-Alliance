@@ -1,5 +1,5 @@
 /**
- * Diagnose: "holes" in Watermaps (G≈0 mitten im Tiefwasser, DXT-Artefakte)
+ * Diagnose: "Löcher" in Watermaps (G≈0 mitten im Tiefwasser, DXT-Artefakte)
  * + lineare Regression G ≈ a·(elevation−h) + b je Karte, um zu prüfen, ob
  * eine höhenbasierte Tiefe die gebackenen Daten treu ersetzen kann.
  */
@@ -85,10 +85,10 @@ for (const dir of dirs) {
   if (holes > 0 || r2 < 0.95) {
     console.log(
       `${dir}: G ≈ ${a.toFixed(4)}·depth + ${b.toFixed(3)}  R²=${r2.toFixed(3)}  ` +
-        `Holes: ${holes} (${holePct}% of underwater Texels)`,
+        `Löcher: ${holes} (${holePct}% der Unterwasser-Texel)`,
     )
   }
   if (!worst || holes > worst.holes) worst = { map: dir, holes }
 }
 
-console.log(`\nWorst card: ${worst?.map} (${worst?.holes} holes)`)
+console.log(`\nSchlimmste Karte: ${worst?.map} (${worst?.holes} Löcher)`)

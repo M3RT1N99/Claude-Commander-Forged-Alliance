@@ -52,7 +52,7 @@ function decodeColorBlock(
   return fourColor
 }
 
-/** Decodes the 3-bit alpha indices of a DXT5 alpha block. */
+/** Dekodiert die 3-Bit-Alpha-Indizes eines DXT5-Alpha-Blocks. */
 function decodeDxt5Alpha(src: Uint8Array, o: number, out: Uint8Array): void {
   const a0 = src[o]!
   const a1 = src[o + 1]!

@@ -1,6 +1,6 @@
 -- Lua-5.0-Kompatibilität für FA-Skripte
 
--- Generic-for-Dispatcher (see rewriteForIn): Table -> pairs/next,
+-- Generic-for-Dispatcher (siehe rewriteForIn): Tabelle -> pairs/next,
 -- Iterator-Tripel unveraendert durchreichen.
 function __foriter(a, b, c)
   if type(a) == 'table' then
@@ -9,11 +9,11 @@ function __foriter(a, b, c)
   return a, b, c
 end
 
--- string.format: Lua 5.0 ignored nonsense flags on %s, Lua 5.4 throws
--- "invalid conversion specification". The original Lua uses this:
+-- string.format: Lua 5.0 ignorierte unsinnige Flags auf %s, Lua 5.4 wirft
+-- "invalid conversion specification". Die Original-Lua nutzt das:
 --   economy.lua:305   string.format("%+s", rateStr)
--- The flags '+', '#' and ' ' make no sense for %s and are removed;
--- '-' (left-aligned) and width specifications remain, they are also valid in 5.4.
+-- Die Flags '+', '#' und ' ' ergeben fuer %s keinen Sinn und werden entfernt;
+-- '-' (linksbuendig) und Breitenangaben bleiben, die sind auch in 5.4 gueltig.
 do
   local rawformat = string.format
   string.format = function(fmt, ...)
@@ -26,9 +26,9 @@ do
   end
 end
 
--- string.gfind was called this in Lua 5.0; from 5.1 the same function is called gmatch.
--- The original UI uses it (text.lua:170 uses it to wrap long texts) — without
--- Every tooltip with "attempt to call a nil value (field 'gfind')" dies.
+-- string.gfind hiess in Lua 5.0 so; ab 5.1 heisst dieselbe Funktion gmatch.
+-- Die Original-UI benutzt sie (text.lua:170 bricht damit lange Texte um) — ohne
+-- sie stirbt jeder Tooltip mit "attempt to call a nil value (field 'gfind')".
 string.gfind = string.gfind or string.gmatch
 
 table.getn = table.getn or function(t) return #t end

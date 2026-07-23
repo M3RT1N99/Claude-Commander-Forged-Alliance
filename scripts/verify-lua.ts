@@ -55,7 +55,7 @@ for (const archive of ['lua.scd', 'mohodata.scd', 'units.scd', 'projectiles.scd'
   for (const entry of luaFiles) {
     const bytes = await zip.read(entry)
     if (bytes[0] === 0x1b) {
-      bytecode++ // precompiled Lua bytecode, not source code
+      bytecode++ // vorkompilierter Lua-Bytecode, kein Quelltext
       continue
     }
     total++
@@ -67,8 +67,8 @@ for (const archive of ['lua.scd', 'mohodata.scd', 'units.scd', 'projectiles.scd'
     stats.varargArg += s.varargArg
 
     try {
-      // 5.3: goto/Labels (for `continue`) and C bit operators (`|`, `&`),
-      // which FA also uses - the target VM (Lua 5.4) can do both natively.
+      // 5.3: goto/Labels (für `continue`) und C-Bitoperatoren (`|`, `&`),
+      // die FA ebenfalls nutzt — beides kann der Ziel-VM (Lua 5.4) nativ.
       luaparse.parse(code, { luaVersion: '5.3', comments: false, scope: false })
       ok++
       archiveOk++
@@ -76,24 +76,24 @@ for (const archive of ['lua.scd', 'mohodata.scd', 'units.scd', 'projectiles.scd'
       failures.push(`${entry.name}: ${(err as Error).message.slice(0, 100)}`)
     }
   }
-  console.log(`${archive}: ${archiveOk}/${luaFiles.length} Lua files are valid Lua`)
+  console.log(`${archive}: ${archiveOk}/${luaFiles.length} Lua-Dateien sind gültiges Lua`)
 }
 
 console.log(
   `\nTranspiler: ${stats.hashComments} '#'-Kommentare, ${stats.notEquals} '!=', ` +
-    `${stats.forInTable} 'for-in-table', ${stats.continues} 'continue', ` +
+    `${stats.forInTable} 'for-in-Tabelle', ${stats.continues} 'continue', ` +
     `${stats.varargArg} 'arg'-Vararg umgeschrieben`,
 )
 console.log(
-  `Result: ${ok}/${total} Parse original Lua files as standard Lua` +
-    (bytecode > 0 ? ` (${bytecode} bytecode files skipped)` : ''),
+  `Ergebnis: ${ok}/${total} Original-Lua-Dateien parsen als Standard-Lua` +
+    (bytecode > 0 ? ` (${bytecode} Bytecode-Dateien übersprungen)` : ''),
 )
 if (failures.length > 0) {
-  console.error(`\n${failures.length} Error:`)
+  console.error(`\n${failures.length} Fehler:`)
   for (const f of failures.slice(0, 20)) console.error(`  ${f}`)
 }
 
-// Runtime check: Compat layer must load in the real VM
+// Laufzeit-Check: Compat-Schicht muss im echten VM laden
 const lua = await new LuaFactory().createEngine()
 await lua.doString(COMPAT_LUA)
 const compatOk = await lua.doString(
@@ -101,7 +101,7 @@ const compatOk = await lua.doString(
     'and type(setfenv) == "function" and type(math.mod) == "function"',
 )
 lua.global.close()
-console.log(`Compat layer in the Lua VM (wasmoon): ${compatOk ? 'OK' : 'FEHLER'}`)
+console.log(`Compat-Schicht im Lua-VM (wasmoon): ${compatOk ? 'OK' : 'FEHLER'}`)
 
 for (const f of openFiles) await f.close()
 process.exit(failures.length === 0 && compatOk ? 0 : 1)

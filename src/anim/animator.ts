@@ -14,7 +14,7 @@ import type { ScaAnim } from '../formats/sca'
  */
 export class UnitAnimator {
   readonly boneCount: number
-  /** Skin matrices for the shader — instances remain stable. */
+  /** Skin-Matrizen für den Shader — Instanzen bleiben stabil. */
   readonly skinMatrices: Matrix4[]
 
   private readonly parents: Int32Array
@@ -26,7 +26,7 @@ export class UnitAnimator {
   private readonly localRot: Quaternion[]
 
   private anim: ScaAnim | null = null
-  /** SCM bone index → ​​SCA bone index (-1 = not animated) */
+  /** SCM-Bone-Index → SCA-Bone-Index (-1 = nicht animiert) */
   private animBoneMap: Int32Array | null = null
   /**
    * Turret aim overrides (bone index -> extra local rotation): the sim's
@@ -111,7 +111,7 @@ export class UnitAnimator {
     this.update(this.lastTime)
   }
 
-  /** Calculates the skin matrices for time t (seconds, looped). */
+  /** Berechnet die Skin-Matrizen für Zeitpunkt t (Sekunden, looped). */
   update(timeSec: number): void {
     this.lastTime = timeSec
     const anim = this.anim
@@ -138,8 +138,8 @@ export class UnitAnimator {
           keys[k0 + 1]! + (keys[k1 + 1]! - keys[k0 + 1]!) * alpha,
           keys[k0 + 2]! + (keys[k1 + 2]! - keys[k0 + 2]!) * alpha,
         )
-        // stored w,x,y,z → THREE.Quaternion(x,y,z,w); Uses original
-        // NLERP, we Slerp (visually identical, no renormalization necessary)
+        // gespeichert w,x,y,z → THREE.Quaternion(x,y,z,w); Original nutzt
+        // NLERP, wir Slerp (visuell identisch, keine Renormierung nötig)
         this.localRot[i]!.set(keys[k0 + 4]!, keys[k0 + 5]!, keys[k0 + 6]!, keys[k0 + 3]!)
         this.tmpQ.set(keys[k1 + 4]!, keys[k1 + 5]!, keys[k1 + 6]!, keys[k1 + 3]!)
         this.localRot[i]!.slerp(this.tmpQ, alpha)
@@ -171,7 +171,7 @@ export class UnitAnimator {
     }
   }
 
-  /** World position of a bone (e.g. for turret mouths later). */
+  /** Welt-Position eines Bones (z. B. für Turret-Mündungen später). */
   getBoneWorld(index: number): Matrix4 | null {
     return this.worlds[index] ?? null
   }

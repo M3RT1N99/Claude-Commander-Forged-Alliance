@@ -34,7 +34,7 @@ const GAME =
   process.env.CFA_GAME_DIR ??
   'C:/Program Files (x86)/Steam/steamapps/common/Supreme Commander Forged Alliance'
 
-/** Known target values ​​per unit (Economy.<field>), checked live against the .bp. */
+/** Bekannte Sollwerte je Unit (Economy.<Feld>), live gegen die .bp geprüft. */
 const EXPECTED: Record<string, Record<string, number>> = {
   // UEF ACU
   uel0001: {
@@ -78,12 +78,12 @@ const dec = new TextDecoder('latin1')
 
 async function loadBp(id: string): Promise<BpObject> {
   const entry = zip.get(`units/${id}/${id}_unit.bp`)
-  if (!entry) throw new Error(`units/${id}/${id}_unit.bp not in units.scd`)
+  if (!entry) throw new Error(`units/${id}/${id}_unit.bp nicht in units.scd`)
   return parseBlueprint(dec.decode(await zip.read(entry)))
 }
 
 for (const [id, expected] of Object.entries(EXPECTED)) {
-  console.log(`\n== ${id.toUpperCase()}: Original Blueprint Economy ==`)
+  console.log(`\n== ${id.toUpperCase()}: Original-Blueprint-Economy ==`)
   const bp = await loadBp(id)
   for (const [field, want] of Object.entries(expected)) {
     const got = bpGet(bp, `Economy.${field}`)
@@ -92,5 +92,5 @@ for (const [id, expected] of Object.entries(EXPECTED)) {
 }
 
 await file.close()
-console.log(failures === 0 ? '\nECO BLUEPRINTS PASSED' : `\n${failures} CHECK(S) FEHLGESCHLAGEN`)
+console.log(failures === 0 ? '\nECO-BLUEPRINTS BESTANDEN' : `\n${failures} CHECK(S) FEHLGESCHLAGEN`)
 process.exit(failures === 0 ? 0 : 1)

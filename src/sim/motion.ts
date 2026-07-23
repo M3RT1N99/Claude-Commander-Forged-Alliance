@@ -16,12 +16,12 @@ import MOTION_LUA from '../engine-lua/motion.lua?raw'
  */
 
 
-/** Installs Navigator + physics update in Lua host. */
+/** Installiert Navigator + Physik-Fortschreibung im Lua-Host. */
 export function installMotion(host: LuaHost): void {
   host.eval(MOTION_LUA)
 }
 
-/** Physics step of a beat (after the thread stage). */
+/** Physik-Schritt eines Beats (nach der Thread-Stage). */
 export function motionTick(host: LuaHost): void {
   host.eval('__advanceMotion()')
 }

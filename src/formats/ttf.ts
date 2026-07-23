@@ -26,7 +26,7 @@ export interface FontMetrics {
   ascent: number
   descent: number
   lineGap: number
-  /** Width of a string in pixels, given the point size. */
+  /** Breite eines Strings in Pixeln, bei der gegebenen Punktgröße. */
   advance(text: string, size: number): number
 }
 
@@ -37,8 +37,8 @@ export function parseTtf(bytes: Uint8Array): FontMetrics {
   const i16 = (o: number): number => view.getInt16(o)
   const u32 = (o: number): number => view.getUint32(o)
 
-  // sfnt header: 'true'/0x00010000 (TTF) or 'OTTO' (CFF — then glyf is missing,
-  // but hmtx/cmap are the same and we don't need anything more).
+  // sfnt-Header: 'true'/0x00010000 (TTF) oder 'OTTO' (CFF — dann fehlt glyf,
+  // aber hmtx/cmap sind dieselben, und mehr brauchen wir nicht).
   const numTables = u16(4)
   const tables = new Map<string, number>()
   for (let i = 0; i < numTables; i++) {
@@ -65,8 +65,8 @@ export function parseTtf(bytes: Uint8Array): FontMetrics {
 
   const hmtx = need('hmtx')
   const advanceOf = (glyph: number): number => {
-    // hmtx: numberOfHMetrics pairs(advance, lsb); after that only lsb —
-    // all subsequent glyphs inherit the final width (OpenType specification).
+    // hmtx: numberOfHMetrics Paare (advance, lsb); danach nur noch lsb —
+    // alle folgenden Glyphen erben die letzte Breite (OpenType-Spezifikation).
     const i = Math.min(glyph, numberOfHMetrics - 1)
     return u16(hmtx + i * 4)
   }
@@ -74,11 +74,11 @@ export function parseTtf(bytes: Uint8Array): FontMetrics {
   const cmap = need('cmap')
   const lookup = buildCmap(view, cmap)
 
-  // The FULL name (nameID 4): "Arial", "Arial Bold", "Zeroes Three". Just as
-  // the UI addresses its fonts — `UIUtil.bodyFont` is "Arial", but
-  // `unitviewDetail.lua` requires "Arial Bold". ARIAL.TTF and ARIALBD.TTF have
-  // both the FAMILY "Arial" (nameID 1); whoever encrypts it overwrites it
-  // Metric of the basic font with that of the bold one and from then on it measures every text incorrectly.
+  // Der VOLLE Name (nameID 4): "Arial", "Arial Bold", "Zeroes Three". Genau so
+  // spricht die UI ihre Schriften an — `UIUtil.bodyFont` ist "Arial", aber
+  // `unitviewDetail.lua` verlangt "Arial Bold". ARIAL.TTF und ARIALBD.TTF haben
+  // beide die FAMILIE "Arial" (nameID 1); wer danach schlüsselt, überschreibt die
+  // Metrik der Grundschrift mit der der fetten und misst ab da jeden Text falsch.
   const nameTable = tables.get('name')
   const family = readName(view, nameTable, 4) || readName(view, nameTable, 1)
 
@@ -96,7 +96,7 @@ export function parseTtf(bytes: Uint8Array): FontMetrics {
   }
 }
 
-/** cmap → function codepoint → glyph index. Preferably (3,10), then (3,1), then (0,*). */
+/** cmap → Funktion Codepoint → Glyph-Index. Bevorzugt (3,10), dann (3,1), dann (0,*). */
 function buildCmap(view: DataView, cmap: number): (cp: number) => number {
   const numSubtables = view.getUint16(cmap + 2)
   let best = -1
@@ -184,7 +184,7 @@ function readName(view: DataView, name: number | undefined, nameId: number): str
     } else {
       for (let o = 0; o < length; o++) s += String.fromCharCode(view.getUint8(offset + o))
     }
-    // Windows/en-US beats Windows/others beats Unicode beats Mac.
+    // Windows/en-US schlägt Windows/andere schlägt Unicode schlägt Mac.
     const english = language === 0x0409 || (platform !== 3 && language === 0)
     const score = (platform === 3 ? 4 : platform === 0 ? 2 : 0) + (english ? 1 : 0)
     if (s && score > bestScore) {

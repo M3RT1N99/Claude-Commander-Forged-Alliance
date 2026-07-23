@@ -1,7 +1,7 @@
-// Port of EffectVertexNormalHiFiVS (effects/mesh.fx:1513-1560) with the
-// UEFBuild overlay pass parameters (mesh.fx:5651):
+// Port von EffectVertexNormalHiFiVS (effects/mesh.fx:1513-1560) mit den
+// Parametern des UEFBuild-Overlay-Passes (mesh.fx:5651):
 //   texScale0=16, texScale1=8, shift0=(0.0192, 0.0176), shift1=(-0.0122,-0.0122)
-// — two scaled, counter-scrolling UV sets for the construction grid.
+// — zwei skalierte, gegenlaeufig scrollende UV-Saetze fuer das Bau-Gitter.
   attribute vec2 scmUv1;
   attribute float scmBoneIndex;
 
@@ -17,6 +17,6 @@
 
     vUvs.xy = uv * 16.0 + unitAge * vec2(0.0192, 0.0176);
     // HLSL: texcoord0.zw += age*xshift1; texcoord0.zw += age*yshift1 —
-    // both scalars add to BOTH components: together -0.0244.
+    // beide Skalare addieren auf BEIDE Komponenten: zusammen -0.0244.
     vUvs.zw = scmUv1 * 8.0 + unitAge * vec2(-0.0244);
   }

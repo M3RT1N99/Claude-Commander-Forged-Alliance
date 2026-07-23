@@ -43,9 +43,9 @@ const check = (ok: boolean, label: string): void => {
   if (!ok) failures++
 }
 
-// --- VFS: all archives, same priority as in the browser (first wins) ---
-// loc_*.scd: Localization.lua also looks for the installed language itself
-// (okLanguage(), localization.lua:20-32) — this installation is German.
+// --- VFS: alle Archive, gleiche Priorität wie im Browser (erstes gewinnt) ---
+// Auch loc_*.scd: Localization.lua sucht sich die installierte Sprache selbst
+// (okLanguage(), localization.lua:20-32) — diese Installation ist deutsch.
 const files = new Map<string, Uint8Array>()
 const allPaths = new Set<string>()
 const openFiles: NodeFile[] = []
@@ -74,30 +74,30 @@ const uiFs = {
 
 console.log('\n== UI-VM booten (zweiter Lua-State, scr_UserInits) ==')
 installUiEngine(host, uiFs)
-check(host.eval('return type(_c_CreateCursor)') === 'function', '_c_CreateCursor is here (UI-Global)')
+check(host.eval('return type(_c_CreateCursor)') === 'function', '_c_CreateCursor ist da (UI-Global)')
 check(
   host.eval('return rawget(_G, "CreateUnit") == nil') === true,
-  'CreateUnit is NOT there (Sim-Global, does not belong in the UI)',
+  'CreateUnit ist NICHT da (Sim-Global, gehört nicht in die UI)',
 )
 
-// NO stub trap: config.lua:56 itself appends a metatable to _G that contains the
-// Accessing a non-existent global makes an error ("access to
-// nonexistent global variable"). The original brings the anti-stub rule
-// with — a trap would overwrite it.
+// KEIN Stub-Trap: config.lua:56 haengt selbst eine Metatable an _G, die den
+// Zugriff auf ein nicht existierendes Global zum Fehler macht ("access to
+// nonexistent global variable"). Das Original bringt die Anti-Stub-Regel also
+// mit — ein Trap wuerde sie ueberschreiben.
 
-console.log('\n== SetupUI() from the Original-uimain.lua ==')
+console.log('\n== SetupUI() aus dem Original-uimain.lua ==')
 let setupErr: string | null = null
 try {
   setupUi(host)
 } catch (e) {
   setupErr = (e as Error).message.split('\n')[0] ?? String(e)
 }
-check(setupErr === null, setupErr === null ? 'SetupUI() went through' : `SetupUI(): ${setupErr}`)
+check(setupErr === null, setupErr === null ? 'SetupUI() lief durch' : `SetupUI(): ${setupErr}`)
 
 if (setupErr === null) {
-  console.log('\n== Layout is available (from the original Lua, not from TS) ==')
-  // `currentSkin` is a local in uiutil.lua:83 — not an export. The skin shows
-  // at the bottom of the resolved texture path, that's better proof anyway.
+  console.log('\n== Layout steht (aus der Original-Lua, nicht aus TS) ==')
+  // `currentSkin` ist ein local in uiutil.lua:83 — kein Export. Der Skin zeigt
+  // sich unten im aufgelösten Texturpfad, das ist ohnehin der bessere Beweis.
   const layout = host.eval(`return import('/lua/ui/uiutil.lua').currentLayout`)
   check(layout === 'bottom', `currentLayout = ${String(layout)} (uimain.lua:32)`)
 
@@ -108,7 +108,7 @@ if (setupErr === null) {
     `GetLayoutFilename('economy') = ${String(eco)}`,
   )
 
-  console.log('\n== UIUtil.UIFile: Skin fallback chain resolves real textures ==')
+  console.log('\n== UIUtil.UIFile: Skin-Fallback-Kette löst echte Texturen auf ==')
   const bmp = host.eval(
     `return import('/lua/ui/uiutil.lua').UIFile('/game/resource-panel/resources_panel_bmp.dds')`,
   )

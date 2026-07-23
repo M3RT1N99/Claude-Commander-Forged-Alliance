@@ -33,7 +33,7 @@ import { bgraToRgba, decodeDxt } from '../formats/dxt'
 
 const FACTION_SKIN = 'uef'
 
-/** Economy snapshot for the UI VM (economy.lua calculates the display from this). */
+/** Ökonomie-Momentaufnahme für die UI-VM (economy.lua rechnet daraus die Anzeige). */
 export interface EcoSnapshot {
   mass: number
   massStorage: number
@@ -52,7 +52,7 @@ export interface EcoSnapshot {
   energyRequested: number
 }
 
-/** Snapshot of a unit for minimap and strategic icons. */
+/** Momentaufnahme einer Einheit für Minimap und strategische Icons. */
 export interface HudUnitInfo {
   id: string
   name: string
@@ -65,13 +65,13 @@ export interface HudUnitInfo {
   army: number
   strategicIcon: string
   fadeZoom: number
-  /** Construction progress (1 = finished). Below 1 the bar shows the BAU, not the HP. */
+  /** Baufortschritt (1 = fertig). Unter 1 zeigt der Balken den BAU, nicht die HP. */
   fraction: number
-  /** Half width of the unit (from the blueprint) — this is how wide its bar is. */
+  /** Halbe Breite der Einheit (aus dem Blueprint) — so breit ist ihr Balken. */
   halfWidth: number
 }
 
-/** Data source — provided by the Lua engine (main.ts). */
+/** Datenquelle — von der Lua-Engine (main.ts) bereitgestellt. */
 export interface HudSource {
   units(): HudUnitInfo[]
 }
@@ -90,7 +90,7 @@ export class Hud {
     this.root.innerHTML = `<div id="bar-layer"></div><div id="strat-layer"></div>`
     document.body.appendChild(this.root)
 
-    // Strategic icons and life bars must follow the camera per frame
+    // Strategic Icons und Lebensbalken müssen der Kamera pro Frame folgen
     viewer.onUpdate(() => {
       this.updateStrategicIcons()
       this.updateLifeBars()
@@ -113,17 +113,17 @@ export class Hud {
   alwaysIcons = false
 
   // -------------------------------------------------------------------------
-  // LIFE BAR + CONSTRUCTION PROGRESS
+  // LEBENSBALKEN + BAU-FORTSCHRITT
   //
-  // In the original, this is also what the ENGINE draws over the world (not the Lua).
-  // Proven from the Decomp (Cfile:1284551-1284575): Bars only appear for
-  // SELECTED units and the unit under the cursor (plus the ConVar
-  // ui_ForceLifbarsOnEnemy), below the zoom limit ui_LifebarLOD (200,
-  // Cfile:421758), never with Display.HideLifebars and never during an upgrade.
+  // Auch das zeichnet im Original die ENGINE über der Welt (nicht die Lua).
+  // Belegt aus der Decomp (Cfile:1284551-1284575): Balken erscheinen nur für
+  // AUSGEWÄHLTE Einheiten und die Einheit unter dem Cursor (dazu die ConVar
+  // ui_ForceLifbarsOnEnemy), unterhalb der Zoom-Grenze ui_LifebarLOD (200,
+  // Cfile:421758), nie bei Display.HideLifebars und nie während eines Upgrades.
   //
-  // Two separate bars, as seen in the original:
-  //   above LIFE (the real health level - it grows with the construction)
-  //   below CONSTRUCTION PROGRESS in YELLOW (only as long as FractionComplete < 1)
+  // Zwei getrennte Balken, wie im Original zu sehen:
+  //   oben   LEBEN         (der echte Gesundheitsstand — er wächst beim Bau mit)
+  //   unten  BAU-FORTSCHRITT in GELB (nur solange FractionComplete < 1)
   // -------------------------------------------------------------------------
   private readonly barPool: HTMLDivElement[] = []
 
@@ -136,7 +136,7 @@ export class Hud {
     while (this.barPool.length < units.length) {
       const bar = document.createElement('div')
       bar.className = 'life-bar'
-      // Two lines: Life above, construction progress (yellow) below.
+      // Zwei Zeilen: Leben oben, Bau-Fortschritt (gelb) darunter.
       bar.innerHTML =
         '<div class="bar-row"><div class="life-fill"></div></div>' +
         '<div class="bar-row build-row"><div class="build-fill"></div></div>'
@@ -147,8 +147,8 @@ export class Hud {
     for (let i = 0; i < this.barPool.length; i++) {
       const bar = this.barPool[i]!
       const u = units[i]
-      // Far away, the strategic icons take over (fadeZoom) - then that's it
-      // Bars in the original also gone.
+      // Weit weg übernehmen die strategischen Icons (fadeZoom) — dann ist der
+      // Balken im Original ebenfalls weg.
       if (!this.renderBars || !u || dist >= u.fadeZoom) {
         bar.style.display = 'none'
         continue
@@ -161,14 +161,14 @@ export class Hud {
       const bauend = u.fraction < 1
       const leben =
         u.maxHealth > 0 ? Math.max(0, Math.min(1, u.health / u.maxHealth)) : 0
-      // Full, unselected units do not show a bar (Decomp:
-      // Selection/hover condition, Cfile:1284556-1284575) — a construction site always.
+      // Volle, nicht ausgewählte Einheiten zeigen keinen Balken (Decomp:
+      // Auswahl/Hover-Bedingung, Cfile:1284556-1284575) — eine Baustelle immer.
       if (!bauend && leben >= 0.999 && !u.selected) {
         bar.style.display = 'none'
         continue
       }
-      // As wide as the unit: half its width times 2, in screen pixels
-      // converted via a second projected point.
+      // So breit wie die Einheit: ihre halbe Breite mal 2, in Bildschirm-Pixel
+      // umgerechnet über einen zweiten projizierten Punkt.
       const rand = this.viewer.worldToScreen(new THREE.Vector3(u.x + u.halfWidth, u.y + 1, u.z))
       const breite = rand ? Math.max(16, Math.abs(rand.x - s.x) * 2) : 24
 
@@ -177,19 +177,19 @@ export class Hud {
       bar.style.transform =
         `translate(${s.x - rootRect.left}px, ${s.y - rootRect.top}px) translate(-50%, -100%)`
 
-      // Above: LIFE - even during construction (the HP grows with the
-      // Progress, unit.lua writes them up). traffic light levels; the exact one
-      // The engine's color ladder is in a non-decompilable one
-      // Drawing function — Green/Yellow/Red is the observed order.
+      // Oben: das LEBEN — auch während des Baus (die HP wachsen mit dem
+      // Fortschritt, unit.lua schreibt sie hoch). Ampel-Stufen; die exakte
+      // Farbtreppe der Engine steckt in einer nicht dekompilierbaren
+      // Zeichenfunktion — Grün/Gelb/Rot ist die beobachtete Reihenfolge.
       const lifeFill = bar.querySelector<HTMLDivElement>('.life-fill')!
       lifeFill.style.width = `${leben * 100}%`
       lifeFill.style.background =
-        life > 0.6 ? '#3ad353' : life > 0.3 ? '#e8d33a' : '#e84040'
+        leben > 0.6 ? '#3ad353' : leben > 0.3 ? '#e8d33a' : '#e84040'
 
-      // Below: the CONSTRUCTION PROGRESS in YELLOW - only as long as construction continues. Just as
-      // It shows the original: both beams on top of each other, the construction beam underneath.
+      // Unten: der BAU-FORTSCHRITT in GELB — nur solange gebaut wird. Genau so
+      // zeigt es das Original: beide Balken übereinander, der Bau-Balken darunter.
       const buildRow = bar.querySelector<HTMLDivElement>('.build-row')!
-      buildRow.style.display = building ? 'block' : 'none'
+      buildRow.style.display = bauend ? 'block' : 'none'
       if (bauend) {
         const buildFill = bar.querySelector<HTMLDivElement>('.build-fill')!
         buildFill.style.width = `${u.fraction * 100}%`
@@ -202,9 +202,9 @@ export class Hud {
   }
 
   // -------------------------------------------------------------------------
-  // Strategic Icons (Original: visible from Display.Mesh.IconFadeInZoom,
+  // Strategic Icons (Original: sichtbar ab Display.Mesh.IconFadeInZoom,
   // Texturen /game/strategicicons/<StrategicIconName>_{rest,selected}.dds,
-  // tinted with the army color)
+  // getönt mit der Armee-Farbe)
   // -------------------------------------------------------------------------
 
   private readonly stratPool: HTMLImageElement[] = []
@@ -213,7 +213,7 @@ export class Hud {
   private armyColors = new Map<number, string>()
 
   /**
-   * The REAL army icon colors: gamecolors.lua ArmyColors, published by army
+   * The REAL army icon colors: gamecolors.lua ArmyColors, published per army
    * as `iconColor` by cfunc_GetArmiesTableL (Cfile:1267023-1267111) — the
    * engine tints the strategic icons with exactly this color. (An invented
    * color table lived here once and was removed; now the values come from
@@ -304,7 +304,7 @@ export class Hud {
     }
   }
 
-  /** SkinnableFile: Faction skin first, then common. */
+  /** SkinnableFile: Fraktions-Skin zuerst, dann common. */
   private async skin(path: string): Promise<string | null> {
     for (const base of [`textures/ui/${FACTION_SKIN}`, 'textures/ui/common']) {
       const full = `${base}${path}`

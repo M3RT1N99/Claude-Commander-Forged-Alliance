@@ -1,33 +1,33 @@
 -- =====================================================================
--- DAMAGE, ARMOR, DEATH — the engine side.
+-- SCHADEN, RUESTUNG, TOD — die Engine-Seite.
 --
 -- Aufteilung (docs/research/damage-binary.md + combat-projectiles.md §4):
 --   Lua entscheidet, WIEVIEL Schaden entsteht (Projectile:DoDamage ruft Damage/
---   DamageArea with the values ​​from the weapon blueprint).
---   Engine resolves it: Armor, Handicap, and then calls OnDamage on that
---   Goal. It does NOT drain HP (Entity::AdjustHealth is just stuck, Cfile:915978) —
---   This is what Unit:DoTakeDamage does in Lua (unit.lua:794-818).
+--   DamageArea mit den Werten aus dem Waffen-Blueprint).
+--   Engine verrechnet ihn: Ruestung, Handicap, und ruft dann OnDamage auf dem
+--   Ziel. Sie zieht KEINE HP ab (Entity::AdjustHealth klemmt nur, Cfile:915978) —
+--   das tut Unit:DoTakeDamage in der Lua (unit.lua:794-818).
 --
 -- Belege:
 --   cfunc_DamageL         Cfile:1064167  (FUENF Argumente!)
 --   cfunc_DamageAreaL     Cfile:1064280
 --   cfunc_DamageRingL     Cfile:1064409
 --   func_DoDamagePoint    Cfile:1062873  (Ruestung, Handicap, OnDamageBy, OnDamage)
---   Armor table Cfile:708539 (the engine imports /lua/armordefinition.lua)
---   Entity::SetHealth Cfile:916009 (OnHealthChanged only in 25% increments)
---   Moho::Unit::Kill Cfile:951962 (CheckCanBeKilled, SetDead, OnKilled)
+--   Armor-Tabelle         Cfile:708539   (die Engine importiert /lua/armordefinition.lua)
+--   Entity::SetHealth     Cfile:916009   (OnHealthChanged nur in 25%-Stufen)
+--   Moho::Unit::Kill      Cfile:951962   (CheckCanBeKilled, SetDead, OnKilled)
 --
 -- STANDARD-LUA 5.4.
 -- =====================================================================
 
 -- ---------------------------------------------------------------------
--- The Armor Table. The engine imports /lua/armordefinition.lua and
--- looks for the ArmorType of the unit (case sensitive, stricmp
--- Cfile:708566); each additional line of the entry is "<damage type> <factor>".
--- Damage types not listed: factor 1.0.
+-- Die Ruestungstabelle. Die Engine importiert /lua/armordefinition.lua und
+-- sucht den ArmorType der Unit (Gross-/Kleinschreibung egal, stricmp
+-- Cfile:708566); jede weitere Zeile des Eintrags ist "<Schadenstyp> <Faktor>".
+-- Nicht gelistete Schadenstypen: Faktor 1.0.
 -- ---------------------------------------------------------------------
 __armorTable = false
--- Handicap comes from the lobby (ArmyGetHandicap). Without a lobby: none.
+-- Handicap kommt aus der Lobby (ArmyGetHandicap). Ohne Lobby: keins.
 __armyHandicap = {}
 
 local function armorTable()
@@ -45,18 +45,18 @@ local function armorTable()
       t[name] = defs
     end
   else
-    -- Exactly the message from the engine (Cfile:708543).
+    -- Genau die Meldung der Engine (Cfile:708543).
     WARN("can't load the armordefinition module -- no armor for you.")
   end
   __armorTable = t
   return t
 end
 
---- Unit:GetArmorMult(damageType) — the factor from the armor table.
+--- Unit:GetArmorMult(damageType) — der Faktor aus der Ruestungstabelle.
 function __armorMult(unit, damageType)
   local bp = unit.__bp
   local armor = (bp and bp.Defense and bp.Defense.ArmorType) or 'Default'
-  -- AlterArmor(type, mult) overwrites at runtime (Cfile:972372).
+  -- AlterArmor(type, mult) ueberschreibt zur Laufzeit (Cfile:972372).
   local altered = unit.__armorOverride and unit.__armorOverride[string.lower(tostring(damageType))]
   if altered then return altered end
   local defs = armorTable()[string.lower(tostring(armor))]
@@ -64,24 +64,24 @@ function __armorMult(unit, damageType)
   return defs[string.lower(tostring(damageType or 'Normal'))] or 1.0
 end
 
---- ArmyGetHandicap(army) — in skirmish without lobby handicap: 0.
---- (The engine divides by (1 + handicap), Cfile:1063020.)
+--- ArmyGetHandicap(army) — im Skirmish ohne Lobby-Handicap: 0.
+--- (Die Engine teilt durch (1 + handicap), Cfile:1063020.)
 function ArmyGetHandicap(army)
   return (__armyHandicap and __armyHandicap[army]) or 0
 end
 
 -- ---------------------------------------------------------------------
--- func_DoDamagePoint (Cfile:1062873) — ONE target.
+-- func_DoDamagePoint (Cfile:1062873) — EIN Ziel.
 -- ---------------------------------------------------------------------
 local function damagePoint(instigator, origin, target, amount, damageType, damageSelf)
   if not target or target.__destroyQueued then return end
   if amount == 0 then return end
 
-  -- A projectile as the causer is released onto its launcher
-  -- (Cfile:1062930-1063000). Self-harm usually goes away - EXCEPT that
+  -- Ein Projektil als Verursacher wird auf seinen Launcher aufgeloest
+  -- (Cfile:1062930-1063000). Selbstschaden faellt normalerweise weg — AUSSER die
   -- Waffe verlangt ihn ausdruecklich (damageSelf, z. B. Kamikaze-/Selbstzerstoerungs-
-  -- units). Without this penetration, DamageArea(damageSelf=true) hit the
-  -- NEVER cause it, because this point damage always skipped him.
+  -- Einheiten). Ohne diesen Durchgriff traf DamageArea(damageSelf=true) den
+  -- Verursacher NIE, weil dieser Punkt-Schaden ihn immer uebersprang.
   local inst = instigator
   if inst and inst.__isProj then inst = inst.__launcher or inst end
   if not damageSelf and inst == target then return end
@@ -94,8 +94,8 @@ local function damagePoint(instigator, origin, target, amount, damageType, damag
 
   if dealt <= 0 then return end
 
-  -- OnDamageBy(armyIndex) — the Lua uses it to count who shot
-  -- (Cfile:1063052; unit.lua uses it for retaliation/statistics).
+  -- OnDamageBy(armyIndex) — die Lua zaehlt damit, wer geschossen hat
+  -- (Cfile:1063052; unit.lua nutzt es fuer die Vergeltung/Statistik).
   if inst and inst.__army and target.OnDamageBy then
     pcall(function() target:OnDamageBy(inst.__army) end)
   end
@@ -103,7 +103,7 @@ local function damagePoint(instigator, origin, target, amount, damageType, damag
   local tp = target.__pos or { 0, 0, 0 }
   local vec = Vector(tp[1] - origin[1], tp[2] - origin[2], tp[3] - origin[3])
 
-  -- And now the Lua engine says it — it deducts the HP itself
+  -- Und jetzt sagt es die Engine der Lua — sie zieht die HP selbst ab
   -- (RunScript_EntityOnDamage, Cfile:1063151).
   if target.OnDamage then
     local ok, err = pcall(function() target:OnDamage(inst, dealt, vec, damageType) end)
@@ -112,8 +112,8 @@ local function damagePoint(instigator, origin, target, amount, damageType, damag
 end
 
 --- "Damage(instigator, origin, target, amount, damageType)" — FUENF Argumente.
---- Engine mHelp text is deprecated (4); cfunc_DamageL checks
---- `lua_gettop != 5` (Cfile:1064215). `amount == 0` is a BUG, ​​not a no-op.
+--- Der mHelp-Text der Engine ist veraltet (4); cfunc_DamageL prueft
+--- `lua_gettop != 5` (Cfile:1064215). `amount == 0` ist ein FEHLER, kein No-Op.
 function Damage(instigator, origin, target, amount, damageType)
   if amount == 0 then error('0 damage specified.', 2) end
   damagePoint(instigator, __vec3(origin), target, amount, damageType)
@@ -122,9 +122,9 @@ end
 --- "DamageArea(instigator, location, radius, amount, damageType, damageFriendly,
 --- [damageSelf])" (Cfile:1064280).
 ---
---- NO distance falloff: every target in the radius gets the full amount
---- (damage-binary.md). Shields are still missing - the trigger via the shield balls
---- (Cfile:1062695) comes with the shield system.
+--- KEIN Abstands-Falloff: jedes Ziel im Radius bekommt den vollen Betrag
+--- (damage-binary.md). Schilde fehlen noch — der Abzug ueber die Schildkugeln
+--- (Cfile:1062695) kommt mit dem Schild-System.
 function DamageArea(instigator, location, radius, amount, damageType, damageFriendly, damageSelf)
   local origin = __vec3(location)
   local inst = instigator
@@ -172,12 +172,12 @@ function DamageRing(instigator, location, minRadius, maxRadius, amount, damageTy
   end
 end
 
---- MetaImpact(instigator, location, radius, amount) — the IMPULSE of a
---- Impact (units are thrown away).
+--- MetaImpact(instigator, location, radius, amount) — der IMPULS eines
+--- Einschlags (Einheiten werden weggeschleudert).
 ---
---- Our sim has no impulse physics (movement runs via the navigator,
---- motion.lua). That's why nothing happens here - and this is said ONCE,
---- instead of hiding it.
+--- Unsere Sim hat keine Impuls-Physik (Bewegung laeuft ueber den Navigator,
+--- motion.lua). Deshalb passiert hier nichts — und das wird EINMAL gesagt,
+--- statt es zu verschweigen.
 __metaImpactWarned = false
 function MetaImpact(instigator, location, radius, amount)
   if not __metaImpactWarned then
@@ -186,19 +186,19 @@ function MetaImpact(instigator, location, radius, amount)
   end
 end
 
---- A vector argument (table with x/y/z OR 1/2/3) in {x,y,z}.
+--- Ein Vektor-Argument (Tabelle mit x/y/z ODER 1/2/3) in {x,y,z}.
 function __vec3(v)
   if not v then return { 0, 0, 0 } end
   return { v[1] or v.x or 0, v[2] or v.y or 0, v[3] or v.z or 0 }
 end
 
 -- ---------------------------------------------------------------------
--- The delete queue (Sim::mDeletionQueue).
+-- Die Loeschwarteschlange (Sim::mDeletionQueue).
 --
--- Entity::Destroy (Cfile:916089) does NOT delete immediately: it sets mDestroyQueued
--- and adds the entity to the queue. Only at the end of the beat
--- (Sim::AdvanceBeat, Cfile:1076638-1076656) runs Entity::OnDestroy — and with it
--- the Lua callback OnDestroy, which empties the TrashBag (unit.lua:1244).
+-- Entity::Destroy (Cfile:916089) loescht NICHT sofort: es setzt mDestroyQueued
+-- und haengt die Entity in die Warteschlange. Erst am Ende des Beats
+-- (Sim::AdvanceBeat, Cfile:1076638-1076656) laeuft Entity::OnDestroy — und damit
+-- der Lua-Callback OnDestroy, der den TrashBag leert (unit.lua:1244).
 -- ---------------------------------------------------------------------
 __deletionQueue = {}
 

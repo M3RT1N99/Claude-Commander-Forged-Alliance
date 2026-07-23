@@ -42,7 +42,7 @@
  * JS-Doubles — gleiche Formel, gleiche Reihenfolge, Differenz < 1e-6 relativ.
  */
 
-/** A curve key: x = time in ticks, y = average, z = random spread. */
+/** Ein Kurven-Key: x = Zeit in Ticks, y = Mittelwert, z = Zufalls-Spread. */
 export interface EfxKey {
   x: number
   y: number
@@ -55,7 +55,7 @@ export interface EfxCurve {
   Keys: EfxKey[]
 }
 
-/** Curve as it appears raw in the blueprint (any field may be missing). */
+/** Kurve, wie sie roh im Blueprint steht (jedes Feld darf fehlen). */
 export interface EfxCurveBp {
   XRange?: number
   Keys?: readonly EfxKey[]
@@ -114,8 +114,8 @@ export function makeEfxCurve(bp?: EfxCurveBp | null): EfxCurve {
   if (!raw || raw.length === 0) {
     return { XRange: 10, Keys: [{ x: 5, y: 0, z: 0 }] }
   }
-  // Stable increasing to x — Array.prototype.sort is stable according to the spec and
-  // This corresponds exactly to the insert scan of the engine.
+  // Stabil aufsteigend nach x — Array.prototype.sort ist laut Spec stabil und
+  // entspricht damit exakt dem Einfüge-Scan der Engine.
   const keys = raw.map((k) => ({ x: k.x, y: k.y, z: k.z }))
   keys.sort((a, b) => a.x - b.x)
   return { XRange: bp.XRange ?? 0, Keys: keys }
@@ -135,23 +135,23 @@ export function sampleCurve(curve: EfxCurve, t: number, rand: () => number): num
   if (n === 0) return 0 // Cfile:649030-649031
   let i = 0
   // Erster Key mit x > t; NaN-t (Repeattime = 0 → fmod = NaN) fällt hier
-  // immediately and clamps to the first key — like the float comparison in C.
+  // sofort durch und clampt auf den ersten Key — wie der Float-Vergleich in C.
   while (keys[i]!.x <= t) {
     // Cfile:649049
     if (++i === n) {
-      // behind the last key: Clamp on the last (Cfile:649036-649045)
+      // hinter dem letzten Key: Clamp auf den letzten (Cfile:649036-649045)
       const last = keys[n - 1]!
       return (rand() - 0.5) * last.z + last.y
     }
   }
   const cur = keys[i]!
   if (i === 0) {
-    // before the first key: Clamp on the first (Cfile:649054-649058)
+    // vor dem ersten Key: Clamp auf den ersten (Cfile:649054-649058)
     return (rand() - 0.5) * cur.z + cur.y
   }
   const pre = keys[i - 1]!
   const f = (t - pre.x) / (cur.x - pre.x) // Cfile:649065
-  // y AND z linearly interpolated, then spread (Cfile:649067)
+  // y UND z linear interpoliert, dann Spread (Cfile:649067)
   return (rand() - 0.5) * (pre.z + (cur.z - pre.z) * f) + f * (cur.y - pre.y) + pre.y
 }
 

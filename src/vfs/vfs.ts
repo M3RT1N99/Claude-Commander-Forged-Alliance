@@ -7,7 +7,7 @@ import type { GameSource } from './gameSource'
  * "units/uel0001/..."). Später gemountete Archive überschreiben frühere
  * Einträge gleichen Pfads.
  */
-/** A file in VFS: either from an archive or directly from disk. */
+/** Eine Datei im VFS: entweder aus einem Archiv oder direkt von der Platte. */
 type VfsFile =
   | { kind: 'zip'; archive: string; zip: ZipArchive; entry: ZipEntry }
   | { kind: 'disk'; archive: string; path: string }
@@ -31,21 +31,21 @@ export class GameVfs {
     const files = new Map<string, VfsFile>()
     const names: string[] = []
 
-    // Priority: the archive mounted FIRST wins — the first hit in the
-    // Mount path counts, later archives only fill gaps.
+    // Priorität: das ZUERST gemountete Archiv gewinnt — der erste Treffer im
+    // Mount-Pfad zählt, spätere Archive füllen nur Lücken.
     //
-    // Evidence: bin/SupComDataPath.lua builds the `path` list and mounts /mods and
-    // /maps BEFORE gamedata — that's exactly why mods overwrite the game. Who used to
-    // stands in the path, wins. `gamedata/*.scd` expands the engine via
-    // findfirst in directory order, i.e. alphabetically.
+    // Beleg: bin/SupComDataPath.lua baut die `path`-Liste und mountet /mods und
+    // /maps VOR gamedata — genau deshalb überschreiben Mods das Spiel. Wer früher
+    // im Pfad steht, gewinnt. `gamedata/*.scd` expandiert die Engine per
+    // findfirst in Verzeichnisreihenfolge, also alphabetisch.
     //
-    // Both real collisions in the retail game only resolve correctly like this:
-    //   lua.scd < mohodata.scd → lua.scd wins. And it has to: mohodatas
-    //     lua/sim/unit.lua is a 117 line stub WITHOUT SetupBuildBones, the
-    //     real in lua.scd has 3715 lines. The other way around, every ACU dies
+    // Beide echten Kollisionen im Retail-Spiel lösen sich nur so korrekt auf:
+    //   lua.scd < mohodata.scd  → lua.scd gewinnt. Und das muss es: mohodatas
+    //     lua/sim/unit.lua ist ein 117-Zeilen-Stub OHNE SetupBuildBones, die
+    //     echte in lua.scd hat 3715 Zeilen. Andersherum stirbt jede ACU beim
     //     Spawn (uel0001_script.lua:113).
-    //   "Advanced strategic icons.scd" < textures.scd → the icon pack wins,
-    //     which is its whole purpose (1102 files).
+    //   "Advanced strategic icons.scd" < textures.scd → der Icon-Pack gewinnt,
+    //     was sein ganzer Zweck ist (1102 Dateien).
     for (const scd of scds) {
       try {
         const raf = await source.open(`gamedata/${scd.name}`)
@@ -67,18 +67,18 @@ export class GameVfs {
       }
     }
 
-    // And the GAME DIRECTORY itself — the engine mounts it to `/`:
+    // Und das SPIELVERZEICHNIS selbst — die Engine mountet es nach `/`:
     //
     //   mount_dir(InitFileDir .. '\\..\\gamedata\\*.scd', '/')
     //   mount_dir(InitFileDir .. '\\..', '/')            <- bin/SupComDataPath.lua
     //
-    // That's the only reason why `/maps/**`, `/movies/**` and `/mods/**` are in the VFS: they are
-    // Not in the archives at all, but loose files. Without finding this mount
-    // `maputil.LoadScenario('/maps/X1CA_TUT/X1CA_TUT_scenario.lua')` nothing —
-    // the tutorial button and every map come to nothing.
+    // Nur deshalb liegen `/maps/**`, `/movies/**` und `/mods/**` im VFS: sie sind
+    // gar nicht in den Archiven, sondern lose Dateien. Ohne diesen Mount findet
+    // `maputil.LoadScenario('/maps/X1CA_TUT/X1CA_TUT_scenario.lua')` nichts —
+    // der Tutorial-Knopf und jede Karte laufen ins Leere.
     //
-    // gamedata/ is skipped (the archives are already above), and the
-    // Archives have priority: what is already there will not be overwritten.
+    // gamedata/ wird uebersprungen (die Archive stehen schon oben), und die
+    // Archive haben Vorrang: was schon da ist, wird nicht ueberschrieben.
     let disk = 0
     const walk = async (relDir: string, depth: number): Promise<void> => {
       if (depth > 6) return
@@ -86,7 +86,7 @@ export class GameVfs {
       try {
         entries = await source.list(relDir)
       } catch {
-        return // unreadable: skip, don't guess
+        return // nicht lesbar: ueberspringen, nicht raten
       }
       for (const e of entries) {
         const rel = relDir ? `${relDir}/${e.name}` : e.name
@@ -129,7 +129,7 @@ export class GameVfs {
     const file = this.files.get(this.normalize(path))
     if (!file) throw new Error(`VFS: Datei nicht gefunden: ${path}`)
     if (file.kind === 'zip') return file.zip.read(file.entry)
-    // Loose file from the game directory (maps, movies, mods).
+    // Lose Datei aus dem Spielverzeichnis (maps, movies, mods).
     const raf = await this.source.open(file.path)
     return new Uint8Array(await raf.slice(0, raf.size))
   }
@@ -191,10 +191,10 @@ export class GameVfs {
         if (b) out.set(key, b)
       }
     }
-    // Loose files (maps, movies) are not in any archive - there is nothing there
-    // to summarize. But reading them one after the other costs the full latency
-    // per file: the ~250 map scripts alone took the UI boot by minutes
-    // extended. So several in the air at the same time.
+    // Lose Dateien (maps, movies) liegen in keinem Archiv — da gibt es nichts
+    // zusammenzufassen. Aber sie NACHEINANDER zu lesen kostet die volle Latenz
+    // pro Datei: die ~250 Karten-Skripte allein haben den UI-Boot um Minuten
+    // verlängert. Also mehrere gleichzeitig in der Luft.
     const PARALLEL = 8
     let next = 0
     await Promise.all(
@@ -208,7 +208,7 @@ export class GameVfs {
     return out
   }
 
-  /** All paths (lowercase) that satisfy the predicate. */
+  /** Alle Pfade (lowercase), die das Prädikat erfüllen. */
   find(predicate: (path: string) => boolean): string[] {
     const out: string[] = []
     for (const key of this.files.keys()) {
