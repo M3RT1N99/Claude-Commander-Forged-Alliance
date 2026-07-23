@@ -217,6 +217,12 @@ function __flushDeletions()
         if not ok then WARN('OnDestroy: ' .. tostring(err)) end
       end
       e.__destroyed = true
+      -- A dying entity's ambient loop stops (the engine releases the HSound
+      -- with the entity — CSimSoundManager loop handles).
+      if e.__ambientHandle then
+        __audioRequest(2, nil, nil, e.__ambientHandle)
+        e.__ambientHandle = false
+      end
       if e.__isProj then
         __projectiles[e.__id] = nil
       elseif e.__isProp then

@@ -67,8 +67,37 @@ end
 
 --- Der Feuer-Sound der Sim (die Sim hat keine Ausgabe — die hat die UI-VM).
 __simSounds = {}
+
+-- === The sim->user audio bridge (SAudioRequest, size 0x1C: {position,
+-- layer, params, sound(handle), type EntitySound=0/StartLoop=1/StopLoop=2}
+-- — effects-audio.md "Sound-Lua-API"). The sim has no audio output; the
+-- requests drain to the browser once per beat. Position/layer (3D audio)
+-- are a named gap — the browser plays flat for now.
+__audioRequests = {}
+__audioNextLoopHandle = 1
+
+function __audioRequest(reqType, bank, cue, handle)
+  __audioRequests[table.getn(__audioRequests) + 1] =
+    { t = reqType, bank = bank or '', cue = cue or '', h = handle or 0 }
+end
+
+function __drainAudioRequestsJson()
+  if __audioRequests[1] == nil then return '[]' end
+  local parts = {}
+  for i, r in ipairs(__audioRequests) do
+    parts[i] = string.format('{"t":%d,"bank":%q,"cue":%q,"h":%d}', r.t, r.bank, r.cue, r.h)
+  end
+  for i = table.getn(__audioRequests), 1, -1 do __audioRequests[i] = nil end
+  return '[' .. table.concat(parts, ',') .. ']'
+end
+
 function __simSoundRequested(cue)
   __simSounds[table.getn(__simSounds) + 1] = cue
+  -- Sound{} carries Bank+Cue (CSndParams) — forward it as an EntitySound
+  -- request so the browser actually plays weapon fire.
+  if type(cue) == 'table' and cue.Bank and cue.Cue then
+    __audioRequest(0, cue.Bank, cue.Cue)
+  end
 end
 
 -- ---------------------------------------------------------------------

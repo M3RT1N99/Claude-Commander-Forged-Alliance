@@ -330,6 +330,9 @@ function tickAndPost(): void {
   // Map-prop instances that died this beat — the instanced renderer hides
   // them (map props are NOT serialized per beat, only their removals).
   const removedMapProps = host.pull<number[]>('__drainRemovedMapPropsJson()')
+  // Sim->user audio requests (SAudioRequest analog: EntitySound=0,
+  // StartLoop=1, StopLoop=2) — weapon fire, unit ambient loops.
+  const audio = host.pull<unknown[]>('__drainAudioRequestsJson()')
   const a = engine.economy.army(1)
   // Der SIM-TICK gehoert zum Zustand: die Spielzeit-Uhr der UI (score.lua:230,
   // GetGameTime) zaehlt in Sim-Ticks und steht bei Pause still.
@@ -342,6 +345,7 @@ function tickAndPost(): void {
     emitters,
     props,
     removedMapProps,
+    audio,
     economy: {
       mass: a.mass, massStorage: a.maxMass, massIncome: a.incomeMass, massExpense: a.expenseMass,
       energy: a.energy, energyStorage: a.maxEnergy, energyIncome: a.incomeEnergy, energyExpense: a.expenseEnergy,

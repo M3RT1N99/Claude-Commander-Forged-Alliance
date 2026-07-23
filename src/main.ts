@@ -588,6 +588,10 @@ let orderLines: OrderLineSystem | null = null
 let commandFeedback: CommandFeedbackSystem | null = null
 const blipAssetCache = new Map<string, Promise<BlipAssets | null>>()
 let gameAudio: GameAudio | null = null
+/** Sim loop handles (HSound analog) map into their own id space. */
+const SIM_LOOP_HANDLE_BASE = 1_000_000_000
+/** One-shot sim sounds get unique negative handles (fire and forget). */
+let nextSimOneShotHandle = -1
 const emitterRuntimes = new Map<number, EmitterRuntime>()
 const emitterBpData = new Map<string, EmitterBpData>()
 const emitterBpPending = new Set<string>()
@@ -1952,6 +1956,17 @@ function luaSimUpdate(): void {
   // Map props whose sim prop died (reclaimed/destroyed): hide the instance
   // in the instanced renderer — map props are not per-beat serialized.
   for (const idx of luaSim.drainRemovedMapProps()) viewer.hideMapProp(idx)
+
+  // Sim->user audio (SAudioRequest analog): weapon fire one-shots and the
+  // units' ambient loops. Loop handles live in their own id space so they
+  // never collide with the UI-VM's sound handles.
+  if (gameAudio) {
+    for (const r of luaSim.drainAudioRequests()) {
+      if (r.t === 2) gameAudio.stop(SIM_LOOP_HANDLE_BASE + r.h)
+      else if (r.t === 1) gameAudio.play(r.bank, r.cue, SIM_LOOP_HANDLE_BASE + r.h)
+      else gameAudio.play(r.bank, r.cue, nextSimOneShotHandle--)
+    }
+  }
 
   // Neue Units aus der Sim (Baustelle, Fabrik-Produkt) bekommen ihr Modell. Die
   // Sim erzeugt sie; die Szene zieht nach — nicht umgekehrt.

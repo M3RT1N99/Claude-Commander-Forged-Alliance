@@ -169,6 +169,29 @@ local entity = withNoops(ENTITY_NAMES, {
     self.__collisionShape = { shape = shape, x = cx, y = cy, z = cz, sx = sx, sy = sy, sz = sz }
   end,
 
+  -- Entity:PlaySound(params) (Entity.cpp) — a one-shot through the
+  -- sim->user bridge (SAudioRequest EntitySound=0, effects-audio.md
+  -- "Sound-Lua-API"). params is the Sound{} table from bp.Audio.
+  PlaySound = function(self, params)
+    if type(params) == 'table' and params.Bank and params.Cue then
+      __audioRequest(0, params.Bank, params.Cue)
+    end
+  end,
+  -- Entity:SetAmbientSound(params, …) (Cfile:932577-932591): ONE ambient
+  -- slot per entity — setting replaces the running loop, nil stops it.
+  SetAmbientSound = function(self, params)
+    if self.__ambientHandle then
+      __audioRequest(2, nil, nil, self.__ambientHandle)
+      self.__ambientHandle = false
+    end
+    if type(params) == 'table' and params.Bank and params.Cue then
+      local h = __audioNextLoopHandle
+      __audioNextLoopHandle = h + 1
+      self.__ambientHandle = h
+      __audioRequest(1, params.Bank, params.Cue, h)
+    end
+  end,
+
   -- Entity:CreateProjectile(proj_bp, [ox,oy,oz], [dx,dy,dz]) (Cfile:930715).
   -- Startpose = Pose der Entity + Offset; Richtung fehlt -> aus dem Blueprint.
   -- Damage 0, Typ 'Normal' — ein so erzeugtes Projektil traegt keinen Schaden
@@ -345,6 +368,26 @@ local unit = withNoops(UNIT_NAMES, {
   -- gibt keinen OnDamage->Feuer-Pfad in der Engine.
   -- Wirkung: der Feuertakt feuert nicht bei HoldFire (Cfile:983935) und die
   -- Zielerfassung LOESCHT das Ziel (Cfile:793085-793097). Beides in weapons.lua.
+  -- SOUND. Unit scripts use unit:PlayUnitSound('DeathExplosion') etc. —
+  -- the name is the KEY in bp.Audio (effects-audio.md "Sound-Lua-API").
+  -- NOTE: the ORIGINAL unit.lua overrides PlayUnitAmbientSound/
+  -- StopUnitAmbientSound in the class (unit.lua:2778-2801: one helper
+  -- Entity per sound key in self.AmbientSounds, tracked by the TrashBag)
+  -- and drives our Entity:SetAmbientSound binding through it — these
+  -- fallbacks only serve classes without the override.
+  PlayUnitSound = function(self, name)
+    local s = self.__bp and self.__bp.Audio and self.__bp.Audio[name]
+    if s then self:PlaySound(s) end
+    return true
+  end,
+  PlayUnitAmbientSound = function(self, name)
+    local s = self.__bp and self.__bp.Audio and self.__bp.Audio[name]
+    if s then self:SetAmbientSound(s) end
+  end,
+  StopUnitAmbientSound = function(self, name)
+    self:SetAmbientSound(nil)
+  end,
+
   -- GUARD. The task syncs from mUnit->mGuardedUnit every tick
   -- (Cfile:839316-839333); the AI Lua reads the chain through exactly
   -- these two (engineermanager.lua:58-66).

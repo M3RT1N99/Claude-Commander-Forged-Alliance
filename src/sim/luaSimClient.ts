@@ -160,7 +160,19 @@ interface StatesMsg {
   props: LuaPropSnapshot[]
   /** Map-prop indices whose sim props died this beat (reclaim/destroy). */
   removedMapProps?: number[]
+  /** Sim->user audio requests (SAudioRequest analog). */
+  audio?: SimAudioRequest[]
   economy: EcoSnapshot
+}
+
+/** One sim->user audio request (SAudioRequest: EntitySound=0, StartLoop=1,
+ *  StopLoop=2 — effects-audio.md "Sound-Lua-API"). */
+export interface SimAudioRequest {
+  t: 0 | 1 | 2
+  bank: string
+  cue: string
+  /** Loop handle (HSound analog); 0 for one-shots. */
+  h: number
 }
 type OutMsg =
   | { type: 'booted' }
@@ -183,6 +195,8 @@ export class LuaSimClient {
   private propStates: LuaPropSnapshot[] = []
   /** Accumulated dead map-prop indices; drained by the instanced renderer. */
   private readonly removedMapProps: number[] = []
+  /** Accumulated sim audio requests; drained by GameAudio in main. */
+  private readonly audioRequests: SimAudioRequest[] = []
   /** Letzter gemeldeter Sim-Tick (Spielzeit = Tick / 10). */
   gameTick = 0
   private nextReq = 1
@@ -282,6 +296,9 @@ export class LuaSimClient {
         // consumed by the instanced map-prop renderer.
         if (m.removedMapProps && m.removedMapProps.length > 0) {
           for (const idx of m.removedMapProps) this.removedMapProps.push(idx)
+        }
+        if (m.audio && m.audio.length > 0) {
+          for (const r of m.audio) this.audioRequests.push(r)
         }
         this.statesById.clear()
         for (const u of m.units) this.statesById.set(u.id, u)
@@ -423,6 +440,7 @@ export class LuaSimClient {
     this.statesById.clear()
     this.economy = null
     this.removedMapProps.length = 0
+    this.audioRequests.length = 0
     this.worker.postMessage({ type: 'reset', terrain, props })
     await done
   }
@@ -522,6 +540,12 @@ export class LuaSimClient {
   drainRemovedMapProps(): number[] {
     if (this.removedMapProps.length === 0) return []
     return this.removedMapProps.splice(0, this.removedMapProps.length)
+  }
+
+  /** Drain the sim->user audio requests since the last call. */
+  drainAudioRequests(): SimAudioRequest[] {
+    if (this.audioRequests.length === 0) return []
+    return this.audioRequests.splice(0, this.audioRequests.length)
   }
 
   /** Reclaim (dispatch 0x13, CUnitReclaimTask): drain prop `targetId`. */

@@ -765,6 +765,60 @@ console.log('\n== Befehls-Dispatch: Stop, Move-bricht-Bau, Attack ==')
     )
   }
   {
+    // SIM->USER AUDIO BRIDGE (SAudioRequest analog: EntitySound=0,
+    // StartLoop=1, StopLoop=2 — effects-audio.md "Sound-Lua-API"). The
+    // combat above fired weapons — their Weapon:PlaySound calls must have
+    // landed as one-shot requests; ambient loops run over the entity's
+    // SINGLE ambient slot (Cfile:932577-932591) and stop with the unit.
+    const backlog = host.pull<{ t: number; bank: string; cue: string; h: number }[]>(
+      '__drainAudioRequestsJson()',
+    )
+    check(
+      backlog.some((r) => r.t === 0 && r.cue.length > 0),
+      `weapon fire lands as EntitySound requests (${backlog.filter((r) => r.t === 0).length} one-shots queued)`,
+    )
+    const hummer = spawnLuaUnit(host, 'uel0201', { x: 860, y: 20, z: 300 }, 1)
+    const ambient = host.pull<{ Bank?: string; Cue?: string }>(
+      `(function() local a = __units[${hummer}].__bp.Audio.AmbientMove
+        return string.format('{"Bank":%q,"Cue":%q}', tostring(a.Bank), tostring(a.Cue)) end)()`,
+    )
+    check(
+      typeof ambient.Bank === 'string' && ambient.Bank.length > 0,
+      `uel0201 has bp.Audio.AmbientMove (${ambient.Bank}:${ambient.Cue})`,
+    )
+    host.eval(`__units[${hummer}]:PlayUnitAmbientSound('AmbientMove')`)
+    let evs = host.pull<{ t: number; bank: string; cue: string; h: number }[]>(
+      '__drainAudioRequestsJson()',
+    )
+    check(
+      evs.length === 1 && evs[0]!.t === 1 && evs[0]!.cue === ambient.Cue && evs[0]!.h > 0,
+      `PlayUnitAmbientSound starts the loop (${JSON.stringify(evs)})`,
+    )
+    const loopHandle = evs[0]!.h
+    host.eval(`__units[${hummer}]:PlayUnitAmbientSound('AmbientMove')`)
+    evs = host.pull<{ t: number; h: number }[]>('__drainAudioRequestsJson()')
+    check(
+      evs.length === 2 && evs[0]!.t === 2 && evs[0]!.h === loopHandle && evs[1]!.t === 1,
+      'replacing the ambient stops the previous loop first (single slot, Cfile:932577)',
+    )
+    host.eval(`__units[${hummer}]:StopUnitAmbientSound('AmbientMove')`)
+    evs = host.pull<{ t: number; h: number }[]>('__drainAudioRequestsJson()')
+    check(evs.length === 1 && evs[0]!.t === 2, 'StopUnitAmbientSound stops the loop')
+    host.eval(`__units[${hummer}]:PlayUnitAmbientSound('AmbientMove')`)
+    host.pull('__drainAudioRequestsJson()')
+    host.eval(`__units[${hummer}]:Destroy()`)
+    // Two beats: the unit's OnDestroy empties its TrashBag, which queues
+    // the AmbientSounds helper entity (unit.lua:2786-2788) for the NEXT
+    // deletion flush — its stop request lands one beat later.
+    beat(engine)
+    beat(engine)
+    evs = host.pull<{ t: number }[]>('__drainAudioRequestsJson()')
+    check(
+      evs.some((r) => r.t === 2),
+      'a dying unit stops its ambient loop (TrashBag -> helper entity flush)',
+    )
+  }
+  {
     // MAP PROPS (Sim::Setup step 7, Cfile:1072041-1072105): spawned before
     // units, NOT serialized per beat (the instanced renderer draws them);
     // dying map props report their index once for instance hiding.
