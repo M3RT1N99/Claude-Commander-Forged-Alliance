@@ -510,6 +510,159 @@ console.log('\n== Befehls-Dispatch: Stop, Move-bricht-Bau, Attack ==')
     `Attack über die Distanz: in Feuerreichweite (MaxRadius) fahren und töten` +
       (gestorben ? '' : ` — Lage: Jäger x=${lage.jx} HP=${lage.jhp}, Beute HP=${lage.bhp}, fährt=${lage.goal}`),
   )
+
+  // GROUND ATTACK (dispatch 0x0A with an AITARGET_Ground target,
+  // Cfile:812553-812563): the tank closes to weapon range, the weapon takes
+  // the POSITION as its target and fires; the order never self-completes
+  // (HasTarget stays true for Ground, Cfile:800284).
+  const schuetze = spawnLuaUnit(host, 'uel0201', { x: 400, y: 20, z: 340 }, 1)
+  host.eval(`__dispatchAttackGround(${schuetze}, 440, 340)`)
+  let bodenZiel = false
+  let gefeuert = false
+  for (let t = 0; t < 300 && !(bodenZiel && gefeuert); t++) {
+    beat(engine)
+    if (!bodenZiel) {
+      bodenZiel =
+        host.eval(
+          `local u = __units[${schuetze}] if not u then return false end
+           for _, w in ipairs(u.__weapons or {}) do
+             if w.__targetGround and w.__targetGround[1] == 440 then return true end
+           end
+           return false`,
+        ) === true
+    }
+    if (bodenZiel && !gefeuert) {
+      gefeuert =
+        host.eval(
+          `local u = __units[${schuetze}] if not u then return false end
+           for _, w in ipairs(u.__weapons or {}) do
+             if (w.__fireClock or 0) > 0 then return true end
+           end
+           return false`,
+        ) === true
+    }
+  }
+  check(bodenZiel, 'Ground attack: the weapon takes the position target (AITARGET_Ground)')
+  check(gefeuert, 'Ground attack: the weapon fires at the ground (fire clock running)')
+  check(
+    host.eval(`return __attackOrders[${schuetze}] ~= nil`) === true,
+    'Ground attack never self-completes (HasTarget true for Ground, Cfile:800284)',
+  )
+  {
+    const rows = host.pull<{ id: number; order?: { t: string; x: number; z: number } }[]>(
+      '__readAllUnitsJson()',
+    )
+    const s = rows.find((r) => r.id === schuetze)
+    check(
+      s?.order?.t === 'Attack' && s.order.x === 440,
+      `Snapshot carries the ground-attack order for the command graph (${JSON.stringify(s?.order)})`,
+    )
+  }
+  host.eval(`__dispatchStop(${schuetze})`)
+  check(
+    host.eval(`return __attackOrders[${schuetze}] == nil`) === true,
+    'Stop ends the ground attack (queue + order wiped)',
+  )
+
+  // GUARD (dispatch 0x0F, CUnitGuardTask): engineer assist joins the
+  // guarded builder's construction (guard chain, sub_612BB0 -> sub_613970);
+  // a guarded factory shares its build queue (sub_6127F0); the order ends
+  // when the guarded unit dies (Cfile:839365-839385).
+  {
+    const bauer = spawnLuaUnit(host, 'uel0001', { x: 600, y: 20, z: 300 }, 1)
+    const helfer = spawnLuaUnit(host, 'uel0001', { x: 606, y: 20, z: 300 }, 1)
+    const baustelle = Number(
+      host.eval(
+        `local id = __spawnBuildSite('/units/ueb0101/ueb0101_script.lua', 'ueb0101', 603, 20, 303, 1) return id`,
+      ),
+    )
+    host.eval(`__issueBuildTask(${bauer}, ${baustelle}, 'MobileBuild')`)
+    host.eval(`__dispatchGuard(${helfer}, ${bauer})`)
+    let joined = false
+    for (let t = 0; t < 40 && !joined; t++) {
+      beat(engine)
+      joined =
+        host.eval(
+          `for _, task in pairs(__buildTasks) do
+             if task.builder == ${helfer} and task.target == ${baustelle} then return true end
+           end
+           return false`,
+        ) === true
+    }
+    check(joined, 'Guard on a builder joins its build (guard chain -> repair task, sub_612BB0)')
+    check(
+      host.eval(`return __units[${helfer}]:IsUnitState('Guarding')`) === true,
+      "IsUnitState('Guarding') answers from the real guard order (ctor bit 0x10, Cfile:836995)",
+    )
+    check(
+      host.eval(
+        `local g = __units[${helfer}]:GetGuardedUnit() return g ~= nil and g.__id == ${bauer}`,
+      ) === true,
+      'GetGuardedUnit returns the guarded unit (mGuardedUnit, Cfile:839316-839333)',
+    )
+    check(
+      host.eval(
+        `local gs = __units[${bauer}]:GetGuards() return table.getn(gs) == 1 and gs[1].__id == ${helfer}`,
+      ) === true,
+      'GetGuards lists the assisting unit (reverse of the guard orders)',
+    )
+    host.eval(`__units[${bauer}].__dead = true`)
+    beat(engine)
+    check(
+      host.eval(`return __guardOrders[${helfer}] == nil`) === true,
+      'Guard ends when the guarded unit dies (TaskTick -1, Cfile:839365-839385)',
+    )
+    host.eval(`__dispatchStop(${helfer})`)
+  }
+  {
+    // Factory queue sharing: the guarding idle factory pulls ONE item off
+    // the guarded factory's queue (count>1 head or later entries) and
+    // builds it locally (sub_6127F0, Cfile:837988-838049).
+    const f1 = spawnLuaUnit(host, 'ueb0101', { x: 620, y: 20, z: 340 }, 1)
+    const f2 = spawnLuaUnit(host, 'ueb0101', { x: 632, y: 20, z: 340 }, 1)
+    host.eval(`__queueFactoryBuild(${f1}, 'uel0201', 3)`)
+    host.eval(`__dispatchGuard(${f2}, ${f1})`)
+    let pulled = false
+    for (let t = 0; t < 40 && !pulled; t++) {
+      beat(engine)
+      pulled =
+        host.eval(
+          `local q = __units[${f2}] and __units[${f2}].__buildQueue
+           return q ~= nil and q[1] ~= nil and q[1].id == 'uel0201'`,
+        ) === true
+    }
+    check(pulled, 'Factory guard pulls ONE queue item and builds it locally (sub_6127F0)')
+    check(
+      host.eval(
+        `local q = __units[${f2}].__buildQueue local n = 0
+         for _, e in ipairs(q or {}) do n = n + (e.count or 1) end
+         return n == 1`,
+      ) === true,
+      'Exactly one item is pulled per idle re-check (count decrement, Cfile:838030-838049)',
+    )
+  }
+  {
+    // Browser finding: an ENGINEER guarding a FINISHED factory must join
+    // the factory's own FactoryBuild once it starts (the guard chain ends
+    // at the factory; its running build task IS the site to assist).
+    const fab = spawnLuaUnit(host, 'ueb0101', { x: 650, y: 20, z: 380 }, 1)
+    const eng = spawnLuaUnit(host, 'uel0001', { x: 656, y: 20, z: 380 }, 1)
+    host.eval(`__dispatchGuard(${eng}, ${fab})`)
+    beat(engine)
+    host.eval(`__queueFactoryBuild(${fab}, 'uel0201', 1)`)
+    let assisted = false
+    for (let t = 0; t < 40 && !assisted; t++) {
+      beat(engine)
+      assisted =
+        host.eval(
+          `for _, task in pairs(__buildTasks) do
+             if task.builder == ${eng} and task.order == 'Repair' then return true end
+           end
+           return false`,
+        ) === true
+    }
+    check(assisted, "Engineer guarding a factory joins the factory's FactoryBuild (assist)")
+  }
 }
 
 console.log('\n== Was die Sim dabei gemeldet hat ==')

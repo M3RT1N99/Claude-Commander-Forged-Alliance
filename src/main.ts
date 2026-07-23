@@ -975,6 +975,13 @@ async function startSandbox(mapFolder: string): Promise<void> {
         for (const id of ids) luaSim?.adjustBuildQueue(id, v.index, delta)
         return
       }
+      // The fire-state buttons (orders.lua:526 / ToggleFireState): the UI asks
+      // the sim driver (cfunc_SetFireStateL -> ProcessInfo(entityId,
+      // "SetFireState", value)); value is the EFireState number.
+      if (cmd === 'setfirestate' && typeof value === 'number') {
+        for (const id of ids) luaSim?.setFireState(id, value)
+        return
+      }
       log(`Befehl an die Sim: ${name}(${ids.join(',')}) — noch kein Weg dorthin`)
     })
     // SimCallback (Ctrl-K-Selbstzerstörung, Kontrollgruppen, Diplomatie):
@@ -1305,9 +1312,10 @@ viewportEl.addEventListener('contextmenu', (e) => {
 /**
  * The unit under the cursor, classified for the command dispatch: an ENEMY
  * turns the default click into Attack, an OWN UNFINISHED structure into
- * Repair (resume construction).
+ * Repair (resume construction), an OWN HEALTHY unit into Guard (assist,
+ * dispatch 0x0F).
  */
-function zielUnter(clientX: number, clientY: number): { enemy?: number; repair?: number } {
+function zielUnter(clientX: number, clientY: number): { enemy?: number; repair?: number; own?: number } {
   const picked = viewer.pickUnit(clientX, clientY)
   if (!picked || !luaSim) return {}
   const u = luaUnits.find((x) => x.scene === picked)
@@ -1317,7 +1325,7 @@ function zielUnter(clientX: number, clientY: number): { enemy?: number; repair?:
   // Repair target: unfinished (resume construction) OR finished but
   // damaged (HP repair — same CBuildTaskHelper, Cfile:815445).
   if (s && (s.fraction < 1 || s.health < s.maxHealth)) return { repair: u.id }
-  return {}
+  return { own: u.id }
 }
 
 /**
@@ -1327,7 +1335,7 @@ function zielUnter(clientX: number, clientY: number): { enemy?: number; repair?:
 async function issueWorldCommand(
   hit: { x: number; z: number },
   queue: boolean,
-  ziel: { enemy?: number; repair?: number } = {},
+  ziel: { enemy?: number; repair?: number; own?: number } = {},
 ): Promise<void> {
   if (!luaSim || !gameUi) return
   try {
@@ -1483,6 +1491,14 @@ function showUnitInfo(id: string, bp: BpObject): void {
 // ---------------------------------------------------------------------------
 
 btnPickDir.addEventListener('click', async () => {
+  // Belt and braces: even if this button is visible (stale build, shimmed
+  // API), a missing picker must fall back to the <input webkitdirectory>
+  // flow instead of erroring out.
+  if (typeof window.showDirectoryPicker !== 'function') {
+    log('Hinweis: Dieser Browser/Kontext hat keine File System Access API — Datei-Auswahl öffnet sich stattdessen')
+    inputDir.click()
+    return
+  }
   try {
     const handle = await window.showDirectoryPicker({ id: 'cfa-game-dir', mode: 'read' })
     await saveDirHandle(handle)
@@ -2208,7 +2224,16 @@ if (import.meta.env.DEV) {
 async function init(): Promise<void> {
   log('Claude Commander: Forged Alliance — Unit-Viewer')
 
-  if (!('showDirectoryPicker' in window)) {
+  if (location.protocol === 'file:') {
+    // Workers, WASM and the File System Access API all need an http(s)
+    // origin — a double-clicked dist/index.html can never work.
+    log('FEHLER: Diese Seite läuft nicht per file:// — bitte über einen lokalen Server öffnen (npm run dev bzw. npm run preview)')
+  }
+
+  // typeof check, not `in`: a property that exists but is not callable (seen
+  // in the wild — user report "showDirectoryPicker is not a function") must
+  // also route to the fallback picker.
+  if (typeof window.showDirectoryPicker !== 'function') {
     btnPickDir.hidden = true
     btnFallback.hidden = false
     log('Hinweis: Browser ohne File System Access API — Fallback-Auswahl aktiv')

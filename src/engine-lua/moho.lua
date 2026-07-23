@@ -326,6 +326,26 @@ local unit = withNoops(UNIT_NAMES, {
   -- gibt keinen OnDamage->Feuer-Pfad in der Engine.
   -- Wirkung: der Feuertakt feuert nicht bei HoldFire (Cfile:983935) und die
   -- Zielerfassung LOESCHT das Ziel (Cfile:793085-793097). Beides in weapons.lua.
+  -- GUARD. The task syncs from mUnit->mGuardedUnit every tick
+  -- (Cfile:839316-839333); the AI Lua reads the chain through exactly
+  -- these two (engineermanager.lua:58-66).
+  GetGuardedUnit = function(self)
+    local id = self.__guardedUnit
+    local t = id and __units[id] or nil
+    if t and not t.__dead and not t.__destroyQueued then return t end
+    return nil
+  end,
+  GetGuards = function(self)
+    local out = {}
+    for unitId, g in pairs(__guardOrders or {}) do
+      if g.target == self.__id then
+        local u = __units[unitId]
+        if u and not u.__dead then out[table.getn(out) + 1] = u end
+      end
+    end
+    return out
+  end,
+
   GetFireState = function(self) return self.__fireState or 0 end,
   SetFireState = function(self, state) self.__fireState = state end,
   ToggleFireState = function(self)
@@ -375,7 +395,34 @@ local unit = withNoops(UNIT_NAMES, {
     self.__rally = pos
     return true
   end,
-  IsUnitState = function(self) return false end,
+  -- EUnitState (Cfile:702962-703052) — answered from the REAL sim state,
+  -- not a stub: the original AI/effect Lua branches on these
+  -- (engineermanager.lua:58-66, terranunits.lua:130).
+  IsUnitState = function(self, state)
+    local id = self.__id
+    if state == 'Guarding' then -- 4, guard ctor sets bit 0x10 (Cfile:836995)
+      return (__guardOrders and __guardOrders[id]) ~= nil
+    elseif state == 'Attacking' then -- 3, attack ctor sets bit 8 (Cfile:812568)
+      return (__attackOrders and __attackOrders[id]) ~= nil
+    elseif state == 'Moving' then
+      return self.__goal ~= nil and self.__goal ~= false
+    elseif state == 'Building' or state == 'Repairing' then
+      -- 5 / 16: a running build task with the matching helper name
+      for _, task in pairs(__buildTasks or {}) do
+        if task.builder == id then
+          local repairing = task.order == 'Repair'
+          return (state == 'Repairing') == repairing
+        end
+      end
+      return false
+    elseif state == 'BeingBuilt' then -- 39
+      return self.__beingBuilt == true
+    elseif state == 'Immobile' then
+      local bp = self.__bp
+      return ((bp and bp.Physics and bp.Physics.MotionType) or 'RULEUMT_None') == 'RULEUMT_None'
+    end
+    return false
+  end,
   IsIdleState = function(self) return true end,
   IsPaused = function(self) return false end,
   IsStunned = function(self) return false end,

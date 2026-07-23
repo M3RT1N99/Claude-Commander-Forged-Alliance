@@ -266,7 +266,8 @@ export class GameUi {
       seen.add(u.id)
       lines.push(
         `__uiSetUnit(${u.id}, '${u.name}', ${u.army ?? 1}, ${u.x}, ${u.y}, ${u.z}, ` +
-          `${u.health}, ${u.maxHealth}, ${u.fraction ?? 1}, ${u.idle === true})`,
+          `${u.health}, ${u.maxHealth}, ${u.fraction ?? 1}, ${u.idle === true}, ` +
+          `${u.fireState ?? 0}, ${u.guard ?? 0})`,
       )
       // Die Bau-Warteschlange einer Fabrik (construction.lua zeigt sie an).
       // IMMER senden, auch leer: sonst bleibt in der UI-Kopie die letzte Queue
@@ -419,13 +420,15 @@ export class GameUi {
     hit: { x: number; z: number },
     elevation: (x: number, z: number) => number,
     queue = false,
-    /** The picked unit under the cursor: enemy → Attack, own unfinished → Repair. */
-    ziel: { enemy?: number; repair?: number } = {},
+    /** The picked unit under the cursor: enemy → Attack, own unfinished →
+     *  Repair, own healthy → Guard (dispatch 0x0F). */
+    ziel: { enemy?: number; repair?: number; own?: number } = {},
   ): Promise<string | null> {
     return worldClick(this.host, sim, hit, elevation, {
       queue,
       enemyTargetId: ziel.enemy,
       repairTargetId: ziel.repair,
+      ownTargetId: ziel.own,
     })
   }
 
@@ -567,13 +570,17 @@ export class GameUi {
   private readonly seenErrors = new Set<string>()
   /** Jeden verschiedenen Lua-Fehler GENAU EINMAL melden — nicht 60-mal pro Sekunde. */
   private reportUiError(err: unknown): void {
-    const msg = (err instanceof Error ? err.message : String(err))
-      .replace(/\[string "[\s\S]*?"\]/g, '')
-      .split('\n')[0]!
-      .slice(0, 300)
-    if (this.seenErrors.has(msg)) return
-    this.seenErrors.add(msg)
-    this.log(`UI-FEHLER: ${msg}`)
+    const full = (err instanceof Error ? err.message : String(err)).replace(
+      /\[string "[\s\S]*?"\]/g,
+      '',
+    )
+    // Dedupe on the first line, but LOG the whole message: wasmoon errors can
+    // carry a Lua traceback in the tail, and cutting it off cost us the
+    // caller when hunting a lazyvar.lua:92 error from a user report.
+    const key = full.split('\n')[0]!.slice(0, 300)
+    if (this.seenErrors.has(key)) return
+    this.seenErrors.add(key)
+    this.log(`UI-FEHLER: ${full.slice(0, 2000)}`)
   }
 
   /**
