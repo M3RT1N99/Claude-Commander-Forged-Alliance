@@ -1,87 +1,86 @@
-# Architektur
+# Architecture
 
-## Leitprinzipien
+## Guiding principles
 
-1. **Bring your own assets** — the app reads the original installation of the
-   Users (Steam/GOG) local; the repo does not contain or distribute game data.
-2. **Browser first** — a TypeScript core that also runs without changes
-   Mobile (PWA/Capacitor) and desktop (Tauri) runs.
-3. **Sim and representation strictly separated** — the simulation is
-   deterministic and doesn't render anything; the renderer only reads sim state.
-   This is a requirement for lockstep multiplayer (like in the original) and
-   Replays.
-4. **Original behavior for reference** — the reconstructed ones
-   Moho engine sources (`faf-re`, ~91% recovered) and the Lua rules
-   `lua.scd` define the target behavior (balance, formulas, path finding).
+1. **Bring your own assets** — the app reads the user's original Steam/GOG
+   installation locally; the repository contains and distributes no game data.
+2. **Browser first** — a TypeScript core that also runs unchanged on mobile
+   (PWA/Capacitor) and desktop (Tauri).
+3. **Sim and rendering strictly separated** — the simulation is deterministic
+   and renders nothing; the renderer only reads Sim state. This is a
+   prerequisite for lockstep multiplayer (as in the original) and replays.
+4. **Original behavior as the reference** — the reconstructed Moho engine
+   sources (`faf-re`, ~91 % recovered) and the Lua rules in `lua.scd` define
+   the intended behavior (balance, formulas, pathfinding).
 
-## Schichten
+## Layers
 
 ```
 ┌────────────────────────────────────────────────────────┐
 │ UI (HTML/CSS)  ·  Input  ·  Audio                      │
 ├────────────────────────────────────────────────────────┤
 │ Renderer (Three.js/WebGL2)                             │
-│   Units (SCM+DDS, mesh.fx-Port) · Terrain · Effekte    │
+│   Units (SCM+DDS, mesh.fx port) · Terrain · Effects    │
 ├────────────────────────────────────────────────────────┤
-│ Sim core (deterministic, later in Web Worker) │
-│   Blueprints · Einheiten · Bewegung/Pathfinding ·      │
-│   Waffen/Schaden · Wirtschaft (Mass/Energy-Flow)       │
+│ Sim core (deterministic, later in a Web Worker)        │
+│   Blueprints · Units · Movement/pathfinding ·           │
+│   Weapons/damage · Economy (Mass/Energy flow)           │
 ├────────────────────────────────────────────────────────┤
-│ Formate: scm · sca · dds/dxt · blueprint · scmap       │
+│ Formats: scm · sca · dds/dxt · blueprint · scmap       │
 ├────────────────────────────────────────────────────────┤
-│ VFS: SCD-Archive (Zip, Random-Access)                  │
+│ VFS: SCD archives (Zip, random access)                 │
 ├────────────────────────────────────────────────────────┤
 │ GameSource: File System Access API │ webkitdirectory │ │
-│             HTTP-Range (Dev/LAN)                       │
+│             HTTP range (development/LAN)                │
 └────────────────────────────────────────────────────────┘
 ```
 
-### Why no port from faf-re?
+### Why not port faf-re?
 
-`faf-re` reconstructs the original C++ engine (MSVC8-ABI, Win32,
-DirectX 9) — valuable as a **behavioral reference** (formulas, data structures,
-Netcode semantics), but not directly portable: 32-bit ABI layouts,
-D3D9 renderer, x87 floating point. An Emscripten port would be a
-Mammoth project with unclear legal situation (derivative work of the binary).
-Instead: re-implementation in TS with faf-re as a reference.
+`faf-re` reconstructs the original C++ engine (MSVC8 ABI, Win32, DirectX 9).
+It is valuable as a **behavioral reference** (formulas, data structures,
+netcode semantics), but cannot be ported directly: 32-bit ABI layouts, the
+D3D9 renderer, and x87 floating point. An Emscripten port would be a massive
+project with an unclear legal status (a derivative work of the binary).
+Instead, this project is a TypeScript reimplementation that uses faf-re as a
+reference.
 
-## Verifizierte Dateiformate
+## Verified file formats
 
-Details in [FORMATS.md](FORMATS.md). All parsers are against the real one
-Installation tested (`scripts/verify.ts`): 568/568 unit blueprints,
-638/638 LOD0 meshes, reference values ​​of UEL0001 exact.
+See [FORMATS.md](FORMATS.md) for details. All parsers are tested against the
+real installation (`scripts/verify.ts`): 568/568 unit blueprints, 638/638 LOD0
+meshes, and exact reference values for UEL0001.
 
-## Plattform-Strategie
+## Platform strategy
 
-| Phase | Plattform | Technik |
-| ----- | --------- | ------- |
-| 1 | Browser (Desktop) | Vite + Three.js, File System Access API |
-| 2 | Mobile | PWA or capacitor; DXT software decoder already exists (mobile GPUs cannot do S3TC); Touch UI |
-| 3 | Linux/Windows | Tauri (nutzt dieselbe Web-Codebasis, nativer FS-Zugriff, GOG/Steam-Erkennung) |
+| Phase | Platform | Technology |
+| ----- | -------- | ---------- |
+| 1 | Browser (desktop) | Vite + Three.js, File System Access API |
+| 2 | Mobile | PWA or Capacitor; a DXT software decoder already exists (mobile GPUs cannot use S3TC); touch UI |
+| 3 | Linux/Windows | Tauri (uses the same web codebase, native FS access, GOG/Steam detection) |
 
-Mobile Note: File access to the installation is not practical there
-— an asset sync from the desktop (LAN, HTTP range source exists) is planned
-already) or a one-time import into the Origin Private File System (OPFS).
+Mobile note: file access to the installation is not practical there. The plan
+is either an asset sync from the desktop (LAN; an HTTP range source already
+exists) or a one-time import into the Origin Private File System (OPFS).
 
-## Determinismus-Plan (Sim-Kern)
+## Determinism plan (Sim core)
 
-- Fixed point arithmetic or consistent `Math.fround` for sim math
-  (Float determinism across platforms; original uses x87 compatible FP)
-- Sim tick: 10/s (original clock), renderer interpolated
-- No iteration over unsorted maps in the sim path; own PRNG with seed
-- Replays = start state + command stream (like original)
+- Fixed-point arithmetic or consistent `Math.fround` for Sim mathematics
+  (float determinism across platforms; the original uses x87-compatible FP)
+- Sim tick: 10/s (original timing); the renderer interpolates
+- No iteration over unsorted maps in the Sim path; use a dedicated seeded PRNG
+- Replays = initial state + command stream (as in the original)
 
-## Meilensteine
+## Milestones
 
-1. ✅ **M1 Unit Viewer**: VFS, SCM/BP/DDS parser, original shader look
+1. ✅ **M1 Unit Viewer**: VFS, SCM/BP/DDS parsers, original shader look
 2. **M2 Map Renderer**: SCMAP parser (heightmap, texture layers, water,
-   Props), terrain shader port (`terrain.fx` is in effects.scd)
-3. **M3 Animation**: SCA-Parser, Skinning (GPU), Idle/Walk-Zyklen
-4. **M4 Sim Base**: Blueprint database, spawn/move units,
-   Flowfield/Pathfinding, Befehls-Queue
-5. **M5 Kampf & Wirtschaft**: Waffen, Projektile, Schaden, Mass/Energy,
-   Build, upgrade chains
-6. **M6 playability**: selection/commands/camera as in the original, minimap,
-   Fog of War, einfache Skirmish-KI
-7. **M7 Plattformen & Multiplayer**: Tauri-Builds, Mobile-UI,
-   Lockstep-Netcode
+   props), terrain shader port (`terrain.fx` is in effects.scd)
+3. **M3 Animation**: SCA parser, GPU skinning, idle/walk cycles
+4. **M4 Sim Foundation**: blueprint database, spawn/move units,
+   flowfield/pathfinding, command queue
+5. **M5 Combat & Economy**: weapons, projectiles, damage, Mass/Energy,
+   construction, upgrade chains
+6. **M6 Gameplay**: selection/commands/camera as in the original, minimap,
+   fog of war, simple skirmish AI
+7. **M7 Platforms & Multiplayer**: Tauri builds, mobile UI, lockstep netcode
