@@ -285,6 +285,10 @@ local function readRow(id, u)
     maxHealth = u:GetMaxHealth(),
     moving = moving,
     fraction = u.__fraction or 1,
+    -- Fire state mirror for the user side (SUnitVarDat.mFireState is part of
+    -- the per-unit sync block, ctor Cfile:772277). The sim itself never
+    -- changes it — only the SetFireState user command does.
+    fireState = u.__fireState or 0,
     born = u.__spawnTick or 0,
     mesh = u.__meshBp,
     army = u.__army or 1,
@@ -339,6 +343,7 @@ function __readAllUnitsJson()
       .. ',"maxHealth":' .. jnum(r.maxHealth)
       .. ',"moving":' .. tostring(r.moving)
       .. ',"fraction":' .. jnum(r.fraction)
+      .. ',"fireState":' .. jnum(r.fireState)
       .. ',"born":' .. jnum(r.born)
       .. (function()
         -- The whole command queue (head first) for the command graph;

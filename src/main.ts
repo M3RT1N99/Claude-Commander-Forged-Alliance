@@ -975,6 +975,13 @@ async function startSandbox(mapFolder: string): Promise<void> {
         for (const id of ids) luaSim?.adjustBuildQueue(id, v.index, delta)
         return
       }
+      // The fire-state buttons (orders.lua:526 / ToggleFireState): the UI asks
+      // the sim driver (cfunc_SetFireStateL -> ProcessInfo(entityId,
+      // "SetFireState", value)); value is the EFireState number.
+      if (cmd === 'setfirestate' && typeof value === 'number') {
+        for (const id of ids) luaSim?.setFireState(id, value)
+        return
+      }
       log(`Befehl an die Sim: ${name}(${ids.join(',')}) — noch kein Weg dorthin`)
     })
     // SimCallback (Ctrl-K-Selbstzerstörung, Kontrollgruppen, Diplomatie):
@@ -1483,6 +1490,14 @@ function showUnitInfo(id: string, bp: BpObject): void {
 // ---------------------------------------------------------------------------
 
 btnPickDir.addEventListener('click', async () => {
+  // Belt and braces: even if this button is visible (stale build, shimmed
+  // API), a missing picker must fall back to the <input webkitdirectory>
+  // flow instead of erroring out.
+  if (typeof window.showDirectoryPicker !== 'function') {
+    log('Hinweis: Dieser Browser/Kontext hat keine File System Access API — Datei-Auswahl öffnet sich stattdessen')
+    inputDir.click()
+    return
+  }
   try {
     const handle = await window.showDirectoryPicker({ id: 'cfa-game-dir', mode: 'read' })
     await saveDirHandle(handle)
@@ -2208,7 +2223,16 @@ if (import.meta.env.DEV) {
 async function init(): Promise<void> {
   log('Claude Commander: Forged Alliance — Unit-Viewer')
 
-  if (!('showDirectoryPicker' in window)) {
+  if (location.protocol === 'file:') {
+    // Workers, WASM and the File System Access API all need an http(s)
+    // origin — a double-clicked dist/index.html can never work.
+    log('FEHLER: Diese Seite läuft nicht per file:// — bitte über einen lokalen Server öffnen (npm run dev bzw. npm run preview)')
+  }
+
+  // typeof check, not `in`: a property that exists but is not callable (seen
+  // in the wild — user report "showDirectoryPicker is not a function") must
+  // also route to the fallback picker.
+  if (typeof window.showDirectoryPicker !== 'function') {
     btnPickDir.hidden = true
     btnFallback.hidden = false
     log('Hinweis: Browser ohne File System Access API — Fallback-Auswahl aktiv')

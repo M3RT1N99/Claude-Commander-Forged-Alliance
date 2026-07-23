@@ -285,7 +285,7 @@ function GetAttachedUnitsList(units)
 end
 
 -- Von der Engine pro Beat: der Zustand einer Unit aus der Sim.
-function __uiSetUnit(id, blueprintId, army, x, y, z, health, maxHealth, workProgress, idle)
+function __uiSetUnit(id, blueprintId, army, x, y, z, health, maxHealth, workProgress, idle, fireState)
   local u = __uiUnits[id]
   if not u then
     -- SUnitVarDat-Ctor (Cfile:772277): mFireState = FIRESTATE_ReturnFire (0).
@@ -301,6 +301,9 @@ function __uiSetUnit(id, blueprintId, army, x, y, z, health, maxHealth, workProg
   u.maxHealth = maxHealth
   u.workProgress = workProgress
   u.idle = idle
+  -- The sim is the authority (SUnitVarDat.mFireState mirrored per beat); the
+  -- optimistic set in SetFireState only bridges the round-trip latency.
+  if fireState ~= nil then u.fireState = fireState end
   u.dead = false
 end
 

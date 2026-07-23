@@ -51,6 +51,10 @@ type InMsg =
   | { type: 'attack'; id: number; targetId: number; queue?: boolean }
   // Repair (dispatch 0x14): resume building an unfinished structure.
   | { type: 'repair'; id: number; targetId: number; queue?: boolean }
+  // SetFireState: the UI ASKS the sim via the sim driver (cfunc_SetFireStateL:
+  // sSimDriver->ProcessInfo(entityId, "SetFireState", value)). EFireState
+  // Cfile:702842-702850: ReturnFire=0, HoldFire=1, HoldGround=2.
+  | { type: 'fireState'; id: number; state: number }
   // Der Sammelpunkt einer Fabrik (IssueFactoryRallyPoint, Cfile:1008266) — KEIN
   // Bewegungsbefehl: die Fabrik bleibt stehen.
   | { type: 'rally'; id: number; x: number; y: number; z: number }
@@ -195,6 +199,10 @@ ctx.onmessage = async (e: MessageEvent<InMsg>): Promise<void> => {
     host.eval(`__dispatchAttack(${msg.id}, ${msg.targetId}, ${msg.queue ? 'false' : 'true'})`)
   } else if (msg.type === 'repair') {
     host.eval(`__dispatchRepair(${msg.id}, ${msg.targetId}, ${msg.queue ? 'false' : 'true'})`)
+  } else if (msg.type === 'fireState') {
+    // No task, no queue: fire state is unit state, not a command
+    // (Unit::SetFireState — weapons read it every tick, weapons.lua:89/229).
+    host.eval(`local u=__units[${msg.id}]; if u then u:SetFireState(${msg.state}) end`)
   }
 }
 

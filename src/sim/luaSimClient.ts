@@ -26,6 +26,8 @@ export interface LuaUnitSnapshot {
   moving: boolean
   /** Baufortschritt (1 = fertig). __readAllUnits schickt es, es wurde nur nie gelesen. */
   fraction: number
+  /** Fire state (EFireState Cfile:702842: ReturnFire=0, HoldFire=1, HoldGround=2). */
+  fireState?: number
   /** Erstellungs-Tick — die Build-Shader zählen ihr Alter darüber (material.x). */
   born: number
   /** The unit's active order (command graph): type + target position. */
@@ -404,6 +406,10 @@ export class LuaSimClient {
   /** Repair (dispatch 0x14): resume building the unfinished `targetId`. */
   repair(id: number, targetId: number, queue = false): void {
     this.worker.postMessage({ type: 'repair', id, targetId, queue })
+  }
+  /** SetFireState (cfunc_SetFireStateL → sim driver ProcessInfo, ui-globals.lua:617). */
+  setFireState(id: number, state: number): void {
+    this.worker.postMessage({ type: 'fireState', id, state })
   }
 
   /**
