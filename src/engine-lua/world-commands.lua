@@ -31,11 +31,35 @@
 --- fahren — und die Sim hat sie bis eben sogar an den Klickpunkt teleportiert
 --- (motion.lua). Die Engine hat dafuer eine eigene Bindung:
 --- `IssueFactoryRallyPoint(units, pos)` (sim_SimInits, Cfile:1008266).
+-- The FULL cap bit table, same values as the Sim's (globals.lua, faf-re
+-- Unit.cpp:8675-8813). A partial mirror here silently reports `false` for
+-- every missing cap — that is exactly how canReclaim broke: the UI mask
+-- never contained RULEUCC_Reclaim, so the ACU "could not" reclaim.
 local COMMAND_CAP_BITS = {
   RULEUCC_Move = 0x1,
+  RULEUCC_Stop = 0x2,
   RULEUCC_Attack = 0x4,
   RULEUCC_Guard = 0x8,
+  RULEUCC_Patrol = 0x10,
+  RULEUCC_RetaliateToggle = 0x20,
   RULEUCC_Repair = 0x40,
+  RULEUCC_Capture = 0x80,
+  RULEUCC_Transport = 0x100,
+  RULEUCC_CallTransport = 0x200,
+  RULEUCC_Nuke = 0x400,
+  RULEUCC_Tactical = 0x800,
+  RULEUCC_Teleport = 0x1000,
+  RULEUCC_Ferry = 0x2000,
+  RULEUCC_SiloBuildTactical = 0x4000,
+  RULEUCC_SiloBuildNuke = 0x8000,
+  RULEUCC_Sacrifice = 0x10000,
+  RULEUCC_Pause = 0x20000,
+  RULEUCC_Overcharge = 0x40000,
+  RULEUCC_Dive = 0x80000,
+  RULEUCC_Reclaim = 0x100000,
+  RULEUCC_SpecialAction = 0x200000,
+  RULEUCC_Dock = 0x400000,
+  RULEUCC_Script = 0x800000,
 }
 
 local function blueprintCommandCapMask(bp)
@@ -102,6 +126,9 @@ function __uiSelectionJson()
     -- Entity guard is target-dependent: compatible stationary factories remain
     -- eligible, while the caller filters point guard through canMove.
     local canGuard = hasCommandCap(commandCapMask, 'RULEUCC_Guard')
+    -- RULEUCC_Reclaim: engineers and ACUs may drain wrecks/map props
+    -- (dispatch 0x13, CUnitReclaimTask) — the cap gates the click.
+    local canReclaim = hasCommandCap(commandCapMask, 'RULEUCC_Reclaim')
     parts[i] = '{"id":' .. tostring(u:GetEntityId())
       .. ',"army":' .. tostring(u:GetArmy())
       .. ',"canMove":' .. tostring(canMove)
@@ -109,6 +136,7 @@ function __uiSelectionJson()
       .. ',"canAttack":' .. tostring(canAttack)
       .. ',"canAttackGround":' .. tostring(canAttackGround)
       .. ',"canGuard":' .. tostring(canGuard)
+      .. ',"canReclaim":' .. tostring(canReclaim)
       .. ',"isFactory":' .. tostring(isFactory)
       .. '}'
   end

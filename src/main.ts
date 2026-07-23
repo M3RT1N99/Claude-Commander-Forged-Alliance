@@ -1432,17 +1432,39 @@ viewportEl.addEventListener('contextmenu', (e) => {
  * Repair (resume construction), an OWN HEALTHY unit into Guard (assist,
  * dispatch 0x0F).
  */
-function zielUnter(clientX: number, clientY: number): { enemy?: number; repair?: number; own?: number } {
+function zielUnter(clientX: number, clientY: number): {
+  enemy?: number
+  repair?: number
+  own?: number
+  /** A wreck prop under the cursor (sim prop id) — reclaim target. */
+  reclaimProp?: number
+  /** A map prop (tree/rock) under the cursor — its scmap instance index. */
+  reclaimMapProp?: number
+} {
   const picked = viewer.pickUnit(clientX, clientY)
-  if (!picked || !luaSim) return {}
-  const u = luaUnits.find((x) => x.scene === picked)
-  if (!u) return {}
-  if (u.army !== 1) return { enemy: u.id }
-  const s = luaSim.state(u.id)
-  // Repair target: unfinished (resume construction) OR finished but
-  // damaged (HP repair — same CBuildTaskHelper, Cfile:815445).
-  if (s && (s.fraction < 1 || s.health < s.maxHealth)) return { repair: u.id }
-  return { own: u.id }
+  if (!luaSim) return {}
+  if (picked) {
+    const u = luaUnits.find((x) => x.scene === picked)
+    if (u) {
+      if (u.army !== 1) return { enemy: u.id }
+      const s = luaSim.state(u.id)
+      // Repair target: unfinished (resume construction) OR finished but
+      // damaged (HP repair — same CBuildTaskHelper, Cfile:815445).
+      if (s && (s.fraction < 1 || s.health < s.maxHealth)) return { repair: u.id }
+      return { own: u.id }
+    }
+  }
+  // No unit: props are reclaim targets (dispatch 0x13) — wrecks first
+  // (individual meshes), then the instanced map props (trees, rocks).
+  const wreck = viewer.pickAmong(clientX, clientY, [...propMeshes.values()])
+  if (wreck) {
+    for (const [id, mesh] of propMeshes) {
+      if (mesh === wreck) return { reclaimProp: id }
+    }
+  }
+  const mapIndex = viewer.pickMapProp(clientX, clientY)
+  if (mapIndex !== null) return { reclaimMapProp: mapIndex }
+  return {}
 }
 
 /**
@@ -1452,7 +1474,13 @@ function zielUnter(clientX: number, clientY: number): { enemy?: number; repair?:
 async function issueWorldCommand(
   hit: { x: number; z: number },
   queue: boolean,
-  ziel: { enemy?: number; repair?: number; own?: number } = {},
+  ziel: {
+    enemy?: number
+    repair?: number
+    own?: number
+    reclaimProp?: number
+    reclaimMapProp?: number
+  } = {},
 ): Promise<void> {
   if (!luaSim || !gameUi) return
   try {
@@ -2382,6 +2410,22 @@ if (import.meta.env.DEV) {
     for (const u of luaUnits) u.selected = u.id === id
     gameUi?.select([id])
     return 'ok'
+  }
+  // The scmap prop spawns near a point — find a tree to reclaim via CDP.
+  ;(window as unknown as Record<string, unknown>).__cfaMapProps = (x: number, z: number, r = 20) =>
+    mapPropSpawns()
+      .filter((p) => Math.abs(p.x - x) < r && Math.abs(p.z - z) < r)
+      .slice(0, 40)
+  // Probe what a click at this screen point would pick (map prop index).
+  ;(window as unknown as Record<string, unknown>).__cfaPickMapProp = (x: number, y: number) =>
+    viewer.pickMapProp(x, y)
+  // Probe the wreck under this screen point (sim prop id) — same picking
+  // path zielUnter uses for the reclaim default click.
+  ;(window as unknown as Record<string, unknown>).__cfaPickWreck = (x: number, y: number) => {
+    const hit = viewer.pickAmong(x, y, [...propMeshes.values()])
+    if (!hit) return null
+    for (const [id, mesh] of propMeshes) if (mesh === hit) return id
+    return null
   }
 }
 

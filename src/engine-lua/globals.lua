@@ -1472,6 +1472,18 @@ function __dispatchReclaim(unitId, targetId, clear)
   __issueOrder(unitId, { type = 'Reclaim', target = targetId }, clear)
 end
 
+--- Reclaim a MAP prop by its scmap index — the browser picks map props
+--- from the instanced renderer and only knows the instance index; the
+--- sim prop id lives in __mapPropIds (props.lua).
+function __dispatchReclaimMapProp(unitId, mapIndex, clear)
+  local targetId = __mapPropIds[mapIndex]
+  if not targetId then
+    WARN('reclaim: no sim prop for map index ' .. tostring(mapIndex))
+    return
+  end
+  __dispatchReclaim(unitId, targetId, clear)
+end
+
 function __reclaimTick()
   for unitId, task in pairs(__reclaimTasks) do
     local u = __units[unitId]

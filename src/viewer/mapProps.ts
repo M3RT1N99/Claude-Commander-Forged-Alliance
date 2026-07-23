@@ -299,10 +299,13 @@ export class MapProps {
           }
           near = lod.cutoff
         }
-        // Register the global-index -> (meshes, slot) lookup for removals.
+        // Register the global-index -> (meshes, slot) lookup for removals
+        // and the reverse slot -> index table for picking.
+        const slotToIndex = instances.map(({ mapIndex }) => mapIndex)
         instances.forEach(({ mapIndex }, slot) => {
           out.instanceLookup.set(mapIndex, { meshes: lodMeshes, slot })
         })
+        for (const m of lodMeshes) out.slotIndex.set(m, slotToIndex)
         out.stats.blueprints++
         out.stats.instances += instances.length
       } catch (err) {
@@ -331,7 +334,25 @@ export class MapProps {
     number,
     { meshes: THREE.InstancedMesh[]; slot: number }
   >()
+  /** Per mesh: instance slot -> global map index (picking). */
+  private readonly slotIndex = new Map<THREE.InstancedMesh, number[]>()
   private readonly zeroMatrix = new THREE.Matrix4().makeScale(0, 0, 0)
+
+  /**
+   * Raycast the instanced map props; returns the scmap index of the
+   * nearest hit instance (hidden instances have zero-scale matrices and
+   * never intersect).
+   */
+  pick(raycaster: THREE.Raycaster): number | null {
+    const hits = raycaster.intersectObjects(this.group.children, false)
+    for (const hit of hits) {
+      if (hit.instanceId === undefined) continue
+      const table = this.slotIndex.get(hit.object as THREE.InstancedMesh)
+      const mapIndex = table?.[hit.instanceId]
+      if (mapIndex !== undefined) return mapIndex
+    }
+    return null
+  }
 
   /**
    * Hide one map prop instance (its sim prop was reclaimed/destroyed):

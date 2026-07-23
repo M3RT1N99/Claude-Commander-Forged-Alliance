@@ -552,6 +552,11 @@ export class LuaSimClient {
   reclaim(id: number, targetId: number, queue = false): void {
     this.worker.postMessage({ type: 'reclaim', id, targetId, queue })
   }
+  /** Reclaim a MAP prop by its scmap instance index (picked from the
+   *  instanced renderer; the sim resolves the prop id). */
+  reclaimMapProp(id: number, mapIndex: number, queue = false): void {
+    this.worker.postMessage({ type: 'reclaim', id, mapIndex, queue })
+  }
 
   /**
    * SimCallback der UI (Cfile:1359123): ruft eine Funktion aus

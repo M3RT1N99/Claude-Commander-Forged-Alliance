@@ -420,15 +420,23 @@ export class GameUi {
     hit: { x: number; z: number },
     elevation: (x: number, z: number) => number,
     queue = false,
-    /** The picked unit under the cursor: enemy → Attack, own unfinished →
-     *  Repair, own healthy → Guard (dispatch 0x0F). */
-    ziel: { enemy?: number; repair?: number; own?: number } = {},
+    /** The picked object under the cursor: enemy → Attack, own unfinished →
+     *  Repair, own healthy → Guard (0x0F), prop → Reclaim (0x13). */
+    ziel: {
+      enemy?: number
+      repair?: number
+      own?: number
+      reclaimProp?: number
+      reclaimMapProp?: number
+    } = {},
   ): Promise<string | null> {
     return worldClick(this.host, sim, hit, elevation, {
       queue,
       enemyTargetId: ziel.enemy,
       repairTargetId: ziel.repair,
       ownTargetId: ziel.own,
+      reclaimPropId: ziel.reclaimProp,
+      reclaimMapPropIndex: ziel.reclaimMapProp,
     })
   }
 

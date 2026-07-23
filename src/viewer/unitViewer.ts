@@ -75,6 +75,38 @@ export class UnitViewer {
   hideMapProp(mapIndex: number): void {
     this.mapProps?.hideInstance(mapIndex)
   }
+
+  private screenRay(clientX: number, clientY: number): THREE.Raycaster {
+    const rect = this.canvas.getBoundingClientRect()
+    const ndc = new THREE.Vector2(
+      ((clientX - rect.left) / rect.width) * 2 - 1,
+      -((clientY - rect.top) / rect.height) * 2 + 1,
+    )
+    const raycaster = new THREE.Raycaster()
+    raycaster.setFromCamera(ndc, this.camera)
+    return raycaster
+  }
+
+  /** Pick a MAP prop instance under the cursor (scmap index) — reclaim
+   *  targets tree/rock instances of the instanced renderer. */
+  pickMapProp(clientX: number, clientY: number): number | null {
+    if (!this.mapProps) return null
+    return this.mapProps.pick(this.screenRay(clientX, clientY))
+  }
+
+  /** Pick the nearest of the given scene objects (wreck meshes live in
+   *  main); returns the hit root object or null. */
+  pickAmong(clientX: number, clientY: number, objects: THREE.Object3D[]): THREE.Object3D | null {
+    if (objects.length === 0) return null
+    const hits = this.screenRay(clientX, clientY).intersectObjects(objects, true)
+    const hit = hits[0]
+    if (!hit) return null
+    // Walk up to the registered root (wreck meshes may have child parts).
+    let obj: THREE.Object3D | null = hit.object
+    const roots = new Set(objects)
+    while (obj && !roots.has(obj)) obj = obj.parent
+    return obj
+  }
   /** Glow/bloom chain (CBloomRenderer::DoBloom @0x7F5160). */
   private bloom: BloomPipeline | null = null
   /** Shadow pass (H7): depth from the sun, ComputeShadowPCF receivers. */

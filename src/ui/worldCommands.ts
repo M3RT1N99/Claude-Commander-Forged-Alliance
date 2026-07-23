@@ -45,6 +45,10 @@ export interface WorldCommandSim {
   guard(id: number, targetId: number, queue?: boolean): void
   /** Patrol (dispatch 0x10, CUnitPatrolTask): one leg, ring-rotated queue. */
   patrol(id: number, x: number, z: number, queue?: boolean): void
+  /** Reclaim (dispatch 0x13, CUnitReclaimTask): drain the wreck prop. */
+  reclaim(id: number, targetId: number, queue?: boolean): void
+  /** Reclaim a MAP prop (tree/rock) by its scmap instance index. */
+  reclaimMapProp(id: number, mapIndex: number, queue?: boolean): void
   /**
    * Der SAMMELPUNKT einer Fabrik (IssueFactoryRallyPoint, Cfile:1008266). Er ist
    * kein Bewegungsbefehl: die Fabrik bleibt stehen, nur ihre frischen Einheiten
@@ -75,6 +79,8 @@ export interface SelectedUnit {
   canAttackGround: boolean
   /** RULEUCC_Guard, excluding stationary factories. */
   canGuard: boolean
+  /** RULEUCC_Reclaim — may drain wrecks and map props (dispatch 0x13). */
+  canReclaim: boolean
   /** Kategorie FACTORY — sie bekommt einen Sammelpunkt statt eines Move-Befehls. */
   isFactory: boolean
 }
@@ -133,6 +139,10 @@ export async function worldClick(
     /** An OWN HEALTHY unit under the cursor — the default click guards it
      *  (dispatch 0x0F: assist builds, share factory queues, follow). */
     ownTargetId?: number
+    /** A wreck prop under the cursor (sim prop id) — reclaim (0x13). */
+    reclaimPropId?: number
+    /** A map prop under the cursor — its scmap instance index. */
+    reclaimMapPropIndex?: number
   } = { queue: false },
 ): Promise<string | null> {
   // pull() liefert JSON — eine LEERE Lua-Tabelle wuerde als `{}` in JS ankommen,
@@ -231,6 +241,33 @@ export async function worldClick(
     return `Guard point → move ${hit.x.toFixed(0)}, ${hit.z.toFixed(0)}`
   }
 
+  // The Reclaim button (orders.lua, RULEUCC_Reclaim): a click on a wreck or
+  // a map prop (tree, rock) dispatches 0x13 (CUnitReclaimTask) — the cost
+  // and yield come from the TARGET's Lua (GetReclaimCosts, prop.lua:153).
+  // A click on bare ground does nothing; the mode stays armed.
+  if (cm.mode === 'order' && cm.name === 'RULEUCC_Reclaim') {
+    if (opts.reclaimPropId === undefined && opts.reclaimMapPropIndex === undefined) return null
+    let n = 0
+    for (const u of selection) {
+      if (!u.canReclaim) continue
+      if (opts.reclaimPropId !== undefined) {
+        sim.reclaim(u.id, opts.reclaimPropId, opts.queue)
+      } else {
+        sim.reclaimMapProp(u.id, opts.reclaimMapPropIndex!, opts.queue)
+      }
+      n++
+    }
+    if (n === 0) return null
+    onCommandIssued(host, {
+      CommandType: 'Reclaim',
+      Position: { x: hit.x, y: elevation(hit.x, hit.z), z: hit.z },
+      Clear: !opts.queue,
+    })
+    return opts.reclaimPropId !== undefined
+      ? `Reclaim (${n}) → prop ${opts.reclaimPropId}`
+      : `Reclaim (${n}) → map prop #${opts.reclaimMapPropIndex}`
+  }
+
   if (cm.mode === 'build' || cm.mode === 'buildanchored') {
     if (!cm.name) return null
     const [sx, sz] = footprintOf(host, cm.name)
@@ -322,6 +359,30 @@ export async function worldClick(
         Clear: !opts.queue,
       })
       return `Guard (${n}) → Unit ${opts.ownTargetId}`
+    }
+  }
+  // Click on a WRECK or MAP PROP: units with RULEUCC_Reclaim reclaim it —
+  // the engine's right-click default on reclaimables (dispatch 0x13).
+  if (opts.reclaimPropId !== undefined || opts.reclaimMapPropIndex !== undefined) {
+    let n = 0
+    for (const u of selection) {
+      if (!u.canReclaim) continue
+      if (opts.reclaimPropId !== undefined) {
+        sim.reclaim(u.id, opts.reclaimPropId, opts.queue)
+      } else {
+        sim.reclaimMapProp(u.id, opts.reclaimMapPropIndex!, opts.queue)
+      }
+      n++
+    }
+    if (n > 0) {
+      onCommandIssued(host, {
+        CommandType: 'Reclaim',
+        Position: { x: hit.x, y, z: hit.z },
+        Clear: !opts.queue,
+      })
+      return opts.reclaimPropId !== undefined
+        ? `Reclaim (${n}) → prop ${opts.reclaimPropId}`
+        : `Reclaim (${n}) → map prop #${opts.reclaimMapPropIndex}`
     }
   }
   let moved = 0

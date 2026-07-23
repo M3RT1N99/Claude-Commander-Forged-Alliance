@@ -227,7 +227,29 @@ function RegisterProjectileBlueprint(bp)
 end
 
 RegisterMeshBlueprint=collector('Mesh')
-RegisterPropBlueprint=collector('Prop')
+
+-- PROP blueprints have their own struct ctor (Moho::RPropBlueprint @0x51D250,
+-- Cfile:654903-654920): UniformScale 1.0, Defense.MaxHealth/Health 1.0 and the
+-- Economy pair ReclaimMassMax/ReclaimEnergyMax 0.0. Both Economy fields are
+-- FLOATS in the struct (AddField_float, Cfile:655099-655102) — a .bp that puts
+-- a string there (defaultwreckage_prop.bp:6 writes ReclaimEnergyMax = '')
+-- can never land in the float member, so the reflected value the Lua sees is
+-- always numeric. Without the coercion, Prop.lua:155 divides that string and
+-- every reclaim on such a prop dies in GetReclaimCosts.
+__propDefaults = {
+  Display = { UniformScale = 1.0 },
+  Defense = { MaxHealth = 1.0, Health = 1.0 },
+  Economy = { ReclaimMassMax = 0.0, ReclaimEnergyMax = 0.0 },
+}
+
+function RegisterPropBlueprint(bp)
+  fillDefaults(bp, __propDefaults)
+  local eco = bp.Economy
+  eco.ReclaimMassMax = tonumber(eco.ReclaimMassMax) or 0.0
+  eco.ReclaimEnergyMax = tonumber(eco.ReclaimEnergyMax) or 0.0
+  __registered.Prop[bp.BlueprintId or '?'] = bp
+end
+
 RegisterEmitterBlueprint=collector('Emitter'); RegisterTrailEmitterBlueprint=collector('TrailEmitter')
 RegisterBeamBlueprint=collector('Beam')
 

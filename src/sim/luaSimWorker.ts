@@ -68,8 +68,9 @@ type InMsg =
   // Bewegungsbefehl: die Fabrik bleibt stehen.
   | { type: 'rally'; id: number; x: number; y: number; z: number }
   | { type: 'reset'; terrain: HeightfieldData; props?: MapPropSpawn[] }
-  // Reclaim (dispatch 0x13, CUnitReclaimTask): drain the prop target.
-  | { type: 'reclaim'; id: number; targetId: number; queue?: boolean }
+  // Reclaim (dispatch 0x13, CUnitReclaimTask): drain the prop target —
+  // either a sim prop id (wrecks) or a map-prop instance index.
+  | { type: 'reclaim'; id: number; targetId?: number; mapIndex?: number; queue?: boolean }
   // SessionRequestPause/SessionResume (mHelp: „Pause the world simulation.").
   // Die Engine hält die WELT an — der Beat läuft nicht weiter, die UI schon.
   | { type: 'pause'; paused: boolean }
@@ -247,7 +248,11 @@ ctx.onmessage = async (e: MessageEvent<InMsg>): Promise<void> => {
   } else if (msg.type === 'patrol') {
     host.eval(`__dispatchPatrol(${msg.id}, ${msg.x}, ${msg.z}, ${msg.queue ? 'false' : 'true'})`)
   } else if (msg.type === 'reclaim') {
-    host.eval(`__dispatchReclaim(${msg.id}, ${msg.targetId}, ${msg.queue ? 'false' : 'true'})`)
+    if (msg.mapIndex !== undefined) {
+      host.eval(`__dispatchReclaimMapProp(${msg.id}, ${msg.mapIndex}, ${msg.queue ? 'false' : 'true'})`)
+    } else {
+      host.eval(`__dispatchReclaim(${msg.id}, ${msg.targetId}, ${msg.queue ? 'false' : 'true'})`)
+    }
   } else if (msg.type === 'repair') {
     host.eval(`__dispatchRepair(${msg.id}, ${msg.targetId}, ${msg.queue ? 'false' : 'true'})`)
   } else if (msg.type === 'fireState') {

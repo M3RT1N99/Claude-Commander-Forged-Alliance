@@ -58,14 +58,17 @@ The path to the real UI: [PLAN-UI.md](PLAN-UI.md); the complete 1:1 roadmap:
   ground, AITARGET_Ground), Repair (including HP repair), shift queueing
   (CUnitCommandQueue), Guard/Assist (queue sharing, build assist, follow),
   Patrol (ring-rotated queue legs with engage-on-the-way), Reclaim
-  (props/wrecks with the target-Lua cost formula), SetFireState, and
-  command-cap masks/build restrictions (Add/RemoveCommandCap,
-  Add/RemoveBuildRestriction with dispatch validation) are 1:1 now
-  (dispatch table @0x608EF0). Still open: Capture, point guard,
-  capture-on-enemy, guard enemy chase (GetBestEnemy), reclaim-assist
-  through guard (sub_612E80), ground-attack ring rotation in the queue,
-  the reclaim UI command mode (GetReclaimablesInRect), and command
-  markers (UICommandGraph — order lines exist).
+  (props/wrecks with the target-Lua cost formula; clickable in the
+  browser — wreck raycast plus instanced map-prop picking resolved
+  through the scmap index, RULEUCC_Reclaim command mode and the default
+  right-click), SetFireState, and command-cap masks/build restrictions
+  (Add/RemoveCommandCap, Add/RemoveBuildRestriction with dispatch
+  validation) are 1:1 now (dispatch table @0x608EF0). Still open:
+  Capture, point guard, capture-on-enemy, guard enemy chase
+  (GetBestEnemy), reclaim-assist through guard (sub_612E80),
+  ground-attack ring rotation in the queue, rectangle reclaim
+  (GetReclaimablesInRect), and command markers (UICommandGraph — order
+  lines exist).
 - **Sim findings:** units stack up at roll-off (no separation), Mex stall
   (production × LimitingRate, Cfile:953938).
 - **`src/ui/hud.ts`** is the last TS remainder (minimap image, strategic

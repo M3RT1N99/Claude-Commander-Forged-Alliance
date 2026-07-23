@@ -94,6 +94,10 @@ end
 -- keeps map props in one InstancedMesh and hides these instances.
 __removedMapProps = {}
 
+-- scmap index -> sim prop id (the browser picks map props by instance
+-- index; reclaim resolves the sim prop through this table).
+__mapPropIds = {}
+
 --- Spawn one map prop (called in a chunked loop from the worker boot).
 --- Unknown blueprints WARN once per path and are skipped — exactly what a
 --- failed GetPropBlueprint lookup amounts to.
@@ -109,6 +113,7 @@ function __spawnMapProp(index, bpId, x, y, z, heading)
   end
   local p = CreatePropHPR(key, x, y, z, heading or 0, 0, 0)
   p.__mapIndex = index
+  __mapPropIds[index] = p.__id
 end
 
 --- TryCopyPose(from, to, stealAnimation) (unit.lua:1135 copies the dying unit's

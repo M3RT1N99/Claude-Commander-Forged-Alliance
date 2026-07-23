@@ -842,6 +842,52 @@ console.log('\n== Befehls-Dispatch: Stop, Move-bricht-Bau, Attack ==')
       host.pull<number[]>('__drainRemovedMapPropsJson()').length === 0,
       'The removal report drains (second read is empty)',
     )
+
+    // RECLAIM BY MAP INDEX (the UI picks instanced map props by their scmap
+    // index, not by sim id — __dispatchReclaimMapProp resolves the index
+    // through __mapPropIds and runs the same CUnitReclaimTask).
+    host.eval(`__spawnMapProp(43, '/props/defaultwreckage/defaultwreckage_prop.bp', 860, 20, 320, 0)`)
+    const digger = spawnLuaUnit(host, 'uel0001', { x: 862, y: 20, z: 320 }, 1)
+    // defaultwreckage_prop.bp writes ReclaimEnergyMax = '' (a string!) — the
+    // engine's float struct field turns that into 0 (RPropBlueprint ctor
+    // @0x51D250 + AddField_float, Cfile:655099-655102). GetReclaimCosts must
+    // therefore return numbers, with mass = ReclaimMassMax = 1.
+    const costMass = Number(
+      host.eval(
+        `local p = __props[__mapPropIds[43]]
+         local ok, time, energy, mass = pcall(function() return p:GetReclaimCosts(__units[${digger}]) end)
+         if not ok or type(time) ~= 'number' or type(mass) ~= 'number' then return -1 end
+         return mass`,
+      ),
+    )
+    check(
+      costMass === 1,
+      `Prop blueprint floats survive string .bp values (GetReclaimCosts mass ${costMass})`,
+    )
+    host.eval(`__dispatchReclaimMapProp(${digger}, 43)`)
+    let drained = false
+    for (let t = 0; t < 300 && !drained; t++) {
+      beat(engine)
+      drained =
+        host.eval(
+          `local id = __mapPropIds and __mapPropIds[43]
+           local p = id and __props[id]
+           return p == nil or p.__destroyed == true or p.__destroyQueued == true`,
+        ) === true
+    }
+    check(drained, 'Reclaim by map index drains the instanced prop (__dispatchReclaimMapProp)')
+    beat(engine)
+    check(
+      host.pull<number[]>('__drainRemovedMapPropsJson()').includes(43),
+      'The reclaimed map prop reports index 43 for instance hiding',
+    )
+    // An unknown index must not crash and must not queue an order.
+    host.eval(`__dispatchReclaimMapProp(${digger}, 99999)`)
+    beat(engine)
+    check(
+      host.eval(`return __orderActive[${digger}] == nil`) === true,
+      'Reclaim on an unknown map index warns and issues nothing',
+    )
   }
   {
     // Browser finding: an ENGINEER guarding a FINISHED factory must join
