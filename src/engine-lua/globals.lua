@@ -1334,10 +1334,10 @@ function __guardStart(unitId, targetId)
 end
 
 --- One guard decision, in the decomp's Processing priority order
---- (Cfile:839432-839516). Air-platform refuel, ferry beacons, the active
---- enemy chase (GetBestEnemy) and assist-reclaim are named gaps — our sim
---- has no refuel/ferry/reclaim yet and free weapon acquisition already
---- covers nearby enemies.
+--- (Cfile:839432-839516). Air-platform refuel, ferry beacons and the
+--- active enemy chase (GetBestEnemy) are named gaps — our sim has no
+--- refuel/ferry yet and free weapon acquisition already covers nearby
+--- enemies.
 local function guardProcess(unitId, u, g, t)
   if g.mode == 'factory' then
     -- Queue sharing (sub_6127F0, Cfile:837860-838073): the assisting
@@ -1376,6 +1376,10 @@ local function guardProcess(unitId, u, g, t)
     return
   end
 
+  -- A guard that is itself mid-reclaim stays on it — the engine's spawned
+  -- CUnitReclaimTask preempts the guard task until the target is gone.
+  if __reclaimTasks and __reclaimTasks[unitId] then return end
+
   -- Builder assist: walk the guard chain with a visited set
   -- (sub_612BB0, Cfile:838175-838228 — A guards B guards C resolves C),
   -- then join the chain unit's structure build through the repair task
@@ -1397,6 +1401,21 @@ local function guardProcess(unitId, u, g, t)
     if site and __units[site] and unitInCat(u, 'REPAIR') then
       __issueBuildTask(unitId, site, 'Repair', true)
       return
+    end
+    -- Reclaim assist (sub_612E80, Cfile:838256-838314): a guard with unit
+    -- category RECLAIM joins the guarded unit's RUNNING reclaim — the
+    -- guarded unit must be IsUnitState(Reclaiming) (enum 28, AddEnum
+    -- Cfile:702962ff) and its focus entity (unit+1232, set by the reclaim
+    -- task, Cfile:848750) becomes the guard's own target: the caller
+    -- issues a reclaim task on it (sub_613A10 -> IssueReclaimTask,
+    -- Cfile:838814-838824).
+    local guardedReclaim = __reclaimTasks and __reclaimTasks[g.target]
+    if guardedReclaim and unitInCat(u, 'RECLAIM') then
+      local prop = __props[guardedReclaim.target]
+      if prop and not prop.__destroyed and not prop.__destroyQueued then
+        __reclaimTasks[unitId] = { target = guardedReclaim.target, started = false }
+        return
+      end
     end
     -- Repair the guarded unit itself when damaged or incomplete
     -- (sub_613110: guarding unit must be REBUILDER or REPAIR; target

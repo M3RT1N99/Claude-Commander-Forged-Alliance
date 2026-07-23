@@ -890,6 +890,36 @@ console.log('\n== Befehls-Dispatch: Stop, Move-bricht-Bau, Attack ==')
     )
   }
   {
+    // GUARD-ASSIST-RECLAIM (sub_612E80, Cfile:838256-838314): a guard whose
+    // unit has category RECLAIM joins the guarded unit's RUNNING reclaim on
+    // the SAME target (the guarded unit's focus entity, set by the reclaim
+    // task at unit+1232, Cfile:848750; sub_613A10 issues the task).
+    host.eval(`__spawnMapProp(44, '/props/defaultwreckage/defaultwreckage_prop.bp', 880, 20, 340, 0)`)
+    const worker = spawnLuaUnit(host, 'uel0001', { x: 882, y: 20, z: 340 }, 1)
+    const buddy = spawnLuaUnit(host, 'uel0001', { x: 884, y: 20, z: 340 }, 1)
+    // Stretch the drain over several ticks so the guard has beats to join —
+    // SetReclaimValues is the original prop API (Prop.lua:116; wreckage.lua
+    // uses it the same way on damage).
+    host.eval(`local p = __props[__mapPropIds[44]] p:SetReclaimValues(1, 1, 50, 0)`)
+    host.eval(`__dispatchGuard(${buddy}, ${worker})`)
+    host.eval(`__dispatchReclaimMapProp(${worker}, 44)`)
+    let joined = false
+    let stateSeen = false
+    for (let t = 0; t < 60 && !joined; t++) {
+      beat(engine)
+      stateSeen =
+        stateSeen || host.eval(`return __units[${worker}]:IsUnitState('Reclaiming')`) === true
+      joined =
+        host.eval(
+          `local a = __reclaimTasks[${buddy}]
+           local b = __reclaimTasks[${worker}]
+           return a ~= nil and b ~= nil and a.target == b.target`,
+        ) === true
+    }
+    check(stateSeen, "IsUnitState('Reclaiming') mirrors the running reclaim task (enum 28)")
+    check(joined, 'A guard with category RECLAIM joins the reclaim on the same target (sub_612E80)')
+  }
+  {
     // Browser finding: an ENGINEER guarding a FINISHED factory must join
     // the factory's own FactoryBuild once it starts (the guard chain ends
     // at the factory; its running build task IS the site to assist).

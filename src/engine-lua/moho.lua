@@ -477,6 +477,8 @@ local unit = withNoops(UNIT_NAMES, {
         end
       end
       return false
+    elseif state == 'Reclaiming' then -- 28 (AddEnum, Cfile:702962ff)
+      return (__reclaimTasks and __reclaimTasks[id]) ~= nil
     elseif state == 'BeingBuilt' then -- 39
       return self.__beingBuilt == true
     elseif state == 'Immobile' then
