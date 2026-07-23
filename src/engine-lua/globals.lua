@@ -794,6 +794,8 @@ local function __abortActive(unitId)
   if not u then return end
   __abortBuildTasks(unitId)
   __attackOrders[unitId] = nil
+  __guardOrders[unitId] = nil
+  u.__guardedUnit = false
   u:GetNavigator():AbortMove()
 end
 
@@ -825,6 +827,8 @@ local function __startOrder(unitId, cmd)
     end
     __issueBuildTask(unitId, cmd.target, 'Repair', true)
     return true
+  elseif cmd.type == 'Guard' then
+    return __guardStart(unitId, cmd.target)
   end
   return false
 end
@@ -882,6 +886,8 @@ function __ordersTick()
         done = __attackOrders[unitId] == nil -- __attackTick clears dead targets
       elseif cmd.type == 'Repair' then
         done = not __builderBusy(unitId)
+      elseif cmd.type == 'Guard' then
+        done = __guardOrders[unitId] == nil -- guarded unit died (Cfile:839365)
       end
       if done then
         __orderActive[unitId] = nil
@@ -900,6 +906,8 @@ function __dispatchStop(unitId)
   __orderActive[unitId] = nil
   __abortBuildTasks(unitId)
   __attackOrders[unitId] = nil
+  __guardOrders[unitId] = nil
+  u.__guardedUnit = false
   u:GetNavigator():AbortMove()
   u.__faceGoal = false
 end
@@ -990,6 +998,167 @@ function __attackTick()
       end
     end
   end
+end
+
+-- === Guard/Assist (dispatch 0x0F, CUnitGuardTask) ===
+--
+-- The ctor classifies the guard from categories (Cfile:836995-837075):
+-- an IMMOBILE FACTORY assists by build-queue sharing, ENGINEER->ENGINEER
+-- and ENGINEER->FACTORY are the builder-assist modes, everything else
+-- guards by following. TaskTick re-checks every 7 ticks, engineer assist
+-- every tick (Cfile:839518-839527). The task ends only when the guarded
+-- unit dies (Cfile:839365-839385) or the order is replaced.
+__guardOrders = {}
+
+local function unitInCat(u, cat)
+  local bp = u.__bp
+  for _, c in ipairs((bp and bp.Categories) or {}) do
+    if c == cat then return true end
+  end
+  return false
+end
+
+local function guardMode(u, t)
+  local motion = (u.__bp and u.__bp.Physics and u.__bp.Physics.MotionType) or 'RULEUMT_None'
+  if unitInCat(u, 'FACTORY') and motion == 'RULEUMT_None' then return 'factory' end
+  if unitInCat(u, 'ENGINEER') and (unitInCat(t, 'ENGINEER') or unitInCat(t, 'FACTORY')) then
+    return 'engineer'
+  end
+  return 'follow'
+end
+
+--- Start a guard order (called from the command queue's __startOrder).
+--- Guarding yourself or a missing unit fails like the dispatch does
+--- (no target -> Stop, Cfile:830638-830650).
+function __guardStart(unitId, targetId)
+  local u = __units[unitId]
+  local t = __units[targetId]
+  if not u or not t or t.__destroyed or targetId == unitId then return false end
+  __guardOrders[unitId] = { target = targetId, mode = guardMode(u, t), clock = 0 }
+  u.__guardedUnit = targetId
+  return true
+end
+
+--- One guard decision, in the decomp's Processing priority order
+--- (Cfile:839432-839516). Air-platform refuel, ferry beacons, the active
+--- enemy chase (GetBestEnemy) and assist-reclaim are named gaps — our sim
+--- has no refuel/ferry/reclaim yet and free weapon acquisition already
+--- covers nearby enemies.
+local function guardProcess(unitId, u, g, t)
+  if g.mode == 'factory' then
+    -- Queue sharing (sub_6127F0, Cfile:837860-838073): the assisting
+    -- factory only pulls when it is idle with an empty queue of its own
+    -- (own builds take priority, Cfile:837930-837962; not while Building,
+    -- Cfile:837903-837908). Pull ONE item and leave the guarded factory
+    -- its RUNNING head item (pull when index>0 or count>1,
+    -- Cfile:837988-838024), decrementing or removing it (Cfile:838030-838049).
+    if __builderBusy(unitId) then return end
+    local own = u.__buildQueue
+    if own and own[1] then return end
+    local q = t.__buildQueue
+    if not q then return end
+    local from = nil
+    if q[1] and (q[1].count or 1) > 1 then from = 1
+    elseif q[2] then from = 2 end
+    if not from then return end
+    local bpId = q[from].id
+    -- CanBuild check (Cfile:838020): the puller must be able to build it.
+    local bp = __registered and __registered.Unit and __registered.Unit[string.lower(bpId)]
+    if not bp then return end
+    if (q[from].count or 1) > 1 then
+      q[from].count = q[from].count - 1
+    else
+      table.remove(q, from)
+    end
+    __queueFactoryBuild(unitId, bpId, 1)
+    return
+  end
+
+  -- Builder assist: walk the guard chain with a visited set
+  -- (sub_612BB0, Cfile:838175-838228 — A guards B guards C resolves C),
+  -- then join the chain unit's structure build through the repair task
+  -- (sub_613970 starts the same build; our repair task IS the shared
+  -- build path).
+  if not __builderBusy(unitId) then
+    local visited = { [unitId] = true }
+    local chain = g.target
+    while chain and not visited[chain] do
+      visited[chain] = true
+      local cu = __units[chain]
+      local nxt = cu and cu.__guardedUnit
+      if nxt and __units[nxt] and not visited[nxt] then chain = nxt else break end
+    end
+    local site = nil
+    for _, task in pairs(__buildTasks) do
+      if task.builder == chain then site = task.target end
+    end
+    if site and __units[site] and unitInCat(u, 'REPAIR') then
+      __issueBuildTask(unitId, site, 'Repair', true)
+      return
+    end
+    -- Repair the guarded unit itself when damaged or incomplete
+    -- (sub_613110: guarding unit must be REBUILDER or REPAIR; target
+    -- damaged, incomplete or enhancing — Cfile via report-guard-assist).
+    if (unitInCat(u, 'REPAIR') or unitInCat(u, 'REBUILDER'))
+      and ((t.__health or 0) < t:GetMaxHealth() or (t.__fraction or 1) < 1) then
+      __issueBuildTask(unitId, g.target, 'Repair', true)
+      return
+    end
+  end
+
+  -- Follow (sub_613C40): only mobiles; ENGINEERS stay put within
+  -- 2 * Economy.MaxBuildDistance of the guarded unit (Cfile:839020-839037).
+  -- The desired position is the guarded unit's position (sub_612220,
+  -- Cfile:837556-837700), clamped outside its skirt rect
+  -- (Cfile:839040-839170) — exact PrepareMove spreading is a named gap.
+  local motion = (u.__bp and u.__bp.Physics and u.__bp.Physics.MotionType) or 'RULEUMT_None'
+  if motion == 'RULEUMT_None' then return end
+  local p, q = u.__pos, t.__pos
+  local dx, dz = q[1] - p[1], q[3] - p[3]
+  local dist = math.sqrt(dx * dx + dz * dz)
+  local stop
+  if unitInCat(u, 'ENGINEER') then
+    local mbd = (u.__bp.Economy and u.__bp.Economy.MaxBuildDistance) or 5
+    stop = 2 * mbd
+  else
+    local skirt = (t.__bp and t.__bp.Physics and t.__bp.Physics.SkirtSizeX)
+      or (t.__bp and t.__bp.Footprint and t.__bp.Footprint.SizeX) or 1
+    local ownFp = (u.__bp and u.__bp.Footprint and u.__bp.Footprint.SizeX) or 1
+    stop = skirt / 2 + ownFp / 2
+  end
+  if dist > stop then
+    u.__goal = { q[1], q[3] }
+    u.__faceGoal = false
+  end
+end
+
+function __guardTick()
+  for unitId, g in pairs(__guardOrders) do
+    local u = __units[unitId]
+    local t = __units[g.target]
+    if not u or u.__dead or u.__destroyQueued then
+      __guardOrders[unitId] = nil
+    elseif not t or t.__dead or t.__destroyQueued then
+      -- TaskTick -1: the guarded unit is gone (Cfile:839365-839385).
+      __guardOrders[unitId] = nil
+      u.__guardedUnit = false
+    else
+      g.clock = (g.clock or 0) - 1
+      if g.clock <= 0 then
+        -- 7-tick re-check, every tick for engineer assist (Cfile:839518-839527)
+        g.clock = (g.mode == 'engineer') and 1 or 7
+        guardProcess(unitId, u, g, t)
+      end
+    end
+  end
+end
+
+--- Guard (dispatch 0x0F): remember the guarded unit (mUnit->mGuardedUnit,
+--- synced into the task every tick, Cfile:839316-839333) and run the
+--- guard state machine per beat. Guarding yourself is refused like a
+--- missing target (dispatch falls back to Stop, Cfile:830638-830650).
+function __dispatchGuard(unitId, targetId, clear)
+  __issueOrder(unitId, { type = 'Guard', target = targetId }, clear)
 end
 
 -- FlattenMapRect(x, z, w, h, y): Gebaeude planieren ihr Baufeld

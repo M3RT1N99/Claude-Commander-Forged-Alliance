@@ -248,7 +248,13 @@ function UserUnitMeta:IsOverchargePaused() return false end
 function UserUnitMeta:GetBuildRate() return self.buildRate or 0 end
 function UserUnitMeta:GetCustomName() return self.customName end
 function UserUnitMeta:GetFocus() return nil end
-function UserUnitMeta:GetGuardedEntity() return nil end
+-- The guarded unit, mirrored from the sim per beat (the task syncs
+-- mUnit->mGuardedUnit every tick, Cfile:839316-839333).
+function UserUnitMeta:GetGuardedEntity()
+  local id = self.guardedId
+  if id and id ~= 0 then return __uiUnits[id] end
+  return nil
+end
 function UserUnitMeta:GetCreator() return nil end
 function UserUnitMeta:GetCommandQueue() return self.commandQueue or {} end
 function UserUnitMeta:GetSelectionSets() return {} end
@@ -285,7 +291,7 @@ function GetAttachedUnitsList(units)
 end
 
 -- Von der Engine pro Beat: der Zustand einer Unit aus der Sim.
-function __uiSetUnit(id, blueprintId, army, x, y, z, health, maxHealth, workProgress, idle, fireState)
+function __uiSetUnit(id, blueprintId, army, x, y, z, health, maxHealth, workProgress, idle, fireState, guardedId)
   local u = __uiUnits[id]
   if not u then
     -- SUnitVarDat-Ctor (Cfile:772277): mFireState = FIRESTATE_ReturnFire (0).
@@ -304,6 +310,8 @@ function __uiSetUnit(id, blueprintId, army, x, y, z, health, maxHealth, workProg
   -- The sim is the authority (SUnitVarDat.mFireState mirrored per beat); the
   -- optimistic set in SetFireState only bridges the round-trip latency.
   if fireState ~= nil then u.fireState = fireState end
+  -- Guarded unit id (0 = none) — GetGuardedEntity/GetAssistingUnitsList.
+  if guardedId ~= nil then u.guardedId = guardedId ~= 0 and guardedId or false end
   u.dead = false
 end
 
@@ -436,12 +444,21 @@ end
 -- "Get a list of units assisting me" (mHelp, Cfile:1360671): die Guards der
 -- gegebenen Units. orders.lua:932 fragt so die Drohnen einer
 -- PODSTAGINGPLATFORM ab — und die UEF-ACU TRAEGT diese Kategorie
--- (uel0001_unit.bp:125); der Pfad laeuft also bei jeder ACU-Auswahl. Unsere
--- Sim fuehrt noch kein Guard/Assist-System: der Spiegel kennt keine
--- Assistenten, die leere Liste ist die WAHRE Antwort. Sobald die Sim Assist
--- lernt, muss der Spiegel die Guards hierher liefern.
+-- (uel0001_unit.bp:125); der Pfad laeuft also bei jeder ACU-Auswahl. Der
+-- Spiegel kennt die Guards ueber das pro Beat gesyncte guardedId-Feld.
 function GetAssistingUnitsList(units)
-  return {}
+  local out = {}
+  if type(units) ~= 'table' then return out end
+  local wanted = {}
+  for _, u in ipairs(units) do
+    if type(u) == 'table' and u.id then wanted[u.id] = true end
+  end
+  for _, u in pairs(__uiUnits) do
+    if not u.dead and u.guardedId and wanted[u.guardedId] then
+      out[table.getn(out) + 1] = u
+    end
+  end
+  return out
 end
 
 -- === Selektion ===

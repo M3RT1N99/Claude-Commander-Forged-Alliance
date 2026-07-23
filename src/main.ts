@@ -1312,9 +1312,10 @@ viewportEl.addEventListener('contextmenu', (e) => {
 /**
  * The unit under the cursor, classified for the command dispatch: an ENEMY
  * turns the default click into Attack, an OWN UNFINISHED structure into
- * Repair (resume construction).
+ * Repair (resume construction), an OWN HEALTHY unit into Guard (assist,
+ * dispatch 0x0F).
  */
-function zielUnter(clientX: number, clientY: number): { enemy?: number; repair?: number } {
+function zielUnter(clientX: number, clientY: number): { enemy?: number; repair?: number; own?: number } {
   const picked = viewer.pickUnit(clientX, clientY)
   if (!picked || !luaSim) return {}
   const u = luaUnits.find((x) => x.scene === picked)
@@ -1324,7 +1325,7 @@ function zielUnter(clientX: number, clientY: number): { enemy?: number; repair?:
   // Repair target: unfinished (resume construction) OR finished but
   // damaged (HP repair — same CBuildTaskHelper, Cfile:815445).
   if (s && (s.fraction < 1 || s.health < s.maxHealth)) return { repair: u.id }
-  return {}
+  return { own: u.id }
 }
 
 /**
@@ -1334,7 +1335,7 @@ function zielUnter(clientX: number, clientY: number): { enemy?: number; repair?:
 async function issueWorldCommand(
   hit: { x: number; z: number },
   queue: boolean,
-  ziel: { enemy?: number; repair?: number } = {},
+  ziel: { enemy?: number; repair?: number; own?: number } = {},
 ): Promise<void> {
   if (!luaSim || !gameUi) return
   try {

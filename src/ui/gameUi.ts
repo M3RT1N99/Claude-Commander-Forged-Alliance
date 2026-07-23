@@ -266,7 +266,8 @@ export class GameUi {
       seen.add(u.id)
       lines.push(
         `__uiSetUnit(${u.id}, '${u.name}', ${u.army ?? 1}, ${u.x}, ${u.y}, ${u.z}, ` +
-          `${u.health}, ${u.maxHealth}, ${u.fraction ?? 1}, ${u.idle === true}, ${u.fireState ?? 0})`,
+          `${u.health}, ${u.maxHealth}, ${u.fraction ?? 1}, ${u.idle === true}, ` +
+          `${u.fireState ?? 0}, ${u.guard ?? 0})`,
       )
       // Die Bau-Warteschlange einer Fabrik (construction.lua zeigt sie an).
       // IMMER senden, auch leer: sonst bleibt in der UI-Kopie die letzte Queue
@@ -419,13 +420,15 @@ export class GameUi {
     hit: { x: number; z: number },
     elevation: (x: number, z: number) => number,
     queue = false,
-    /** The picked unit under the cursor: enemy → Attack, own unfinished → Repair. */
-    ziel: { enemy?: number; repair?: number } = {},
+    /** The picked unit under the cursor: enemy → Attack, own unfinished →
+     *  Repair, own healthy → Guard (dispatch 0x0F). */
+    ziel: { enemy?: number; repair?: number; own?: number } = {},
   ): Promise<string | null> {
     return worldClick(this.host, sim, hit, elevation, {
       queue,
       enemyTargetId: ziel.enemy,
       repairTargetId: ziel.repair,
+      ownTargetId: ziel.own,
     })
   }
 

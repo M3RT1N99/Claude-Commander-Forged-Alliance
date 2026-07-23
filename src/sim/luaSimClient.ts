@@ -28,6 +28,8 @@ export interface LuaUnitSnapshot {
   fraction: number
   /** Fire state (EFireState Cfile:702842: ReturnFire=0, HoldFire=1, HoldGround=2). */
   fireState?: number
+  /** Guarded unit id (0 = none) — mUnit->mGuardedUnit mirrored per beat. */
+  guard?: number
   /** Erstellungs-Tick — die Build-Shader zählen ihr Alter darüber (material.x). */
   born: number
   /** The unit's active order (command graph): type + target position. */
@@ -406,6 +408,10 @@ export class LuaSimClient {
   /** Ground attack: same task with an AITARGET_Ground position target. */
   attackGround(id: number, x: number, z: number, queue = false): void {
     this.worker.postMessage({ type: 'attackGround', id, x, z, queue })
+  }
+  /** Guard/assist (dispatch 0x0F): follow + assist `targetId`. */
+  guard(id: number, targetId: number, queue = false): void {
+    this.worker.postMessage({ type: 'guard', id, targetId, queue })
   }
   /** Repair (dispatch 0x14): resume building the unfinished `targetId`. */
   repair(id: number, targetId: number, queue = false): void {

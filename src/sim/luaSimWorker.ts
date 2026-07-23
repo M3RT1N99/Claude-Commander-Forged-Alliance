@@ -52,6 +52,8 @@ type InMsg =
   // Ground attack: the same dispatch (0x0A) with an AITARGET_Ground target
   // (CAiTarget carries a position, Cfile:812553-812563); never self-completes.
   | { type: 'attackGround'; id: number; x: number; z: number; queue?: boolean }
+  // Guard/assist (dispatch 0x0F, CUnitGuardTask ctor Cfile:836763-837080).
+  | { type: 'guard'; id: number; targetId: number; queue?: boolean }
   // Repair (dispatch 0x14): resume building an unfinished structure.
   | { type: 'repair'; id: number; targetId: number; queue?: boolean }
   // SetFireState: the UI ASKS the sim via the sim driver (cfunc_SetFireStateL:
@@ -202,6 +204,8 @@ ctx.onmessage = async (e: MessageEvent<InMsg>): Promise<void> => {
     host.eval(`__dispatchAttack(${msg.id}, ${msg.targetId}, ${msg.queue ? 'false' : 'true'})`)
   } else if (msg.type === 'attackGround') {
     host.eval(`__dispatchAttackGround(${msg.id}, ${msg.x}, ${msg.z}, ${msg.queue ? 'false' : 'true'})`)
+  } else if (msg.type === 'guard') {
+    host.eval(`__dispatchGuard(${msg.id}, ${msg.targetId}, ${msg.queue ? 'false' : 'true'})`)
   } else if (msg.type === 'repair') {
     host.eval(`__dispatchRepair(${msg.id}, ${msg.targetId}, ${msg.queue ? 'false' : 'true'})`)
   } else if (msg.type === 'fireState') {

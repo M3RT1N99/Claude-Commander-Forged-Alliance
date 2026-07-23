@@ -417,6 +417,9 @@ function __weaponTick()
   -- Command queue head advance FIRST (TaskTick pops finished commands and
   -- starts the next, sim-core.md:211-252), then the attack orders.
   __ordersTick()
+  -- Guard orders (CUnitGuardTask): queue sharing, builder assist and the
+  -- follow behavior run per beat like the engine's TaskTick.
+  __guardTick()
   -- Attack-Orders ZUERST (CAttackTargetTask laeuft vor den Waffen-Tasks):
   -- sie steuern die Bewegung in Reichweite, die Zielerfassung unten
   -- bevorzugt dann das Befehlsziel.
