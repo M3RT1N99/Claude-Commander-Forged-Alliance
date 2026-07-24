@@ -212,12 +212,29 @@ __weaponDefaults = {
   ProjectileId = '',
 }
 
+--- The FOOTPRINT the engine derives when the blueprint leaves it at 0
+--- (RUnitBlueprint post-load, Cfile:647164-647177): `frndint(SizeX)` plus one
+--- if SizeX is larger than that — i.e. ceil() into the integer footprint
+--- field. The same runs for the AltFootprint (Cfile:647178-647192).
+---
+--- Without it `bp.Footprint.SizeX` stays 0, and the ORIGINAL Lua computes with
+--- it: unit.lua:243 `fx = x - bp.Footprint.SizeX * 0.5` is the skirt rect used
+--- by FlattenSkirt (defaultunits.lua:70) and by the engine's adjacency test.
+--- A 0 there moves every skirt half a footprint off.
+local function fillFootprint(fp, sizeX, sizeZ)
+  if not fp then return end
+  if not fp.SizeX or fp.SizeX == 0 then fp.SizeX = math.ceil(sizeX or 0) end
+  if not fp.SizeZ or fp.SizeZ == 0 then fp.SizeZ = math.ceil(sizeZ or 0) end
+end
+
 function RegisterUnitBlueprint(bp)
   fillDefaults(bp, __bpDefaults)
   -- Jeder Waffen-Eintrag ist ein eigenes Struct — also auch eigene Defaults.
   for _, w in ipairs(bp.Weapon or {}) do
     fillDefaults(w, __weaponDefaults)
   end
+  fillFootprint(bp.Footprint, bp.SizeX, bp.SizeZ)
+  fillFootprint(bp.AltFootprint, bp.SizeX, bp.SizeZ)
   __registered.Unit[bp.BlueprintId or '?'] = bp
 end
 

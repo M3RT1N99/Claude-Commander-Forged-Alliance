@@ -710,12 +710,15 @@ function WaitFor(obj)
   until obj:IsDone()
 end
 
--- === Buff-Blueprints (BuffBlueprint{...}) ===
-__buffs = {}
-function BuffBlueprint(spec)
-  if type(spec) == 'table' and spec.Name then __buffs[spec.Name] = spec end
-  return spec
-end
+-- === Buff blueprints ===
+--
+-- NOT ours: `BuffBlueprint` and the global `Buffs` table are ORIGINAL Lua
+-- (/lua/system/buffblueprints.lua:11/30-60) — the engine loads that file into
+-- the sim state, like the other /lua/system files. It used to be reimplemented
+-- here, writing into a private `__buffs`; the original /lua/sim/buff.lua reads
+-- `Buffs[name]`, so every ApplyBuff (adjacency, veterancy, enhancements) died
+-- with "*ERROR: Tried to add a buff that doesn't exist!". engine.ts loads the
+-- original file instead.
 
 -- === Datei-/Pfad-Helfer ===
 -- DiskToLocal steht in boot.lua (Kern, beide VMs): es nimmt den /mod-Praefix des

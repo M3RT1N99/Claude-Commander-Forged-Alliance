@@ -464,6 +464,10 @@ function __buildApply()
         if wasBeingBuilt then
           local okB, errB = pcall(function() t:OnStopBeingBuilt(b, t:GetCurrentLayer()) end)
           if not okB then WARN('OnStopBeingBuilt: ' .. tostring(errB)) end
+          -- Materialize scans for adjacent structures the moment the unit is
+          -- complete and runs OnAdjacentTo on both sides (Cfile:953548-953576).
+          -- This is where FA's adjacency bonuses come from.
+          __notifyAdjacent(task.target)
         end
         b.UnitBeingBuilt = t
         local okS, errS = pcall(function() b:OnStopBuild(t, task.order) end)

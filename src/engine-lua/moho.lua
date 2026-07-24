@@ -158,6 +158,13 @@ local entity = withNoops(ENTITY_NAMES, {
       if not ok then WARN('OnKilled: ' .. tostring(err)) end
     end
 
+    -- A dying STRUCTURE releases its neighbours: the engine runs
+    -- OnNotAdjacentTo on both sides right after the kill, but only for an
+    -- immobile unit that was not still under construction
+    -- (Cfile:952133-952162). That is what takes the adjacency buffs away
+    -- again — defaultunits.lua:372 removes every buff of its Adjacency table.
+    if self.__isUnit and __notifyNotAdjacent then __notifyNotAdjacent(self.__id) end
+
     -- Die Kill-Statistik zaehlt die ENGINE (Cfile:936180-936183) — unit.lua:3083
     -- verlaesst sich darauf („kills through the engine are already counted").
     -- BENIGN-Ziele (Wracks, Reklamierbares) zaehlen NICHT (Cfile:936164).

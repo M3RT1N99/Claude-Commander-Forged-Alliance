@@ -179,6 +179,9 @@ function __spawnUnit(scriptPath, bpId, x, y, z, army, complete)
       ok2, err2 = pcall(function() u:OnStopBeingBuilt(nil, u:GetCurrentLayer()) end)
     end
     if not ok2 then return id, tostring(err2) end
+    -- The engine tells an immobile unit and its neighbours about each other
+    -- right after creation (Cfile:950616-950645).
+    __notifyAdjacent(id)
   end
   return id, ''
 end
@@ -234,6 +237,127 @@ function CreateUnit2(blueprint, army, layer, x, z, heading)
   return spawnCreateUnit(blueprint, army, x, GetSurfaceHeight(x, z), z, heading, 'CreateUnit2')
 end
 
+-- === Adjacency (Moho::Unit::CollectAllOverlapping, Cfile:62d460) ===
+--
+-- When an immobile unit comes into being — created complete (Cfile:950616) or
+-- finished by a build task (Materialize, Cfile:953548) — the engine collects
+-- every overlapping structure and runs the Lua callback on BOTH sides:
+--
+--   new:OnAdjacentTo(other, new)      Cfile:953563
+--   other:OnAdjacentTo(new,   new)    Cfile:953568
+--
+-- That is where FA's adjacency bonuses come from: StructureUnit.OnAdjacentTo
+-- (defaultunits.lua:357) looks up bp.Adjacency in AdjacencyBuffs and applies
+-- every buff of that table to the neighbour. Without the callback a power
+-- generator next to a factory does nothing at all — one of the game's core
+-- mechanics was missing.
+
+--- The ENGINE's skirt rect (Moho::RUnitBlueprint::GetSkirtRect, Cfile:51ec50).
+--- NOT the same as the Lua one in unit.lua:240: the engine TRUNCATES the lower
+--- corner to whole ogrids (grid alignment) and falls back to the footprint when
+--- a skirt size is 0.
+local function skirtRect(u)
+  local bp = u.__bp or {}
+  local fp = bp.Footprint or {}
+  local phys = bp.Physics or {}
+  local p = u.__pos or { 0, 0, 0 }
+  local fpX = fp.SizeX or 0
+  local fpZ = fp.SizeZ or 0
+  -- (int) truncates toward zero; map coordinates are positive.
+  local xLower = math.floor(p[1] - fpX * 0.5)
+  local zLower = math.floor(p[3] - fpZ * 0.5)
+  local x0, x1, z0, z1
+  if (phys.SkirtSizeX or 0) == 0 then
+    x0, x1 = xLower, xLower + fpX
+  else
+    x0 = xLower + (phys.SkirtOffsetX or 0)
+    x1 = x0 + phys.SkirtSizeX
+  end
+  if (phys.SkirtSizeZ or 0) == 0 then
+    z0, z1 = zLower, zLower + fpZ
+  else
+    z0 = zLower + (phys.SkirtOffsetZ or 0)
+    z1 = z0 + phys.SkirtSizeZ
+  end
+  return x0, z0, x1, z1
+end
+
+--- Moho::Unit::OverlapsWith (Cfile:62d2b0) — two skirts count as adjacent when
+--- they TOUCH on one axis (edge distance < 1 ogrid) and one of them CONTAINS
+--- the other on the other axis. That containment rule is why FA's adjacency is
+--- so picky about alignment.
+local function overlapsWith(a, b)
+  local ax0, az0, ax1, az1 = skirtRect(a)
+  local bx0, bz0, bx1, bz1 = skirtRect(b)
+  local touchX = math.abs(ax0 - bx1) < 1 or math.abs(ax1 - bx0) < 1
+  if not touchX then
+    -- Not touching along X: then they must touch along Z and overlap in X.
+    local touchZ = math.abs(az0 - bz1) < 1 or math.abs(az1 - bz0) < 1
+    if not touchZ then return false end
+    if ax0 >= bx0 and bx1 >= ax1 then return true end
+    if bx0 >= ax0 and ax1 >= bx1 then return true end
+    return false
+  end
+  -- Touching along X: they must contain each other along Z.
+  if az0 >= bz0 and bz1 >= az1 then return true end
+  if bz0 >= az0 and az1 >= bz1 then return true end
+  return false
+end
+
+local function immobile(u)
+  return ((u.__bp and u.__bp.Physics and u.__bp.Physics.MotionType) or 'RULEUMT_None') == 'RULEUMT_None'
+end
+
+--- Every structure of the same army whose skirt overlaps this one's.
+--- Filter per Cfile:62d56a-62d5be: alive, IMMOBILE, SAME ARMY, not itself,
+--- same layer, within 20 ogrids, and OverlapsWith.
+local function overlappingNeighbours(id, u)
+  local out = {}
+  local p = u.__pos or { 0, 0, 0 }
+  for oid, o in pairs(__units) do
+    if oid ~= id and not o.__dead and not o.__destroyQueued and immobile(o)
+      and (o.__army or 1) == (u.__army or 1) and o.Layer == u.Layer then
+      local q = o.__pos or { 0, 0, 0 }
+      local dx, dz = q[1] - p[1], q[3] - p[3]
+      -- The engine's spatial query uses a 20 ogrid radius (Cfile:62d4f9).
+      if dx * dx + dz * dz <= 400 and overlapsWith(u, o) then
+        out[table.getn(out) + 1] = o
+      end
+    end
+  end
+  return out
+end
+
+--- Tell a freshly completed structure and its neighbours about each other
+--- (Cfile:953563/953568). The second argument is the TRIGGERING unit in both
+--- calls — the one that just came into being.
+function __notifyAdjacent(id)
+  local u = __units[id]
+  if not u or u.__dead or u.__destroyQueued or not immobile(u) then return end
+  for _, o in ipairs(overlappingNeighbours(id, u)) do
+    local ok, err = pcall(function() u:OnAdjacentTo(o, u) end)
+    if not ok then WARN('OnAdjacentTo: ' .. tostring(err)) end
+    local ok2, err2 = pcall(function() o:OnAdjacentTo(u, u) end)
+    if not ok2 then WARN('OnAdjacentTo: ' .. tostring(err2)) end
+  end
+end
+
+--- The counterpart when a structure DIES (Cfile:952133-952162): if it is
+--- immobile and was NOT still under construction, both sides get
+--- `OnNotAdjacentTo(other)` — one argument, not two (defaultunits.lua:372).
+--- That is what REMOVES the adjacency buffs again; without it a destroyed
+--- power generator kept boosting its neighbour forever.
+function __notifyNotAdjacent(id)
+  local u = __units[id]
+  if not u or not immobile(u) or u.__beingBuilt then return end
+  for _, o in ipairs(overlappingNeighbours(id, u)) do
+    local ok, err = pcall(function() u:OnNotAdjacentTo(o) end)
+    if not ok then WARN('OnNotAdjacentTo: ' .. tostring(err)) end
+    local ok2, err2 = pcall(function() o:OnNotAdjacentTo(u) end)
+    if not ok2 then WARN('OnNotAdjacentTo: ' .. tostring(err2)) end
+  end
+end
+
 -- Baustelle: wie __spawnUnit, aber UNFERTIG (FractionComplete 0, Health 0,
 -- IsBeingBuilt) — ohne OnStopBeingBuilt. Produktion/Unterhalt bleiben inaktiv
 -- bis zur Fertigstellung.
@@ -277,6 +401,9 @@ function __finishUnit(id, builderId)
   else
     ok, err = pcall(function() u:OnStopBeingBuilt(builder, u:GetCurrentLayer()) end)
   end
+  -- Materialize runs the adjacency scan once the unit is complete
+  -- (Cfile:953548-953576).
+  __notifyAdjacent(id)
   return ok, (ok and '' or tostring(err))
 end
 
