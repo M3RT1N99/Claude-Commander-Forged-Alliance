@@ -330,6 +330,10 @@ local function readRow(id, u)
     -- Unit.cpp:8675-8813). Synced per beat so the UI mirror follows
     -- runtime cap changes instead of freezing at the blueprint state.
     caps = __ensureCommandCapMask(u),
+    -- Shield strength ratio (0..1), fed by shield.lua UpdateShieldRatio ->
+    -- Unit:SetShieldRatio (moho). The UI mirror shows it (GetShieldRatio; the
+    -- rollover shield bar, unitview.lua).
+    shieldRatio = u.__shieldRatio or 0,
     born = u.__spawnTick or 0,
     mesh = u.__meshBp,
     army = u.__army or 1,
@@ -394,6 +398,7 @@ function __readAllUnitsJson()
       .. ',"guard":' .. jnum(r.guard)
       .. ',"caps":' .. jnum(r.caps)
       .. ',"dead":' .. tostring(r.dead)
+      .. ',"shieldRatio":' .. jnum(r.shieldRatio)
       .. ',"born":' .. jnum(r.born)
       .. (function()
         -- The whole command queue (head first) for the command graph;

@@ -86,6 +86,28 @@ local function damagePoint(instigator, origin, target, amount, damageType, damag
   if inst and inst.__isProj then inst = inst.__launcher or inst end
   if not damageSelf and inst == target then return end
 
+  local tp = target.__pos or { 0, 0, 0 }
+  local vec = Vector(tp[1] - origin[1], tp[2] - origin[2], tp[3] - origin[3])
+
+  -- OnDamageBy(armyIndex) — the Lua counts who fired (Cfile:1063052; unit.lua
+  -- uses it for retaliation/stats). It fires whether or not a shield eats the hit.
+  if inst and inst.__army and target.OnDamageBy then
+    pcall(function() target:OnDamageBy(inst.__army) end)
+  end
+
+  -- Shield: a unit with an ACTIVE shield takes the hit on the shield first
+  -- (native shield-sphere routing, Cfile:1062695). shield.lua's OnDamage applies
+  -- the shield's OWN armor/handicap (OnGetDamageAbsorption) and passes overkill
+  -- to the owner (Owner:DoTakeDamage) — so it receives the RAW amount, BEFORE the
+  -- unit-armor reduction below.
+  local shield = target.MyShield
+  if shield and not shield.__destroyed and not shield.__destroyQueued
+    and shield.IsOn and shield:IsOn() and shield:GetHealth() > 0 then
+    local ok, err = pcall(function() shield:OnDamage(inst, amount, vec, damageType) end)
+    if not ok then WARN('Shield OnDamage: ' .. tostring(err)) end
+    return
+  end
+
   local dealt = amount
   if target.__bp and not target.__isProj then
     dealt = dealt * __armorMult(target, damageType)
@@ -93,15 +115,6 @@ local function damagePoint(instigator, origin, target, amount, damageType, damag
   dealt = dealt / (1 + ArmyGetHandicap(target.__army or 1))
 
   if dealt <= 0 then return end
-
-  -- OnDamageBy(armyIndex) — die Lua zaehlt damit, wer geschossen hat
-  -- (Cfile:1063052; unit.lua nutzt es fuer die Vergeltung/Statistik).
-  if inst and inst.__army and target.OnDamageBy then
-    pcall(function() target:OnDamageBy(inst.__army) end)
-  end
-
-  local tp = target.__pos or { 0, 0, 0 }
-  local vec = Vector(tp[1] - origin[1], tp[2] - origin[2], tp[3] - origin[3])
 
   -- Und jetzt sagt es die Engine der Lua — sie zieht die HP selbst ab
   -- (RunScript_EntityOnDamage, Cfile:1063151).

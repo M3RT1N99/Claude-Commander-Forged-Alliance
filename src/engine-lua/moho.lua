@@ -501,6 +501,14 @@ local unit = withNoops(UNIT_NAMES, {
   -- real method — as with IsPaused.
   IsPaused = function(self) return self.__paused == true end,
   SetPaused = function(self, paused) self.__paused = paused == true end,
+  -- Shield seam: the shield calls Owner:SetShieldRatio (shield.lua
+  -- UpdateShieldRatio); the UI mirrors __shieldRatio (readRow -> GetShieldRatio).
+  -- SetFocusEntity/ClearFocusEntity hold the shield as the unit's focus entity
+  -- (Unit:CreateShield/DestroyShield, unit.lua:3275/3375). All three sit in
+  -- UNIT_NAMES (the noop list) but withNoops skips names with a real method.
+  SetShieldRatio = function(self, ratio) self.__shieldRatio = ratio end,
+  SetFocusEntity = function(self, e) self.__focusEntity = e end,
+  ClearFocusEntity = function(self) self.__focusEntity = nil end,
   IsStunned = function(self) return false end,
 
   -- Weapons: the engine builds one object per bp.Weapon entry (see units.lua).

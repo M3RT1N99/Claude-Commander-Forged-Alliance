@@ -323,7 +323,7 @@ function GetAttachedUnitsList(units)
 end
 
 -- Von der Engine pro Beat: der Zustand einer Unit aus der Sim.
-function __uiSetUnit(id, blueprintId, army, x, y, z, health, maxHealth, workProgress, idle, fireState, guardedId, capMask, deadFlag)
+function __uiSetUnit(id, blueprintId, army, x, y, z, health, maxHealth, workProgress, idle, fireState, guardedId, capMask, deadFlag, shieldRatio)
   local u = __uiUnits[id]
   if not u then
     -- SUnitVarDat-Ctor (Cfile:772277): mFireState = FIRESTATE_ReturnFire (0).
@@ -354,6 +354,9 @@ function __uiSetUnit(id, blueprintId, army, x, y, z, health, maxHealth, workProg
   -- SelectUnits/avatars/ValidateUnitsList — the engine drops IsDead AND
   -- DestroyQueued (Cfile:1361497-1361498).
   u.dead = deadFlag == true
+  -- Shield strength (0..1) from shield.lua UpdateShieldRatio -> SetShieldRatio;
+  -- GetShieldRatio and the rollover shield bar read it.
+  u.shieldRatio = shieldRatio or 0
 end
 
 -- Die Bau-Warteschlange einer Fabrik aus der Sim spiegeln. Die Engine haelt sie

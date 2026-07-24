@@ -879,6 +879,31 @@ function __ensureCommandCapMask(u)
   return u.__commandCapMask
 end
 
+-- === Shields (Defense.Shield) ===
+-- The shield LOGIC is the original /lua/shield.lua: a ChangeState state machine
+-- (OnState/OffState/DamageRechargeState) that absorbs damage, regenerates, and
+-- passes overkill to the owner. It runs on our scheduler; the engine supplies
+-- only the shield ENTITY here and routes damage through it (damage.lua, the
+-- shield-sphere subtraction, Cfile:1062695). Regular Shield, UnitShield
+-- (personal) and AntiArtilleryShield all derive from Shield and share this
+-- __init binding (_c_CreateShield, shield.lua:20).
+function _c_CreateShield(luaobj, spec)
+  local owner = spec.Owner
+  luaobj.__isShield = true
+  luaobj.__army = (owner and owner.__army) or 1
+  local op = (owner and owner.__pos) or { 0, 0, 0 }
+  luaobj.__pos = { op[1], op[2], op[3] }
+  luaobj.__heading = (owner and owner.__heading) or 0
+  -- Health comes from OnCreate (SetMaxHealth/SetHealth); start at 0 like the
+  -- engine ctor before the script fills it.
+  luaobj.__health = 0
+  luaobj.__bones = { names = {}, xform = {}, index = {} }
+  local id = __nextUnitId
+  __nextUnitId = id + 1
+  luaobj.__id = id
+  return luaobj
+end
+
 local function hasCommandCap(u, cap)
   local bit = commandCapBit(cap)
   return bit ~= 0 and (__ensureCommandCapMask(u) & bit) == bit

@@ -48,6 +48,9 @@ export interface LuaUnitSnapshot {
   /** Dead/DestroyQueued through the multi-beat death sequence — the UI mirror
    *  excludes it from selection/avatars (IsDead + DestroyQueued, Cfile:1361497). */
   dead?: boolean
+  /** Shield strength ratio 0..1 (shield.lua UpdateShieldRatio -> SetShieldRatio);
+   *  the UI shows it via GetShieldRatio. */
+  shieldRatio?: number
   /** Erstellungs-Tick — die Build-Shader zählen ihr Alter darüber (material.x). */
   born: number
   /** The unit's active order (command graph): type + target position. */
