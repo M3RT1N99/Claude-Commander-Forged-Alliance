@@ -33,6 +33,13 @@ import type { HeightfieldData } from './sim/terrain'
 import { Hud, type HudSource, type HudUnitInfo, type EcoSnapshot } from './ui/hud'
 import { GameUi } from './ui/gameUi'
 import { BuildPreview } from './ui/buildPreview'
+import {
+  boxSelectIds,
+  mergeSelection,
+  selectionBpData,
+  type SelectionBpData,
+  type SelectionCandidate,
+} from './ui/boxSelection'
 import type { ScmapData } from './formats/scmap'
 import {
   createUefBuildMaterials,
@@ -1423,20 +1430,25 @@ window.addEventListener('pointerup', (e) => {
   boxStart = null
   selectBox.hidden = true
   const moved = Math.hypot(e.clientX - start.x, e.clientY - start.y)
-  if (moved > 5 || !luaSim) return
+  if (!luaSim) return
 
   // Was ein Linksklick in der Welt bedeutet, entscheidet die UI-Lua, nicht wir:
   // steht ein Command-Mode an (Bau-Icon geklickt, Move-Button gedrückt), ist der
   // Klick ein BEFEHL. Sonst ist er eine Auswahl.
   if (gameUi && gameUi.commandMode().mode !== false) {
+    if (moved > 5) return
     const hit = viewer.pickTerrain(e.clientX, e.clientY)
     if (hit) void issueWorldCommand(hit, e.shiftKey, zielUnter(e.clientX, e.clientY))
     return
   }
-  if (luaUnits.length > 0) {
-    const luaMsg = selectLua(e.clientX, e.clientY)
-    if (luaMsg) log(luaMsg)
-  }
+  if (luaUnits.length === 0) return
+  // Gezogen = Rahmenauswahl (SelectionDragger), geklickt = Einzelauswahl.
+  // Beides mit derselben Shift-Semantik aus DragRelease.
+  const luaMsg =
+    moved > 5
+      ? boxSelect(start.x, start.y, e.clientX, e.clientY, e.shiftKey)
+      : selectLua(e.clientX, e.clientY, e.shiftKey)
+  if (luaMsg) log(luaMsg)
 })
 
 viewportEl.addEventListener('contextmenu', (e) => {
@@ -1757,6 +1769,8 @@ interface LuaSceneUnit {
   scene: SceneUnit
   /** Halbachsen + Versatz des Auswahlrings (aus dem Blueprint, siehe ringExtents). */
   ringExtents: { x: number; z: number; ox: number; oz: number }
+  /** Was die Rahmenauswahl aus dem Blueprint braucht (src/ui/boxSelection.ts). */
+  select: SelectionBpData
   /**
    * Läuft die Gehanimation gerade? Die SIM sagt, ob die Einheit fährt
    * (`moving` aus `__readAllUnitsJson`) — der Renderer spielt nur ab, was die
@@ -1983,19 +1997,114 @@ function ringExtents(bp: BpObject): { x: number; z: number; ox: number; oz: numb
  * `gamemain.OnSelectionChanged`, und daraus speisen sich orders.lua,
  * construction.lua und unitview.lua (Cfile:1294170).
  */
-function selectLua(clientX: number, clientY: number): string | null {
+function selectLua(clientX: number, clientY: number, additive = false): string | null {
   const hit = viewer.pickUnit(clientX, clientY)
-  let name: string | null = null
+  const treffer = hit ? luaUnits.filter((u) => u.mesh === hit.mesh) : []
+  return applySelection(treffer, additive)
+}
+
+/**
+ * Auswahl setzen — die eine Stelle, an der `selected`, die Original-UI und die
+ * Shift-Semantik zusammenkommen.
+ *
+ * Shift folgt `DragRelease` (Cfile:1289882-1289946): ist die getroffene Menge
+ * BEREITS vollständig ausgewählt, wird sie ABGEWÄHLT (`v5 >= size(a1)` →
+ * SetSelection(Auswahl \ Treffer)), sonst kommt sie hinzu (SetSelection(∪)).
+ */
+function applySelection(treffer: LuaSceneUnit[], additive: boolean): string | null {
+  const aktuell = luaUnits.filter((u) => u.selected).map((u) => u.id)
+  const neu = new Set(mergeSelection(aktuell, treffer.map((u) => u.id), additive))
   const ids: number[] = []
+  let name: string | null = null
   for (const u of luaUnits) {
-    u.selected = hit != null && hit.mesh === u.mesh
+    u.selected = neu.has(u.id)
     if (u.selected) {
-      name = u.name
       ids.push(u.id)
+      if (name === null) name = u.name
     }
   }
   gameUi?.select(ids)
-  return name ? `Ausgewählt: ${name}` : null
+  if (name === null) return null
+  return ids.length > 1 ? `Ausgewählt: ${ids.length} Einheiten` : `Ausgewählt: ${name}`
+}
+
+/**
+ * ZIEHRAHMEN-AUSWAHL — `Moho::SelectionDragger::DragRelease` (Cfile:863870).
+ * Hier stehen nur die beiden Engine-Anteile: der Kandidatenfilter (eigene
+ * Fokus-Armee, lebendig — Cfile:1290158) und die PROJEKTION der Auswahl-Box.
+ * Wer davon ausgewählt wird, entscheidet `src/ui/boxSelection.ts` genau nach
+ * dem Decomp (Trefferprüfung, Prioritätseimer, Shift-Semantik).
+ *
+ * Die Box ist die MESH-Bounding-Box, deren Halbachsen mit
+ * `SelectionMeshScaleX/Y/Z` multipliziert werden
+ * (Cfile:1290063-1290071) — nicht der Auswahlring (`SelectionSizeX/Z`, ein
+ * anderes Feld). Das Ziehvolumen des Originals ist der Frustum-Ausschnitt des
+ * Rechtecks; projizierte Box gegen Rechteck ist derselbe Test.
+ *
+ * Schritt 2 des Originals — `IsMobile(u) || !IsUnitState(u, 37)`, 37 =
+ * `UNITSTATE_BeingUpgraded` (Cfile:703040) — ist heute für JEDE Einheit
+ * erfüllt: die Sim kennt keinen Upgrade-Zustand, der zweite Term ist damit
+ * immer wahr. Kein erfundener Zustand, kein zusätzlicher Filter.
+ */
+function boxSelect(x0: number, y0: number, x1: number, y1: number, additive: boolean): string | null {
+  if (!luaSim) return null
+  const rahmen = {
+    minX: Math.min(x0, x1),
+    maxX: Math.max(x0, x1),
+    minY: Math.min(y0, y1),
+    maxY: Math.max(y0, y1),
+  }
+  const box = new THREE.Box3()
+  const ecke = new THREE.Vector3()
+  const mitte = new THREE.Vector3()
+  const halb = new THREE.Vector3()
+  const fokus = gameUi ? gameUi.focusArmy() : 1
+  const kandidaten: SelectionCandidate[] = []
+  const nachId = new Map<number, LuaSceneUnit>()
+  for (const u of luaUnits) {
+    if (u.army !== fokus) continue
+    const s = luaSim.state(u.id)
+    if (!s || s.dead) continue
+    box.setFromObject(u.mesh)
+    if (box.isEmpty()) continue
+    box.getCenter(mitte)
+    box.getSize(halb).multiplyScalar(0.5)
+    halb.x *= u.select.meshScale.x
+    halb.y *= u.select.meshScale.y
+    halb.z *= u.select.meshScale.z
+    let minX = Infinity
+    let maxX = -Infinity
+    let minY = Infinity
+    let maxY = -Infinity
+    for (let i = 0; i < 8; i++) {
+      ecke.set(
+        mitte.x + (i & 1 ? halb.x : -halb.x),
+        mitte.y + (i & 2 ? halb.y : -halb.y),
+        mitte.z + (i & 4 ? halb.z : -halb.z),
+      )
+      const p = viewer.worldToScreen(ecke)
+      if (!p) continue
+      if (p.x < minX) minX = p.x
+      if (p.x > maxX) maxX = p.x
+      if (p.y < minY) minY = p.y
+      if (p.y > maxY) maxY = p.y
+    }
+    nachId.set(u.id, u)
+    kandidaten.push({
+      id: u.id,
+      screen: minX > maxX ? null : { minX, maxX, minY, maxY },
+      priority: u.select.priority,
+      lowSelectPrio: u.select.lowSelectPrio,
+      beingBuilt: s.fraction < 1,
+    })
+  }
+  const ids = boxSelectIds(kandidaten, rahmen, additive)
+  const treffer: LuaSceneUnit[] = []
+  for (const id of ids) {
+    const u = nachId.get(id)
+    if (u) treffer.push(u)
+  }
+  return applySelection(treffer, additive)
 }
 
 /** Ob mindestens eine Lua-Unit selektiert ist. */
@@ -2361,6 +2470,7 @@ async function addLuaUnitToScene(
     scene,
     walking: false,
     ringExtents: ringExtents(assets.bp as BpObject),
+    select: selectionBpData(assets.bp as BpObject),
     build,
   })
 }

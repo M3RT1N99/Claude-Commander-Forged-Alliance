@@ -344,6 +344,17 @@ export class GameUi {
   }
 
   /**
+   * The army the player is looking through — `GetFocusArmy()`
+   * (`__uiFocusArmy`, ui-globals.lua:927). Selection is limited to it: the
+   * drag box only collects units whose army equals the focus army
+   * (Cfile:1290158).
+   */
+  focusArmy(): number {
+    const v = this.host.pull<number>('tostring(GetFocusArmy())')
+    return typeof v === 'number' ? v : 1
+  }
+
+  /**
    * The armies' icon colors (ARGB hex) from the armiesTable — the field
    * cfunc_GetArmiesTableL publishes per army (Cfile:1267023-1267111),
    * sourced from /lua/gamecolors.lua ArmyColors. Strategic icons are
