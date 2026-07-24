@@ -89,7 +89,10 @@ The path to the real UI: [PLAN-UI.md](PLAN-UI.md); the complete 1:1 roadmap:
   engine economy (values come only from the blueprint).
 - **`research/economy-binary.md` describes more than `economy.ts` supports**
   (Handicap, overflow sharing, cumulative `granted` accumulator).
-- **DDS parser:** 16-bit uncompressed DDS files are rejected (a finding from a
-  self-test run; it affects at least one UI texture).
+- **DDS parser** handles DXT1/3/5, uncompressed 8/16/24/32-bit (incl. A1R5G5B5,
+  the format of all 1,134 strategic icons), cubemaps and full mip chains.
+  Sub-4-bit channels now expand uniformly (`round(v*255/(2^bits-1))`) — the
+  1-bit alpha of the A1R5G5B5 icons no longer renders at half opacity. Open:
+  ATI2/BC5, BC6H/BC7, DX10 headers and DDSD_PITCH — no retail asset uses them.
 - **Score numbers remain blank** (1:1: Vanilla-3599 has no `currentScores`
   producers) — the user decision between Vanilla and FAF remains open.

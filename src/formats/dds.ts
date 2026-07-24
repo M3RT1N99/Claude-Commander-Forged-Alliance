@@ -102,8 +102,12 @@ function expandToBgra(src: Uint8Array, count: number, layout: RawLayout): Uint8A
   const scale = (value: number, bits: number): number => {
     if (bits === 8) return value
     if (bits === 0) return 0
-    // Bit replication: repeat the high bits into the low bits.
-    return (value << (8 - bits)) | (value >> (2 * bits - 8))
+    // Expand an N-bit channel to 8-bit uniformly (0 -> 0, max -> 255). The old
+    // bit-replication `(v << (8-bits)) | (v >> (2*bits-8))` only holds for
+    // bits >= 4; for 1..3-bit channels the low-bit shift goes negative (JS mods
+    // it by 32), so A1R5G5B5's 1-bit alpha expanded to 128 instead of 255 and
+    // every strategic icon (A1R5G5B5, 1-bit alpha) rendered half-transparent.
+    return Math.round((value * 255) / ((1 << bits) - 1))
   }
 
   for (let i = 0; i < count; i++) {

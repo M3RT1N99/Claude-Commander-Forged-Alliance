@@ -464,17 +464,23 @@ export class MauiRenderer {
   private texture(path: string): string | null {
     const key = path.replace(/^\/+/, '').toLowerCase()
     const hit = this.textures.get(key)
-    if (hit && hit !== 'pending') return hit
-    if (hit === 'pending') return null
+    if (hit === 'pending' || hit === 'failed') return null
+    if (hit) return hit
     this.textures.set(key, 'pending')
     void (async () => {
-      if (!this.vfs.exists(key)) {
-        this.textures.delete(key)
-        return
+      try {
+        if (!this.vfs.exists(key)) {
+          this.textures.set(key, 'failed')
+          return
+        }
+        const url = ddsToDataUrl(key, await this.vfs.read(key))
+        this.textures.set(key, url ?? 'failed')
+      } catch {
+        // An unsupported/corrupt DDS must not leave the bitmap stuck on
+        // 'pending' (unhandled rejection). Mark it 'failed' so it renders
+        // nothing and is not retried every frame.
+        this.textures.set(key, 'failed')
       }
-      const url = ddsToDataUrl(key, await this.vfs.read(key))
-      if (url) this.textures.set(key, url)
-      else this.textures.delete(key)
     })()
     return null
   }
