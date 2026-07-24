@@ -562,6 +562,8 @@ interface ProjectileAssets {
   scale: number
 }
 const projAssetCache = new Map<string, Promise<ProjectileAssets | null>>()
+/** Shader-Namen, für die schon einmal gemeldet wurde, dass sie fehlen. */
+const projSkipLogged = new Set<string>()
 const projMeshes = new Map<number, THREE.Mesh>()
 const projBaseScales = new Map<number, number>()
 const projPending = new Set<number>()
@@ -578,14 +580,51 @@ function loadProjectileAssets(bpId: string): Promise<ProjectileAssets | null> {
       const m = path.match(/^((?:projectiles|effects\/entities)\/[^/]+\/[^/]+)_proj\.bp$/)
       if (!m) return null
       const base = m[1]!
-      const meshPath = `${base}_lod0.scm`
+      if (!vfs.exists(path)) return null
+      const bp = parseBlueprint(await vfs.readText(path))
+      // Das Mesh steht IM BLUEPRINT (`Display.Mesh.LODs[n].MeshName`) — genau
+      // so liest es die Engine. Es aus dem Blueprint-PFAD abzuleiten war eine
+      // Vermutung, die für die Bau-Effekte falsch ist: der Bau-Würfel
+      // (`effects/entities/uefbuildeffect/uefbuildeffect03_proj.bp`) zeigt auf
+      // `/meshes/generic/cube01_lod0.scm` und hat kein eigenes Modell. Der
+      // Pfad daneben bleibt als Fallback (die Waffen-Projektile nutzen ihn).
+      const lodsRaw = bpGet(bp, 'Display.Mesh.LODs.1') ?? bpGet(bp, 'Display.Mesh.LODs')
+      const lod = (Array.isArray(lodsRaw) ? lodsRaw[0] : lodsRaw) as BpObject | undefined
+      // Der Shader steht im Blueprint. Das Projektil-Material hier ist
+      // TMeshGlow (unbeleuchtet, Albedo pur) — genau das, was die Schuss-
+      // Projektile verlangen. Ein Blueprint, das einen ANDEREN Shader nennt
+      // (`UEFBuildCube`, `AeonBuildPuddle`), bekommt sein Mesh NICHT: mit dem
+      // falschen Material stünde ein weißer Kasten um das Gebäude. Diese
+      // Shader sind ein offener Schritt (docs/STATUS.md), keine Fußnote hier.
+      const shader = lod ? bpGet(lod, 'ShaderName') : undefined
+      if (typeof shader === 'string' && /Build/i.test(shader)) {
+        if (!projSkipLogged.has(shader)) {
+          projSkipLogged.add(shader)
+          log(`Projektil-Shader ${shader} fehlt — ${bpId} bleibt unsichtbar`)
+        }
+        return null
+      }
+      const lodMesh = lod ? bpGet(lod, 'MeshName') : undefined
+      const meshPath =
+        typeof lodMesh === 'string' && lodMesh.length > 0
+          ? lodMesh.replace(/^\//, '').toLowerCase()
+          : `${base}_lod0.scm`
       // KEIN Mesh ist bei vielen Projektilen die Wahrheit (ACU-Laser,
       // Maschinengewehr, Bau-Effekte): sie sind reine Emitter/Trail-Effekte
       // und werden erst mit dem Partikelsystem sichtbar.
       if (!vfs.exists(meshPath)) return null
       const model = parseScm(await vfs.read(meshPath))
-      const albedo = await loadFirstTexture([`${base}_albedo.dds`])
-      const bp = parseBlueprint(await vfs.readText(path))
+      // Die Textur gehört zum MESH, nicht zum Blueprint-Ordner: liegt das Mesh
+      // woanders, liegt auch sein Albedo dort.
+      const meshBase = meshPath.replace(/_lod\d+\.scm$/i, '')
+      const lodAlbedo = lod ? bpGet(lod, 'AlbedoName') : undefined
+      const albedo = await loadFirstTexture(
+        [
+          typeof lodAlbedo === 'string' && lodAlbedo.length > 0 ? lodAlbedo.replace(/^\//, '').toLowerCase() : '',
+          `${meshBase}_albedo.dds`,
+          `${base}_albedo.dds`,
+        ].filter((p) => p.length > 0),
+      )
       const scale = bpGet(bp, 'Display.UniformScale')
       return { model, albedo, scale: typeof scale === 'number' && scale > 0 ? scale : 1 }
     })()

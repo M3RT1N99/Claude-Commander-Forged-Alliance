@@ -183,6 +183,57 @@ function __spawnUnit(scriptPath, bpId, x, y, z, army, complete)
   return id, ''
 end
 
+-- === Einheiten aus der Lua erzeugen ===
+--
+-- CreateUnit(blueprint, army, tx, ty, tz, qx, qy, qz, qw, [layer])
+-- (cfunc_CreateUnitL, Cfile:980268, Hilfetext Cfile:980258). Die Engine prueft
+-- Blueprint ("Unknown unit kind: %s", Cfile:980337) und Armee-Index
+-- ("Invalid army index; must be >= 1 and < %d", Cfile:980352), baut daraus
+-- SUnitConstructionParams(layer, pos, army, bp, creator = 0, complete = 1) und
+-- ruft Sim::CreateUnit — die Einheit entsteht FERTIG, nicht als Baustelle
+-- (Cfile:980435-980444). Rueckgabe ist die Unit; scheitert die Erzeugung,
+-- wirft die Engine "CreateUnit(%s) failed".
+--
+-- Nutzer im Original: effectutilities.lua:436 (SpawnBuildBots — die
+-- Cybran-Bau-Drohnen), scenarioframework, terranunits.lua (Bau-Pods).
+local function spawnCreateUnit(blueprint, army, x, y, z, heading, who)
+  local key = type(blueprint) == 'string' and string.lower(blueprint) or nil
+  local bp = key and __registered and __registered.Unit[key]
+  if not bp then error('Unknown unit kind: ' .. tostring(blueprint), 3) end
+  if type(army) ~= 'number' or army < 1 then
+    error('Invalid army index; must be >= 1 but got ' .. tostring(army), 3)
+  end
+  local scriptPath = bp.Script or ('/units/' .. key .. '/' .. key .. '_script.lua')
+  local id, err = __spawnUnit(scriptPath, key, x, y, z, army, true)
+  if id < 0 then error(who .. '(' .. tostring(blueprint) .. ') failed: ' .. tostring(err), 3) end
+  local u = __units[id]
+  u.__heading = heading or 0
+  return u
+end
+
+--- Die Gierung aus einem Quaternion (die Engine gibt Orientierungen als
+--- Quaternion heraus, GetOrientation -> {x, y, z, w}).
+local function headingFromQuat(qx, qy, qz, qw)
+  qx, qy, qz, qw = qx or 0, qy or 0, qz or 0, qw or 1
+  return math.atan(2 * (qw * qy + qx * qz), 1 - 2 * (qy * qy + qz * qz))
+end
+
+function CreateUnit(blueprint, army, tx, ty, tz, qx, qy, qz, qw, layer)
+  return spawnCreateUnit(blueprint, army, tx, ty, tz, headingFromQuat(qx, qy, qz, qw), 'CreateUnit')
+end
+
+--- CreateUnitHPR(blueprint, army, x, y, z, pitch, yaw, roll) — Cfile:980475.
+--- Dieselbe Erzeugung, nur mit Euler-Winkeln statt Quaternion.
+function CreateUnitHPR(blueprint, army, x, y, z, pitch, yaw, roll)
+  return spawnCreateUnit(blueprint, army, x, y, z, yaw or 0, 'CreateUnitHPR')
+end
+
+--- CreateUnit2(blueprint, army, layer, x, z, heading) — Cfile:980637. Die
+--- Hoehe kommt aus dem Gelaende (die Signatur hat kein y).
+function CreateUnit2(blueprint, army, layer, x, z, heading)
+  return spawnCreateUnit(blueprint, army, x, GetSurfaceHeight(x, z), z, heading, 'CreateUnit2')
+end
+
 -- Baustelle: wie __spawnUnit, aber UNFERTIG (FractionComplete 0, Health 0,
 -- IsBeingBuilt) — ohne OnStopBeingBuilt. Produktion/Unterhalt bleiben inaktiv
 -- bis zur Fertigstellung.

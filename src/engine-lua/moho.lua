@@ -281,7 +281,27 @@ local entity = withNoops(ENTITY_NAMES, {
   SetMesh = function(self, mesh) self.__meshBp = mesh end,
   -- Der Zeichen-Massstab (unit.lua:1111 gibt dem Wrack den UniformScale der
   -- Unit mit). Der Renderer liest ihn aus dem Prop-Snapshot.
-  SetScale = function(self, s) self.__drawScale = s end,
+  -- Entity:SetScale(s) ODER SetScale(x, y, z) — die Engine nimmt 2 oder 4
+  -- Argumente und wirft sonst "Wrong number of arguments to Entity:SetScale,
+  -- expected 2 or 4 but got %d" (Cfile:935305); bei einem Wert skaliert sie
+  -- alle drei Achsen gleich (Cfile:935334-935337). Nur EIN Wert zu speichern
+  -- verlor die Achsenmasse der Bau-Box: effectutilities.lua:100/109 skaliert
+  -- sie mit dem Fussabdruck des Gebaeudes (x*1.05, y*0.2, z*1.05).
+  SetScale = function(self, x, y, z)
+    if y == nil and z == nil then
+      self.__drawScale = x
+      self.__scale = { x, x, x }
+    else
+      self.__drawScale = x
+      self.__scale = { x, y, z }
+    end
+  end,
+  GetScale = function(self)
+    local s = self.__scale
+    if s then return s[1], s[2], s[3] end
+    local d = self.__drawScale or 1
+    return d, d, d
+  end,
 
   -- Das Skelett. Die Engine kennt es, weil sie das Modell der Unit auch in der
   -- SIM laedt (nicht nur im Renderer): Waffen-Tuerme, Bau-Knochen, Muendungen

@@ -380,6 +380,12 @@ function ManipMeta:Disable() self.__enabled = false; return self end
 function ManipMeta:Enable() self.__enabled = true; return self end
 function ManipMeta:Destroy() self.__destroyed = true end
 function ManipMeta:IsDestroyed() return self.__destroyed == true end
+-- BeenDestroyed() — die Engine antwortet mit `opt == 0`, also "das Objekt gibt
+-- es nicht mehr" (cfunc_CSlideManipulatorBeenDestroyedL, Cfile:879376). Es
+-- fehlte: effectutilities.lua:664/670 (der Seraphim-Fabrik-Bau-Effekt) ruft es
+-- auf dem Slider, der Thread starb dort mit "attempt to call a nil value
+-- (method 'BeenDestroyed')" — der Bau-Sockel blieb stehen.
+function ManipMeta:BeenDestroyed() return self.__destroyed == true end
 function ManipMeta:GetGoal() return self.__goal end
 -- WaitFor(manipulator) blocks until the manipulator reached its goal. There is
 -- no bone animation system yet, so a manipulator is done the moment it is set;
@@ -765,13 +771,25 @@ end
 
 --- IssueMove(units, pos) — ein BEFEHL, keine direkte Zielsetzung: die Engine
 --- baut SSTICommandIssueData(UNITCOMMAND_Move) und schickt es durch
---- UNIT_IssueCommand, das ohne Shift die Warteschlange ersetzt
---- (IssueUnitCommand-Default clear = true, Cfile:1265640). Genau deshalb kann
---- ein NACHFOLGENDER Befehl (der Sammelpunkt einer Fabrik) dahinter warten,
---- statt das Ziel sofort zu ueberschreiben.
+--- UNIT_IssueCommand mit clear = 0 (Cfile:1008574) — der Befehl haengt sich
+--- also AN die Warteschlange, er ersetzt sie nicht. (Der Spieler-Weg ist ein
+--- anderer: IssueUnitCommand leert per Default, Cfile:1265640.) Nur deshalb
+--- kann der Sammelpunkt einer Fabrik hinter dem Abfahrt-Befehl warten.
 function IssueMove(units, pos)
   return issueTo(units, function(u, cmd)
-    __issueOrder(u.__id, { type = 'Move', x = pos[1], z = pos[3], cmdId = cmd.id }, true)
+    __issueOrder(u.__id, { type = 'Move', x = pos[1], z = pos[3], cmdId = cmd.id }, false)
+  end)
+end
+
+--- IssueGuard(units, target) — cfunc_IssueGuardL (Cfile:1008933):
+--- SSTICommandIssueData(UNITCOMMAND_Guard) mit dem Ziel, ueber
+--- UNIT_IssueCommand mit clear = 0 (Cfile:1009018) — also angehaengt.
+--- effectutilities.lua:445 schickt damit die Cybran-Bau-Drohnen auf die
+--- Baustelle.
+function IssueGuard(units, target)
+  local targetId = type(target) == 'table' and target.__id or target
+  return issueTo(units, function(u, cmd)
+    __issueOrder(u.__id, { type = 'Guard', target = targetId, cmdId = cmd.id }, false)
   end)
 end
 
