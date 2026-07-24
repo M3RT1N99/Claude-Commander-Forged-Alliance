@@ -110,6 +110,12 @@ local entity = withNoops(ENTITY_NAMES, {
     end
   end,
   AdjustHealth = function(self, instigator, delta)
+    -- Entity::AdjustHealth (Cfile:915985-915988): a zero delta does nothing, and
+    -- a DEAD entity is never healed (only delta <= 0 applies once mIsDead). (The
+    -- NoDamage cheat SimVar, which would also block damage while active, is not
+    -- modelled.)
+    if delta == 0 then return end
+    if self.__dead and delta > 0 then return end
     self:SetHealth(instigator, (self.__health or 0) + delta)
   end,
   GetFractionComplete = function(self) return self.__fraction or 1 end,

@@ -119,55 +119,64 @@ function Damage(instigator, origin, target, amount, damageType)
   damagePoint(instigator, __vec3(origin), target, amount, damageType)
 end
 
+-- Area/ring splash eligibility (func_DoDamageArea, Cfile:1063243-1063261):
+--   * damageSelf gates the instigator itself;
+--   * the friendly filter uses IsAlly, NOT exact-army equality
+--     (Cfile:1063248-1063249) — allies of a DIFFERENT army are spared too unless
+--     damageFriendly (IsAlly(x,x) keeps the instigator's own army spared);
+--   * a target in category NOSPLASHDAMAGE is immune to splash
+--     (Cfile:1063254-1063256).
+local function splashEligible(u, inst, instArmy, damageFriendly, damageSelf)
+  if u.__destroyQueued then return false end
+  if not damageSelf and u == inst then return false end
+  if not damageFriendly and instArmy ~= nil and IsAlly(instArmy, u.__army) then return false end
+  if EntityCategoryContains(categories.NOSPLASHDAMAGE, u) then return false end
+  return true
+end
+
 --- "DamageArea(instigator, location, radius, amount, damageType, damageFriendly,
---- [damageSelf])" (Cfile:1064280).
----
---- KEIN Abstands-Falloff: jedes Ziel im Radius bekommt den vollen Betrag
---- (damage-binary.md). Schilde fehlen noch — der Abzug ueber die Schildkugeln
---- (Cfile:1062695) kommt mit dem Schild-System.
+--- [damageSelf])" (Cfile:1064280). No distance falloff: every target in the
+--- radius takes the full amount (damage-binary.md). Shields are not modelled yet
+--- (the shield-sphere subtraction, Cfile:1062695, arrives with the shield system).
+--- The engine ERRORS on degenerate input rather than silently no-oping
+--- (cfunc_DamageAreaL, Cfile:1064381/1064383).
 function DamageArea(instigator, location, radius, amount, damageType, damageFriendly, damageSelf)
+  if amount == 0 then error('0 damage specified.', 2) end
+  if radius == 0 then error('0 radius specified.', 2) end
   local origin = __vec3(location)
   local inst = instigator
   if inst and inst.__isProj then inst = inst.__launcher or inst end
   local instArmy = inst and inst.__army
 
   for _, u in pairs(__units) do
-    if not u.__destroyQueued then
-      if damageSelf or u ~= inst then
-        local friendly = instArmy ~= nil and u.__army == instArmy
-        if damageFriendly or not friendly then
-          local p = u.__pos
-          local dx, dy, dz = p[1] - origin[1], p[2] - origin[2], p[3] - origin[3]
-          if dx * dx + dy * dy + dz * dz <= radius * radius then
-            damagePoint(instigator, origin, u, amount, damageType, damageSelf)
-          end
-        end
-      end
+    local p = u.__pos
+    local dx, dy, dz = p[1] - origin[1], p[2] - origin[2], p[3] - origin[3]
+    if dx * dx + dy * dy + dz * dz <= radius * radius
+      and splashEligible(u, inst, instArmy, damageFriendly, damageSelf) then
+      damagePoint(instigator, origin, u, amount, damageType, damageSelf)
     end
   end
 end
 
 --- "DamageRing(instigator, location, minRadius, maxRadius, amount, damageType,
---- damageFriendly, [damageSelf])" (Cfile:1064409).
+--- damageFriendly, [damageSelf])" (Cfile:1064409). Errors on 0 damage / 0 min /
+--- 0 max radius (cfunc_DamageRingL, Cfile:1064503-1064507).
 function DamageRing(instigator, location, minRadius, maxRadius, amount, damageType, damageFriendly, damageSelf)
+  if amount == 0 then error('0 damage specified.', 2) end
+  if minRadius == 0 then error('0 min radius specified.', 2) end
+  if maxRadius == 0 then error('0 max radius specified.', 2) end
   local origin = __vec3(location)
   local inst = instigator
   if inst and inst.__isProj then inst = inst.__launcher or inst end
   local instArmy = inst and inst.__army
 
   for _, u in pairs(__units) do
-    if not u.__destroyQueued then
-      if damageSelf or u ~= inst then
-        local friendly = instArmy ~= nil and u.__army == instArmy
-        if damageFriendly or not friendly then
-          local p = u.__pos
-          local dx, dy, dz = p[1] - origin[1], p[2] - origin[2], p[3] - origin[3]
-          local d2 = dx * dx + dy * dy + dz * dz
-          if d2 >= minRadius * minRadius and d2 <= maxRadius * maxRadius then
-            damagePoint(instigator, origin, u, amount, damageType, damageSelf)
-          end
-        end
-      end
+    local p = u.__pos
+    local dx, dy, dz = p[1] - origin[1], p[2] - origin[2], p[3] - origin[3]
+    local d2 = dx * dx + dy * dy + dz * dz
+    if d2 >= minRadius * minRadius and d2 <= maxRadius * maxRadius
+      and splashEligible(u, inst, instArmy, damageFriendly, damageSelf) then
+      damagePoint(instigator, origin, u, amount, damageType, damageSelf)
     end
   end
 end
