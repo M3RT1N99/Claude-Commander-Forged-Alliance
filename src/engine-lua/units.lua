@@ -183,19 +183,19 @@ function __spawnUnit(scriptPath, bpId, x, y, z, army, complete)
   return id, ''
 end
 
--- === Einheiten aus der Lua erzeugen ===
+-- === Creating units from Lua ===
 --
 -- CreateUnit(blueprint, army, tx, ty, tz, qx, qy, qz, qw, [layer])
--- (cfunc_CreateUnitL, Cfile:980268, Hilfetext Cfile:980258). Die Engine prueft
--- Blueprint ("Unknown unit kind: %s", Cfile:980337) und Armee-Index
--- ("Invalid army index; must be >= 1 and < %d", Cfile:980352), baut daraus
--- SUnitConstructionParams(layer, pos, army, bp, creator = 0, complete = 1) und
--- ruft Sim::CreateUnit — die Einheit entsteht FERTIG, nicht als Baustelle
--- (Cfile:980435-980444). Rueckgabe ist die Unit; scheitert die Erzeugung,
--- wirft die Engine "CreateUnit(%s) failed".
+-- (cfunc_CreateUnitL, Cfile:980268, help text Cfile:980258). The engine checks
+-- the blueprint ("Unknown unit kind: %s", Cfile:980337) and the army index
+-- ("Invalid army index; must be >= 1 and < %d", Cfile:980352), builds
+-- SUnitConstructionParams(layer, pos, army, bp, creator = 0, complete = 1) from
+-- them and calls Sim::CreateUnit — the unit comes into being COMPLETE, not as
+-- a construction site (Cfile:980435-980444). It returns the unit; if creation
+-- fails the engine throws "CreateUnit(%s) failed".
 --
--- Nutzer im Original: effectutilities.lua:436 (SpawnBuildBots — die
--- Cybran-Bau-Drohnen), scenarioframework, terranunits.lua (Bau-Pods).
+-- Callers in the original: effectutilities.lua:436 (SpawnBuildBots — the
+-- Cybran build drones), scenarioframework, terranunits.lua (build pods).
 local function spawnCreateUnit(blueprint, army, x, y, z, heading, who)
   local key = type(blueprint) == 'string' and string.lower(blueprint) or nil
   local bp = key and __registered and __registered.Unit[key]
@@ -211,8 +211,8 @@ local function spawnCreateUnit(blueprint, army, x, y, z, heading, who)
   return u
 end
 
---- Die Gierung aus einem Quaternion (die Engine gibt Orientierungen als
---- Quaternion heraus, GetOrientation -> {x, y, z, w}).
+--- The yaw from a quaternion (the engine hands out orientations as
+--- quaternions, GetOrientation -> {x, y, z, w}).
 local function headingFromQuat(qx, qy, qz, qw)
   qx, qy, qz, qw = qx or 0, qy or 0, qz or 0, qw or 1
   return math.atan(2 * (qw * qy + qx * qz), 1 - 2 * (qy * qy + qz * qz))
@@ -223,13 +223,13 @@ function CreateUnit(blueprint, army, tx, ty, tz, qx, qy, qz, qw, layer)
 end
 
 --- CreateUnitHPR(blueprint, army, x, y, z, pitch, yaw, roll) — Cfile:980475.
---- Dieselbe Erzeugung, nur mit Euler-Winkeln statt Quaternion.
+--- The same creation, only with Euler angles instead of a quaternion.
 function CreateUnitHPR(blueprint, army, x, y, z, pitch, yaw, roll)
   return spawnCreateUnit(blueprint, army, x, y, z, yaw or 0, 'CreateUnitHPR')
 end
 
---- CreateUnit2(blueprint, army, layer, x, z, heading) — Cfile:980637. Die
---- Hoehe kommt aus dem Gelaende (die Signatur hat kein y).
+--- CreateUnit2(blueprint, army, layer, x, z, heading) — Cfile:980637. The
+--- height comes from the terrain (the signature has no y).
 function CreateUnit2(blueprint, army, layer, x, z, heading)
   return spawnCreateUnit(blueprint, army, x, GetSurfaceHeight(x, z), z, heading, 'CreateUnit2')
 end

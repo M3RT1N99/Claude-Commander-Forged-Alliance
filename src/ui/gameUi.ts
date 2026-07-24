@@ -38,6 +38,25 @@ import type { SessionInfo } from '../sim/session'
 /** Wo die Einstellungen im Browser liegen (das Gegenstück zu Game.prefs). */
 const PREFS_KEY = 'ccfa.prefs'
 
+/**
+ * A number list from Lua as a real JS array. Depending on its contents wasmoon
+ * hands a Lua table over as an array OR as an object keyed "1", "2", … — code
+ * that relies on an array eventually gets an object and
+ * `map is not a function`.
+ */
+function toIdArray(value: unknown): number[] {
+  if (Array.isArray(value)) return value.map((n) => Math.floor(Number(n))).filter((n) => Number.isFinite(n))
+  if (value && typeof value === 'object') {
+    const out: number[] = []
+    for (const v of Object.values(value as Record<string, unknown>)) {
+      const n = Math.floor(Number(v))
+      if (Number.isFinite(n)) out.push(n)
+    }
+    return out
+  }
+  return []
+}
+
 export class GameUi {
   private knownUnits = new Set<number>()
 
@@ -503,7 +522,14 @@ export class GameUi {
    * die Auswahl als Entity-IDs — die Sim baut daraus Unit-Objekte.
    */
   connectSimCallback(send: (func: string, argsJson: string, ids: number[]) => void): void {
-    this.host.setGlobal('__uiSimCallbackSink', send)
+    // The id list arrives as a LUA TABLE, and wasmoon hands that over as a JS
+    // OBJECT ({ "1": id, "2": id }), not as an array. Passed through unchecked
+    // the worker threw "msg.unitIds.map is not a function" on every
+    // SimCallback — the callback (control groups, Ctrl-K, diplomacy) never
+    // reached the sim.
+    this.host.setGlobal('__uiSimCallbackSink', (func: string, argsJson: string, ids: unknown) => {
+      send(func, argsJson, toIdArray(ids))
+    })
   }
 
   /**

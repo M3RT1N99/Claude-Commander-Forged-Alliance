@@ -337,12 +337,12 @@ function __uiSetUnit(id, blueprintId, army, x, y, z, health, maxHealth, workProg
   u.z = z
   u.health = health
   u.maxHealth = maxHealth
-  -- WorkProgress und FractionComplete sind ZWEI Felder, nicht eines:
-  -- mWorkProgress ist der Fortschritt dessen, WORAN die Unit arbeitet (der
-  -- Bau-Task schreibt es, Cfile:815482; UserUnit:GetWorkProgress zeigt es,
-  -- construction.lua:380), mFractionComplete ist ihr EIGENER Bauzustand
-  -- (SSTIEntityVariableData+96). Frueher trug workProgress den eigenen
-  -- Bauzustand — damit zeigte eine Fabrik nie den Fortschritt ihrer Einheit.
+  -- WorkProgress and FractionComplete are TWO fields, not one: mWorkProgress
+  -- is the progress of what the unit is WORKING ON (the build task writes it,
+  -- Cfile:815482; UserUnit:GetWorkProgress shows it, construction.lua:380),
+  -- mFractionComplete is the unit's OWN build state
+  -- (SSTIEntityVariableData+96). workProgress used to carry the unit's own
+  -- build state — so a factory never showed the progress of its unit.
   u.workProgress = workProgress
   u.fractionComplete = fractionComplete or 1
   u.idle = idle

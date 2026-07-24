@@ -100,8 +100,31 @@ const compatOk = await lua.doString(
   'return type(table.getn) == "function" and type(unpack) == "function" ' +
     'and type(setfenv) == "function" and type(math.mod) == "function"',
 )
+
+// string.format the way FA uses it (Lua 5.0 → C, here Lua 5.4):
+//   %d with a FRACTIONAL value throws "number has no integer representation"
+//   in 5.4. unitview.lua:269 formats HEALTH with it
+//   (`string.format("%d / %d", info.health, info.maxHealth)`) — every damaged
+//   unit tore down the rollover panel.
+//   %+s is an invalid conversion in 5.4, and economy.lua:305 uses it.
+const formatChecks: [string, string][] = [
+  ['return string.format("%d / %d", 12.7, 100)', '12 / 100'],
+  ['return string.format("%d", -3.7)', '-3'],
+  ['return string.format("%d%%", 55.2)', '55%'],
+  ['return string.format("%+s", "x")', 'x'],
+  ['return string.format("%.1f %d %s", 1.25, 7.9, "a")', '1.2 7 a'],
+  ['return string.format("%5.2f|%d", 3.14159, 42)', ' 3.14|42'],
+]
+let formatOk = true
+for (const [code, want] of formatChecks) {
+  const got = await lua.doString(code)
+  const ok = got === want
+  if (!ok) formatOk = false
+  console.log(`  ${ok ? 'OK  ' : 'FAIL'} ${code.replace('return ', '')} → ${JSON.stringify(got)}`)
+}
+
 lua.global.close()
-console.log(`Compat-Schicht im Lua-VM (wasmoon): ${compatOk ? 'OK' : 'FEHLER'}`)
+console.log(`Compat-Schicht im Lua-VM (wasmoon): ${compatOk && formatOk ? 'OK' : 'FEHLER'}`)
 
 for (const f of openFiles) await f.close()
-process.exit(failures.length === 0 && compatOk ? 0 : 1)
+process.exit(failures.length === 0 && compatOk && formatOk ? 0 : 1)

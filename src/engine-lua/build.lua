@@ -228,34 +228,35 @@ function __adjustFactoryQueue(factoryId, index, delta)
   if item.count <= 0 then table.remove(f.__buildQueue, index) end
 end
 
--- === Gebaeude-Upgrade (Moho::CUnitUpgradeTask, Cfile:816981/817198) ===
+-- === Structure upgrade (Moho::CUnitUpgradeTask, Cfile:816981/817198) ===
 --
--- Der Upgrade ist KEIN Sonderweg: die Engine legt denselben CBuildTaskHelper an
--- wie bei jedem Bau, nur mit dem Helfer-Namen "Upgrade" (ctor Cfile:816992) —
--- und genau dieser Name ist der `order`-String, den OnStartBuild/OnStopBuild in
--- der Lua bekommen (defaultunits.lua:223 schaltet darauf in den UpgradingState).
+-- An upgrade is NOT a special path: the engine creates the same
+-- CBuildTaskHelper as for any other build, only with the helper name "Upgrade"
+-- (ctor Cfile:816992) — and that name IS the `order` string OnStartBuild and
+-- OnStopBuild receive in Lua (defaultunits.lua:223 switches into the
+-- UpgradingState on exactly that).
 --
--- TaskTick (Cfile:817276-817300) erzeugt den Nachfolger mit
--- SUnitConstructionParams(layer, GetPosition(), army, zielBlueprint, bauer) —
--- also an der Stelle, im Layer und in der Armee des alten Gebaeudes, mit dem
--- alten Gebaeude als Erbauer. Danach:
---   * altes Gebaeude:  mUnitStates |= 0x40  -> UNITSTATE_Upgrading (6)
---                      (ctor Cfile:817000), mWorkProgress = 0
---   * neues Gebaeude:  mUnitStates |= 0x20 (HIDWORD) -> UNITSTATE_BeingUpgraded
---                      (37, Cfile:817320)
---   * SetFocusEntity: der Nachfolger ist der Fokus des alten Gebaeudes
---                     (Cfile:817310; der Destruktor raeumt ihn wieder ab)
--- Beide Zustaende leitet IsUnitState aus den Tasks ab (moho.lua) — sie sind
--- damit genau so lange gesetzt wie der Task lebt.
+-- TaskTick (Cfile:817276-817300) creates the successor with
+-- SUnitConstructionParams(layer, GetPosition(), army, targetBlueprint, builder)
+-- — at the position, in the layer and in the army of the old building, with the
+-- old building as its builder. Then:
+--   * old building:  mUnitStates |= 0x40  -> UNITSTATE_Upgrading (6)
+--                    (ctor Cfile:817000), mWorkProgress = 0
+--   * new building:  mUnitStates |= 0x20 (HIDWORD) -> UNITSTATE_BeingUpgraded
+--                    (37, Cfile:817320)
+--   * SetFocusEntity: the successor is the old building's focus entity
+--                     (Cfile:817310; the destructor clears it again)
+-- IsUnitState derives both states from the tasks (moho.lua), so they hold for
+-- exactly as long as the task lives.
 function __issueUpgrade(unitId, bpId)
   local u = __units[unitId]
   if not u then return -1, 'unknown unit ' .. tostring(unitId) end
   if u.__dead or u.__destroyQueued then return -1, 'unit is dead' end
-  -- Ein zweiter Upgrade-Befehl auf demselben Gebaeude verpufft — kein Fehler:
-  -- UNIT_IssueCommand haengt ihn nur an die Warteschlange (clear = 0,
-  -- Cfile:1011353), und ein Task wird daraus erst, wenn er an die Reihe kommt.
-  -- Dann ist das Gebaeude aber schon zerstoert (defaultunits.lua:267).
-  -- Rueckgabe -2 = "nichts zu tun" (im Gegensatz zu -1 = Fehler).
+  -- A second upgrade command on the same building fizzles out — not an error:
+  -- UNIT_IssueCommand only appends it to the queue (clear = 0, Cfile:1011353),
+  -- and it becomes a task only once it reaches the head of that queue. By then
+  -- the building has destroyed itself (defaultunits.lua:267).
+  -- Return -2 = "nothing to do" (as opposed to -1 = error).
   for _, task in pairs(__buildTasks) do
     if task.builder == unitId and task.order == 'Upgrade' then return -2, 'already upgrading' end
   end
@@ -467,14 +468,13 @@ function __buildApply()
         b.UnitBeingBuilt = t
         local okS, errS = pcall(function() b:OnStopBuild(t, task.order) end)
         if not okS then WARN('OnStopBuild: ' .. tostring(errS)) end
-        -- Die fertige Einheit ERBT die Befehle ihrer Fabrik (sub_5FA340,
-        -- Cfile:818487-818600): jeder Befehl der Fabrik wandert in die
-        -- Warteschlange der neuen Einheit, uebersprungen wird nur
-        -- TransportLoadUnits fuer Luft-/Seeeinheiten. Der Sammelpunkt IST so
-        -- ein Befehl — IssueFactoryRallyPoint legt einen UNITCOMMAND_Move in
-        -- die Fabrik-Befehlsliste (Cfile:1008346). Er kommt HINTER den
-        -- Abfahrt-Befehl, den RollOffUnit gerade erteilt hat
-        -- (defaultunits.lua:571): erst vom Hof, dann zum Sammelpunkt.
+        -- The finished unit INHERITS its factory's commands (sub_5FA340,
+        -- Cfile:818487-818600): every command of the factory goes into the new
+        -- unit's queue; only TransportLoadUnits is skipped for AIR/NAVAL units.
+        -- The rally point IS such a command — IssueFactoryRallyPoint puts a
+        -- UNITCOMMAND_Move into the factory's command list (Cfile:1008346). It
+        -- lands BEHIND the roll-off command RollOffUnit just issued
+        -- (defaultunits.lua:571): off the pad first, then to the rally point.
         if task.order == 'FactoryBuild' and b.__rally then
           __issueOrder(task.target, { type = 'Move', x = b.__rally[1], z = b.__rally[3] }, false)
         end

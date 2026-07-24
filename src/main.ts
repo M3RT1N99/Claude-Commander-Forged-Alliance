@@ -447,7 +447,12 @@ function requireCameraNumber(value: string | number | boolean | undefined, label
     const what = args[1]
     if (typeof what !== 'string') throw new Error('Invalid UI camera setter')
     const value = args[2]
-    const seconds = args[3] === undefined ? 0 : requireCameraNumber(args[3], 'transition duration')
+    // A missing transition duration is 0 (instant) — the original Lua calls
+    // `Camera:SetTargetZoom(zoom)` without one (zoomslider.lua:66). wasmoon
+    // hands a Lua nil over as `undefined` OR as `null` depending on the path;
+    // checking only for `undefined` threw "Invalid UI camera transition
+    // duration" on every zoom click.
+    const seconds = args[3] == null ? 0 : requireCameraNumber(args[3], 'transition duration')
     viewer.rtsSetCameraValue(what, typeof value === 'boolean' ? value : requireCameraNumber(value, what), seconds)
     return undefined
   }
@@ -562,7 +567,7 @@ interface ProjectileAssets {
   scale: number
 }
 const projAssetCache = new Map<string, Promise<ProjectileAssets | null>>()
-/** Shader-Namen, für die schon einmal gemeldet wurde, dass sie fehlen. */
+/** Shader names already reported as missing (report once, not per frame). */
 const projSkipLogged = new Set<string>()
 const projMeshes = new Map<number, THREE.Mesh>()
 const projBaseScales = new Map<number, number>()
@@ -582,25 +587,25 @@ function loadProjectileAssets(bpId: string): Promise<ProjectileAssets | null> {
       const base = m[1]!
       if (!vfs.exists(path)) return null
       const bp = parseBlueprint(await vfs.readText(path))
-      // Das Mesh steht IM BLUEPRINT (`Display.Mesh.LODs[n].MeshName`) — genau
-      // so liest es die Engine. Es aus dem Blueprint-PFAD abzuleiten war eine
-      // Vermutung, die für die Bau-Effekte falsch ist: der Bau-Würfel
-      // (`effects/entities/uefbuildeffect/uefbuildeffect03_proj.bp`) zeigt auf
-      // `/meshes/generic/cube01_lod0.scm` und hat kein eigenes Modell. Der
-      // Pfad daneben bleibt als Fallback (die Waffen-Projektile nutzen ihn).
+      // The mesh is named IN THE BLUEPRINT (`Display.Mesh.LODs[n].MeshName`)
+      // — that is how the engine reads it. Deriving it from the blueprint PATH
+      // was a guess, and a wrong one for the build effects: the build cube
+      // (`effects/entities/uefbuildeffect/uefbuildeffect03_proj.bp`) points at
+      // `/meshes/generic/cube01_lod0.scm` and has no model of its own. The
+      // path next to it stays as the fallback (weapon projectiles use it).
       const lodsRaw = bpGet(bp, 'Display.Mesh.LODs.1') ?? bpGet(bp, 'Display.Mesh.LODs')
       const lod = (Array.isArray(lodsRaw) ? lodsRaw[0] : lodsRaw) as BpObject | undefined
-      // Der Shader steht im Blueprint. Das Projektil-Material hier ist
-      // TMeshGlow (unbeleuchtet, Albedo pur) — genau das, was die Schuss-
-      // Projektile verlangen. Ein Blueprint, das einen ANDEREN Shader nennt
-      // (`UEFBuildCube`, `AeonBuildPuddle`), bekommt sein Mesh NICHT: mit dem
-      // falschen Material stünde ein weißer Kasten um das Gebäude. Diese
-      // Shader sind ein offener Schritt (docs/STATUS.md), keine Fußnote hier.
+      // The shader is named in the blueprint. The projectile material here is
+      // TMeshGlow (unlit, pure albedo) — exactly what the weapon projectiles
+      // ask for. A blueprint naming a DIFFERENT shader (`UEFBuildCube`,
+      // `AeonBuildPuddle`) does NOT get its mesh: with the wrong material a
+      // white box would stand around the building. Those shaders are an open
+      // step (docs/STATUS.md), not a footnote here.
       const shader = lod ? bpGet(lod, 'ShaderName') : undefined
       if (typeof shader === 'string' && /Build/i.test(shader)) {
         if (!projSkipLogged.has(shader)) {
           projSkipLogged.add(shader)
-          log(`Projektil-Shader ${shader} fehlt — ${bpId} bleibt unsichtbar`)
+          log(`projectile shader ${shader} missing — ${bpId} stays invisible`)
         }
         return null
       }
@@ -614,8 +619,8 @@ function loadProjectileAssets(bpId: string): Promise<ProjectileAssets | null> {
       // und werden erst mit dem Partikelsystem sichtbar.
       if (!vfs.exists(meshPath)) return null
       const model = parseScm(await vfs.read(meshPath))
-      // Die Textur gehört zum MESH, nicht zum Blueprint-Ordner: liegt das Mesh
-      // woanders, liegt auch sein Albedo dort.
+      // The texture belongs to the MESH, not to the blueprint folder: if the
+      // mesh lives elsewhere, so does its albedo.
       const meshBase = meshPath.replace(/_lod\d+\.scm$/i, '')
       const lodAlbedo = lod ? bpGet(lod, 'AlbedoName') : undefined
       const albedo = await loadFirstTexture(
@@ -1174,7 +1179,7 @@ async function startSandbox(mapFolder: string): Promise<void> {
       // (cfunc_IssueUpgradeL, Cfile:1011315).
       if (cmd === 'upgrade' && v?.blueprint) {
         for (const id of ids) luaSim?.upgrade(id, v.blueprint)
-        log(`Upgrade ${ids.join(',')} → ${v.blueprint}`)
+        log(`upgrade ${ids.join(',')} → ${v.blueprint}`)
         return
       }
       // SetPaused (cfunc_SetPausedL "Pause builders in this list"): a SEPARATE
@@ -1490,8 +1495,8 @@ window.addEventListener('pointerup', (e) => {
     return
   }
   if (luaUnits.length === 0) return
-  // Gezogen = Rahmenauswahl (SelectionDragger), geklickt = Einzelauswahl.
-  // Beides mit derselben Shift-Semantik aus DragRelease.
+  // Dragged = box selection (SelectionDragger), clicked = single selection.
+  // Both use the same Shift semantics from DragRelease.
   const luaMsg =
     moved > 5
       ? boxSelect(start.x, start.y, e.clientX, e.clientY, e.shiftKey)
@@ -1817,7 +1822,7 @@ interface LuaSceneUnit {
   scene: SceneUnit
   /** Halbachsen + Versatz des Auswahlrings (aus dem Blueprint, siehe ringExtents). */
   ringExtents: { x: number; z: number; ox: number; oz: number }
-  /** Was die Rahmenauswahl aus dem Blueprint braucht (src/ui/boxSelection.ts). */
+  /** What box selection needs from the blueprint (src/ui/boxSelection.ts). */
   select: SelectionBpData
   /**
    * Läuft die Gehanimation gerade? Die SIM sagt, ob die Einheit fährt
@@ -2052,20 +2057,20 @@ function selectLua(clientX: number, clientY: number, additive = false): string |
 }
 
 /**
- * Auswahl setzen — die eine Stelle, an der `selected`, die Original-UI und die
- * Shift-Semantik zusammenkommen.
+ * Apply a selection — the one place where `selected`, the original UI and the
+ * Shift semantics come together.
  *
- * Shift folgt `DragRelease` (Cfile:1289882-1289946): ist die getroffene Menge
- * BEREITS vollständig ausgewählt, wird sie ABGEWÄHLT (`v5 >= size(a1)` →
- * SetSelection(Auswahl \ Treffer)), sonst kommt sie hinzu (SetSelection(∪)).
+ * Shift follows `DragRelease` (Cfile:1289882-1289946): if the hit set is
+ * ALREADY fully selected it is DESELECTED (`v5 >= size(a1)` →
+ * SetSelection(selection \ hits)), otherwise it is added (SetSelection(∪)).
  */
-function applySelection(treffer: LuaSceneUnit[], additive: boolean): string | null {
-  const aktuell = luaUnits.filter((u) => u.selected).map((u) => u.id)
-  const neu = new Set(mergeSelection(aktuell, treffer.map((u) => u.id), additive))
+function applySelection(hits: LuaSceneUnit[], additive: boolean): string | null {
+  const current = luaUnits.filter((u) => u.selected).map((u) => u.id)
+  const next = new Set(mergeSelection(current, hits.map((u) => u.id), additive))
   const ids: number[] = []
   let name: string | null = null
   for (const u of luaUnits) {
-    u.selected = neu.has(u.id)
+    u.selected = next.has(u.id)
     if (u.selected) {
       ids.push(u.id)
       if (name === null) name = u.name
@@ -2073,72 +2078,71 @@ function applySelection(treffer: LuaSceneUnit[], additive: boolean): string | nu
   }
   gameUi?.select(ids)
   if (name === null) return null
-  return ids.length > 1 ? `Ausgewählt: ${ids.length} Einheiten` : `Ausgewählt: ${name}`
+  return ids.length > 1 ? `selected: ${ids.length} units` : `selected: ${name}`
 }
 
 /**
- * ZIEHRAHMEN-AUSWAHL — `Moho::SelectionDragger::DragRelease` (Cfile:863870).
- * Hier stehen nur die beiden Engine-Anteile: der Kandidatenfilter (eigene
- * Fokus-Armee, lebendig — Cfile:1290158) und die PROJEKTION der Auswahl-Box.
- * Wer davon ausgewählt wird, entscheidet `src/ui/boxSelection.ts` genau nach
- * dem Decomp (Trefferprüfung, Prioritätseimer, Shift-Semantik).
+ * DRAG-BOX SELECTION — `Moho::SelectionDragger::DragRelease` (Cfile:863870).
+ * Only the two engine parts live here: the candidate filter (own focus army,
+ * alive — Cfile:1290158) and the PROJECTION of the selection box. WHICH of
+ * them ends up selected is decided by `src/ui/boxSelection.ts`, straight from
+ * the decompilation (hit test, priority buckets, Shift semantics).
  *
- * Die Box ist die MESH-Bounding-Box, deren Halbachsen mit
- * `SelectionMeshScaleX/Y/Z` multipliziert werden
- * (Cfile:1290063-1290071) — nicht der Auswahlring (`SelectionSizeX/Z`, ein
- * anderes Feld). Das Ziehvolumen des Originals ist der Frustum-Ausschnitt des
- * Rechtecks; projizierte Box gegen Rechteck ist derselbe Test.
- *
+ * The box is the MESH bounding box whose half extents are multiplied by
+ * `SelectionMeshScaleX/Y/Z` (Cfile:1290063-1290071) — not the selection ring
+ * (`SelectionSizeX/Z`, a different field). The original's drag volume is the
+ * frustum slice of the rectangle; projected box against rectangle is the same
+ * test.
  */
 function boxSelect(x0: number, y0: number, x1: number, y1: number, additive: boolean): string | null {
   if (!luaSim) return null
-  const rahmen = {
+  const rect = {
     minX: Math.min(x0, x1),
     maxX: Math.max(x0, x1),
     minY: Math.min(y0, y1),
     maxY: Math.max(y0, y1),
   }
   const box = new THREE.Box3()
-  const ecke = new THREE.Vector3()
-  const mitte = new THREE.Vector3()
-  const halb = new THREE.Vector3()
-  const fokus = gameUi ? gameUi.focusArmy() : 1
-  const kandidaten: SelectionCandidate[] = []
-  const nachId = new Map<number, LuaSceneUnit>()
+  const corner = new THREE.Vector3()
+  const center = new THREE.Vector3()
+  const half = new THREE.Vector3()
+  const focusArmy = gameUi ? gameUi.focusArmy() : 1
+  const candidates: SelectionCandidate[] = []
+  const byId = new Map<number, LuaSceneUnit>()
   for (const u of luaUnits) {
-    if (u.army !== fokus) continue
+    if (u.army !== focusArmy) continue
     const s = luaSim.state(u.id)
     if (!s || s.dead) continue
-    // Schritt 2: `IsMobile(u) || !IsUnitState(u, 37)` (Cfile:1290062) — der
-    // Nachfolger, der gerade auf einem Gebäude wächst, ist NICHT mit dem
-    // Rahmen wählbar; die Auswahl bleibt beim arbeitenden Original.
+    // Step 2: `IsMobile(u) || !IsUnitState(u, 37)` (Cfile:1290062) — the
+    // successor growing on a building is NOT box-selectable; the box keeps
+    // selecting the working original.
     if (!u.select.mobile && s.beingUpgraded === true) continue
     box.setFromObject(u.mesh)
     if (box.isEmpty()) continue
-    box.getCenter(mitte)
-    box.getSize(halb).multiplyScalar(0.5)
-    halb.x *= u.select.meshScale.x
-    halb.y *= u.select.meshScale.y
-    halb.z *= u.select.meshScale.z
+    box.getCenter(center)
+    box.getSize(half).multiplyScalar(0.5)
+    half.x *= u.select.meshScale.x
+    half.y *= u.select.meshScale.y
+    half.z *= u.select.meshScale.z
     let minX = Infinity
     let maxX = -Infinity
     let minY = Infinity
     let maxY = -Infinity
     for (let i = 0; i < 8; i++) {
-      ecke.set(
-        mitte.x + (i & 1 ? halb.x : -halb.x),
-        mitte.y + (i & 2 ? halb.y : -halb.y),
-        mitte.z + (i & 4 ? halb.z : -halb.z),
+      corner.set(
+        center.x + (i & 1 ? half.x : -half.x),
+        center.y + (i & 2 ? half.y : -half.y),
+        center.z + (i & 4 ? half.z : -half.z),
       )
-      const p = viewer.worldToScreen(ecke)
+      const p = viewer.worldToScreen(corner)
       if (!p) continue
       if (p.x < minX) minX = p.x
       if (p.x > maxX) maxX = p.x
       if (p.y < minY) minY = p.y
       if (p.y > maxY) maxY = p.y
     }
-    nachId.set(u.id, u)
-    kandidaten.push({
+    byId.set(u.id, u)
+    candidates.push({
       id: u.id,
       screen: minX > maxX ? null : { minX, maxX, minY, maxY },
       priority: u.select.priority,
@@ -2146,13 +2150,13 @@ function boxSelect(x0: number, y0: number, x1: number, y1: number, additive: boo
       beingBuilt: s.fraction < 1,
     })
   }
-  const ids = boxSelectIds(kandidaten, rahmen, additive)
-  const treffer: LuaSceneUnit[] = []
+  const ids = boxSelectIds(candidates, rect, additive)
+  const hits: LuaSceneUnit[] = []
   for (const id of ids) {
-    const u = nachId.get(id)
-    if (u) treffer.push(u)
+    const u = byId.get(id)
+    if (u) hits.push(u)
   }
-  return applySelection(treffer, additive)
+  return applySelection(hits, additive)
 }
 
 /** Ob mindestens eine Lua-Unit selektiert ist. */

@@ -380,11 +380,11 @@ function ManipMeta:Disable() self.__enabled = false; return self end
 function ManipMeta:Enable() self.__enabled = true; return self end
 function ManipMeta:Destroy() self.__destroyed = true end
 function ManipMeta:IsDestroyed() return self.__destroyed == true end
--- BeenDestroyed() — die Engine antwortet mit `opt == 0`, also "das Objekt gibt
--- es nicht mehr" (cfunc_CSlideManipulatorBeenDestroyedL, Cfile:879376). Es
--- fehlte: effectutilities.lua:664/670 (der Seraphim-Fabrik-Bau-Effekt) ruft es
--- auf dem Slider, der Thread starb dort mit "attempt to call a nil value
--- (method 'BeenDestroyed')" — der Bau-Sockel blieb stehen.
+-- BeenDestroyed() — the engine answers `opt == 0`, i.e. "the object is gone"
+-- (cfunc_CSlideManipulatorBeenDestroyedL, Cfile:879376). It was missing:
+-- effectutilities.lua:664/670 (the Seraphim factory build effect) calls it on
+-- the slider, so that thread died with "attempt to call a nil value (method
+-- 'BeenDestroyed')" — and the build base was never removed.
 function ManipMeta:BeenDestroyed() return self.__destroyed == true end
 function ManipMeta:GetGoal() return self.__goal end
 -- WaitFor(manipulator) blocks until the manipulator reached its goal. There is
@@ -769,12 +769,12 @@ local function issueTo(units, apply)
   return cmd
 end
 
---- IssueMove(units, pos) — ein BEFEHL, keine direkte Zielsetzung: die Engine
---- baut SSTICommandIssueData(UNITCOMMAND_Move) und schickt es durch
---- UNIT_IssueCommand mit clear = 0 (Cfile:1008574) — der Befehl haengt sich
---- also AN die Warteschlange, er ersetzt sie nicht. (Der Spieler-Weg ist ein
---- anderer: IssueUnitCommand leert per Default, Cfile:1265640.) Nur deshalb
---- kann der Sammelpunkt einer Fabrik hinter dem Abfahrt-Befehl warten.
+--- IssueMove(units, pos) — a COMMAND, not a direct goal: the engine builds
+--- SSTICommandIssueData(UNITCOMMAND_Move) and sends it through
+--- UNIT_IssueCommand with clear = 0 (Cfile:1008574), so the command is APPENDED
+--- to the queue instead of replacing it. (The player's path is a different one:
+--- IssueUnitCommand clears by default, Cfile:1265640.) Only because of this can
+--- a factory's rally point wait behind the roll-off command.
 function IssueMove(units, pos)
   return issueTo(units, function(u, cmd)
     __issueOrder(u.__id, { type = 'Move', x = pos[1], z = pos[3], cmdId = cmd.id }, false)
@@ -782,10 +782,10 @@ function IssueMove(units, pos)
 end
 
 --- IssueGuard(units, target) — cfunc_IssueGuardL (Cfile:1008933):
---- SSTICommandIssueData(UNITCOMMAND_Guard) mit dem Ziel, ueber
---- UNIT_IssueCommand mit clear = 0 (Cfile:1009018) — also angehaengt.
---- effectutilities.lua:445 schickt damit die Cybran-Bau-Drohnen auf die
---- Baustelle.
+--- SSTICommandIssueData(UNITCOMMAND_Guard) with the target, through
+--- UNIT_IssueCommand with clear = 0 (Cfile:1009018) — appended, not replacing.
+--- effectutilities.lua:445 sends the Cybran build drones to the construction
+--- site with it.
 function IssueGuard(units, target)
   local targetId = type(target) == 'table' and target.__id or target
   return issueTo(units, function(u, cmd)
@@ -803,11 +803,11 @@ end
 --- Fehlt das Global, stirbt der Thread, die Fabrik bleibt BUSY und baut nie
 --- wieder etwas. Genau so sah es im Browser aus.
 ---
---- Fertig ist der Befehl, wenn er bei KEINER Unit mehr in der Warteschlange
---- steht — weder laufend noch wartend. Genau das prueft die Engine: existiert
---- der CUnitCommandOpt nicht mehr, ist der Befehl erledigt (Cfile:1007814).
---- (Ein „hat die Unit noch ein Fahrziel?" waere etwas anderes: ein NEUER Befehl
---- setzt ein neues Ziel, der alte ist damit aber trotzdem vorbei.)
+--- A command is done once it sits in NO unit's queue any more — neither
+--- running nor waiting. That is exactly what the engine checks: if the
+--- CUnitCommandOpt no longer exists, the command is finished (Cfile:1007814).
+--- ("Does the unit still have a goal?" would be something else: a NEW command
+--- sets a new goal, and the old command is over regardless.)
 function IsCommandDone(cmd)
   if not cmd or not cmd.units then return true end
   for _, u in ipairs(cmd.units) do
@@ -828,10 +828,10 @@ function IssueStop(units)
 end
 
 --- IssueUpgrade(units, blueprintId) — cfunc_IssueUpgradeL (Cfile:1011315).
---- Genau zwei Argumente (Einheitenliste + Blueprint), daraus baut die Engine
---- SSTICommandIssueData(UNITCOMMAND_Upgrade) mit dem Blueprint als Ziel und
---- schickt es durch UNIT_IssueCommand — OHNE die Warteschlange zu leeren
---- (clear = 0, Cfile:1011353). Der Befehl wird zu einem CUnitUpgradeTask
+--- Exactly two arguments (unit list + blueprint); the engine builds
+--- SSTICommandIssueData(UNITCOMMAND_Upgrade) with the blueprint as its target
+--- and sends it through UNIT_IssueCommand — WITHOUT clearing the queue
+--- (clear = 0, Cfile:1011353). The command becomes a CUnitUpgradeTask
 --- (build.lua __issueUpgrade).
 function IssueUpgrade(units, blueprintId)
   return issueTo(units, function(u)
@@ -841,26 +841,26 @@ function IssueUpgrade(units, blueprintId)
   end)
 end
 
---- NotifyUpgrade(altesGebaeude, neuesGebaeude) — cfunc_NotifyUpgradeL
---- (Cfile:978489). Die Uebergabe am Ende eines Upgrades: die Lua ruft es in
+--- NotifyUpgrade(oldBuilding, newBuilding) — cfunc_NotifyUpgradeL
+--- (Cfile:978489). The hand-over at the end of an upgrade: the Lua calls it in
 --- UpgradingState.OnStopBuild (defaultunits.lua:264, terranunits.lua:697),
---- BEVOR sich das alte Gebaeude zerstoert. Die Engine traegt dabei alles vom
---- alten auf das neue Gebaeude um:
+--- BEFORE the old building destroys itself. The engine moves everything from
+--- the old building to the new one:
 ---
----   * die Befehls-Warteschlange, OHNE den Upgrade-Befehl selbst — uebersprungen
----     wird genau der Eintrag mit Typ 27 (UNITCOMMAND_Upgrade) und dem
----     Blueprint des NEUEN Gebaeudes (Cfile:978572-978581)
----   * AI-Builder-Befehle und den Platoon-Platz (Cfile:978602-978634) — die Sim
----     hat weder AI-Builder noch Platoons, dort gibt es nichts umzutragen
----   * das Repeat-Queue-Flag mit OnStartRepeatQueue/OnStopRepeatQueue
----     (Cfile:978635-978646); die Sim kennt keine Repeat-Queue
----     (UserUnit:IsRepeatQueue ist false)
----   * die GESUNDHEIT als VERHAELTNIS: neu = neuesMax * (altHP / altMax)
----     (Cfile:978648-978652) — ein angeschlagener Mex bleibt angeschlagen
----   * die bewachte Einheit und ALLE Bewacher des alten Gebaeudes
+---   * the command queue, WITHOUT the upgrade command itself — skipped is
+---     exactly the entry of type 27 (UNITCOMMAND_Upgrade) whose target is the
+---     blueprint of the NEW building (Cfile:978572-978581)
+---   * AI builder commands and the platoon slot (Cfile:978602-978634) — the sim
+---     has neither AI builders nor platoons, so there is nothing to move
+---   * the repeat-queue flag with OnStartRepeatQueue/OnStopRepeatQueue
+---     (Cfile:978635-978646); the sim has no repeat queue
+---     (UserUnit:IsRepeatQueue is false)
+---   * the HEALTH as a RATIO: new = newMax * (oldHP / oldMax)
+---     (Cfile:978648-978652) — a damaged mex stays damaged
+---   * the guarded unit and ALL guards of the old building
 ---     (Cfile:978653-978670)
 ---
---- Beide Argumente muessen lebende Units sein, sonst wirft die Engine
+--- Both arguments must be live units, otherwise the engine throws
 --- "Passed in invalid source/destination object to upgrade"
 --- (Cfile:978553/978557).
 function NotifyUpgrade(old, new)
@@ -872,7 +872,7 @@ function NotifyUpgrade(old, new)
   end
   local oldId, newId = old.__id, new.__id
 
-  -- Die Warteschlange: der laufende Befehl zuerst, dann die wartenden.
+  -- The queue: the running command first, then the waiting ones.
   local newBp = (new.__bp and new.__bp.BlueprintId) or ''
   local moved = __orders[newId] or {}
   local function carry(cmd)
@@ -889,17 +889,17 @@ function NotifyUpgrade(old, new)
     if not __orderActive[newId] then __ordersAdvance(newId) end
   end
 
-  -- Gesundheit als Verhaeltnis (Cfile:978648-978652).
+  -- Health as a ratio (Cfile:978648-978652).
   local oldMax = old:GetMaxHealth()
   if oldMax > 0 then
     local ratio = (old.__health or 0) / oldMax
     local h = new:GetMaxHealth() * ratio
-    -- Ohne Verursacher — die Engine ruft Entity::SetHealth direkt
-    -- (Cfile:978652), es ist kein Schaden.
+    -- No instigator — the engine calls Entity::SetHealth directly
+    -- (Cfile:978652); this is not damage.
     if h ~= (new.__health or 0) then new:SetHealth(nil, h) end
   end
 
-  -- Bewachung: was das alte Gebaeude bewachte, bewacht jetzt das neue …
+  -- Guarding: whatever the old building guarded, the new one guards now …
   local g = __guardOrders[oldId]
   if g then
     __guardOrders[oldId] = nil
@@ -907,7 +907,7 @@ function NotifyUpgrade(old, new)
     new.__guardedUnit = old.__guardedUnit
   end
   old.__guardedUnit = false
-  -- … und jeder Bewacher des alten Gebaeudes folgt (Cfile:978664-978670).
+  -- … and every guard of the old building follows (Cfile:978664-978670).
   for unitId, order in pairs(__guardOrders) do
     if order.target == oldId then
       order.target = newId

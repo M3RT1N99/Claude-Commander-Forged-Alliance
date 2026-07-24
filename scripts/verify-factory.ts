@@ -104,13 +104,13 @@ check(
   'Er hat ein Bewegungsziel (FactoryUnit.RollOffUnit → IssueMove, defaultunits.lua:571)',
 )
 
-// Solange der fertige Panzer noch von der Bauplattform fährt, ist die Fabrik
-// BESETZT und ihre Warteschlange BLOCKIERT: FinishBuildThread setzt SetBusy(true)
-// + SetBlockCommandQueue(true) (defaultunits.lua:529-530), RolloffBody hält beides,
-// bis IsCommandDone(MoveCommand) meldet, dass die Einheit weg ist
-// (defaultunits.lua:643-649). Erst dann darf die nächste Einheit entstehen —
-// sonst wüchse sie IN der abfahrenden.
-const zaehlePanzer = (): number =>
+// While the finished tank is still leaving the build pad the factory is BUSY
+// and its queue is BLOCKED: FinishBuildThread sets SetBusy(true) +
+// SetBlockCommandQueue(true) (defaultunits.lua:529-530), RolloffBody holds both
+// until IsCommandDone(MoveCommand) reports the unit is clear
+// (defaultunits.lua:643-649). Only then may the next unit come into being —
+// otherwise it would grow INSIDE the one rolling off.
+const countTanks = (): number =>
   Number(
     host.eval(`
       local n = 0
@@ -123,29 +123,29 @@ const zaehlePanzer = (): number =>
 for (let i = 0; i < 3; i++) beat(engine)
 check(
   host.eval(`return __units[${factory}].__busy == true`) === true,
-  'Die Fabrik ist BESETZT, solange der Panzer vom Hof rollt (SetBusy, defaultunits.lua:529)',
+  'the factory is BUSY while the tank rolls off (SetBusy, defaultunits.lua:529)',
 )
-check(zaehlePanzer() === 1, 'Und sie setzt in dieser Zeit KEINEN zweiten Panzer auf')
+check(countTanks() === 1, 'and it starts NO second tank during that time')
 
-// Abfahrt abwarten: RolloffBody prüft alle 0.5 s (WaitSeconds), dann IdleState.
+// Wait for the roll-off: RolloffBody checks every 0.5 s (WaitSeconds), then IdleState.
 let rollTicks = 0
 while (host.eval(`return __units[${factory}].__busy == true`) === true && rollTicks < 300) {
   beat(engine)
   rollTicks++
 }
-check(rollTicks < 300, `Der Panzer ist nach ${rollTicks} Beats vom Hof (RolloffBody → IdleState)`)
+check(rollTicks < 300, `the tank is clear after ${rollTicks} beats (RolloffBody → IdleState)`)
 for (let i = 0; i < 3; i++) beat(engine)
-const tanks = zaehlePanzer()
-check(tanks === 2, `Danach nimmt sich die Fabrik den zweiten Panzer (${tanks} Panzer)`)
+const tanks = countTanks()
+check(tanks === 2, `then the factory starts the second tank (${tanks} tanks)`)
 
-// === Sammelpunkt ===
+// === Rally point ===
 //
-// Die fertige Einheit ERBT die Befehle ihrer Fabrik (sub_5FA340,
-// Cfile:818487-818600). Der Sammelpunkt ist so ein Befehl: IssueFactoryRallyPoint
-// legt einen UNITCOMMAND_Move in die Befehlsliste der Fabrik (Cfile:1008346).
-// Ohne diese Vererbung blieben alle Einheiten auf dem Abfahrtspunkt stehen und
-// stapelten sich dort.
-console.log('\n== Sammelpunkt: die neue Einheit fährt hin ==')
+// The finished unit INHERITS its factory's commands (sub_5FA340,
+// Cfile:818487-818600). The rally point is such a command:
+// IssueFactoryRallyPoint puts a UNITCOMMAND_Move into the factory's command
+// list (Cfile:1008346). Without that inheritance every unit stopped on the
+// roll-off point and piled up there.
+console.log('\n== Rally point: the new unit drives there ==')
 {
   host.eval(`__units[${factory}]:SetRallyPoint({ 160, 20, 170 })`)
   const tank2 = Number(
@@ -162,15 +162,15 @@ console.log('\n== Sammelpunkt: die neue Einheit fährt hin ==')
     beat(engine)
     t++
   }
-  // Ein Beat nach der Fertigstellung: RollOffUnit hat den Abfahrt-Befehl
-  // erteilt, der Sammelpunkt steht dahinter in der Warteschlange.
+  // One beat after completion: RollOffUnit issued the roll-off command, the
+  // rally point waits behind it in the queue.
   beat(engine)
   const queued = host.eval(`
     local n = 0
     for _, c in ipairs(__orders[${tank2}] or {}) do n = n + 1 end
     return n .. '|' .. tostring(__orderActive[${tank2}] ~= nil)
   `)
-  check(queued === '1|true', `Abfahrt läuft, Sammelpunkt wartet dahinter (${queued})`)
+  check(queued === '1|true', `roll-off running, rally point queued behind it (${queued})`)
   let m = 0
   while (m < 2000 && host.eval(`return __orderActive[${tank2}] ~= nil`) === true) {
     beat(engine)
@@ -179,7 +179,7 @@ console.log('\n== Sammelpunkt: die neue Einheit fährt hin ==')
   const end = readLuaUnit(host, tank2)!
   check(
     Math.hypot(end.x - 160, end.z - 170) < 3,
-    `Er steht am Sammelpunkt 160/170 (${end.x.toFixed(1)}/${end.z.toFixed(1)}, nach ${m} Beats)`,
+    `it stands on the rally point 160/170 (${end.x.toFixed(1)}/${end.z.toFixed(1)}, after ${m} beats)`,
   )
 }
 
