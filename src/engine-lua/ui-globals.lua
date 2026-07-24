@@ -289,8 +289,34 @@ function UserUnitMeta:GetGuardedEntity()
 end
 function UserUnitMeta:GetCreator() return nil end
 function UserUnitMeta:GetCommandQueue() return self.commandQueue or {} end
-function UserUnitMeta:GetSelectionSets() return {} end
-function UserUnitMeta:HasSelectionSet() return false end
+-- Selection sets (control groups) live ON THE UNIT in the engine:
+-- `UserUnit_base.mSelectionSets` is a std::set<string> at offset 972. The
+-- original selection.lua keeps the group's unit list and mirrors the name onto
+-- every member (selection.lua:59/68) so the avatars and the control-group bar
+-- can ask a unit which groups it is in.
+--   AddSelectionSet(string)     Cfile:1365907
+--   RemoveSelectionSet(string)  Cfile:1365969
+--   HasSelectionSet(string)     Cfile:1366031
+--   GetSelectionSets()          Cfile:1366101 (table of all names)
+-- They used to answer `{}` / false, which silently broke every control group.
+function UserUnitMeta:AddSelectionSet(name)
+  if name == nil then return end
+  self.selectionSets = self.selectionSets or {}
+  self.selectionSets[tostring(name)] = true
+end
+function UserUnitMeta:RemoveSelectionSet(name)
+  if name == nil or not self.selectionSets then return end
+  self.selectionSets[tostring(name)] = nil
+end
+function UserUnitMeta:HasSelectionSet(name)
+  if name == nil or not self.selectionSets then return false end
+  return self.selectionSets[tostring(name)] == true
+end
+function UserUnitMeta:GetSelectionSets()
+  local out = {}
+  for name in pairs(self.selectionSets or {}) do out[table.getn(out) + 1] = name end
+  return out
+end
 function UserUnitMeta:GetFootPrintSize()
   local bp = self:GetBlueprint()
   if not bp then return 1 end
@@ -323,7 +349,7 @@ function GetAttachedUnitsList(units)
 end
 
 -- Von der Engine pro Beat: der Zustand einer Unit aus der Sim.
-function __uiSetUnit(id, blueprintId, army, x, y, z, health, maxHealth, workProgress, idle, fireState, guardedId, capMask, deadFlag, shieldRatio, fractionComplete)
+function __uiSetUnit(id, blueprintId, army, x, y, z, health, maxHealth, workProgress, idle, fireState, guardedId, capMask, deadFlag, shieldRatio, fractionComplete, beingUpgraded)
   local u = __uiUnits[id]
   if not u then
     -- SUnitVarDat-Ctor (Cfile:772277): mFireState = FIRESTATE_ReturnFire (0).
@@ -345,6 +371,10 @@ function __uiSetUnit(id, blueprintId, army, x, y, z, health, maxHealth, workProg
   -- build state — so a factory never showed the progress of its unit.
   u.workProgress = workProgress
   u.fractionComplete = fractionComplete or 1
+  -- UNITSTATE_BeingUpgraded (37): the successor growing on a structure. The
+  -- engine excludes it from every selection path (drag box Cfile:1290062,
+  -- UI_SelectByCategory Cfile:866692, UI_ExpandCurrentSelection Cfile:8661e6).
+  u.beingUpgraded = beingUpgraded == true
   u.idle = idle
   -- The sim is the authority (SUnitVarDat.mFireState mirrored per beat); the
   -- optimistic set in SetFireState only bridges the round-trip latency.
@@ -519,6 +549,9 @@ end
 -- `if GetSelectedUnits() then` (construction.lua:1891, orders.lua:1250,
 -- buildmode.lua:50). Ein leeres Table waere hier still falsch.
 __uiSelection = false
+--- Set by the 3D side: it draws the selection and must follow a selection the
+--- UI VM made itself.
+__uiSelectionSink = false
 
 function GetSelectedUnits()
   if not __uiSelection or table.getn(__uiSelection) == 0 then return nil end
@@ -549,6 +582,14 @@ function SelectUnits(units)
   -- (Moho::SelectionListener::Receive @0x869060, Cfile:1294170), der
   -- gamemain.OnSelectionChanged(old, new, added, removed) ruft.
   __uiNotifySelectionChanged(old, new)
+  -- The 3D side draws the selection brackets, so it has to learn about a
+  -- selection the UI made ITSELF (control groups, UI_SelectByCategory) — in the
+  -- engine both read the same CWldSession::mSelection (Cfile:1329207).
+  if __uiSelectionSink then
+    local ids = {}
+    for i, u in ipairs(new) do ids[i] = u.id end
+    __uiSelectionSink(table.concat(ids, ','))
+  end
   return new
 end
 
@@ -558,6 +599,137 @@ function AddSelectUnits(units)
   for _, u in ipairs(__uiSelection or {}) do cur[table.getn(cur) + 1] = u end
   for _, u in ipairs(units) do cur[table.getn(cur) + 1] = u end
   SelectUnits(cur)
+end
+
+-- === The two selection console commands the ENGINE runs itself ===
+--
+-- Both are CConFuncs that never enter the UI Lua in the original either: the
+-- selection is session state, so the engine walks its own unit list. The
+-- keymap drives them (keyactions.lua: UI_SelectByCategory for the "select all
+-- land units" style keys, UI_ExpandCurrentSelection for Ctrl+click-alike).
+--
+-- The cursor's world position — the engine keeps it in
+-- CWldSession::mCursorInfo.mMouseWorldPos and `+nearest` measures against it
+-- (Cfile:866617-866685). Fed from the 3D side, which owns the picking.
+__uiCursorWorld = false
+function __uiSetCursorWorld(x, y, z)
+  __uiCursorWorld = { x, y, z }
+end
+
+--- Is this unit inside the current view? The engine asks the camera
+--- (`GetArmyUnitsInFrustum`, Cfile:866323) — the 3D side answers here.
+__uiInViewSink = false
+local function unitInView(u)
+  if not __uiInViewSink then return true end
+  return __uiInViewSink(u.id) == true
+end
+
+--- The category expression of the CONSOLE has its own syntax (Cfile:1292319):
+--- "CAT1 CAT2, CAT3 CAT4" — a space means intersection, a comma union. Turn it
+--- into the form ParseEntityCategory takes ('CAT1 * CAT2 + CAT3 * CAT4').
+local function parseConsoleCategory(expr)
+  local terms = {}
+  for part in string.gmatch(expr, '[^,]+') do
+    local factors = {}
+    for tok in string.gmatch(part, '%S+') do
+      factors[table.getn(factors) + 1] = tok
+    end
+    if table.getn(factors) > 0 then
+      terms[table.getn(terms) + 1] = table.concat(factors, ' * ')
+    end
+  end
+  if table.getn(terms) == 0 then return nil end
+  return ParseEntityCategory(table.concat(terms, ' + '))
+end
+
+--- UI_SelectByCategory [+add] [+nearest] [+idle] [+inview] [+goto]
+--- [+excludeengineers] categoryExpression (Cfile:1292279 parses the modifiers,
+--- Cfile:8662B0 does the work). Per unit the engine requires: selectable, the
+--- FOCUS ARMY, the category, not UNITSTATE_BeingUpgraded (Cfile:866692); with
+--- `+idle` also not busy and without a queued order (Cfile:8664e9); with
+--- `+excludeengineers` neither ENGINEER nor COMMAND (Cfile:866546-866590).
+--- `+nearest` keeps only the unit closest to the cursor, `+add` merges the
+--- current selection in, `+goto` moves the camera onto the result
+--- (Cfile:866700-866760).
+function __uiSelectByCategory(argline)
+  local flags = {}
+  local expr = {}
+  for tok in string.gmatch(tostring(argline or ''), '%S+') do
+    local lower = string.lower(tok)
+    if string.sub(lower, 1, 1) == '+' then
+      if lower == '+add' or lower == '+nearest' or lower == '+idle' or lower == '+inview'
+        or lower == '+goto' or lower == '+excludeengineers' then
+        flags[string.sub(lower, 2)] = true
+      else
+        -- The engine prints "Unknown modifier %s" and carries on (Cfile:1292420).
+        LOG('Unknown modifier ' .. tok)
+      end
+    else
+      expr[table.getn(expr) + 1] = tok
+    end
+  end
+  local category = parseConsoleCategory(table.concat(expr, ' '))
+  if not category then
+    LOG('UI_SelectByCategory [+add] [+nearest] [+idle] [+inview] [+goto] categoryExpression')
+    return
+  end
+
+  local hits = {}
+  local nearest, nearestDist = nil, nil
+  for _, u in pairs(__uiUnits) do
+    local ok = u.army == __uiFocusArmy and not u:IsDead() and not u.beingUpgraded
+    if ok and flags.idle then ok = u.idle == true end
+    if ok and flags.inview then ok = unitInView(u) end
+    if ok then ok = EntityCategoryContains(category, u.blueprintId) end
+    if ok and flags.excludeengineers then
+      ok = not EntityCategoryContains(categories.ENGINEER, u.blueprintId)
+        and not EntityCategoryContains(categories.COMMAND, u.blueprintId)
+    end
+    if ok then
+      if flags.nearest then
+        local c = __uiCursorWorld or { u.x, u.y, u.z }
+        local dx, dy, dz = u.x - c[1], u.y - c[2], u.z - c[3]
+        local d = math.sqrt(dx * dx + dy * dy + dz * dz)
+        if not nearestDist or d < nearestDist then nearest, nearestDist = u, d end
+      else
+        hits[table.getn(hits) + 1] = u
+      end
+    end
+  end
+  if flags.nearest and nearest then hits = { nearest } end
+  if flags.add then
+    for _, u in ipairs(__uiSelection or {}) do hits[table.getn(hits) + 1] = u end
+  end
+  SelectUnits(hits)
+  -- `+goto`: one unit -> TargetEntityBox, several -> the box around all of them
+  -- (Cfile:866722-866760).
+  if flags['goto'] and table.getn(hits) > 0 then
+    if table.getn(hits) == 1 then
+      local u = hits[1]
+      __uiCameraTargetEntity('WorldCamera', u.id, u.x, u.y, u.z, 0)
+    else
+      UIZoomTo(hits, 0)
+    end
+  end
+end
+
+--- UI_ExpandCurrentSelection (Cfile:866020): every unit of the same BLUEPRINT
+--- as one already selected joins the selection — except walls (category WALL,
+--- Cfile:866110) and units being upgraded (Cfile:8661e6). The engine walks its
+--- whole unit list here, not the view frustum, despite what the help text says.
+function __uiExpandCurrentSelection()
+  local selected = __uiSelection or {}
+  if table.getn(selected) == 0 then return end
+  local wanted = {}
+  for _, u in ipairs(selected) do wanted[u.blueprintId] = true end
+  local hits = {}
+  for _, u in pairs(__uiUnits) do
+    if wanted[u.blueprintId] and not u:IsDead() and not u.beingUpgraded
+      and not EntityCategoryContains(categories.WALL, u.blueprintId) then
+      hits[table.getn(hits) + 1] = u
+    end
+  end
+  SelectUnits(hits)
 end
 
 -- added/removed berechnen und gamemain.OnSelectionChanged rufen — genau das,
@@ -1761,6 +1933,16 @@ function GetIsSubmerged(units) return anyFlag(units, 'submerged') end
 -- Deshalb ueberschreibt die UI-VM hier das Tick-basierte WaitSeconds aus
 -- threads.lua (das gilt nur in der Sim). __uiTime zaehlt __mauiFrame(delta) hoch.
 function CurrentTime()
+  return __uiTime
+end
+
+--- GetSystemTimeSeconds() — cfunc_GetSystemTimeSecondsL (Cfile:1266810):
+--- `gpg::time::Timer::ElapsedSeconds(GetSystemTimer())`, i.e. the REAL clock,
+--- not the game clock, and it takes no arguments (the engine errors otherwise).
+--- selection.lua:101/143 measures the double-tap on a control group with it,
+--- tooltip.lua and announcement.lua use it too. __uiTime is exactly that clock:
+--- __mauiFrame(delta) advances it by the real frame time.
+function GetSystemTimeSeconds()
   return __uiTime
 end
 

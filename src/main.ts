@@ -423,6 +423,8 @@ async function loadMap(folder: string): Promise<void> {
 let sandbox: SandboxController | null = null
 let hud: Hud | null = null
 let gameUi: GameUi | null = null
+/** Feeds the UI VM the cursor's world position (mCursorInfo.mMouseWorldPos). */
+let setCursorWorld: ((x: number, y: number, z: number) => void) | null = null
 
 type UiCameraBridge = (operation: string, ...args: (string | number | boolean)[]) => unknown
 
@@ -1191,6 +1193,24 @@ async function startSandbox(mapFolder: string): Promise<void> {
       }
       log(`Befehl an die Sim: ${name}(${ids.join(',')}) — noch kein Weg dorthin`)
     })
+    // The UI VM selects on its own for control groups (UI_ApplySelectionSet),
+    // UI_SelectByCategory and UI_ExpandCurrentSelection. The brackets live on
+    // the 3D side, so it follows that selection here.
+    gameUi.connectSelection((ids) => {
+      const wanted = new Set(ids)
+      for (const u of luaUnits) u.selected = wanted.has(u.id)
+    })
+    // `UI_SelectByCategory +inview` asks the camera which units are on screen
+    // (GetArmyUnitsInFrustum, Cfile:866323) — worldToScreen answers it.
+    gameUi.connectInView((id) => {
+      const u = luaUnits.find((x) => x.id === id)
+      if (!u) return false
+      const p = viewer.worldToScreen(u.mesh.position)
+      if (!p) return false
+      const r = viewportEl.getBoundingClientRect()
+      return p.x >= r.left && p.x <= r.right && p.y >= r.top && p.y <= r.bottom
+    })
+    setCursorWorld = gameUi.connectCursorWorld()
     // SimCallback (Ctrl-K-Selbstzerstörung, Kontrollgruppen, Diplomatie):
     // die UI ruft eine Funktion aus lua/simcallbacks.lua in der Sim.
     gameUi.connectSimCallback((func, argsLua, unitIds) => {
@@ -1448,6 +1468,13 @@ window.addEventListener('pointermove', (e) => {
     const hit = viewer.pickUnit(e.clientX, e.clientY)
     const u = hit ? luaUnits.find((x) => x.scene === hit) : undefined
     gameUi.setRollover(u ? u.id : null)
+  }
+  // The cursor's world position — the engine keeps it per frame in
+  // CWldSession::mCursorInfo.mMouseWorldPos; `UI_SelectByCategory +nearest`
+  // measures against it (Cfile:866617-866685).
+  if (sandbox && setCursorWorld) {
+    const hit = viewer.pickTerrain(e.clientX, e.clientY)
+    if (hit) setCursorWorld(hit.x, hit.y ?? 0, hit.z)
   }
   // Bau-Modus: das Geistergebäude folgt dem Cursor — auf dem Raster, mit dem
   // die Sim es gleich setzt (src/ui/buildPreview.ts).

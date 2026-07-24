@@ -287,7 +287,7 @@ export class GameUi {
         `__uiSetUnit(${u.id}, '${u.name}', ${u.army ?? 1}, ${u.x}, ${u.y}, ${u.z}, ` +
           `${u.health}, ${u.maxHealth}, ${u.workProgress ?? 0}, ${u.idle === true}, ` +
           `${u.fireState ?? 0}, ${u.guard ?? 0}, ${u.caps ?? -1}, ${u.dead === true}, ` +
-          `${u.shieldRatio ?? 0}, ${u.fraction ?? 1})`,
+          `${u.shieldRatio ?? 0}, ${u.fraction ?? 1}, ${u.beingUpgraded === true})`,
       )
       // Die Bau-Warteschlange einer Fabrik (construction.lua zeigt sie an).
       // IMMER senden, auch leer: sonst bleibt in der UI-Kopie die letzte Queue
@@ -350,6 +350,37 @@ export class GameUi {
   select(ids: number[]): number {
     const list = ids.join(',')
     return Number(this.host.eval(`return __uiSelectByIds({ ${list} })`))
+  }
+
+  /**
+   * The selection the UI VM made ITSELF (control groups, UI_SelectByCategory,
+   * UI_ExpandCurrentSelection). The engine has one selection per session
+   * (CWldSession::mSelection, Cfile:1329207); here the 3D side has its own
+   * copy for the brackets, so it has to follow.
+   */
+  connectSelection(onSelected: (ids: number[]) => void): void {
+    this.host.setGlobal('__uiSelectionSink', (csv: string) => {
+      const ids = String(csv ?? '')
+        .split(',')
+        .map((s) => Number(s))
+        .filter((n) => Number.isFinite(n))
+      onSelected(ids)
+    })
+  }
+
+  /**
+   * The cursor's world position (CWldSession::mCursorInfo.mMouseWorldPos) and
+   * the "is this unit in view" test (RCamCamera::GetArmyUnitsInFrustum,
+   * Cfile:866323) — `UI_SelectByCategory +nearest` and `+inview` run on them.
+   */
+  connectCursorWorld(): (x: number, y: number, z: number) => void {
+    return (x, y, z) => {
+      this.host.eval(`__uiSetCursorWorld(${x}, ${y}, ${z})`)
+    }
+  }
+
+  connectInView(inView: (id: number) => boolean): void {
+    this.host.setGlobal('__uiInViewSink', inView)
   }
 
   /** Wie viele Units gerade ausgewählt sind (GetSelectedUnits der UI-VM). */

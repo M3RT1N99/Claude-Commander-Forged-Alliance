@@ -784,6 +784,95 @@ console.log('\n== Alliances in the UI VM ==')
   check(String(bad).includes('Invalid army'), `invalid index errors loudly (${bad})`)
 }
 
+// The console commands the keymap fires. In the engine they are CConFuncs;
+// most of them call straight into the original UI Lua (CON_UI_MakeSelectionSet
+// -> selection.lua AddCurrentSelectionSet, Cfile:834b6d), the two selection
+// ones the engine runs itself (Cfile:866020 / 8662B0). Without them every key
+// bound in defaultkeymap.lua ended in "console command missing".
+console.log('\n== Console commands (keymap -> ConExecute) ==')
+{
+  // Three units of the focus army: an ACU, a bot, and a second bot.
+  host.eval(`
+    __uiSetUnit(1, 'uel0001', 1, 100, 20, 100, 12000, 12000, 0, true, 0, 0, -1, false, 0, 1, false)
+    __uiSetUnit(2, 'uel0101', 1, 110, 20, 100,   500,   500, 0, true, 0, 0, -1, false, 0, 1, false)
+    __uiSetUnit(3, 'uel0101', 1, 190, 20, 190,   500,   500, 0, false, 0, 0, -1, false, 0, 1, false)
+    __uiSelectByIds({ 2 })
+  `)
+
+  // Control groups: Ctrl+1 stores, 1 applies (keyactions.lua:26-46).
+  host.eval(`ConExecute('UI_MakeSelectionSet 1')`)
+  host.eval(`__uiSelectByIds({ 1 })`)
+  check(
+    Number(host.eval('return GetSelectedUnits()[1]:GetEntityId()')) === 1,
+    'the ACU is selected before the control group is applied',
+  )
+  host.eval(`ConExecute('UI_ApplySelectionSet 1')`)
+  check(
+    Number(host.eval('local s = GetSelectedUnits() return s and s[1]:GetEntityId() or 0')) === 2,
+    'UI_ApplySelectionSet 1 restores the stored bot (selection.lua ApplySelectionSet)',
+  )
+
+  // UI_SelectByCategory: space = intersection, comma = union (Cfile:1292319).
+  const selectedIds = (): string =>
+    String(
+      host.eval(`
+        local s = GetSelectedUnits() or {}
+        local ids = {}
+        for _, u in ipairs(s) do ids[#ids + 1] = u:GetEntityId() end
+        table.sort(ids)
+        return table.concat(ids, ',')
+      `),
+    )
+  host.eval(`ConExecute('UI_SelectByCategory LAND MOBILE')`)
+  check(
+    selectedIds() === '1,2,3',
+    `UI_SelectByCategory LAND MOBILE selects ACU and both bots (${selectedIds()})`,
+  )
+  host.eval(`ConExecute('UI_SelectByCategory +idle LAND MOBILE')`)
+  check(
+    selectedIds() === '1,2',
+    `+idle drops the busy bot (Cfile:8664e9) (${selectedIds()})`,
+  )
+  host.eval(`ConExecute('UI_SelectByCategory +excludeengineers ALLUNITS')`)
+  check(
+    Number(host.eval('local s = GetSelectedUnits() return s and table.getn(s) or 0')) === 2,
+    '+excludeengineers drops the ACU (COMMAND, Cfile:866546-866590)',
+  )
+  host.eval(`ConExecute('UI_SelectByCategory +nearest COMMAND')`)
+  check(
+    Number(host.eval('local s = GetSelectedUnits() return s and s[1]:GetEntityId() or 0')) === 1,
+    '+nearest COMMAND finds the ACU',
+  )
+
+  // UI_ExpandCurrentSelection: same blueprint joins in (Cfile:866020).
+  host.eval(`__uiSelectByIds({ 2 })`)
+  host.eval(`ConExecute('UI_ExpandCurrentSelection')`)
+  check(
+    Number(host.eval('local s = GetSelectedUnits() return s and table.getn(s) or 0')) === 2,
+    'UI_ExpandCurrentSelection adds the second unit of the same blueprint',
+  )
+
+  // A unit being upgraded is invisible to every selection path (Cfile:866692).
+  host.eval(`
+    __uiSetUnit(4, 'uel0101', 1, 120, 20, 100, 500, 500, 0, true, 0, 0, -1, false, 0, 0.5, true)
+    ConExecute('UI_SelectByCategory LAND MOBILE')
+  `)
+  check(
+    selectedIds() === '1,2,3',
+    `a unit in UNITSTATE_BeingUpgraded is not selected (${selectedIds()})`,
+  )
+
+  // No command may end in the "missing" warning any more.
+  const stillMissing = String(
+    host.eval(`
+      local parts = {}
+      for _, text in pairs(__conUnknown) do parts[#parts + 1] = text end
+      return table.concat(parts, ' | ')
+    `),
+  )
+  check(stillMissing === '', `no console command reported missing (${stillMissing})`)
+}
+
 host.close()
 for (const f of openFiles) await f.close()
 console.log(failures === 0 ? '\nUI-PANELS BESTANDEN' : `\n${failures} CHECK(S) FEHLGESCHLAGEN`)

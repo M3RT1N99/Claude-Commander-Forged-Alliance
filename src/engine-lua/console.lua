@@ -147,6 +147,56 @@ function ConExecute(cmd)
     return
   end
 
+  -- === The UI console functions ===
+  --
+  -- Every one of them is a thin bridge into the ORIGINAL UI Lua in the engine
+  -- too: CON_UI_MakeSelectionSet calls selection.lua AddCurrentSelectionSet
+  -- (Cfile:834b6d/834b89), CON_UI_ApplySelectionSet calls ApplySelectionSet
+  -- (Cfile:1255995), CON_UI_ToggleGamePanels calls gamemain.lua HideGameUI with
+  -- NO argument (Cfile:1255891/1255893), CON_UI_RotateSkin/RotateLayout call
+  -- uiutil.lua RotateSkin/RotateLayout with the direction string
+  -- (Cfile:1255792/1255840). The keymap drives them: defaultkeymap.lua binds
+  -- Ctrl+1..0 to UI_MakeSelectionSet and 1..0 to UI_ApplySelectionSet
+  -- (keyactions.lua:26-46).
+  local lower = string.lower(name)
+  if lower == 'ui_makeselectionset' or lower == 'ui_applyselectionset' then
+    if rest == '' then
+      -- Same wording as the engine (Cfile:834c0d / 1255a0d).
+      LOG('USAGE: ' .. name .. ' [name]')
+      return
+    end
+    local selection = import('/lua/ui/game/selection.lua')
+    if lower == 'ui_makeselectionset' then
+      selection.AddCurrentSelectionSet(rest)
+    else
+      selection.ApplySelectionSet(rest)
+    end
+    return
+  end
+
+  if lower == 'ui_togglegamepanels' then
+    import('/lua/ui/game/gamemain.lua').HideGameUI()
+    return
+  end
+
+  if lower == 'ui_rotateskin' or lower == 'ui_rotatelayout' then
+    local uiutil = import('/lua/ui/uiutil.lua')
+    if lower == 'ui_rotateskin' then uiutil.RotateSkin(rest) else uiutil.RotateLayout(rest) end
+    return
+  end
+
+  -- These two the ENGINE does itself (they never enter Lua): the selection is
+  -- session state, so they live next to the rest of the selection code in
+  -- ui-globals.lua.
+  if lower == 'ui_expandcurrentselection' then
+    __uiExpandCurrentSelection()
+    return
+  end
+  if lower == 'ui_selectbycategory' then
+    __uiSelectByCategory(rest)
+    return
+  end
+
   local entry = __conVars[key(name)]
   if entry then
     local value = parseValue(rest)
