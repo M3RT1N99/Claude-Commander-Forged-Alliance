@@ -1067,6 +1067,18 @@ export class UnitViewer {
   }
 
   /** Aktuelle Kamera-Zoomdistanz (für Strategic-Icon-Schwellen). */
+  /**
+   * The engine's "zoom": `dot(cam.mViewport.d[1], (cameraTarget, 1))`, i.e. the
+   * world width the viewport spans at the depth of the camera TARGET
+   * (Cfile:1284418-1284425). ui_LifebarLOD (200) and IconFadeInZoom are
+   * compared against exactly this — not against the camera distance.
+   */
+  zoomOgrids(): number {
+    const target = this.rts.enabled ? this.rts.target : this.controls.target
+    const rect = this.canvas.getBoundingClientRect()
+    return this.ogridsPerPixel(target.x, target.y, target.z) * rect.width
+  }
+
   getRtsDistance(): number {
     return this.rts.enabled
       ? this.rts.dist
@@ -1204,6 +1216,24 @@ export class UnitViewer {
   }
 
   /** Weltposition → Canvas-Client-Koordinaten (null wenn hinter der Kamera). */
+  /**
+   * The world width ONE PIXEL spans at that world position — the engine's
+   * `dot(cam.mViewport.d[2], (pos, 1))`, where `d[2] = d[0] / viewportWidth`
+   * and `d[0]·pos` is the world width the viewport spans at that depth
+   * (Cfile:522779-522802). The selection brackets keep their minimum pixel
+   * size with it (Cfile:1215269), the life bars their size (Cfile:1285308).
+   */
+  ogridsPerPixel(x: number, y: number, z: number): number {
+    const cam = this.camera
+    const forward = cam.getWorldDirection(new THREE.Vector3())
+    const depth = new THREE.Vector3(x, y, z).sub(cam.position).dot(forward)
+    if (!(depth > 0)) return 0
+    const rect = this.canvas.getBoundingClientRect()
+    if (rect.width <= 0) return 0
+    const worldHeight = 2 * depth * Math.tan(((cam.fov * Math.PI) / 180) / 2)
+    return (worldHeight * cam.aspect) / rect.width
+  }
+
   worldToScreen(pos: THREE.Vector3): { x: number; y: number } | null {
     const p = pos.clone().project(this.camera)
     if (p.z > 1) return null

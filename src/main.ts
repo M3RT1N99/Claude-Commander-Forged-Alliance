@@ -40,6 +40,14 @@ import {
   type SelectionBpData,
   type SelectionCandidate,
 } from './ui/boxSelection'
+import {
+  SELECT_PARAM_DEFAULTS,
+  bracketThickness,
+  createBracketGeometry,
+  updateBracketGeometry,
+  type BracketExtents,
+  type SelectParams,
+} from './ui/selectionBrackets'
 import type { ScmapData } from './formats/scmap'
 import {
   createUefBuildMaterials,
@@ -1847,10 +1855,12 @@ interface LuaSceneUnit {
   caps: ReadonlySet<string>
   /** Der Szenen-Eintrag mit Skelett-Animator (für die Laufanimation). */
   scene: SceneUnit
-  /** Halbachsen + Versatz des Auswahlrings (aus dem Blueprint, siehe ringExtents). */
-  ringExtents: { x: number; z: number; ox: number; oz: number }
+  /** Half extents + offsets of the selection box (blueprint, see ringExtents). */
+  ringExtents: BracketExtents
   /** What box selection needs from the blueprint (src/ui/boxSelection.ts). */
   select: SelectionBpData
+  /** What the unit bars need from the blueprint (src/ui/lifeBars.ts). */
+  bars: { size: number; height: number; offset: number; render: boolean; hide: boolean }
   /**
    * Läuft die Gehanimation gerade? Die SIM sagt, ob die Einheit fährt
    * (`moving` aus `__readAllUnitsJson`) — der Renderer spielt nur ab, was die
@@ -2009,6 +2019,18 @@ const hudSource: HudSource = {
         // Einheit und zeigt bei einer Baustelle den Fortschritt statt der HP.
         fraction: s.fraction,
         halfWidth: u.ringExtents.x,
+        // The bar geometry comes from the BLUEPRINT (REntityBlueprint
+        // mLifeBar*, Cfile:646995-646998), the values from the sim.
+        lifeBarSize: u.bars.size,
+        lifeBarHeight: u.bars.height,
+        lifeBarOffset: u.bars.offset,
+        lifeBarRender: u.bars.render,
+        hideLifebars: u.bars.hide,
+        beingUpgraded: s.beingUpgraded === true,
+        shieldRatio: s.shieldRatio ?? 0,
+        // mFuelRatio defaults to -1 = "no fuel" (Cfile:772265), not 0.
+        fuelRatio: -1,
+        workProgress: s.workProgress ?? 0,
       })
     }
     return out
@@ -2016,29 +2038,36 @@ const hudSource: HudSource = {
 }
 
 /**
- * Der Auswahlring — ein Kreis mit Radius 1, der pro Einheit SKALIERT wird.
- *
- * Die Maße stehen im Blueprint, nicht im Renderer (Cfile:1215195-1215210):
- *
- *   halbX = SelectionSizeX > 0 ? SelectionSizeX · ren_UnitSelectionScale
- *                              : Kollisions-Extent · ren_SelectionSizeFudge
- *
- * dazu der Versatz `SelectionCenterOffsetX/Z` und die Höhe
- * `ren_SelectionHeightFudge`. Die drei ConVars kommen aus der Original-Datei
- * `lua/renderselectparams.lua` (die Engine liest genau sie, Cfile:1215033) —
- * kein geschätzter Wert.
- *
- * Vorher war der Ring ein fester Kreis mit Radius 1: um eine ACU zu groß, um
- * eine Fabrik viel zu klein.
+ * The selection marker — FOUR textured bracket quads, not a ring
+ * (`func_DrawSelectionBrackets`, Cfile:1215114-1215433; the maths and the
+ * texture atlas live in src/ui/selectionBrackets.ts). The green circle that
+ * used to sit here was invented: the engine has no ring asset at all, only
+ * `selection_brackets_*.dds` and `selection.dds` for the drag rectangle.
  */
-const luaRingGeo = (() => {
-  const g = new THREE.RingGeometry(0.85, 1, 48)
-  g.rotateX(-Math.PI / 2)
-  return g
-})()
+const bracketMaterial = new THREE.MeshBasicMaterial({
+  transparent: true,
+  depthTest: false,
+  side: THREE.DoubleSide,
+  // ren_SelectColor = 0xFFFFFFFF: the texture carries the colour.
+  color: 0xffffff,
+})
+let bracketTextureLoaded = false
+async function loadBracketTexture(): Promise<void> {
+  if (bracketTextureLoaded) return
+  bracketTextureLoaded = true
+  const tex = await loadFirstTexture([
+    'textures/ui/common/game/selection/selection_brackets_player.dds',
+  ])
+  if (tex) {
+    bracketMaterial.map = tex
+    bracketMaterial.needsUpdate = true
+  } else {
+    log('selection_brackets_player.dds missing — selection stays untextured')
+  }
+}
 
 /** Die Werte aus `lua/renderselectparams.lua` (Original-Datei, kein Nachbau). */
-let selectParams = { sizeFudge: 1.85, heightFudge: 0.12, unitScale: 0.75 }
+let selectParams: SelectParams = { ...SELECT_PARAM_DEFAULTS }
 async function loadSelectParams(): Promise<void> {
   if (!vfs || !vfs.exists('lua/renderselectparams.lua')) return
   const text = new TextDecoder('utf-8').decode(await vfs.read('lua/renderselectparams.lua'))
@@ -2047,15 +2076,41 @@ async function loadSelectParams(): Promise<void> {
     const v = bpGet(p, `RenderSelectParams.${k}`)
     return typeof v === 'number' ? v : fallback
   }
+  // All SIX keys of the file, not three: the bracket size and its minimum
+  // pixel size decide how thick the marker is (Cfile:1215259-1215270).
   selectParams = {
-    sizeFudge: num('ren_SelectionSizeFudge', 1.85),
-    heightFudge: num('ren_SelectionHeightFudge', 0.12),
-    unitScale: num('ren_UnitSelectionScale', 0.75),
+    sizeFudge: num('ren_SelectionSizeFudge', SELECT_PARAM_DEFAULTS.sizeFudge),
+    heightFudge: num('ren_SelectionHeightFudge', SELECT_PARAM_DEFAULTS.heightFudge),
+    unitScale: num('ren_UnitSelectionScale', SELECT_PARAM_DEFAULTS.unitScale),
+    bracketMinPixelSize: num('ren_SelectBracketMinPixelSize', SELECT_PARAM_DEFAULTS.bracketMinPixelSize),
+    bracketSize: num('ren_SelectBracketSize', SELECT_PARAM_DEFAULTS.bracketSize),
+    selectColor: num('ren_SelectColor', SELECT_PARAM_DEFAULTS.selectColor),
   }
 }
 
-/** Die Halbachsen des Auswahlrings einer Einheit (Weltmeter). */
-function ringExtents(bp: BpObject): { x: number; z: number; ox: number; oz: number } {
+/**
+ * The bar fields of REntityBlueprint (Cfile:646995-646998): LifeBarSize (1.0),
+ * LifeBarHeight (0.1), LifeBarOffset (0.0), LifeBarRender (0 for entities, but
+ * the RUnitBlueprint constructor sets it to 1 for every unit, Cfile:655716) —
+ * plus Display.HideLifebars, which switches the bars off per blueprint.
+ */
+function barBpData(bp: BpObject): LuaSceneUnit['bars'] {
+  const n = (path: string, fallback: number): number => {
+    const v = bpGet(bp, path)
+    return typeof v === 'number' ? v : fallback
+  }
+  return {
+    size: n('LifeBarSize', 1),
+    height: n('LifeBarHeight', 0.1),
+    offset: n('LifeBarOffset', 0),
+    // Every unit renders bars; only props do not.
+    render: bpGet(bp, 'LifeBarRender') !== false,
+    hide: bpGet(bp, 'Display.HideLifebars') === true,
+  }
+}
+
+/** Die Halbachsen der Auswahl-Box einer Einheit (Weltmeter). */
+function ringExtents(bp: BpObject): BracketExtents {
   const n = (path: string): number => {
     const v = bpGet(bp, path)
     return typeof v === 'number' ? v : 0
@@ -2066,7 +2121,10 @@ function ringExtents(bp: BpObject): { x: number; z: number; ox: number; oz: numb
     x: selX > 0 ? selX * selectParams.unitScale : (n('SizeX') / 2) * selectParams.sizeFudge,
     z: selZ > 0 ? selZ * selectParams.unitScale : (n('SizeZ') / 2) * selectParams.sizeFudge,
     ox: n('SelectionCenterOffsetX'),
+    oy: n('SelectionCenterOffsetY'),
     oz: n('SelectionCenterOffsetZ'),
+    // Display.SelectionThickness (Cfile:1215259) — 0 means ren_SelectBracketSize.
+    thickness: n('Display.SelectionThickness') || n('SelectionThickness'),
   }
 }
 
@@ -2351,18 +2409,21 @@ function luaSimUpdate(): void {
     }
     u.ring.visible = u.selected
     if (u.selected) {
-      // Die Ellipse aus dem Blueprint (siehe ringExtents), am Heading gedreht,
-      // um den Selection-Offset versetzt, auf ren_SelectionHeightFudge angehoben.
-      const e = u.ringExtents
-      const cos = Math.cos(heading)
-      const sin = Math.sin(heading)
-      u.ring.position.set(
-        x + e.ox * cos + e.oz * sin,
-        y + selectParams.heightFudge,
-        z - e.ox * sin + e.oz * cos,
+      // Four bracket quads on the corners of the selection box. The thickness
+      // is world-sized but never thinner than ren_SelectBracketMinPixelSize
+      // pixels, so it needs the world width of ONE PIXEL at the unit's depth
+      // (the engine's dot(mViewport.d[2], pos), Cfile:1215269).
+      const halfEdge = bracketThickness(u.ringExtents, viewer.ogridsPerPixel(x, y, z), selectParams)
+      updateBracketGeometry(
+        u.ring.geometry,
+        x,
+        y,
+        z,
+        heading,
+        u.ringExtents,
+        halfEdge,
+        selectParams,
       )
-      u.ring.rotation.set(0, heading, 0)
-      u.ring.scale.set(e.x, 1, e.z)
     }
 
     // TURRET AIMING: the sim's CAimManipulator state (yaw/pitch per aim
@@ -2522,10 +2583,8 @@ async function addLuaUnitToScene(
       }
     }
   }
-  const ring = new THREE.Mesh(
-    luaRingGeo,
-    new THREE.MeshBasicMaterial({ color: 0x44ff66, transparent: true, opacity: 0.9, depthTest: false }),
-  )
+  void loadBracketTexture()
+  const ring = new THREE.Mesh(createBracketGeometry(), bracketMaterial)
   ring.visible = false
   ring.renderOrder = 10
   viewer.addHelper(ring)
@@ -2550,6 +2609,7 @@ async function addLuaUnitToScene(
     walking: false,
     ringExtents: ringExtents(assets.bp as BpObject),
     select: selectionBpData(assets.bp as BpObject),
+    bars: barBpData(assets.bp as BpObject),
     build,
   })
 }

@@ -356,29 +356,17 @@ select.inline {
   top: 0;
 }
 
-/* Eine Balkenzeile (Leben bzw. Bau-Fortschritt) — der Bau-Balken sitzt wie im
-   Original UNTER dem Lebensbalken. */
+/* One bar row. The engine draws a black background quad (0xFF000000) with the
+   fill inset by one pixel (Cfile:1285459/1285504-1285515) — no border, no
+   rounding, no segmentation. Size and position come from lifeBars.ts. */
 .bar-row {
-  height: 3px;
-  background: rgba(0, 0, 0, 0.65);
-  border: 1px solid rgba(0, 0, 0, 0.85);
-  box-sizing: content-box;
+  position: absolute;
+  background: #000000;
+  box-sizing: border-box;
 }
 
-.build-row {
-  margin-top: 1px;
-}
-
-.life-fill {
-  height: 100%;
-  width: 0;
-}
-
-/* Der Bau-Fortschritt ist GELB — wie im Original. */
-.build-fill {
-  height: 100%;
-  width: 0;
-  background: #f5d800;
+.bar-fill {
+  position: absolute;
 }
 
 .strat-icon {

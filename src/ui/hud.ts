@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { LIFEBAR_CONVARS, barGeometry, barRows, barSize } from './lifeBars'
 import type { GameVfs } from '../vfs/vfs'
 import type { UnitViewer } from '../viewer/unitViewer'
 import type { ScmapData } from '../formats/scmap'
@@ -72,10 +73,26 @@ export interface HudUnitInfo {
   army: number
   strategicIcon: string
   fadeZoom: number
-  /** Baufortschritt (1 = fertig). Unter 1 zeigt der Balken den BAU, nicht die HP. */
+  /** Baufortschritt (1 = fertig) — für die Icons, NICHT für die Balken. */
   fraction: number
-  /** Halbe Breite der Einheit (aus dem Blueprint) — so breit ist ihr Balken. */
+  /** Halbe Breite der Einheit (aus dem Blueprint). */
   halfWidth: number
+  /** `LifeBarSize` (ogrids, 0 = ui_LifebarWidth). */
+  lifeBarSize: number
+  /** `LifeBarHeight` (ogrids, 0 = ui_lifebarHeight). */
+  lifeBarHeight: number
+  /** `LifeBarOffset` (ogrids), added to ui_LifebarOffset. */
+  lifeBarOffset: number
+  /** `LifeBarRender` — 1 for every unit, 0 for props (Cfile:655716). */
+  lifeBarRender: boolean
+  /** `Display.HideLifebars`. */
+  hideLifebars: boolean
+  /** UNITSTATE_BeingUpgraded — no bars while upgrading (Cfile:1284570). */
+  beingUpgraded: boolean
+  /** mShieldRatio / mFuelRatio (-1 = no fuel) / mWorkProgress. */
+  shieldRatio: number
+  fuelRatio: number
+  workProgress: number
 }
 
 /** Datenquelle — von der Lua-Engine (main.ts) bereitgestellt. */
@@ -111,6 +128,8 @@ export class Hud {
    * (keyactions.lua:14). Wir lesen genau diese ConVar.
    */
   renderBars = true
+  /** `fmod((tick + interp) * ui_FuelEmptyBlinkRate, 1)` (Cfile:1285384). */
+  fuelBlinkPhase = 0
 
   /**
    * ConVar `ui_AlwaysRenderStrategicIcons` (Cfile:421748) — im Optionen-Dialog
@@ -122,15 +141,20 @@ export class Hud {
   // -------------------------------------------------------------------------
   // LEBENSBALKEN + BAU-FORTSCHRITT
   //
-  // Auch das zeichnet im Original die ENGINE über der Welt (nicht die Lua).
-  // Belegt aus der Decomp (Cfile:1284551-1284575): Balken erscheinen nur für
-  // AUSGEWÄHLTE Einheiten und die Einheit unter dem Cursor (dazu die ConVar
-  // ui_ForceLifbarsOnEnemy), unterhalb der Zoom-Grenze ui_LifebarLOD (200,
-  // Cfile:421758), nie bei Display.HideLifebars und nie während eines Upgrades.
+  // The engine draws these over the world too (not the Lua):
+  // CWldSession::RenderStrategicIcons collects them (Cfile:1284551-1284575),
+  // sub_85CD40 draws them (Cfile:1285245-1285580). The arithmetic lives in
+  // src/ui/lifeBars.ts; this layer only places DOM elements.
   //
-  // Zwei getrennte Balken, wie im Original zu sehen:
-  //   oben   LEBEN         (der echte Gesundheitsstand — er wächst beim Bau mit)
-  //   unten  BAU-FORTSCHRITT in GELB (nur solange FractionComplete < 1)
+  // Up to THREE rows, 2 px apart, each a black background with a one-pixel
+  // inset fill:
+  //   1  health           green/yellow/red at 0.75 / 0.25 (Cfile:1285354)
+  //   2  shield, else fuel or work progress (Cfile:1285364-1285442)
+  //   3  only next to a shield: whichever of the two row 2 did not take
+  //
+  // NOTE the second row is NOT the unit's own build progress: the engine draws
+  // mWorkProgress, i.e. what the unit is BUILDING (Cfile:1285481). Its own
+  // mFractionComplete never appears in a bar.
   // -------------------------------------------------------------------------
   private readonly barPool: HTMLDivElement[] = []
 
@@ -138,15 +162,17 @@ export class Hud {
     const layer = this.el('#bar-layer')
     const rootRect = this.root.getBoundingClientRect()
     const units = this.source.units()
-    const dist = this.viewer.getRtsDistance()
+    // ui_LifebarLOD is compared against the engine's zoom = the world width
+    // spanned at the camera target (Cfile:1284418-1284425), not the camera
+    // distance.
+    const zoom = this.viewer.zoomOgrids()
 
     while (this.barPool.length < units.length) {
       const bar = document.createElement('div')
       bar.className = 'life-bar'
-      // Zwei Zeilen: Leben oben, Bau-Fortschritt (gelb) darunter.
+      // Three rows; each is a background with its own fill.
       bar.innerHTML =
-        '<div class="bar-row"><div class="life-fill"></div></div>' +
-        '<div class="bar-row build-row"><div class="build-fill"></div></div>'
+        '<div class="bar-row"><div class="bar-fill"></div></div>'.repeat(3)
       layer.appendChild(bar)
       this.barPool.push(bar)
     }
@@ -154,52 +180,71 @@ export class Hud {
     for (let i = 0; i < this.barPool.length; i++) {
       const bar = this.barPool[i]!
       const u = units[i]
-      // Weit weg übernehmen die strategischen Icons (fadeZoom) — dann ist der
-      // Balken im Original ebenfalls weg.
-      if (!this.renderBars || !u || dist >= u.fadeZoom) {
+      // ui_RenderUnitBars and ui_LifebarLOD = 200 (Cfile:1284552); the
+      // blueprint can switch them off entirely (Display.HideLifebars,
+      // LifeBarRender), and a unit being upgraded shows none.
+      if (
+        !this.renderBars ||
+        !u ||
+        zoom >= LIFEBAR_CONVARS.lod ||
+        !u.lifeBarRender ||
+        u.hideLifebars ||
+        u.beingUpgraded
+      ) {
         bar.style.display = 'none'
         continue
       }
-      const s = this.viewer.worldToScreen(new THREE.Vector3(u.x, u.y + 1, u.z))
-      if (!s) {
+      const anchor = this.viewer.worldToScreen(new THREE.Vector3(u.x, u.y, u.z))
+      if (!anchor) {
         bar.style.display = 'none'
         continue
       }
-      const bauend = u.fraction < 1
-      const leben =
-        u.maxHealth > 0 ? Math.max(0, Math.min(1, u.health / u.maxHealth)) : 0
-      // Volle, nicht ausgewählte Einheiten zeigen keinen Balken (Decomp:
-      // Auswahl/Hover-Bedingung, Cfile:1284556-1284575) — eine Baustelle immer.
-      if (!bauend && leben >= 0.999 && !u.selected) {
+      const ogridsPerPixel = this.viewer.ogridsPerPixel(u.x, u.y, u.z)
+      const { width, height } = barSize(ogridsPerPixel, u.lifeBarSize, u.lifeBarHeight)
+      if (width <= 0 || height <= 0) {
         bar.style.display = 'none'
         continue
       }
-      // So breit wie die Einheit: ihre halbe Breite mal 2, in Bildschirm-Pixel
-      // umgerechnet über einen zweiten projizierten Punkt.
-      const rand = this.viewer.worldToScreen(new THREE.Vector3(u.x + u.halfWidth, u.y + 1, u.z))
-      const breite = rand ? Math.max(16, Math.abs(rand.x - s.x) * 2) : 24
+      // The engine lowers the view-space Y by (LifeBarOffset + ui_LifebarOffset)
+      // BEFORE projecting (Cfile:1285331-1285334) and floors the result
+      // (Cfile:1285341-1285342). One ogrid at that depth is `ogridsPerPixel`
+      // pixels wide, so the offset in pixels is offset / ogridsPerPixel.
+      const offsetPx = (u.lifeBarOffset + LIFEBAR_CONVARS.offset) / ogridsPerPixel
+      const screenX = Math.floor(anchor.x - rootRect.left)
+      const screenY = Math.floor(anchor.y - rootRect.top + offsetPx)
 
+      const rows = barRows(
+        {
+          health: u.health,
+          maxHealth: u.maxHealth,
+          shieldRatio: u.shieldRatio,
+          fuelRatio: u.fuelRatio,
+          workProgress: u.workProgress,
+        },
+        this.fuelBlinkPhase,
+      )
       bar.style.display = 'block'
-      bar.style.width = `${breite}px`
-      bar.style.transform =
-        `translate(${s.x - rootRect.left}px, ${s.y - rootRect.top}px) translate(-50%, -100%)`
-
-      // Oben: das LEBEN — auch während des Baus (die HP wachsen mit dem
-      // Fortschritt, unit.lua schreibt sie hoch). Ampel-Stufen; die exakte
-      // Farbtreppe der Engine steckt in einer nicht dekompilierbaren
-      // Zeichenfunktion — Grün/Gelb/Rot ist die beobachtete Reihenfolge.
-      const lifeFill = bar.querySelector<HTMLDivElement>('.life-fill')!
-      lifeFill.style.width = `${leben * 100}%`
-      lifeFill.style.background =
-        leben > 0.6 ? '#3ad353' : leben > 0.3 ? '#e8d33a' : '#e84040'
-
-      // Unten: der BAU-FORTSCHRITT in GELB — nur solange gebaut wird. Genau so
-      // zeigt es das Original: beide Balken übereinander, der Bau-Balken darunter.
-      const buildRow = bar.querySelector<HTMLDivElement>('.build-row')!
-      buildRow.style.display = bauend ? 'block' : 'none'
-      if (bauend) {
-        const buildFill = bar.querySelector<HTMLDivElement>('.build-fill')!
-        buildFill.style.width = `${u.fraction * 100}%`
+      bar.style.transform = 'translate(0px, 0px)'
+      const rowEls = bar.querySelectorAll<HTMLDivElement>('.bar-row')
+      for (let r = 0; r < rowEls.length; r++) {
+        const rowEl = rowEls[r]!
+        const row = rows[r]
+        if (!row) {
+          rowEl.style.display = 'none'
+          continue
+        }
+        const g = barGeometry(screenX, screenY, width, height, r, row.fraction)
+        rowEl.style.display = 'block'
+        rowEl.style.left = `${g.left}px`
+        rowEl.style.top = `${g.top}px`
+        rowEl.style.width = `${g.width}px`
+        rowEl.style.height = `${g.height}px`
+        const fill = rowEl.querySelector<HTMLDivElement>('.bar-fill')!
+        fill.style.left = '1px'
+        fill.style.top = '1px'
+        fill.style.width = `${g.fillWidth}px`
+        fill.style.height = `${g.fillHeight}px`
+        fill.style.background = row.color
       }
     }
   }

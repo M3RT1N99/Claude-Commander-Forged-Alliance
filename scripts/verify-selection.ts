@@ -9,7 +9,7 @@
  *
  *   npx tsx scripts/verify-selection.ts
  */
-import { parseBlueprint } from '../src/formats/blueprint'
+import { parseBlueprint, parseLuaAssignments, bpGet } from '../src/formats/blueprint'
 import {
   boxSelectIds,
   mergeSelection,
@@ -17,6 +17,12 @@ import {
   selectionPriority,
   type SelectionCandidate,
 } from '../src/ui/boxSelection'
+import {
+  SELECT_PARAM_DEFAULTS,
+  bracketThickness,
+  createBracketGeometry,
+  updateBracketGeometry,
+} from '../src/ui/selectionBrackets'
 import { GameFiles } from './gameFiles'
 
 let failures = 0
@@ -115,6 +121,93 @@ check(mergeSelection([1, 2, 7], [1, 2], true).join() === '7', 'Shift removes whe
 check(mergeSelection([1, 7], [1, 2], true).sort().join() === '1,2,7', 'partially selected -> adds (not removes)')
 check(mergeSelection([1, 7], [], true).sort().join() === '1,7', 'empty drag with Shift keeps the selection')
 check(mergeSelection([1, 7], [], false).length === 0, 'empty drag without Shift clears the selection')
+
+// === The selection MARKER: four bracket quads, not a ring ===
+//
+// func_DrawSelectionBrackets (Cfile:1215114-1215433) draws exactly four
+// textured quads on the corners of the selection box — the engine has no ring
+// asset at all. The green circle drawn before was invented.
+console.log('\n== Selection brackets (Cfile:1215114-1215433) ==')
+{
+  for (const tex of [
+    'textures/ui/common/game/selection/selection_brackets_player.dds',
+    'textures/ui/common/game/selection/selection_brackets_player_highlighted.dds',
+    'textures/ui/common/game/selection/selection_brackets_enemy.dds',
+    'textures/ui/common/game/selection/selection_brackets_neutral.dds',
+    'textures/ui/common/game/selection/selection.dds',
+  ]) {
+    check(game.exists(tex), `${tex.split('/').pop()} exists in the archives`)
+  }
+  check(
+    !game.exists('textures/ui/common/game/selection/selection_ring.dds'),
+    'and there is NO ring texture — the brackets are the whole marker',
+  )
+
+  // renderselectparams.lua carries all six values (Cfile:1214972-1215091).
+  const params = parseLuaAssignments(
+    new TextDecoder('utf-8').decode(await game.read('lua/renderselectparams.lua')),
+  )
+  const p = (k: string): unknown => bpGet(params, `RenderSelectParams.${k}`)
+  check(p('ren_SelectionSizeFudge') === 1.85, `ren_SelectionSizeFudge = ${p('ren_SelectionSizeFudge')}`)
+  check(p('ren_SelectionHeightFudge') === 0.12, `ren_SelectionHeightFudge = ${p('ren_SelectionHeightFudge')}`)
+  check(p('ren_UnitSelectionScale') === 0.75, `ren_UnitSelectionScale = ${p('ren_UnitSelectionScale')}`)
+  check(p('ren_SelectBracketSize') === 0.2, `ren_SelectBracketSize = ${p('ren_SelectBracketSize')}`)
+  check(
+    p('ren_SelectBracketMinPixelSize') === 3,
+    `ren_SelectBracketMinPixelSize = ${p('ren_SelectBracketMinPixelSize')}`,
+  )
+  check(p('ren_SelectColor') === 0xffffffff, `ren_SelectColor = ${p('ren_SelectColor')}`)
+
+  const ext = { x: 2, z: 3, ox: 0, oy: 0, oz: 0, thickness: 0 }
+  // No blueprint thickness -> ren_SelectBracketSize; S = max(halfX, halfZ) = 3.
+  // Close to the camera one pixel is small, so the minimum never bites.
+  check(
+    Math.abs(bracketThickness(ext, 0.01, SELECT_PARAM_DEFAULTS) - 0.6) < 1e-9,
+    `t*S = 0.2 * 3 = ${bracketThickness(ext, 0.01, SELECT_PARAM_DEFAULTS)}`,
+  )
+  // Zoomed far out one pixel is 1 ogrid: (3*0.2)/1 = 0.6 px < 3 px, so the
+  // engine grows the bracket to exactly 3 pixels (Cfile:1215269-1215270).
+  check(
+    Math.abs(bracketThickness(ext, 1, SELECT_PARAM_DEFAULTS) - 3) < 1e-9,
+    `far away it grows to ren_SelectBracketMinPixelSize (${bracketThickness(ext, 1, SELECT_PARAM_DEFAULTS)} world units = 3 px)`,
+  )
+  check(
+    Math.abs(bracketThickness({ ...ext, thickness: 0.26 }, 0.01, SELECT_PARAM_DEFAULTS) - 0.78) < 1e-9,
+    'Display.SelectionThickness wins over the ConVar (Cfile:1215259-1215263)',
+  )
+
+  // Geometry: 4 quads = 16 vertices, each a square of half edge t*S centred ON
+  // its corner (Cfile:1215281-1215293).
+  const geo = createBracketGeometry()
+  updateBracketGeometry(geo, 100, 20, 200, 0, ext, 0.6, SELECT_PARAM_DEFAULTS)
+  const pos = geo.getAttribute('position')
+  check(pos.count === 16, `${pos.count} vertices (4 quads)`)
+  check(
+    Math.abs(pos.getY(0) - (20 + 0.12)) < 1e-4,
+    `they sit at unitY + ren_SelectionHeightFudge (${pos.getY(0)})`,
+  )
+  // First quad = corner (-halfX, -halfZ) = (98, 197), first vertex = corner - t*S.
+  check(
+    Math.abs(pos.getX(0) - (100 - 2 - 0.6)) < 1e-4 && Math.abs(pos.getZ(0) - (200 - 3 - 0.6)) < 1e-4,
+    `quad 1 sits on the -X/-Z corner (${pos.getX(0)}/${pos.getZ(0)})`,
+  )
+  // Quad 3 covers the +X/+Z corner: its first vertex is corner-(t,t), its
+  // third corner+(t,t) — the square is CENTRED on the corner (Cfile:1215281).
+  check(
+    Math.abs(pos.getX(8) - (100 + 2 - 0.6)) < 1e-4 && Math.abs(pos.getZ(8) - (200 + 3 - 0.6)) < 1e-4,
+    `quad 3 starts one thickness before the +X/+Z corner (${pos.getX(8)}/${pos.getZ(8)})`,
+  )
+  check(
+    Math.abs(pos.getX(10) - (100 + 2 + 0.6)) < 1e-4 && Math.abs(pos.getZ(10) - (200 + 3 + 0.6)) < 1e-4,
+    `and ends one thickness behind it (${pos.getX(10)}/${pos.getZ(10)})`,
+  )
+  // UVs: -X -> smaller u, -Z -> smaller v (Cfile:1215297-1215405).
+  const uv = geo.getAttribute('uv')
+  check(
+    uv.getX(0) === 0 && uv.getY(0) === 0 && uv.getX(4) === 0.5 && uv.getY(8) === 0.5,
+    'each quad takes its own quadrant of the bracket texture',
+  )
+}
 
 await game.close()
 console.log(failures === 0 ? '\nSELECTION PASSED' : `\nSELECTION FAILED (${failures})`)
