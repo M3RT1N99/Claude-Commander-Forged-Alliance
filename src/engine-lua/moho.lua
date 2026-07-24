@@ -506,6 +506,13 @@ local unit = withNoops(UNIT_NAMES, {
   -- SetFocusEntity/ClearFocusEntity hold the shield as the unit's focus entity
   -- (Unit:CreateShield/DestroyShield, unit.lua:3275/3375). All three sit in
   -- UNIT_NAMES (the noop list) but withNoops skips names with a real method.
+  -- Unit:RecoilImpulse(x, y, z) — defaultweapons.lua:221 kicks the hull back
+  -- when a ship gun fires (bp.Weapon.ShipRock). The method was not defined at
+  -- all, so that path threw "attempt to call a nil value" (units.lua:4-8
+  -- deliberately disables the instance fallback). Record the impulse; the
+  -- visible hull rock needs impulse physics, which the sim does not have —
+  -- motion runs through the navigator (a separate, absent feature).
+  RecoilImpulse = function(self, x, y, z) self.__recoilImpulse = { x or 0, y or 0, z or 0 } end,
   SetShieldRatio = function(self, ratio) self.__shieldRatio = ratio end,
   SetFocusEntity = function(self, e) self.__focusEntity = e end,
   ClearFocusEntity = function(self) self.__focusEntity = nil end,

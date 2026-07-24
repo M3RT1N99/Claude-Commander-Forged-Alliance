@@ -368,7 +368,13 @@ function ManipMeta:SetAnimationFraction(fr) self.__animFraction = fr; return sel
 function ManipMeta:GetAnimationFraction() return self.__animFraction or 0 end
 function ManipMeta:SetRate(r) self.__rate = r; return self end
 function ManipMeta:GetAnimationTime() return self.__animTime or 0 end
-function ManipMeta:SetBoneEnabled(bone, on) return self end
+function ManipMeta:SetBoneEnabled(bone, on) self.__boneEnabled = self.__boneEnabled or {}; self.__boneEnabled[bone] = on ~= false; return self end
+-- Slider:SetWorldUnits(bool) — the slider goal is in world units instead of the
+-- model's. effectutilities.lua:362/574/646 (the Aeon/Seraphim/Cybran build-effect
+-- threads) call it on every build; it was not defined anywhere, so those threads
+-- died with "attempt to call a nil value" (units.lua:4-8 deliberately disables
+-- the instance fallback, so a missing engine method throws).
+function ManipMeta:SetWorldUnits(v) self.__worldUnits = v ~= false; return self end
 function ManipMeta:ClearGoal() self.__goal = nil; return self end
 function ManipMeta:Disable() self.__enabled = false; return self end
 function ManipMeta:Enable() self.__enabled = true; return self end
@@ -383,10 +389,28 @@ function ManipMeta:IsDone() return true end
 local function newManipulator(kind, unit, bone)
   return setmetatable({ __kind = kind, __unit = unit, __bone = bone, __enabled = true }, ManipMeta)
 end
-function CreateRotator(unit, bone, axis) return newManipulator('rotator', unit, bone) end
+-- CreateRotator(unit, bone, axis, [goal], [speed], [accel], [goalspeed])
+-- (mHelp Cfile:876359). The four optional arguments were dropped before, so a
+-- rotator built in one call (`CreateRotator(u, b, 'y', nil, 30)`) started blank.
+function CreateRotator(unit, bone, axis, goal, speed, accel, goalSpeed)
+  local m = newManipulator('rotator', unit, bone)
+  m.__axis = axis
+  if goal ~= nil then m.__goal = { goal } end
+  if speed ~= nil then m.__speed = speed end
+  if accel ~= nil then m.__accel = accel end
+  if goalSpeed ~= nil then m.__targetSpeed = goalSpeed end
+  return m
+end
 function CreateSlider(unit, bone) return newManipulator('slider', unit, bone) end
 function CreateAnimator(unit) return newManipulator('animator', unit) end
-function CreateBuilderArmController(unit, bone) return newManipulator('builderarm', unit, bone) end
+-- CreateBuilderArmController(unit, turretBone, [barrelBone], [aimBone])
+-- (mHelp Cfile:866166) — unit.lua:1661 passes all three bones.
+function CreateBuilderArmController(unit, turretBone, barrelBone, aimBone)
+  local m = newManipulator('builderarm', unit, turretBone)
+  m.__barrelBone = barrelBone
+  m.__aimBone = aimBone
+  return m
+end
 function CreateThrustController(unit, bone) return newManipulator('thrust', unit, bone) end
 
 -- SetFiringArc(yawMin, yawMax, yawSpeed, pitchMin, pitchMax, pitchSpeed) —
@@ -669,9 +693,15 @@ end
 -- Used on economy events and on manipulators (aeonweapons.lua:138).
 function WaitFor(obj)
   if type(obj) ~= 'table' or not obj.IsDone then return end
-  while not obj:IsDone() do
+  -- Yield at least ONE tick before re-checking. A manipulator always needs time
+  -- in the engine, and while no bone animation runs here IsDone() is instantly
+  -- true — with a plain `while not IsDone()` the loop body never ran, so
+  -- WaitFor returned inside the same tick. unit.lua:3683 (RockingThread) does
+  -- `while true do WaitFor(RockManip) ... end`: that spun forever without ever
+  -- yielding and hung the sim thread.
+  repeat
     coroutine.yield(1)
-  end
+  until obj:IsDone()
 end
 
 -- === Buff-Blueprints (BuffBlueprint{...}) ===
