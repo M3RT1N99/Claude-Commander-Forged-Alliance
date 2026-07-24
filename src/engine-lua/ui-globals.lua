@@ -323,7 +323,7 @@ function GetAttachedUnitsList(units)
 end
 
 -- Von der Engine pro Beat: der Zustand einer Unit aus der Sim.
-function __uiSetUnit(id, blueprintId, army, x, y, z, health, maxHealth, workProgress, idle, fireState, guardedId, capMask, deadFlag, shieldRatio)
+function __uiSetUnit(id, blueprintId, army, x, y, z, health, maxHealth, workProgress, idle, fireState, guardedId, capMask, deadFlag, shieldRatio, fractionComplete)
   local u = __uiUnits[id]
   if not u then
     -- SUnitVarDat-Ctor (Cfile:772277): mFireState = FIRESTATE_ReturnFire (0).
@@ -337,7 +337,14 @@ function __uiSetUnit(id, blueprintId, army, x, y, z, health, maxHealth, workProg
   u.z = z
   u.health = health
   u.maxHealth = maxHealth
+  -- WorkProgress und FractionComplete sind ZWEI Felder, nicht eines:
+  -- mWorkProgress ist der Fortschritt dessen, WORAN die Unit arbeitet (der
+  -- Bau-Task schreibt es, Cfile:815482; UserUnit:GetWorkProgress zeigt es,
+  -- construction.lua:380), mFractionComplete ist ihr EIGENER Bauzustand
+  -- (SSTIEntityVariableData+96). Frueher trug workProgress den eigenen
+  -- Bauzustand — damit zeigte eine Fabrik nie den Fortschritt ihrer Einheit.
   u.workProgress = workProgress
+  u.fractionComplete = fractionComplete or 1
   u.idle = idle
   -- The sim is the authority (SUnitVarDat.mFireState mirrored per beat); the
   -- optimistic set in SetFireState only bridges the round-trip latency.
@@ -1874,7 +1881,7 @@ function __uiSetRollover(id)
   -- Baustelle produziert nichts (Baustellen sind fuer die Oekonomie unsichtbar).
   local bp = __blueprints[u.blueprintId]
   local eco = (bp and bp.Economy) or {}
-  local fertig = (u.workProgress or 1) >= 1
+  local fertig = (u.fractionComplete or 1) >= 1
   __uiRollover = {
     userUnit = u,
     blueprintId = u.blueprintId,

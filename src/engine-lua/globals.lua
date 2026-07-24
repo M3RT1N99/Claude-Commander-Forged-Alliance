@@ -756,16 +756,22 @@ local function issueTo(units, apply)
   __nextCommand = __nextCommand + 1
   for _, u in ipairs(units or {}) do
     if u then
-      apply(u)
+      apply(u, cmd)
       cmd.units[table.getn(cmd.units) + 1] = u
     end
   end
   return cmd
 end
 
+--- IssueMove(units, pos) — ein BEFEHL, keine direkte Zielsetzung: die Engine
+--- baut SSTICommandIssueData(UNITCOMMAND_Move) und schickt es durch
+--- UNIT_IssueCommand, das ohne Shift die Warteschlange ersetzt
+--- (IssueUnitCommand-Default clear = true, Cfile:1265640). Genau deshalb kann
+--- ein NACHFOLGENDER Befehl (der Sammelpunkt einer Fabrik) dahinter warten,
+--- statt das Ziel sofort zu ueberschreiben.
 function IssueMove(units, pos)
-  return issueTo(units, function(u)
-    u:GetNavigator():SetGoal({ pos[1], pos[2] or 0, pos[3] })
+  return issueTo(units, function(u, cmd)
+    __issueOrder(u.__id, { type = 'Move', x = pos[1], z = pos[3], cmdId = cmd.id }, true)
   end)
 end
 
@@ -779,17 +785,118 @@ end
 --- Fehlt das Global, stirbt der Thread, die Fabrik bleibt BUSY und baut nie
 --- wieder etwas. Genau so sah es im Browser aus.
 ---
---- Fertig ist der Befehl, wenn keine Einheit mehr ein Ziel hat.
+--- Fertig ist der Befehl, wenn er bei KEINER Unit mehr in der Warteschlange
+--- steht — weder laufend noch wartend. Genau das prueft die Engine: existiert
+--- der CUnitCommandOpt nicht mehr, ist der Befehl erledigt (Cfile:1007814).
+--- (Ein „hat die Unit noch ein Fahrziel?" waere etwas anderes: ein NEUER Befehl
+--- setzt ein neues Ziel, der alte ist damit aber trotzdem vorbei.)
 function IsCommandDone(cmd)
   if not cmd or not cmd.units then return true end
   for _, u in ipairs(cmd.units) do
-    if u and not u.__destroyQueued and u.__goal then return false end
+    if u and not u.__destroyQueued then
+      local id = u.__id
+      local active = __orderActive[id]
+      if active and active.cmdId == cmd.id then return false end
+      for _, q in ipairs(__orders[id] or {}) do
+        if q.cmdId == cmd.id then return false end
+      end
+    end
   end
   return true
 end
 
 function IssueStop(units)
   return issueTo(units, function(u) __dispatchStop(u.__id) end)
+end
+
+--- IssueUpgrade(units, blueprintId) — cfunc_IssueUpgradeL (Cfile:1011315).
+--- Genau zwei Argumente (Einheitenliste + Blueprint), daraus baut die Engine
+--- SSTICommandIssueData(UNITCOMMAND_Upgrade) mit dem Blueprint als Ziel und
+--- schickt es durch UNIT_IssueCommand — OHNE die Warteschlange zu leeren
+--- (clear = 0, Cfile:1011353). Der Befehl wird zu einem CUnitUpgradeTask
+--- (build.lua __issueUpgrade).
+function IssueUpgrade(units, blueprintId)
+  return issueTo(units, function(u)
+    local uid, err = __issueUpgrade(u.__id, blueprintId)
+    -- -2 = der Befehl verpufft (schon am Upgraden), -1 = echter Fehler.
+    if uid == -1 then WARN('IssueUpgrade: ' .. tostring(err)) end
+  end)
+end
+
+--- NotifyUpgrade(altesGebaeude, neuesGebaeude) — cfunc_NotifyUpgradeL
+--- (Cfile:978489). Die Uebergabe am Ende eines Upgrades: die Lua ruft es in
+--- UpgradingState.OnStopBuild (defaultunits.lua:264, terranunits.lua:697),
+--- BEVOR sich das alte Gebaeude zerstoert. Die Engine traegt dabei alles vom
+--- alten auf das neue Gebaeude um:
+---
+---   * die Befehls-Warteschlange, OHNE den Upgrade-Befehl selbst — uebersprungen
+---     wird genau der Eintrag mit Typ 27 (UNITCOMMAND_Upgrade) und dem
+---     Blueprint des NEUEN Gebaeudes (Cfile:978572-978581)
+---   * AI-Builder-Befehle und den Platoon-Platz (Cfile:978602-978634) — die Sim
+---     hat weder AI-Builder noch Platoons, dort gibt es nichts umzutragen
+---   * das Repeat-Queue-Flag mit OnStartRepeatQueue/OnStopRepeatQueue
+---     (Cfile:978635-978646); die Sim kennt keine Repeat-Queue
+---     (UserUnit:IsRepeatQueue ist false)
+---   * die GESUNDHEIT als VERHAELTNIS: neu = neuesMax * (altHP / altMax)
+---     (Cfile:978648-978652) — ein angeschlagener Mex bleibt angeschlagen
+---   * die bewachte Einheit und ALLE Bewacher des alten Gebaeudes
+---     (Cfile:978653-978670)
+---
+--- Beide Argumente muessen lebende Units sein, sonst wirft die Engine
+--- "Passed in invalid source/destination object to upgrade"
+--- (Cfile:978553/978557).
+function NotifyUpgrade(old, new)
+  if type(old) ~= 'table' or not old.__id or old.__dead or old.__destroyed then
+    error('Passed in invalid source object to upgrade', 2)
+  end
+  if type(new) ~= 'table' or not new.__id or new.__dead or new.__destroyed then
+    error('Passed in invalid destination object to upgrade', 2)
+  end
+  local oldId, newId = old.__id, new.__id
+
+  -- Die Warteschlange: der laufende Befehl zuerst, dann die wartenden.
+  local newBp = (new.__bp and new.__bp.BlueprintId) or ''
+  local moved = __orders[newId] or {}
+  local function carry(cmd)
+    if not cmd then return end
+    if cmd.type == 'Upgrade' and (cmd.blueprint or '') == newBp then return end
+    moved[#moved + 1] = cmd
+  end
+  carry(__orderActive[oldId])
+  for _, cmd in ipairs(__orders[oldId] or {}) do carry(cmd) end
+  __orders[oldId] = nil
+  __orderActive[oldId] = nil
+  if moved[1] then
+    __orders[newId] = moved
+    if not __orderActive[newId] then __ordersAdvance(newId) end
+  end
+
+  -- Gesundheit als Verhaeltnis (Cfile:978648-978652).
+  local oldMax = old:GetMaxHealth()
+  if oldMax > 0 then
+    local ratio = (old.__health or 0) / oldMax
+    local h = new:GetMaxHealth() * ratio
+    -- Ohne Verursacher — die Engine ruft Entity::SetHealth direkt
+    -- (Cfile:978652), es ist kein Schaden.
+    if h ~= (new.__health or 0) then new:SetHealth(nil, h) end
+  end
+
+  -- Bewachung: was das alte Gebaeude bewachte, bewacht jetzt das neue …
+  local g = __guardOrders[oldId]
+  if g then
+    __guardOrders[oldId] = nil
+    __guardOrders[newId] = g
+    new.__guardedUnit = old.__guardedUnit
+  end
+  old.__guardedUnit = false
+  -- … und jeder Bewacher des alten Gebaeudes folgt (Cfile:978664-978670).
+  for unitId, order in pairs(__guardOrders) do
+    if order.target == oldId then
+      order.target = newId
+      local guard = __units[unitId]
+      if guard then guard.__guardedUnit = newId end
+    end
+  end
 end
 
 function IssueClearCommands(units)

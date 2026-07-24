@@ -70,6 +70,7 @@ type InMsg =
   // Per-unit SetPaused (cfunc_SetPausedL "Pause builders in this list") —
   // DISTINCT from the whole-world 'pause' above (that halts the beat).
   | { type: 'unitPause'; id: number; paused: boolean }
+  | { type: 'upgrade'; id: number; blueprint: string }
   // Der Sammelpunkt einer Fabrik (IssueFactoryRallyPoint, Cfile:1008266) — KEIN
   // Bewegungsbefehl: die Fabrik bleibt stehen.
   | { type: 'rally'; id: number; x: number; y: number; z: number }
@@ -269,6 +270,13 @@ ctx.onmessage = async (e: MessageEvent<InMsg>): Promise<void> => {
     // ToggleScriptBit: apply the DESIRED state; Unit:SetScriptBit guards and
     // fires OnScriptBitSet/Clear (shields, weapon hold, stealth, intel, cloak).
     host.eval(`local u=__units[${msg.id}]; if u then u:SetScriptBit(${msg.bit}, ${msg.value ? 'true' : 'false'}) end`)
+  } else if (msg.type === 'upgrade') {
+    // IssueUpgrade(units, blueprintId) — cfunc_IssueUpgradeL (Cfile:1011315):
+    // exactly two arguments, no queue clear. The sim turns it into the
+    // CUnitUpgradeTask (build.lua __issueUpgrade).
+    host.eval(
+      `local u=__units[${msg.id}]; if u then IssueUpgrade({ u }, ${JSON.stringify(msg.blueprint)}) end`,
+    )
   } else if (msg.type === 'unitPause') {
     // Per-unit SetPaused: halts this builder/factory's production only
     // (build.lua gates __buildCollect/__factoryTick on u.__paused).

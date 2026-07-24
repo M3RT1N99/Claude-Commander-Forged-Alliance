@@ -485,6 +485,21 @@ local unit = withNoops(UNIT_NAMES, {
       return false
     elseif state == 'Reclaiming' then -- 28 (AddEnum, Cfile:702962ff)
       return (__reclaimTasks and __reclaimTasks[id]) ~= nil
+    elseif state == 'Upgrading' then
+      -- 6: the structure that is upgrading ITSELF — it is the builder of an
+      -- 'Upgrade' task (aibrain.lua:2072, platoon.lua:301, cybranunits.lua:258).
+      for _, task in pairs(__buildTasks or {}) do
+        if task.builder == id and task.order == 'Upgrade' then return true end
+      end
+      return false
+    elseif state == 'BeingUpgraded' then
+      -- 37: the successor growing on top of it — the TARGET of an 'Upgrade'
+      -- task. The drag box skips such a structure (Cfile:1290062), so the box
+      -- keeps selecting the working original instead of the half-built site.
+      for _, task in pairs(__buildTasks or {}) do
+        if task.target == id and task.order == 'Upgrade' then return true end
+      end
+      return false
     elseif state == 'BeingBuilt' then -- 39
       return self.__beingBuilt == true
     elseif state == 'Immobile' then
@@ -501,6 +516,39 @@ local unit = withNoops(UNIT_NAMES, {
   -- real method — as with IsPaused.
   IsPaused = function(self) return self.__paused == true end,
   SetPaused = function(self, paused) self.__paused = paused == true end,
+  -- WorkProgress (mUnitVarDat.mWorkProgress, ctor Cfile:772278) — ONE field
+  -- with two writers: the build task writes the progress of what the unit is
+  -- working on every tick (Cfile:815482/815496/815547, build.lua), and Lua
+  -- writes it directly for enhancements and pod rebuilds
+  -- (unit.lua:3572-3616 EnhanceThread, terranunits.lua:595-633).
+  -- The UI shows exactly this value (construction.lua:380 GetWorkProgress).
+  SetWorkProgress = function(self, progress) self.__workProgress = progress or 0 end,
+  GetWorkProgress = function(self) return self.__workProgress or 0 end,
+  -- SetBusy / SetBlockCommandQueue (defaultunits.lua:529/639): a factory that
+  -- has just finished a unit is BUSY until the unit has left the build pad, and
+  -- its command queue is BLOCKED so the next order does not start on top of the
+  -- one rolling off. build.lua __factoryTick honours both.
+  IsBusy = function(self) return self.__busy == true end,
+  SetBusy = function(self, busy) self.__busy = busy == true end,
+  SetBlockCommandQueue = function(self, block) self.__blockCommandQueue = block == true end,
+  IsCommandQueueBlocked = function(self) return self.__blockCommandQueue == true end,
+  -- GetNumBuildOrders(category) — how many build orders of that category are
+  -- pending. defaultunits.lua:473 switches the factory's blinking lights on it
+  -- (`== 0` -> green): with the old no-op it returned nil, `nil == 0` was false,
+  -- and every idle factory stayed yellow.
+  GetNumBuildOrders = function(self, category)
+    local n = 0
+    for _, task in pairs(__buildTasks or {}) do
+      if task.builder == self.__id then
+        local t = __units[task.target]
+        if t and (not category or EntityCategoryContains(category, t)) then n = n + 1 end
+      end
+    end
+    for _, item in ipairs(self.__buildQueue or {}) do
+      if not category or EntityCategoryContains(category, item.id) then n = n + (item.count or 1) end
+    end
+    return n
+  end,
   -- Shield seam: the shield calls Owner:SetShieldRatio (shield.lua
   -- UpdateShieldRatio); the UI mirrors __shieldRatio (readRow -> GetShieldRatio).
   -- SetFocusEntity/ClearFocusEntity hold the shield as the unit's focus entity

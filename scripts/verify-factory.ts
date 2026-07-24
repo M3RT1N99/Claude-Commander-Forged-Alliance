@@ -104,18 +104,84 @@ check(
   'Er hat ein Bewegungsziel (FactoryUnit.RollOffUnit → IssueMove, defaultunits.lua:571)',
 )
 
-// Und die Fabrik nimmt sich den zweiten Panzer.
+// Solange der fertige Panzer noch von der Bauplattform fährt, ist die Fabrik
+// BESETZT und ihre Warteschlange BLOCKIERT: FinishBuildThread setzt SetBusy(true)
+// + SetBlockCommandQueue(true) (defaultunits.lua:529-530), RolloffBody hält beides,
+// bis IsCommandDone(MoveCommand) meldet, dass die Einheit weg ist
+// (defaultunits.lua:643-649). Erst dann darf die nächste Einheit entstehen —
+// sonst wüchse sie IN der abfahrenden.
+const zaehlePanzer = (): number =>
+  Number(
+    host.eval(`
+      local n = 0
+      for _, u in pairs(__units) do
+        if u.__bp and u.__bp.BlueprintId == 'uel0101' then n = n + 1 end
+      end
+      return n
+    `),
+  )
 for (let i = 0; i < 3; i++) beat(engine)
-const tanks = Number(
-  host.eval(`
-    local n = 0
-    for _, u in pairs(__units) do
-      if u.__bp and u.__bp.BlueprintId == 'uel0101' then n = n + 1 end
-    end
-    return n
-  `),
+check(
+  host.eval(`return __units[${factory}].__busy == true`) === true,
+  'Die Fabrik ist BESETZT, solange der Panzer vom Hof rollt (SetBusy, defaultunits.lua:529)',
 )
-check(tanks === 2, `Die Fabrik hat den zweiten Panzer aufgesetzt (${tanks} Panzer)`)
+check(zaehlePanzer() === 1, 'Und sie setzt in dieser Zeit KEINEN zweiten Panzer auf')
+
+// Abfahrt abwarten: RolloffBody prüft alle 0.5 s (WaitSeconds), dann IdleState.
+let rollTicks = 0
+while (host.eval(`return __units[${factory}].__busy == true`) === true && rollTicks < 300) {
+  beat(engine)
+  rollTicks++
+}
+check(rollTicks < 300, `Der Panzer ist nach ${rollTicks} Beats vom Hof (RolloffBody → IdleState)`)
+for (let i = 0; i < 3; i++) beat(engine)
+const tanks = zaehlePanzer()
+check(tanks === 2, `Danach nimmt sich die Fabrik den zweiten Panzer (${tanks} Panzer)`)
+
+// === Sammelpunkt ===
+//
+// Die fertige Einheit ERBT die Befehle ihrer Fabrik (sub_5FA340,
+// Cfile:818487-818600). Der Sammelpunkt ist so ein Befehl: IssueFactoryRallyPoint
+// legt einen UNITCOMMAND_Move in die Befehlsliste der Fabrik (Cfile:1008346).
+// Ohne diese Vererbung blieben alle Einheiten auf dem Abfahrtspunkt stehen und
+// stapelten sich dort.
+console.log('\n== Sammelpunkt: die neue Einheit fährt hin ==')
+{
+  host.eval(`__units[${factory}]:SetRallyPoint({ 160, 20, 170 })`)
+  const tank2 = Number(
+    host.eval(`
+      local newest = 0
+      for id, u in pairs(__units) do
+        if u.__bp and u.__bp.BlueprintId == 'uel0101' and id > newest then newest = id end
+      end
+      return newest
+    `),
+  )
+  let t = 0
+  while (t < 3000 && readLuaUnit(host, tank2)!.fraction < 1) {
+    beat(engine)
+    t++
+  }
+  // Ein Beat nach der Fertigstellung: RollOffUnit hat den Abfahrt-Befehl
+  // erteilt, der Sammelpunkt steht dahinter in der Warteschlange.
+  beat(engine)
+  const queued = host.eval(`
+    local n = 0
+    for _, c in ipairs(__orders[${tank2}] or {}) do n = n + 1 end
+    return n .. '|' .. tostring(__orderActive[${tank2}] ~= nil)
+  `)
+  check(queued === '1|true', `Abfahrt läuft, Sammelpunkt wartet dahinter (${queued})`)
+  let m = 0
+  while (m < 2000 && host.eval(`return __orderActive[${tank2}] ~= nil`) === true) {
+    beat(engine)
+    m++
+  }
+  const end = readLuaUnit(host, tank2)!
+  check(
+    Math.hypot(end.x - 160, end.z - 170) < 3,
+    `Er steht am Sammelpunkt 160/170 (${end.x.toFixed(1)}/${end.z.toFixed(1)}, nach ${m} Beats)`,
+  )
+}
 
 const badWarnings = warnings.filter((w) => !/effectutilities|Emitter|Animator|Sound/i.test(w))
 if (badWarnings.length > 0) {

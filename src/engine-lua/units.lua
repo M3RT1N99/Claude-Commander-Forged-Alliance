@@ -334,6 +334,16 @@ local function readRow(id, u)
     -- Unit:SetShieldRatio (moho). The UI mirror shows it (GetShieldRatio; the
     -- rollover shield bar, unitview.lua).
     shieldRatio = u.__shieldRatio or 0,
+    -- WorkProgress (mUnitVarDat.mWorkProgress): what this unit is working on,
+    -- written by the build task every tick (Cfile:815482) and by Lua for
+    -- enhancements (unit.lua:3579). The UI shows exactly this
+    -- (construction.lua:380 GetWorkProgress) — for an upgrading structure it is
+    -- the progress of its successor.
+    workProgress = u.__workProgress or 0,
+    -- UNITSTATE_BeingUpgraded (37) — the successor growing on top of a
+    -- structure. The drag box skips it (Cfile:1290062), so the box keeps
+    -- selecting the working original.
+    beingUpgraded = u:IsUnitState('BeingUpgraded'),
     born = u.__spawnTick or 0,
     mesh = u.__meshBp,
     army = u.__army or 1,
@@ -399,6 +409,8 @@ function __readAllUnitsJson()
       .. ',"caps":' .. jnum(r.caps)
       .. ',"dead":' .. tostring(r.dead)
       .. ',"shieldRatio":' .. jnum(r.shieldRatio)
+      .. ',"workProgress":' .. jnum(r.workProgress)
+      .. ',"beingUpgraded":' .. tostring(r.beingUpgraded)
       .. ',"born":' .. jnum(r.born)
       .. (function()
         -- The whole command queue (head first) for the command graph;

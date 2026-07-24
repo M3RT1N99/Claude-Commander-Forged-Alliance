@@ -54,9 +54,11 @@ function __abortBuildTasks(builderId)
       local t = __units[task.target]
       if task.started and b and not b.__dead then
         if t and not t.__dead then
-          pcall(function() b:OnStopBuild(t, task.order) end)
+          local ok, err = pcall(function() b:OnStopBuild(t, task.order) end)
+          if not ok then WARN('OnStopBuild: ' .. tostring(err)) end
         end
-        pcall(function() b:OnFailedToBuild() end)
+        local okF, errF = pcall(function() b:OnFailedToBuild() end)
+        if not okF then WARN('OnFailedToBuild: ' .. tostring(errF)) end
       end
       -- Only a site whose build NEVER began vanishes on abort: in the
       -- engine the structure does not exist before the task reached it —
@@ -64,6 +66,7 @@ function __abortBuildTasks(builderId)
       -- begun site (__engineBorn) stays, keeps its progress, and dies
       -- through the decay path (Unit::OnTick, Cfile:952824-952840).
       if t and not t.__engineBorn and (t.__fraction or 1) <= 0 then t:Destroy() end
+      if b then b.__workProgress = 0 end
       __econClearBuildRequest((b and b.__army) or 1, tid)
       __buildTasks[tid] = nil
     end
@@ -138,7 +141,8 @@ local function startTask(task, tid)
   -- Die Engine setzt UnitBeingBuilt, BEVOR sie OnStartBuild ruft:
   -- FactoryUnit.RollOffUnit (defaultunits.lua:570) liest genau dieses Feld.
   b.UnitBeingBuilt = t
-  pcall(function() b:OnStartBuild(t, task.order) end)
+  local ok, err = pcall(function() b:OnStartBuild(t, task.order) end)
+  if not ok then WARN('OnStartBuild: ' .. tostring(err)) end
 end
 
 --- Pro Beat: der Bauer geht zu seinem aktiven Auftrag und DREHT SICH ZU IHM.
@@ -150,7 +154,10 @@ end
 local function approach(task)
   local b = __units[task.builder]
   local t = __units[task.target]
-  if not b or not t or task.order == 'FactoryBuild' then return end
+  -- Neither a factory build nor an upgrade has an approach: the site sits ON
+  -- the builder (CUnitUpgradeTask skips the navigator branch for immobile
+  -- units entirely, Cfile:817246-817259).
+  if not b or not t or task.order == 'FactoryBuild' or task.order == 'Upgrade' then return end
 
   local mbd = (b.__bp and b.__bp.Economy and b.__bp.Economy.MaxBuildDistance) or 0
   local bp = b.__pos or { 0, 0, 0 }
@@ -221,6 +228,60 @@ function __adjustFactoryQueue(factoryId, index, delta)
   if item.count <= 0 then table.remove(f.__buildQueue, index) end
 end
 
+-- === Gebaeude-Upgrade (Moho::CUnitUpgradeTask, Cfile:816981/817198) ===
+--
+-- Der Upgrade ist KEIN Sonderweg: die Engine legt denselben CBuildTaskHelper an
+-- wie bei jedem Bau, nur mit dem Helfer-Namen "Upgrade" (ctor Cfile:816992) —
+-- und genau dieser Name ist der `order`-String, den OnStartBuild/OnStopBuild in
+-- der Lua bekommen (defaultunits.lua:223 schaltet darauf in den UpgradingState).
+--
+-- TaskTick (Cfile:817276-817300) erzeugt den Nachfolger mit
+-- SUnitConstructionParams(layer, GetPosition(), army, zielBlueprint, bauer) —
+-- also an der Stelle, im Layer und in der Armee des alten Gebaeudes, mit dem
+-- alten Gebaeude als Erbauer. Danach:
+--   * altes Gebaeude:  mUnitStates |= 0x40  -> UNITSTATE_Upgrading (6)
+--                      (ctor Cfile:817000), mWorkProgress = 0
+--   * neues Gebaeude:  mUnitStates |= 0x20 (HIDWORD) -> UNITSTATE_BeingUpgraded
+--                      (37, Cfile:817320)
+--   * SetFocusEntity: der Nachfolger ist der Fokus des alten Gebaeudes
+--                     (Cfile:817310; der Destruktor raeumt ihn wieder ab)
+-- Beide Zustaende leitet IsUnitState aus den Tasks ab (moho.lua) — sie sind
+-- damit genau so lange gesetzt wie der Task lebt.
+function __issueUpgrade(unitId, bpId)
+  local u = __units[unitId]
+  if not u then return -1, 'unknown unit ' .. tostring(unitId) end
+  if u.__dead or u.__destroyQueued then return -1, 'unit is dead' end
+  -- Ein zweiter Upgrade-Befehl auf demselben Gebaeude verpufft — kein Fehler:
+  -- UNIT_IssueCommand haengt ihn nur an die Warteschlange (clear = 0,
+  -- Cfile:1011353), und ein Task wird daraus erst, wenn er an die Reihe kommt.
+  -- Dann ist das Gebaeude aber schon zerstoert (defaultunits.lua:267).
+  -- Rueckgabe -2 = "nichts zu tun" (im Gegensatz zu -1 = Fehler).
+  for _, task in pairs(__buildTasks) do
+    if task.builder == unitId and task.order == 'Upgrade' then return -2, 'already upgrading' end
+  end
+  local target = bpId
+  if not target or target == '' then
+    target = u.__bp and u.__bp.General and u.__bp.General.UpgradesTo
+  end
+  if not target or target == '' then
+    return -1, tostring(u.__bp and u.__bp.BlueprintId) .. ' has no General.UpgradesTo'
+  end
+  if __isBuildRestricted(u, target) then return -1, target .. ' is build-restricted' end
+  local p = u.__pos or { 0, 0, 0 }
+  local scriptPath = '/units/' .. target .. '/' .. target .. '_script.lua'
+  local uid, err = __spawnBuildSite(scriptPath, target, p[1], p[2], p[3], u.__army or 1, unitId, 'Upgrade')
+  if uid < 0 then return uid, err end
+  local t = __units[uid]
+  -- Same heading as its predecessor — the successor stands exactly where the
+  -- old building stood (SUnitConstructionParams takes the builder's transform).
+  t.__heading = u.__heading or 0
+  -- Cfile:817310: the successor becomes the old building's focus entity, so
+  -- Unit:GetFocusUnit() answers "what am I working on" during the upgrade.
+  u:SetFocusEntity(t)
+  __issueBuildTask(unitId, uid, 'Upgrade')
+  return uid, ''
+end
+
 -- Laeuft an dieser Unit gerade ein Bau-Auftrag?
 local function isBuilding(id)
   for _, task in pairs(__buildTasks) do
@@ -237,7 +298,12 @@ function __factoryTick()
     local q = f.__buildQueue
     -- A paused factory (SetPaused) starts no new unit from its queue
     -- (cfunc_SetPausedL: mIsPaused halts production).
-    if q and table.getn(q) > 0 and not f.__beingBuilt and not isBuilding(id) and not f.__paused then
+    -- SetBusy / SetBlockCommandQueue (defaultunits.lua:529/639, FinishBuildThread
+    -- and RolloffBody): while the finished unit is still leaving the build pad
+    -- the factory is busy and its queue is blocked — the next unit must NOT
+    -- start on top of the one rolling off.
+    if q and table.getn(q) > 0 and not f.__beingBuilt and not isBuilding(id) and not f.__paused
+      and not f.__busy and not f.__blockCommandQueue then
       local item = q[1]
       if __isBuildRestricted(f, item.id) then
         -- A build-restricted unit is never produced (Unit::CanBuild, the army
@@ -363,9 +429,13 @@ function __buildApply()
       local h = (t.__health or 0) + maxH * task.step * rate
       if h > maxH then h = maxH end
       t.__health = h
+      -- HP repair: the builder's WorkProgress is the target's health ratio
+      -- (Cfile:815496).
+      b.__workProgress = maxH > 0 and (h / maxH) or 0
       if h >= maxH then
         b.UnitBeingBuilt = t
-        pcall(function() b:OnStopBuild(t, task.order) end)
+        local okS, errS = pcall(function() b:OnStopBuild(t, task.order) end)
+        if not okS then WARN('OnStopBuild: ' .. tostring(errS)) end
         n = n + 1
         done[n] = tid
       end
@@ -375,6 +445,10 @@ function __buildApply()
       if f > 1 then f = 1 end
       t.__fraction = f
       t.__health = t:GetMaxHealth() * f
+      -- Construction: the builder's WorkProgress IS the site's fraction
+      -- (Cfile:815480-815482) — that is the value the UI shows
+      -- (construction.lua:380 GetWorkProgress).
+      b.__workProgress = f
       if f >= 1 then
         -- With several builders on one site every task finishes here, but
         -- the TARGET gets OnStopBeingBuilt exactly once — the engine guards
@@ -387,10 +461,23 @@ function __buildApply()
         -- about it. FactoryUnit.OnStopBuild rolls the unit off the factory
         -- (defaultunits.lua:515-526) — it must already be alive for that.
         if wasBeingBuilt then
-          pcall(function() t:OnStopBeingBuilt(b, task.order) end)
+          local okB, errB = pcall(function() t:OnStopBeingBuilt(b, t:GetCurrentLayer()) end)
+          if not okB then WARN('OnStopBeingBuilt: ' .. tostring(errB)) end
         end
         b.UnitBeingBuilt = t
-        pcall(function() b:OnStopBuild(t, task.order) end)
+        local okS, errS = pcall(function() b:OnStopBuild(t, task.order) end)
+        if not okS then WARN('OnStopBuild: ' .. tostring(errS)) end
+        -- Die fertige Einheit ERBT die Befehle ihrer Fabrik (sub_5FA340,
+        -- Cfile:818487-818600): jeder Befehl der Fabrik wandert in die
+        -- Warteschlange der neuen Einheit, uebersprungen wird nur
+        -- TransportLoadUnits fuer Luft-/Seeeinheiten. Der Sammelpunkt IST so
+        -- ein Befehl — IssueFactoryRallyPoint legt einen UNITCOMMAND_Move in
+        -- die Fabrik-Befehlsliste (Cfile:1008346). Er kommt HINTER den
+        -- Abfahrt-Befehl, den RollOffUnit gerade erteilt hat
+        -- (defaultunits.lua:571): erst vom Hof, dann zum Sammelpunkt.
+        if task.order == 'FactoryBuild' and b.__rally then
+          __issueOrder(task.target, { type = 'Move', x = b.__rally[1], z = b.__rally[3] }, false)
+        end
         n = n + 1
         done[n] = tid
       end
@@ -404,6 +491,9 @@ function __buildApply()
     local tid = done[i]
     local task = __buildTasks[tid]
     local b = task and __units[task.builder]
+    -- Every build task resets the builder's WorkProgress when it ends
+    -- (task destructors, Cfile:814889/817002/817050/818358/819000).
+    if b then b.__workProgress = 0 end
     __econClearBuildRequest((b and b.__army) or 1, tid)
     __buildTasks[tid] = nil
   end

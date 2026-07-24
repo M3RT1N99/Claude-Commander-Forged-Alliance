@@ -1129,6 +1129,15 @@ async function startSandbox(mapFolder: string): Promise<void> {
         }
         return
       }
+      // UNITCOMMAND_Upgrade (construction.lua:876 IssueBlueprintCommand): the
+      // structure builds its successor (General.UpgradesTo) on its own spot.
+      // Same seam as every other order — IssueUpgrade in the sim VM
+      // (cfunc_IssueUpgradeL, Cfile:1011315).
+      if (cmd === 'upgrade' && v?.blueprint) {
+        for (const id of ids) luaSim?.upgrade(id, v.blueprint)
+        log(`Upgrade ${ids.join(',')} → ${v.blueprint}`)
+        return
+      }
       // SetPaused (cfunc_SetPausedL "Pause builders in this list"): a SEPARATE
       // per-unit path — NOT the whole-world session pause (that freezes the
       // entire sim). value is the boolean; the sim halts production + demand.
@@ -2041,10 +2050,6 @@ function applySelection(treffer: LuaSceneUnit[], additive: boolean): string | nu
  * anderes Feld). Das Ziehvolumen des Originals ist der Frustum-Ausschnitt des
  * Rechtecks; projizierte Box gegen Rechteck ist derselbe Test.
  *
- * Schritt 2 des Originals — `IsMobile(u) || !IsUnitState(u, 37)`, 37 =
- * `UNITSTATE_BeingUpgraded` (Cfile:703040) — ist heute für JEDE Einheit
- * erfüllt: die Sim kennt keinen Upgrade-Zustand, der zweite Term ist damit
- * immer wahr. Kein erfundener Zustand, kein zusätzlicher Filter.
  */
 function boxSelect(x0: number, y0: number, x1: number, y1: number, additive: boolean): string | null {
   if (!luaSim) return null
@@ -2065,6 +2070,10 @@ function boxSelect(x0: number, y0: number, x1: number, y1: number, additive: boo
     if (u.army !== fokus) continue
     const s = luaSim.state(u.id)
     if (!s || s.dead) continue
+    // Schritt 2: `IsMobile(u) || !IsUnitState(u, 37)` (Cfile:1290062) — der
+    // Nachfolger, der gerade auf einem Gebäude wächst, ist NICHT mit dem
+    // Rahmen wählbar; die Auswahl bleibt beim arbeitenden Original.
+    if (!u.select.mobile && s.beingUpgraded === true) continue
     box.setFromObject(u.mesh)
     if (box.isEmpty()) continue
     box.getCenter(mitte)
