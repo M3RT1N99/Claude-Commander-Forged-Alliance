@@ -323,7 +323,7 @@ function GetAttachedUnitsList(units)
 end
 
 -- Von der Engine pro Beat: der Zustand einer Unit aus der Sim.
-function __uiSetUnit(id, blueprintId, army, x, y, z, health, maxHealth, workProgress, idle, fireState, guardedId, capMask)
+function __uiSetUnit(id, blueprintId, army, x, y, z, health, maxHealth, workProgress, idle, fireState, guardedId, capMask, deadFlag)
   local u = __uiUnits[id]
   if not u then
     -- SUnitVarDat-Ctor (Cfile:772277): mFireState = FIRESTATE_ReturnFire (0).
@@ -348,7 +348,12 @@ function __uiSetUnit(id, blueprintId, army, x, y, z, health, maxHealth, workProg
   -- is the authority — runtime Add/RemoveCommandCap arrives here per beat
   -- (-1 = no value in this beat; keep the blueprint-derived mask).
   if capMask ~= nil and capMask >= 0 then u.__commandCapMask = capMask end
-  u.dead = false
+  -- The sim marks a unit dead through its multi-beat death sequence (readRow
+  -- sends `dead` = __dead or __destroyQueued). A dying unit stays in __uiUnits
+  -- until it is flushed and __uiRemoveUnit runs, but is already excluded from
+  -- SelectUnits/avatars/ValidateUnitsList — the engine drops IsDead AND
+  -- DestroyQueued (Cfile:1361497-1361498).
+  u.dead = deadFlag == true
 end
 
 -- Die Bau-Warteschlange einer Fabrik aus der Sim spiegeln. Die Engine haelt sie
@@ -644,9 +649,14 @@ end
 -- accumulates the buildable category across the selection as an INTERSECTION
 -- (BVIntSet::IntersectWith, Cfile:1264719): the first builder copies, every
 -- further one intersects — the build menu shows only what ALL selected units
--- can build. (Left open on purpose: the original also subtracts each unit's
--- already-queued categories, Cfile:1264659-1264712 — that needs the
--- queue->category mapping.)
+-- can build. (The original also intersects each unit's buildable with the army's
+-- build-restriction category (army->mVarDat.mCat, Cfile:1264632) and removes
+-- restricted blueprints per unit (sub_8C1220 + RemoveAllFrom, Cfile:1264659-1264712).
+-- That category is populated ONLY by AddBuildRestriction — the lobby "Restricted
+-- Units" option / scenario restrictions (siminit.lua:190, scenarioframework.lua:949).
+-- Our sim has no restrictions, so the category is empty and the subtraction is a
+-- no-op; wiring the machinery without the restriction data would be dead code —
+-- it belongs with the restrictions feature, not here.)
 --
 -- orders/toggles are ARRAYS of cap strings — orders.lua:891 iterates them with
 -- `for index, availOrder in availableOrders do`.

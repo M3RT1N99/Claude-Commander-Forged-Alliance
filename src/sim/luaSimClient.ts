@@ -45,6 +45,9 @@ export interface LuaUnitSnapshot {
   /** Effective command-cap mask (UnitAttributes::commandCapsMask) — the UI
    *  mirror follows runtime Add/RemoveCommandCap through this sync. */
   caps?: number
+  /** Dead/DestroyQueued through the multi-beat death sequence — the UI mirror
+   *  excludes it from selection/avatars (IsDead + DestroyQueued, Cfile:1361497). */
+  dead?: boolean
   /** Erstellungs-Tick — die Build-Shader zählen ihr Alter darüber (material.x). */
   born: number
   /** The unit's active order (command graph): type + target position. */

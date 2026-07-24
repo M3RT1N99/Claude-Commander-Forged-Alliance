@@ -333,6 +333,12 @@ local function readRow(id, u)
     born = u.__spawnTick or 0,
     mesh = u.__meshBp,
     army = u.__army or 1,
+    -- Death mirror: a unit lingers in __units through its multi-beat death
+    -- sequence (Kill -> OnKilled thread -> Destroy), so readRow still sends it.
+    -- Without this flag __uiSetUnit marks it alive (u.dead = false) and
+    -- SelectUnits/avatars/ValidateUnitsList would keep a dying unit selectable —
+    -- the engine excludes IsDead AND DestroyQueued (Cfile:1361497-1361498).
+    dead = (u.__dead == true) or (u.__destroyQueued == true),
     -- „idle" im Sinn der Engine (die Idle-Sets am UserArmy, Cfile:1352334-1352374,
     -- werden aus dem TASK-Zustand gepflegt): kein Bewegungsziel, kein laufender
     -- oder wartender Bau-Auftrag, keine Fabrik-Produktion — und eine BAUSTELLE
@@ -387,6 +393,7 @@ function __readAllUnitsJson()
       .. ',"fireState":' .. jnum(r.fireState)
       .. ',"guard":' .. jnum(r.guard)
       .. ',"caps":' .. jnum(r.caps)
+      .. ',"dead":' .. tostring(r.dead)
       .. ',"born":' .. jnum(r.born)
       .. (function()
         -- The whole command queue (head first) for the command graph;
