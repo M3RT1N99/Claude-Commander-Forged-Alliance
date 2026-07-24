@@ -1887,7 +1887,20 @@ function __uiSetRollover(id)
     shieldRatio = u.shieldRatio or 0,
     fuelRatio = u.fuelRatio or -1,
     workProgress = u.workProgress or 0,
-    kills = 0,
+    kills = u.kills or 0,
+    -- Silo ammo. unitview.lua:216 calls the silo stat function for EVERY
+    -- hovered unit, and unitview.lua:116 compares
+    -- `info.tacticalSiloMaxStorageCount > 0 or info.nukeSiloMaxStorageCount > 0`
+    -- unconditionally — leaving these nil threw "attempt to compare nil with
+    -- number" and silently killed the WHOLE rollover panel on every hover (the
+    -- error is swallowed by the frame pump's try, gameUi.ts). orders.lua:611-627
+    -- reads the same fields. The sim does not build silo missiles yet, so
+    -- nothing is stored and no capacity is reported; once silos are simulated
+    -- these come from GetTacticalSiloAmmoCount/GetNukeSiloAmmoCount.
+    tacticalSiloStorageCount = u.tacticalSiloAmmo or 0,
+    tacticalSiloMaxStorageCount = u.tacticalSiloMax or 0,
+    nukeSiloStorageCount = u.nukeSiloAmmo or 0,
+    nukeSiloMaxStorageCount = u.nukeSiloMax or 0,
     customName = u.customName,
     massProduced = fertig and (eco.ProductionPerSecondMass or 0) or 0,
     massRequested = fertig and (eco.MaintenanceConsumptionPerSecondMass or 0) or 0,

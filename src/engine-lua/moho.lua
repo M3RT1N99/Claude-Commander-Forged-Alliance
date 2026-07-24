@@ -513,6 +513,18 @@ local unit = withNoops(UNIT_NAMES, {
   -- visible hull rock needs impulse physics, which the sim does not have —
   -- motion runs through the navigator (a separate, absent feature).
   RecoilImpulse = function(self, x, y, z) self.__recoilImpulse = { x or 0, y or 0, z or 0 } end,
+  -- Silo ammo counts. unit.lua:1405 does `if self:GetNukeSiloAmmoCount() <= 0`,
+  -- simutils.lua:69-70 and platoon.lua:358/408 read them too — undefined they
+  -- threw "call a nil value" / "compare nil with number". The sim builds no silo
+  -- missiles yet, so the count is 0 and Give*SiloAmmo records what it was given.
+  GetTacticalSiloAmmoCount = function(self) return self.__tacticalSiloAmmo or 0 end,
+  GetNukeSiloAmmoCount = function(self) return self.__nukeSiloAmmo or 0 end,
+  GiveTacticalSiloAmmo = function(self, n)
+    self.__tacticalSiloAmmo = (self.__tacticalSiloAmmo or 0) + (n or 0)
+  end,
+  GiveNukeSiloAmmo = function(self, n)
+    self.__nukeSiloAmmo = (self.__nukeSiloAmmo or 0) + (n or 0)
+  end,
   SetShieldRatio = function(self, ratio) self.__shieldRatio = ratio end,
   SetFocusEntity = function(self, e) self.__focusEntity = e end,
   ClearFocusEntity = function(self) self.__focusEntity = nil end,

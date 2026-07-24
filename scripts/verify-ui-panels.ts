@@ -528,6 +528,26 @@ const rollover = host.eval(`
   return info and info.blueprintId or false
 `)
 check(rollover === 'uel0001', 'GetRolloverInfo().blueprintId = uel0001')
+// unitview.lua:216 runs the silo stat function for EVERY hovered unit, and
+// unitview.lua:116 compares `tacticalSiloMaxStorageCount > 0 or
+// nukeSiloMaxStorageCount > 0` unconditionally. While those fields were nil this
+// threw "attempt to compare nil with number" and the frame pump swallowed it —
+// the whole rollover panel silently stopped updating on every hover.
+// orders.lua:611-627 reads the same fields.
+const siloStats = host.eval(`
+  local i = GetRolloverInfo()
+  local ok, err = pcall(function()
+    local shown = i.tacticalSiloMaxStorageCount > 0 or i.nukeSiloMaxStorageCount > 0
+    return string.format('%d/%d %d/%d %s', i.tacticalSiloStorageCount, i.tacticalSiloMaxStorageCount,
+      i.nukeSiloStorageCount, i.nukeSiloMaxStorageCount, tostring(shown))
+  end)
+  return ok and err or ('ERR: ' .. tostring(err))
+`) as string
+check(
+  siloStats === '0/0 0/0 false',
+  `the silo stat function runs on any hovered unit (${siloStats})`,
+)
+check(host.eval('return type(GetRolloverInfo().kills)') === 'number', 'kills is a number (veterancy stars)')
 
 console.log('\n== score.lua: das Punkte-Panel steht, die Uhr läuft aus dem Sim-Tick ==')
 // CreateScoreUI lief im One-Shot-OnFrame (gamemain.OnFirstUpdate,
