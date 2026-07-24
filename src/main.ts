@@ -194,6 +194,19 @@ async function startFrontEndUi(): Promise<void> {
     gameUi?.dispose()
     gameUi = await GameUi.create(vfs, await loadGameFonts(), log, 'frontend', conVarChanged)
     gameUi.attachEvents()
+    // Wire audio in the FRONT END too — main.lua:231/236 starts the ambient loop
+    // and the "Main_Menu" music, and the options dialog drives the sound-volume
+    // sliders (SetVolume). Only the session start connected these before, so the
+    // whole menu was silent and the menu sound options did nothing.
+    if (!gameAudio) gameAudio = await GameAudio.create(vfs, log)
+    if (gameAudio) {
+      const audio = gameAudio
+      gameUi.connectAudio(
+        (bank, cue, id) => audio.play(bank, cue, id),
+        (id) => audio.stop(id),
+      )
+      gameUi.connectVolume((cat, vol) => audio.setVolume(cat, vol))
+    }
     setIngame(true)
 
     // GameUi.render() fängt Lua-Fehler selbst ab und meldet jeden genau einmal

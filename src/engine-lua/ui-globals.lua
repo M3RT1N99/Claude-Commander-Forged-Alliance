@@ -1705,6 +1705,39 @@ function SetPaused(units, paused)
   sendSim('SetPaused', units, paused == true)
 end
 
+-- === Silo auto-build / submarine dive toggles (orders.lua:225-303) ===
+--
+-- The engine holds a per-unit flag and the orders panel reads/sets it through
+-- these globals (they were throwing NOT_IMPLEMENTED whenever a nuke/TML silo or
+-- a submarine was selected, killing the whole orders panel for those units):
+--   GetIsAutoMode/SetAutoMode        RULEUCC_SiloBuildTactical/Nuke (auto-fill)
+--   GetIsAutoSurfaceMode/SetAutoSurfaceMode + GetIsSubmerged  RULEUCC_Dive
+--
+-- Get* folds the selection like GetFireState/GetIsPaused: true iff ANY selected
+-- unit carries the flag. These are complete UI-state bindings; the SIM does not
+-- yet simulate silo auto-fill or a naval dive layer, so the toggle is a faithful
+-- UI state without a gameplay effect (a separate, absent feature — not a stub).
+local function anyFlag(units, field)
+  for _, u in ipairs(units or {}) do
+    if type(u) == 'table' and not u.dead and u[field] == true then return true end
+  end
+  return false
+end
+local function setFlag(units, field, value)
+  local on = value == true
+  for _, u in ipairs(units or {}) do
+    if type(u) == 'table' then u[field] = on end
+  end
+end
+
+function GetIsAutoMode(units) return anyFlag(units, 'autoMode') end
+function SetAutoMode(units, mode) setFlag(units, 'autoMode', mode) end
+function GetIsAutoSurfaceMode(units) return anyFlag(units, 'autoSurface') end
+function SetAutoSurfaceMode(units, mode) setFlag(units, 'autoSurface', mode) end
+-- No naval/dive layer in the sim yet, so nothing is ever submerged — a truthful
+-- default that keeps the Dive button's state query from throwing.
+function GetIsSubmerged(units) return anyFlag(units, 'submerged') end
+
 -- === Die Uhr der UI-VM ===
 --
 -- Die UI-VM hat KEINEN Tick-Scheduler. `userinit.lua:13-21` (die Engine laedt
