@@ -653,13 +653,13 @@ end
 -- (BVIntSet::IntersectWith, Cfile:1264719): the first builder copies, every
 -- further one intersects — the build menu shows only what ALL selected units
 -- can build. (The original also intersects each unit's buildable with the army's
--- build-restriction category (army->mVarDat.mCat, Cfile:1264632) and removes
--- restricted blueprints per unit (sub_8C1220 + RemoveAllFrom, Cfile:1264659-1264712).
--- That category is populated ONLY by AddBuildRestriction — the lobby "Restricted
--- Units" option / scenario restrictions (siminit.lua:190, scenarioframework.lua:949).
--- Our sim has no restrictions, so the category is empty and the subtraction is a
--- no-op; wiring the machinery without the restriction data would be dead code —
--- it belongs with the restrictions feature, not here.)
+-- build-restriction category (army->mVarDat.mCat, Cfile:1264632) so restricted
+-- units drop OUT of the build menu. The restrictions themselves live sim-side
+-- (globals.lua AddBuildRestriction/__armyBuildRestrictions, enforced by
+-- canBuildBlueprint) and are NOT yet mirrored into this UI VM — so the menu still
+-- shows a restricted unit, but the sim rejects the build (CanBuild). Wiring this
+-- subtraction needs the army restriction category synced to the UI; the sandbox
+-- sets no restrictions, so it is inert today.)
 --
 -- orders/toggles are ARRAYS of cap strings — orders.lua:891 iterates them with
 -- `for index, availOrder in availableOrders do`.

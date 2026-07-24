@@ -239,18 +239,25 @@ function __factoryTick()
     -- (cfunc_SetPausedL: mIsPaused halts production).
     if q and table.getn(q) > 0 and not f.__beingBuilt and not isBuilding(id) and not f.__paused then
       local item = q[1]
-      local p = f.__pos or { 0, 0, 0 }
-      local scriptPath = '/units/' .. item.id .. '/' .. item.id .. '_script.lua'
-      local uid, err = __spawnBuildSite(
-        scriptPath, item.id, p[1], p[2], p[3], f.__army or 1, id, 'FactoryBuild'
-      )
-      if uid < 0 then
-        WARN('Fabrik ' .. tostring(id) .. ' kann ' .. tostring(item.id) .. ' nicht bauen: ' .. tostring(err))
+      if __isBuildRestricted(f, item.id) then
+        -- A build-restricted unit is never produced (Unit::CanBuild, the army
+        -- deny-list from AddBuildRestriction). Drop it rather than spawn it.
+        WARN('Factory ' .. tostring(id) .. ': ' .. tostring(item.id) .. ' is build-restricted')
         table.remove(q, 1)
       else
-        __issueBuildTask(id, uid, 'FactoryBuild')
-        item.count = item.count - 1
-        if item.count <= 0 then table.remove(q, 1) end
+        local p = f.__pos or { 0, 0, 0 }
+        local scriptPath = '/units/' .. item.id .. '/' .. item.id .. '_script.lua'
+        local uid, err = __spawnBuildSite(
+          scriptPath, item.id, p[1], p[2], p[3], f.__army or 1, id, 'FactoryBuild'
+        )
+        if uid < 0 then
+          WARN('Fabrik ' .. tostring(id) .. ' kann ' .. tostring(item.id) .. ' nicht bauen: ' .. tostring(err))
+          table.remove(q, 1)
+        else
+          __issueBuildTask(id, uid, 'FactoryBuild')
+          item.count = item.count - 1
+          if item.count <= 0 then table.remove(q, 1) end
+        end
       end
     end
   end

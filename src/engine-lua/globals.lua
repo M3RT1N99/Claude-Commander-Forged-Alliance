@@ -991,6 +991,19 @@ local function canBuildBlueprint(u, bp)
   return not categoryTermsMatch(u.__buildRestrictions, targetCategories)
 end
 
+-- Restriction-only gate for the primary build path (build.lua __factoryTick):
+-- the builder's own BuildableCategory is already enforced by what the queue
+-- accepts, so here only the army deny-list (AddBuildRestriction) and the
+-- per-unit restriction cache block production — Unit::CanBuild consults the army
+-- filter first (faf-re Unit.cpp:12386-12398).
+function __isBuildRestricted(u, bpId)
+  local bp = __registered and __registered.Unit and __registered.Unit[string.lower(tostring(bpId))]
+  if not u or not bp then return false end
+  local targetCategories = bpCategorySet(bp)
+  if categoryTermsMatch(__armyBuildRestrictions[u.__army], targetCategories) then return true end
+  return categoryTermsMatch(u.__buildRestrictions, targetCategories)
+end
+
 local function factoryBuildCategoriesIntersect(a, b)
   local aCategories = a.__bp and a.__bp.Economy and a.__bp.Economy.BuildableCategory
   local bCategories = b.__bp and b.__bp.Economy and b.__bp.Economy.BuildableCategory
