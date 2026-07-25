@@ -137,6 +137,15 @@ export class Hud {
    * ab `Display.Mesh.IconFadeInZoom` des Blueprints.
    */
   alwaysIcons = false
+  /**
+   * The two engine master switches for strategic icons (Cfile:1284579):
+   * `ui_RenderIcons` (Cfile:421748, default true) hides the normal icons when
+   * off; `ui_NisRenderIcons` (Cfile:421760, default true) hides ALL of them
+   * (the NIS/cinematic master). The paused/toggle-overlay force (isBusy_37) is
+   * not modelled — a documented reduction.
+   */
+  renderIcons = true
+  nisRenderIcons = true
 
   // -------------------------------------------------------------------------
   // LEBENSBALKEN + BAU-FORTSCHRITT
@@ -320,7 +329,17 @@ export class Hud {
   private updateStrategicIcons(): void {
     const layer = this.el('#strat-layer')
     const rootRect = this.root.getBoundingClientRect()
-    const dist = this.viewer.getRtsDistance()
+    // The engine compares Display.Mesh.IconFadeInZoom against the zoom scalar Z
+    // = the world width in ogrids spanned at the camera target (Cfile:1284422),
+    // the SAME metric the bars use — NOT the camera distance. The fade threshold
+    // is capped at GetMaxZoom()*0.89 so icons always appear before the camera
+    // bottoms out at full zoom (Cfile:1284589-1284591).
+    const zoom = this.viewer.zoomOgrids()
+    const mz = this.viewer.rtsCameraValue('maxZoom')
+    const maxZoom = typeof mz === 'number' ? mz : Infinity
+    // Master switches: ui_NisRenderIcons off hides ALL, ui_RenderIcons off hides
+    // the normal icons (Cfile:1284579).
+    const iconsOff = !this.nisRenderIcons || !this.renderIcons
     const units = this.source.units()
 
     while (this.stratPool.length < units.length) {
@@ -333,7 +352,11 @@ export class Hud {
     for (let i = 0; i < this.stratPool.length; i++) {
       const img = this.stratPool[i]!
       const u = units[i]
-      if (!u || (dist < u.fadeZoom && !this.alwaysIcons)) {
+      // No icon for a unit still under construction (engine !IsBeingBuilt,
+      // Cfile:1284581); fade unless ui_AlwaysRenderStrategicIcons, comparing the
+      // capped threshold min(IconFadeInZoom, maxZoom*0.89) against the zoom Z.
+      const cap = u ? Math.min(u.fadeZoom, maxZoom * 0.88999999) : 0
+      if (!u || iconsOff || u.fraction < 1 || (zoom < cap && !this.alwaysIcons)) {
         img.style.display = 'none'
         continue
       }

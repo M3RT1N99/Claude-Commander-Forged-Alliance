@@ -560,6 +560,10 @@ function conVarChanged(name: string, value: string | number | boolean): void {
   // (ui_AlwaysRenderStrategicIcons, Cfile:421748) und im Optionen-Dialog
   // schaltbar. Ohne sie erscheinen die Icons erst ab Display.Mesh.IconFadeInZoom.
   if (name.toLowerCase() === 'ui_alwaysrenderstrategicicons') hud.alwaysIcons = an
+  // The two strategic-icon master switches (Cfile:1284579): ui_NisRenderIcons
+  // hides ALL icons, ui_RenderIcons hides the normal ones.
+  if (name.toLowerCase() === 'ui_rendericons') hud.renderIcons = an
+  if (name.toLowerCase() === 'ui_nisrendericons') hud.nisRenderIcons = an
 }
 let buildPreview: BuildPreview | null = null
 let currentScmap: ScmapData | null = null
@@ -2514,7 +2518,10 @@ function luaSimUpdate(): void {
         x,
         y,
         z,
-        heading,
+        // The unit's full render orientation — yaw-only today (the sim sends
+        // heading), so the brackets stay flat; when the sim carries a full
+        // orientation the same call tilts them (Cfile:1215184).
+        u.mesh.quaternion,
         u.ringExtents,
         halfEdge,
         selectParams,

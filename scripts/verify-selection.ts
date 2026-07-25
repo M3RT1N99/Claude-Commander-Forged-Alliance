@@ -9,6 +9,7 @@
  *
  *   npx tsx scripts/verify-selection.ts
  */
+import * as THREE from 'three'
 import { parseBlueprint, parseLuaAssignments, bpGet } from '../src/formats/blueprint'
 import {
   boxSelectIds,
@@ -181,7 +182,8 @@ console.log('\n== Selection brackets (Cfile:1215114-1215433) ==')
   // Geometry: 4 quads = 16 vertices, each a square of half edge t*S centred ON
   // its corner (Cfile:1215281-1215293).
   const geo = createBracketGeometry()
-  updateBracketGeometry(geo, 100, 20, 200, 0, ext, 0.6, SELECT_PARAM_DEFAULTS)
+  // Identity (= yaw 0) reproduces the flat box geometry bit-for-bit.
+  updateBracketGeometry(geo, 100, 20, 200, new THREE.Quaternion(), ext, 0.6, SELECT_PARAM_DEFAULTS)
   const pos = geo.getAttribute('position')
   check(pos.count === 16, `${pos.count} vertices (4 quads)`)
   check(
@@ -209,6 +211,17 @@ console.log('\n== Selection brackets (Cfile:1215114-1215433) ==')
     uv.getX(0) === 0 && uv.getY(0) === 0 && uv.getX(4) === 0.5 && uv.getY(8) === 0.5,
     'each quad takes its own quadrant of the bracket texture',
   )
+  // A TILTED unit (full orientation, not just yaw) gives the brackets a real
+  // per-vertex Y — the engine rotates the box by the full mCurTransform.orient
+  // (Cfile:1215184), which the old yaw-only path could never do.
+  {
+    const tilted = createBracketGeometry()
+    const roll = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.PI / 6)
+    updateBracketGeometry(tilted, 100, 20, 200, roll, ext, 0.6, SELECT_PARAM_DEFAULTS)
+    const tp = tilted.getAttribute('position')
+    const anyTilt = Array.from({ length: tp.count }, (_, i) => tp.getY(i)).some((y) => Math.abs(y - 20.12) > 1e-3)
+    check(anyTilt, 'a rolled unit tilts its brackets (per-vertex Y varies)')
+  }
 }
 
 

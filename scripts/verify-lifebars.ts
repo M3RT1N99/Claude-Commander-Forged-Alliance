@@ -118,12 +118,14 @@ console.log('\n== Geometry of a row (Cfile:1285452-1285515) ==')
   check(g.left === 485 && g.top === 298, `row 1 is centred on the anchor (${g.left}/${g.top})`)
   check(g.width === 30 && g.height === 4, 'background = the full bar')
   check(g.fillLeft === 486 && g.fillTop === 299, 'the fill is inset by one pixel')
-  check(Math.abs(g.fillWidth - 14.5) < 1e-9, `fill width = frac * (barW - 1) = ${g.fillWidth}`)
-  check(g.fillHeight === 3, `fill height = max(barH - 1, 2) = ${g.fillHeight}`)
+  // Fill spans [left+1 .. left+frac*(barW-1)], so width = frac*(barW-1) - 1
+  // (the +1 near edge, Cfile:1285512-1285534) — not the far-edge offset itself.
+  check(Math.abs(g.fillWidth - 13.5) < 1e-9, `fill width = frac*(barW-1) - 1 = ${g.fillWidth}`)
+  check(g.fillHeight === 2, `fill height = max(barH-1, 2) - 1 = ${g.fillHeight}`)
   const g2 = barGeometry(500, 300, 30, 4, 1, 1)
   check(g2.top === 298 + 4 + 2, `row 2 sits barH + 2 lower (${g2.top})`)
-  // A very thin bar keeps a two pixel fill (Cfile:1285512-1285515).
-  check(barGeometry(0, 0, 10, 2, 0, 1).fillHeight === 2, 'a thin bar keeps a 2 px fill')
+  // A very thin bar: max(barH-1,2)=2 bottom edge, fill inset +1 -> 1 px fill.
+  check(barGeometry(0, 0, 10, 2, 0, 1).fillHeight === 1, 'a thin bar has a 1 px fill (2 px bottom edge minus the +1 inset)')
 }
 
 await game.close()

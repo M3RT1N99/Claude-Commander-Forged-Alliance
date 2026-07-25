@@ -133,28 +133,35 @@ export function createBracketGeometry(): THREE.BufferGeometry {
 
 /**
  * Write the 16 vertices for one unit. `centerX/Z` come from the MESH BOX
- * centre, `unitY` from the unit's position (Cfile:1215271-1215278); `heading`
- * turns the box with the unit (the engine uses the full box axes).
+ * centre, `unitY` from the unit's position (Cfile:1215271-1215278); `orient` is
+ * the unit's FULL current-transform orientation quaternion, which the engine
+ * uses to rotate the box axes and every quad offset (MultQuadVec against
+ * mVarData.mCurTransform.orient, Cfile:1215184) — so a tilted unit gets tilted
+ * brackets with a real per-vertex Y, not a flat yaw box. A pure-yaw quaternion
+ * reproduces the old flat geometry exactly (M*(x,0,z) then has y=0).
  */
 export function updateBracketGeometry(
   geometry: THREE.BufferGeometry,
   centerX: number,
   unitY: number,
   centerZ: number,
-  heading: number,
+  orient: THREE.Quaternion,
   extents: BracketExtents,
   halfEdge: number,
   params: SelectParams,
 ): void {
   const pos = geometry.getAttribute('position') as THREE.BufferAttribute
-  const cos = Math.cos(heading)
-  const sin = Math.sin(heading)
-  // R * (x, z) for a heading rotation about Y.
-  const rx = (x: number, z: number): number => x * cos + z * sin
-  const rz = (x: number, z: number): number => -x * sin + z * cos
-  const cx = centerX + rx(extents.ox, extents.oz)
-  const cz = centerZ + rz(extents.ox, extents.oz)
-  const cy = unitY + params.heightFudge + extents.oy
+  // M = the rotation matrix of the orientation (column-major elements).
+  const e = new THREE.Matrix4().makeRotationFromQuaternion(orient).elements
+  // M * (x, 0, z): world components of a ground-plane local vector.
+  const rx = (x: number, z: number): number => e[0]! * x + e[8]! * z
+  const ry = (x: number, z: number): number => e[1]! * x + e[9]! * z
+  const rz = (x: number, z: number): number => e[2]! * x + e[10]! * z
+  // The centre offset is a full 3D vector rotated by M (Cfile:1215222-1215253).
+  const { ox, oy, oz } = extents
+  const cx = centerX + (e[0]! * ox + e[4]! * oy + e[8]! * oz)
+  const cy = unitY + params.heightFudge + (e[1]! * ox + e[5]! * oy + e[9]! * oz)
+  const cz = centerZ + (e[2]! * ox + e[6]! * oy + e[10]! * oz)
   let i = 0
   for (let q = 0; q < 4; q++) {
     const [sx, sz] = CORNERS[q]!
@@ -169,7 +176,7 @@ export function updateBracketGeometry(
     ] as const) {
       const x = localX + dx
       const z = localZ + dz
-      pos.setXYZ(i++, cx + rx(x, z), cy, cz + rz(x, z))
+      pos.setXYZ(i++, cx + rx(x, z), cy + ry(x, z), cz + rz(x, z))
     }
   }
   pos.needsUpdate = true

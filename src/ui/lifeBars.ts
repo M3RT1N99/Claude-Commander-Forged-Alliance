@@ -113,10 +113,24 @@ export function barRows(u: BarUnit, blinkPhase = 0): BarRow[] {
     rows.push({ fraction: clamp01(u.shieldRatio), color: LIFEBAR_CONVARS.shield })
     // Row 3: work progress when there is no fuel at all, else the fuel bar.
     rows.push(u.fuelRatio <= -1 ? progressRow() : fuelRow())
-  } else if (u.fuelRatio > u.workProgress) {
-    rows.push(fuelRow())
   } else {
-    rows.push(progressRow())
+    // No shield (Cfile:1285370-1285442): pick work progress, or fuel when fuel
+    // exceeds progress; THEN — regardless of that choice — an empty tank
+    // (-1 < fuel <= 0) overrides to a FULL bar in the warning colour while the
+    // blink phase is high (Cfile:1285383-1285393). The earlier routing only
+    // reached the blink when fuel > progress, so an empty tank with progress 0
+    // never blinked.
+    let color: string = LIFEBAR_CONVARS.progress
+    let value = u.workProgress
+    if (u.fuelRatio > u.workProgress) {
+      color = LIFEBAR_CONVARS.fuel
+      value = u.fuelRatio
+    }
+    if (u.fuelRatio > -1 && u.fuelRatio <= 0 && blinkPhase > 0.5) {
+      color = LIFEBAR_CONVARS.fuelWarning
+      value = 1
+    }
+    rows.push({ fraction: clamp01(value), color })
   }
 
   // A row below the first is only drawn when its value is > 0
@@ -164,8 +178,12 @@ export function barGeometry(
     height: barH,
     fillLeft: left + 1,
     fillTop: top + 1,
-    fillWidth: Math.max(0, fraction * (barW - 1)),
-    fillHeight: Math.max(barH - 1, 2),
+    // The fill spans X:[left+1 .. left+frac*(barW-1)] and Y:[top+1 ..
+    // top+max(barH-1,2)] (Cfile:1285512-1285534), so its WIDTH/HEIGHT are the
+    // far-edge offset MINUS the +1 near edge — not the far-edge offset itself
+    // (which was 1px too wide and 1px too tall).
+    fillWidth: Math.max(0, fraction * (barW - 1) - 1),
+    fillHeight: Math.max(0, Math.max(barH - 1, 2) - 1),
   }
 }
 
