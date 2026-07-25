@@ -26,7 +26,7 @@ local NOT_IMPLEMENTED = {
   'GetIsSubmerged', 'GetMouseScreenPos', 'GetMouseWorldPos', 'GetMovieVolume', 'GetNumRootFrames', 'GetOptions',
   'GetPreference', 'GetResourceSharing', 'GetRolloverInfo', 'GetScriptBit', 'GetSelectedUnits',
   'GetSimRate', 'GetSimTicksPerSecond', 'GetSpecialFileInfo', 'GetSpecialFilePath', 'GetSpecialFiles', 'GetSpecialFolder',
-  'GetSystemTime', 'GetSystemTimeSeconds', 'GetTextureDimensions', 'GetUIControlsAlpha', 'GetUnitById', 'GetUnitCommandData',
+  'GetSystemTime', 'GetSystemTimeSeconds', 'GetTextureDimensions', 'GetUIControlsAlpha', 'GetUnitCommandData',
   'GetValidAttackingUnits', 'GpgNetActive', 'GpgNetSend', 'HasCommandLineArg',
   'HasLocalizedVO', 'IN_AddKeyMapTable', 'IN_ClearKeyMap', 'IN_RemoveKeyMapTable', 'InternalCreateBitmap',
   'InternalCreateBorder', 'InternalCreateDiscoveryService', 'InternalCreateDragger', 'InternalCreateEdit', 'InternalCreateFrame', 'InternalCreateGroup',

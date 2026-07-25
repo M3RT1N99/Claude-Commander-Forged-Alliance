@@ -2052,6 +2052,13 @@ function GetRolloverInfo()
   return __uiRollover or nil
 end
 
+-- "GetUnitById(id)" (Cfile:1269630, UI variant): the UserUnit mirror by id.
+-- unittext.lua:19/30/68 (the floating unit-count/damage numbers) look units up
+-- with it.
+function GetUnitById(id)
+  return __uiUnits[tonumber(id)]
+end
+
 function __uiSetRollover(id)
   local u = id and __uiUnits[id]
   if not u then

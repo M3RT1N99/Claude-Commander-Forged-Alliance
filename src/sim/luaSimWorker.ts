@@ -166,7 +166,7 @@ ctx.onmessage = async (e: MessageEvent<InMsg>): Promise<void> => {
     // Original-Lua lesen GetSurfaceHeight, und ohne Quelle knallt es jetzt (statt
     // still 0 zu liefern). Dieselbe bilineare Abfrage wie im Renderer.
     const hf = new Heightfield(msg.terrain)
-    setTerrainSource(h, (x, z) => hf.at(x, z))
+    setTerrainSource(h, (x, z) => hf.at(x, z), { width: msg.terrain.width, height: msg.terrain.height })
     // ALLE Projektil- und Prop-Blueprints, VOR dem ersten Schuss. Die Engine
     // lädt beim Start ebenfalls alles (Blueprints.lua über DiskFindFiles) —
     // mitten im Tick kann eine Waffe nichts nachladen.
@@ -298,7 +298,7 @@ async function resetSession(files: Map<string, Uint8Array>, terrain: Heightfield
   const h = await LuaHost.create(files, (level, m) => ctx.postMessage({ type: 'log', level, msg: m }))
   engine = installEngine(h)
   const hf = new Heightfield(terrain)
-  setTerrainSource(h, (x, z) => hf.at(x, z))
+  setTerrainSource(h, (x, z) => hf.at(x, z), { width: terrain.width, height: terrain.height })
   loadBlueprintGroups(h, files)
   host = h
 }

@@ -21,7 +21,20 @@ export function installEngineGlobals(host: LuaHost): void {
   host.eval(ENGINE_LUA)
 }
 
-/** Verdrahtet die Terrain-Höhe der geladenen Karte (GetTerrainHeight). */
-export function setTerrainSource(host: LuaHost, heightAt: (x: number, z: number) => number): void {
+/**
+ * Verdrahtet die Terrain-Höhe der geladenen Karte (GetTerrainHeight) und die
+ * Kartenmaße (GetMapSize). Das Heightfield hat (width+1)×(height+1) Samples, die
+ * Engine liefert `field->width - 1` / `field->height - 1` — also genau die
+ * Zell-Maße width/height (Cfile:1089736/1089738).
+ */
+export function setTerrainSource(
+  host: LuaHost,
+  heightAt: (x: number, z: number) => number,
+  size?: { width: number; height: number },
+): void {
   host.setGlobal('__terrainHeight', heightAt)
+  if (size) {
+    host.setGlobal('__mapSizeX', size.width)
+    host.setGlobal('__mapSizeZ', size.height)
+  }
 }

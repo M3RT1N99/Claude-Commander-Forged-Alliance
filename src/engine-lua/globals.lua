@@ -591,6 +591,32 @@ function CreateBuilderArmController(unit, turretBone, barrelBone, aimBone)
 end
 function CreateThrustController(unit, bone) return newManipulator('thrust', unit, bone) end
 
+-- "manip = CreateSlaver(unit, dest_bone, src_bone)" (Cfile:877923, sim only) —
+-- a CSlaveManipulator that copies src_bone's animated pose onto dest_bone.
+-- weapon.lua:101 slaves every rack bone to the pitch bone for weapons with
+-- RackSlavedToTurret; without it that weapon's OnCreate thread died.
+function CreateSlaver(unit, destBone, srcBone)
+  local m = newManipulator('slaver', unit, destBone)
+  m.__srcBone = srcBone
+  return m
+end
+
+-- "CreateStorageManip(unit, bone, resource, minX,minY,minZ, maxX,maxY,maxZ)"
+-- (Cfile:880155, sim only) — a CStorageManipulator that slides the bone
+-- between min and max as the army's storage of that resource fills. The eight
+-- mass/energy storage structure scripts call it in OnCreate (ueb1105 etc.).
+function CreateStorageManip(unit, bone, resource, mnX, mnY, mnZ, mxX, mxY, mxZ)
+  local m = newManipulator('storage', unit, bone)
+  m.__resource = resource
+  m.__min = { mnX, mnY, mnZ }
+  m.__max = { mxX, mxY, mxZ }
+  return m
+end
+
+-- CSlaveManipulator:SetMaxRate(deg/s) (Cfile:880156) — weapon.lua caps the
+-- slaved bone's rate with it.
+function ManipMeta:SetMaxRate(dps) self.__maxRate = dps; return self end
+
 -- SetFiringArc(yawMin, yawMax, yawSpeed, pitchMin, pitchMax, pitchSpeed) —
 -- weapon.lua:150 hands center±halfRange in DEGREES; the engine stores the
 -- centered arc (CAimManipulator: mMinHeading = arc center, mMaxHeading =
@@ -806,6 +832,21 @@ function CreateLightParticleIntel(owner, bone, army, size, life, tex, ramp) end
 function CreateSplat(pos, heading, tex, sx, sz, lod, life, army) return newEmitter(nil, -1, army, tex) end
 function CreateDecal(pos, heading, tex1, tex2, type, sx, sz, lod, life, army) return newEmitter(nil, -1, army, tex1) end
 
+-- "CreateSplatOnBone(entity, offset, boneName, textureName, sizeX, sizeZ,
+-- lodParam, duration, army)" (Cfile:908461, sim only; the mHelp is incomplete
+-- but the impl and unit.lua:2648 give the 9-arg order). It takes the bone's
+-- world transform, rotates the offset by the bone orientation and drops a
+-- ground splat there. unit.lua:2325/2649 lays tread marks with it.
+function CreateSplatOnBone(ent, offset, bone, tex, sx, sz, lod, life, army)
+  local pos, rot = __boneWorld(ent, bone)
+  local o = __qrot(rot, offset or { 0, 0, 0 })
+  local p = { pos[1] + o[1], pos[2] + o[2], pos[3] + o[3] }
+  -- Heading = the bone's +Z direction projected onto the ground.
+  local fwd = __quatForward(rot)
+  local heading = math.atan(fwd[1], fwd[3])
+  return CreateSplat(p, heading, tex, sx, sz, lod, life, army)
+end
+
 -- === Economy events (CreateEconomyEvent / WaitFor) ===
 -- unit.lua:3599 (teleport drain) and defaultweapons.lua:143 (overcharge) buy a
 -- timed resource drain: CreateEconomyEvent(unit, energy, mass, time, callback).
@@ -903,6 +944,37 @@ function DiskGetFileInfo(path) return false end
 -- for layer changes (land/water), amphibious movement and effects, and a silent
 -- 0 makes every one of those decisions wrong while looking fine. A test that
 -- wants flat ground says so explicitly.
+-- "entity = GetEntityById(id)" (Cfile:1077559, sim only) — any entity (unit,
+-- prop, projectile) by id, no IsUnit filter; nil when gone. selfdestruct.lua:16
+-- (Ctrl-K) and simcallbacks.lua:78 (control groups) look units up with it.
+function GetEntityById(id)
+  local n = tonumber(id)
+  if not n then return nil end
+  return __units[n] or (__props and __props[n]) or (__projectiles and __projectiles[n]) or nil
+end
+
+-- "GetUnitById(id)" (Cfile:1077628, sim; the UI has its own at Cfile:1269630) —
+-- like GetEntityById but ONLY when the entity is a unit (Entity::IsUnit filter,
+-- Cfile:1077672).
+function GetUnitById(id)
+  local u = __units[tonumber(id)]
+  if u and u.__isUnit then return u end
+  return nil
+end
+
+-- "sizeX, sizeZ = GetMapSize()" (Cfile:1089710, sim only) — the heightfield is
+-- (w+1)x(h+1) samples, so this returns the map extent in world coords
+-- (field->width - 1, field->height - 1, Cfile:1089736/1089738). __mapSizeX/Z
+-- come from setTerrainSource. AI base templates scale their radii with it.
+__mapSizeX = false
+__mapSizeZ = false
+function GetMapSize()
+  if not __mapSizeX then
+    error('GetMapSize: no map loaded — the engine must call setTerrainSource()', 2)
+  end
+  return __mapSizeX, __mapSizeZ
+end
+
 __terrainHeight = false
 function GetTerrainHeight(x, z)
   if not __terrainHeight then
