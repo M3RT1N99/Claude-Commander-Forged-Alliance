@@ -745,9 +745,11 @@ export class GameUi {
           this.host.eval(`return __mauiKey('KeyDown', ${k.wx}, ${k.vk}, ${m})`) === true
         let acted = consumed
         if (!consumed) {
-          // '~' erreicht die Konsole im Original über den Char-Code 126
-          // (Cfile:1262747) — die Taste selbst ist VK 0xC0.
-          const mauiCode = e.key === '~' ? 126 : k.wx
+          // The console toggle reaches the engine as maui code 126
+          // (Cfile:1262747). The backquote key (VK 0xC0) now maps to 126 in
+          // keys.ts (MAUI_KeycodeMSWToMaui case 192->126), so k.wx already
+          // carries it — no special-case needed.
+          const mauiCode = k.wx
           acted =
             this.host.eval(
               `return __uiKeyMapExecute(${k.vk}, ${e.shiftKey}, ${e.ctrlKey}, ${e.altKey}, ${e.repeat}, ${mauiCode})`,
