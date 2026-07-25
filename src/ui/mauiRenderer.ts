@@ -524,9 +524,17 @@ export class MauiRenderer {
 /** FA-Farben sind 'aarrggbb' (oder 'rrggbb'). */
 function argb(color: string): string {
   const c = String(color).replace(/^#/, '')
-  if (c.length === 8) {
+  // The engine's func_ParseColor (@574510) accepts an 8-digit AARRGGBB or a
+  // 6-digit RRGGBB hex string, OR a named colour it resolves via enum_colors.
+  if (/^[0-9a-fA-F]{8}$/.test(c)) {
     const a = parseInt(c.slice(0, 2), 16) / 255
     return `rgba(${parseInt(c.slice(2, 4), 16)},${parseInt(c.slice(4, 6), 16)},${parseInt(c.slice(6, 8), 16)},${a})`
   }
-  return `#${c}`
+  if (/^[0-9a-fA-F]{6}$/.test(c)) return `#${c}`
+  // Not hex -> a named colour. enum_colors is the full HTML/X11 name set (it
+  // starts "AliceBlue", Cfile:387861; func_ParseColor lowercases before the
+  // lookup, Cfile:574529-574551). CSS resolves the SAME names to the SAME
+  // values case-insensitively, so 'black'/'white'/... pass straight through
+  // (previously '#black' was emitted and silently dropped).
+  return c.toLowerCase()
 }
