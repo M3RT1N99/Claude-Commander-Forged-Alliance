@@ -11,6 +11,8 @@
  *  - GetEntityById / GetUnitById (Cfile:1077559/1077628): control groups and
  *    Ctrl-K self-destruct resolve ids with them.
  *  - GetMapSize (Cfile:1089710): AI base templates scale their radii with it.
+ *  - CreateBeamEntityToEntity (Cfile:890531): the experimental phason laser
+ *    (defaultcollisionbeams.lua:325) draws its beam with it.
  *
  *   npx tsx --import ./scripts/register-lua.mjs scripts/verify-sim-entities.ts
  */
@@ -100,6 +102,24 @@ console.log('\n== GetEntityById / GetUnitById ==')
   check(host.eval(`return GetUnitById(${u}) == __units[${u}]`) === true, 'GetUnitById finds the unit')
   check(host.eval(`return GetEntityById(999999) == nil`) === true, 'a missing id -> nil')
   check(host.eval(`return GetEntityById(tostring(${u})) == __units[${u}]`) === true, 'a string id works too (atoi)')
+}
+
+console.log('\n== CreateBeamEntityToEntity: a beam between two bones ==')
+{
+  const u = spawnLuaUnit(host, 'uel0001', { x: 300, y: 20, z: 300 }, 1)
+  for (let i = 0; i < 2; i++) beat(engine)
+  // The beam carries both endpoints; __readAllEmittersJson writes x2/y2/z2 for
+  // the far end (the impact bone).
+  const r = String(
+    host.eval(`
+      local e = CreateBeamEntityToEntity(__units[${u}], 0, __units[${u}], 1, 1, '/effects/emitters/test_beam_emit.bp')
+      return tostring(e.__other == __units[${u}]) .. '|' .. tostring(e.__otherBone) .. '|' .. tostring(e.__spec)
+    `),
+  )
+  check(
+    r === 'true|1|/effects/emitters/test_beam_emit.bp',
+    `the beam runs bone 0 -> bone 1 and carries its blueprint (${r})`,
+  )
 }
 
 console.log('\n== GetMapSize ==')

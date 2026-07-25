@@ -827,6 +827,24 @@ function AttachBeamEntityToEntity(a, ab, b, bb, army, spec)
   e.__otherBone = bb
   return e
 end
+
+-- "CreateBeamEntityToEntity(entity, bone, other, bone, army, blueprint)"
+-- (Cfile:890531, sim only) — a beam between two bones from a BEAM BLUEPRINT,
+-- the same carrier as AttachBeamEntityToEntity. defaultcollisionbeams.lua:325
+-- draws the experimental phason laser (muzzle bone 0 -> impact bone 1) with it.
+--
+-- The engine additionally looks the blueprint up and throws "Unknown beam kind"
+-- for an unknown one (Cfile:890636). We do NOT mirror that check: the sim VM
+-- does not register beam emitter blueprints up front (the renderer fetches them
+-- on demand via emitterBlueprint), so a valid beam path is absent from
+-- __registered.Emitter and validating against it would reject every real beam.
+-- The blueprint is carried as the emitter spec; the renderer resolves it.
+function CreateBeamEntityToEntity(a, aBone, b, bBone, army, blueprint)
+  local e = newEmitter(a, aBone, army, blueprint)
+  e.__other = b
+  e.__otherBone = bBone
+  return e
+end
 function CreateLightParticle(owner, bone, army, size, life, tex, ramp) end
 function CreateLightParticleIntel(owner, bone, army, size, life, tex, ramp) end
 function CreateSplat(pos, heading, tex, sx, sz, lod, life, army) return newEmitter(nil, -1, army, tex) end
