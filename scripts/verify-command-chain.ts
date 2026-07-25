@@ -164,6 +164,19 @@ const sim = {
   repair: (id: number, targetId: number): void => {
     simHost.eval(`__dispatchRepair(${id}, ${targetId})`)
   },
+  guard: (id: number, targetId: number): void => {
+    simHost.eval(`__dispatchGuard(${id}, ${targetId})`)
+  },
+  patrol: (id: number, x: number, z: number): void => {
+    simHost.eval(`__dispatchPatrol(${id}, ${x}, ${z})`)
+  },
+  attackGround: (id: number, x: number, z: number): void => {
+    simHost.eval(`__dispatchAttackGround(${id}, ${x}, ${z})`)
+  },
+  reclaim: (id: number, targetId: number): void => {
+    simHost.eval(`__dispatchReclaim(${id}, ${targetId})`)
+  },
+  reclaimMapProp: (): void => {},
   setRallyPoint: (id: number, x: number, y: number, z: number): void => {
     simHost.eval(`local u = __units[${id}] if u then u:SetRallyPoint({ ${x}, ${y}, ${z} }) end`)
   },
@@ -310,6 +323,89 @@ console.log('\n== Klick auf den Feind: Attack statt Move ==')
   check(
     simHost.eval(`return __attackOrders[${acu}] == ${feind}`) === true,
     'Die Sim führt die Attack-Order (CAttackTargetTask)',
+  )
+}
+
+// RULEUCC_Move: a FORCED move — the click goes to the ground even if an enemy
+// is under the cursor (the enemy is NOT attacked). This was a gap: a Move
+// command mode fell through to the default handler and misrouted to Attack.
+console.log('\n== RULEUCC_Move: forced move, even onto an enemy ==')
+{
+  simHost.eval(`__attackOrders[${acu}] = nil; __orders[${acu}] = nil; __orderActive[${acu}] = nil`)
+  const enemy = spawnLuaUnit(simHost, 'uel0201', { x: 170, y: 20, z: 170 }, 2)
+  mirror()
+  uiHost.eval(`return __uiSelectByIds({ ${acu} })`)
+  uiHost.eval(`import('/lua/ui/game/commandmode.lua').StartCommandMode('order', { name = 'RULEUCC_Move' })`)
+  const mvMsg = await worldClick(uiHost, sim, { x: 170, z: 170 }, () => 20, {
+    queue: false,
+    enemyTargetId: enemy,
+  })
+  check(mvMsg !== null && mvMsg.startsWith('Move (1)'), `forced move onto an enemy is a Move (${mvMsg})`)
+  check(
+    simHost.eval(`return __attackOrders[${acu}] == nil`) === true,
+    'the ACU did NOT attack — the forced move ignores the enemy target',
+  )
+}
+
+// RULEUCC_Repair: a forced repair on the target under the cursor.
+console.log('\n== RULEUCC_Repair: forced repair on the clicked unit ==')
+{
+  simHost.eval(`__abortBuildTasks(${acu}); __orders[${acu}] = nil; __orderActive[${acu}] = nil`)
+  const damaged = spawnLuaUnit(simHost, 'ueb0101', { x: 180, y: 20, z: 180 }, 1)
+  simHost.eval(`local u = __units[${damaged}]; u:SetHealth(nil, u:GetMaxHealth() * 0.5)`)
+  mirror()
+  uiHost.eval(`return __uiSelectByIds({ ${acu} })`)
+  uiHost.eval(`import('/lua/ui/game/commandmode.lua').StartCommandMode('order', { name = 'RULEUCC_Repair' })`)
+  const rpMsg = await worldClick(uiHost, sim, { x: 180, z: 180 }, () => 20, {
+    queue: false,
+    ownTargetId: damaged,
+  })
+  check(rpMsg !== null && rpMsg.startsWith('Repair (1)'), `forced repair on a damaged unit (${rpMsg})`)
+  check(simHost.eval(`return __builderBusy(${acu})`) === true, 'the ACU has a repair task')
+}
+
+// An UNWIRED order mode must FAIL LOUDLY, not silently misroute to Attack/Move
+// (CLAUDE.md). This is the systematic gap the audit found.
+console.log('\n== An unwired order mode fails loudly ==')
+{
+  simHost.eval(`__abortBuildTasks(${acu}); __attackOrders[${acu}] = nil; __orders[${acu}] = nil; __orderActive[${acu}] = nil`)
+  mirror()
+  uiHost.eval(`return __uiSelectByIds({ ${acu} })`)
+  uiHost.eval(`import('/lua/ui/game/commandmode.lua').StartCommandMode('order', { name = 'RULEUCC_Overcharge' })`)
+  const ocMsg = await worldClick(uiHost, sim, { x: 190, z: 190 }, () => 20, { queue: false })
+  check(
+    ocMsg !== null && ocMsg.includes('not wired'),
+    `an unwired mode returns a loud message, no misrouting (${ocMsg})`,
+  )
+  check(
+    simHost.eval(`return __attackOrders[${acu}] == nil and not __units[${acu}].__goal`) === true,
+    'and it issued NO move or attack',
+  )
+}
+
+// Guard vs Repair: a right-click on an own FINISHED but DAMAGED unit is GUARD,
+// not Repair — the engine's precedence (Cfile:1240337-1240397); the guard task
+// itself repairs the damaged target.
+console.log('\n== Right-click a finished damaged unit: Guard, not Repair ==')
+{
+  // End the command mode from the previous test: this is a plain right-click.
+  uiHost.eval(`import('/lua/ui/game/commandmode.lua').EndCommandMode(true)`)
+  simHost.eval(`__abortBuildTasks(${acu}); __guardOrders[${acu}] = nil; __orders[${acu}] = nil; __orderActive[${acu}] = nil`)
+  const finished = spawnLuaUnit(simHost, 'uel0201', { x: 210, y: 20, z: 210 }, 1)
+  simHost.eval(`local u = __units[${finished}]; u:SetHealth(nil, u:GetMaxHealth() * 0.5)`)
+  for (let i = 0; i < 2; i++) beat(engine)
+  mirror()
+  uiHost.eval(`return __uiSelectByIds({ ${acu} })`)
+  // No command mode: the default right-click. ownTargetId is the finished
+  // damaged unit (fraction >= 1) — zielUnter classifies it as own, not repair.
+  const gMsg = await worldClick(uiHost, sim, { x: 210, z: 210 }, () => 20, {
+    queue: false,
+    ownTargetId: finished,
+  })
+  check(gMsg !== null && gMsg.startsWith('Guard'), `a finished damaged unit is guarded, not repaired (${gMsg})`)
+  check(
+    simHost.eval(`return __guardOrders[${acu}] ~= nil`) === true,
+    'the ACU has a guard order (which repairs the damaged target)',
   )
 }
 

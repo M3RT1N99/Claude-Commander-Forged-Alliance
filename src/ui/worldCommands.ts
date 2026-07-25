@@ -268,6 +268,62 @@ export async function worldClick(
       : `Reclaim (${n}) → map prop #${opts.reclaimMapPropIndex}`
   }
 
+  // The Move button/hotkey (orders.lua, RULEUCC_Move): a FORCED move — the
+  // click goes to the ground point regardless of what is under the cursor (an
+  // enemy is NOT attacked, an own unit is NOT guarded). Factories rally.
+  if (cm.mode === 'order' && cm.name === 'RULEUCC_Move') {
+    let moved = 0
+    let rallied = 0
+    for (const u of selection) {
+      if (u.canMove) {
+        sim.move(u.id, hit.x, hit.z, opts.queue)
+        moved++
+      } else if (u.isFactory) {
+        sim.setRallyPoint(u.id, hit.x, elevation(hit.x, hit.z), hit.z)
+        rallied++
+      }
+    }
+    if (moved === 0 && rallied === 0) return null
+    onCommandIssued(host, {
+      // The rally point is issued as UNITCOMMAND_Move (IssueFactoryRallyPoint,
+      // Cfile:1008346) — its feedback is a Move blip, not an invented type.
+      CommandType: 'Move',
+      Position: { x: hit.x, y: elevation(hit.x, hit.z), z: hit.z },
+      Clear: !opts.queue,
+    })
+    return `Move (${moved}) → ${hit.x.toFixed(0)}, ${hit.z.toFixed(0)}`
+  }
+
+  // The Repair button/hotkey (orders.lua, RULEUCC_Repair): a FORCED repair on
+  // the unit under the cursor (own, finished or unfinished) — the same repair
+  // task as the default right-click (dispatch 0x14). Bare ground does nothing.
+  if (cm.mode === 'order' && cm.name === 'RULEUCC_Repair') {
+    const target = opts.repairTargetId ?? opts.ownTargetId
+    if (target === undefined) return null
+    let n = 0
+    for (const u of selection) {
+      if (u.canRepair && u.id !== target) {
+        sim.repair(u.id, target, opts.queue)
+        n++
+      }
+    }
+    if (n === 0) return null
+    onCommandIssued(host, {
+      CommandType: 'Repair',
+      Position: { x: hit.x, y: elevation(hit.x, hit.z), z: hit.z },
+      Clear: !opts.queue,
+    })
+    return `Repair (${n}) → Unit ${target}`
+  }
+
+  // Any OTHER order mode (Capture, Overcharge, Nuke, Tactical, Teleport, Ferry,
+  // Transport, Sacrifice, Dive, SiloBuild*, Script): the sim has no task for it
+  // yet. FAIL LOUDLY (CLAUDE.md) rather than fall through to the default
+  // handler, which would silently misroute the click to Attack/Move.
+  if (cm.mode === 'order') {
+    return `command mode ${cm.name} is not wired to the sim yet — click ignored`
+  }
+
   if (cm.mode === 'build' || cm.mode === 'buildanchored') {
     if (!cm.name) return null
     const [sx, sz] = footprintOf(host, cm.name)
@@ -399,7 +455,9 @@ export async function worldClick(
   if (moved === 0 && rallied === 0) return null
 
   onCommandIssued(host, {
-    CommandType: moved > 0 ? 'Move' : 'RallyPoint',
+    // The rally point is a UNITCOMMAND_Move under the hood (Cfile:1008346), so
+    // its feedback is a Move blip — 'RallyPoint' is not a valid EUnitCommandType.
+    CommandType: 'Move',
     Position: { x: hit.x, y, z: hit.z },
     Clear: !opts.queue,
   })

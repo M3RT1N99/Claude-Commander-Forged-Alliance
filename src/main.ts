@@ -1585,11 +1585,19 @@ function zielUnter(clientX: number, clientY: number): {
   if (hit.kind === 'unit') {
     const u = luaUnits.find((x) => x.scene === hit.unit)
     if (!u) return {}
+    // The player is army 1 in the sandbox. NOTE: the engine's target
+    // classification treats ALLIES like own units (repair/guard), not enemies
+    // (Cfile:1240320) — with no allied army in the sandbox this never differs,
+    // but a real session would need the UI VM's IsAlly here.
     if (u.army !== 1) return { enemy: u.id }
     const s = luaSim.state(u.id)
-    // Repair target: unfinished (resume construction) OR finished but
-    // damaged (HP repair — same CBuildTaskHelper, Cfile:815445).
-    if (s && (s.fraction < 1 || s.health < s.maxHealth)) return { repair: u.id }
+    // The engine's default-order precedence (Cfile:1240337-1240397):
+    //   1. UNFINISHED own/allied unit -> Repair (resume construction).
+    //   2. otherwise -> Guard (dispatch 0x0F). A FINISHED but DAMAGED unit is
+    //      Guard, NOT Repair: the guard task itself repairs a damaged target
+    //      (globals.lua guardProcess), so Guard wins and repair follows from it.
+    // Classifying a finished damaged unit as Repair (as before) inverted this.
+    if (s && s.fraction < 1) return { repair: u.id }
     return { own: u.id }
   }
   if (hit.kind === 'wreck') {
