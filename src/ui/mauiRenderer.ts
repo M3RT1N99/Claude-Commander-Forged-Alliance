@@ -256,24 +256,37 @@ export class MauiRenderer {
   }
 
   /**
-   * Der 9-Slice-Rahmen: vier Kanten + vier Ecken, die MITTE bleibt frei.
+   * Der 9-Slice-Rahmen: vier Ecken + vier Kanten, die MITTE bleibt frei.
    *
-   * So beschreibt es die Original-Lua selbst (border.lua:9-12: „Border textures
-   * assume a texture border of 1", „Adjacent corner textures must have matching
-   * widths and heights"). Die Kantenstärke kommt nicht aus einer Zahl im Skript,
-   * sondern aus den Texturmaßen: `BorderWidth` = Breite der vertical-Kachel,
-   * `BorderHeight` = Höhe der horizontal-Kachel (Cfile:1122728/1122748).
+   * Original-Lua (border.lua:9-12: „Border textures assume a texture border of
+   * 1", „Adjacent corner textures must have matching widths and heights"). Die
+   * Kantenstärke kommt aus den Texturmaßen: `BorderWidth` = Breite der
+   * vertical-Kachel, `BorderHeight` = Höhe der horizontal-Kachel
+   * (Cfile:1122728/1122748).
    *
-   * Der Rahmen liegt AUSSERHALB des Controls — deshalb sitzen die Kacheln bei
-   * negativen Offsets. Die Kanten kacheln (repeat), die Ecken nicht.
+   * `CMauiBorder::Draw` (Cfile:1122837-1123057) zeichnet alle neun Slices
+   * INNERHALB des Control-Rects [Left,Right]×[Top,Bottom] — der Border-Control
+   * hat SELBST die äußeren Maße, die Stärke frisst nach INNEN (border.lua setzt
+   * die Ränder auf die Außengrenzen). Die Ecken sitzen also bei [0,bw]/[0,bh]
+   * bzw. an der Innenkante, nicht bei negativen Offsets. bw/bh werden gerundet
+   * (func_round, Cfile:1122842/1122844).
+   *
+   * Kanten: die Engine STRECKT jede Kantentextur über ihre Spanne (UV 0..1,
+   * nicht kacheln), nur ZWISCHEN den Ecken ([Left+bw,Right-bw] / [Top+bh,B-bh])
+   * und nur, wenn die Spanne größer als die doppelte Stärke ist
+   * (Cfile:1122951/1123005). Die untere Kante ist vertikal gespiegelt (UV.y an
+   * der Außenkante 0), die rechte horizontal (Cfile:1122983/1123034).
    */
   private drawBorder(el: HTMLDivElement, c: MauiControl): void {
     const b = c.border
     if (!b) return
-    const bw = b.borderWidth || 0
-    const bh = b.borderHeight || 0
+    const bw = Math.round(b.borderWidth || 0)
+    const bh = Math.round(b.borderHeight || 0)
+    const w = c.width
+    const h = c.height
     el.style.background = 'none'
-    el.style.overflow = 'visible'
+    // Slices live INSIDE the rect now, so clip anything past the edges.
+    el.style.overflow = 'hidden'
 
     // Acht Kacheln als Kinder — sie folgen dem Control, also einmal anlegen.
     if (el.children.length !== 8) {
@@ -285,30 +298,52 @@ export class MauiRenderer {
       }
     }
     const tiles = [...el.children] as HTMLDivElement[]
-    const put = (
-      i: number,
-      tex: string | false,
-      css: Partial<CSSStyleDeclaration>,
-      repeat: string,
-    ): void => {
+    const put = (i: number, tex: string | false, css: Partial<CSSStyleDeclaration>): void => {
       const t = tiles[i]!
       const url = tex ? this.texture(tex) : null
+      // Reset any stale offset/flip from a previous layout before restyling.
+      t.style.left = t.style.right = t.style.top = t.style.bottom = ''
+      t.style.transform = ''
+      t.style.display = 'block'
       t.style.backgroundImage = url ? `url(${url})` : 'none'
-      t.style.backgroundRepeat = repeat
-      t.style.backgroundSize = repeat === 'no-repeat' ? '100% 100%' : 'auto'
+      t.style.backgroundRepeat = 'no-repeat'
+      t.style.backgroundSize = '100% 100%' // stretch (UV 0..1), never tile
       Object.assign(t.style, css)
     }
 
-    // Ecken (fest), dann Kanten (gekachelt) — genau die sechs Texturen, die
-    // SetNewTextures bekommt.
-    put(0, b.upperLeft, { left: `${-bw}px`, top: `${-bh}px`, width: `${bw}px`, height: `${bh}px` }, 'no-repeat')
-    put(1, b.upperRight, { right: `${-bw}px`, top: `${-bh}px`, width: `${bw}px`, height: `${bh}px` }, 'no-repeat')
-    put(2, b.lowerLeft, { left: `${-bw}px`, bottom: `${-bh}px`, width: `${bw}px`, height: `${bh}px` }, 'no-repeat')
-    put(3, b.lowerRight, { right: `${-bw}px`, bottom: `${-bh}px`, width: `${bw}px`, height: `${bh}px` }, 'no-repeat')
-    put(4, b.horizontal, { left: '0', top: `${-bh}px`, width: '100%', height: `${bh}px` }, 'repeat-x')
-    put(5, b.horizontal, { left: '0', bottom: `${-bh}px`, width: '100%', height: `${bh}px` }, 'repeat-x')
-    put(6, b.vertical, { left: `${-bw}px`, top: '0', width: `${bw}px`, height: '100%' }, 'repeat-y')
-    put(7, b.vertical, { right: `${-bw}px`, top: '0', width: `${bw}px`, height: '100%' }, 'repeat-y')
+    // Corners: always drawn, inside the rect (Cfile:1122850-1122950).
+    put(0, b.upperLeft, { left: '0', top: '0', width: `${bw}px`, height: `${bh}px` })
+    put(1, b.upperRight, { left: `${w - bw}px`, top: '0', width: `${bw}px`, height: `${bh}px` })
+    put(2, b.lowerLeft, { left: '0', top: `${h - bh}px`, width: `${bw}px`, height: `${bh}px` })
+    put(3, b.lowerRight, { left: `${w - bw}px`, top: `${h - bh}px`, width: `${bw}px`, height: `${bh}px` })
+    // Horizontal edges (top + bottom = mTexHorz): only between the corners, only
+    // when width > 2*bw; the bottom edge is flipped vertically (Cfile:1122951).
+    if (w > bw * 2) {
+      put(4, b.horizontal, { left: `${bw}px`, top: '0', width: `${w - 2 * bw}px`, height: `${bh}px` })
+      put(5, b.horizontal, {
+        left: `${bw}px`,
+        top: `${h - bh}px`,
+        width: `${w - 2 * bw}px`,
+        height: `${bh}px`,
+        transform: 'scaleY(-1)',
+      })
+    } else {
+      tiles[4]!.style.display = tiles[5]!.style.display = 'none'
+    }
+    // Vertical edges (left + right = mTex1): only between the corners, only when
+    // height > 2*bh; the right edge is flipped horizontally (Cfile:1123005).
+    if (h > bh * 2) {
+      put(6, b.vertical, { left: '0', top: `${bh}px`, width: `${bw}px`, height: `${h - 2 * bh}px` })
+      put(7, b.vertical, {
+        left: `${w - bw}px`,
+        top: `${bh}px`,
+        width: `${bw}px`,
+        height: `${h - 2 * bh}px`,
+        transform: 'scaleX(-1)',
+      })
+    } else {
+      tiles[6]!.style.display = tiles[7]!.style.display = 'none'
+    }
   }
 
   /**
