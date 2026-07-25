@@ -689,6 +689,17 @@ local function jnum(v)
   return string.format('%.6g', v or 0)
 end
 
+-- Integer fields need an EXACT serialization, not '%.6g'. '%.6g' keeps only 6
+-- significant digits, so a 7-digit value is rounded: the command-cap BITMASK
+-- 0x1602FF = 1442559 became 1442560 = 0x160300 — silently dropping the whole
+-- low byte (RULEUCC_Move 0x1, Attack, Guard, Repair, ...) while keeping the
+-- high bits (Reclaim 0x100000). The UI then reported canMove=false and the
+-- commander could not be moved, only reclaim. Entity ids and the spawn tick
+-- (which grows past 6 digits) have the same latent corruption.
+local function jint(v)
+  return string.format('%d', math.floor(v or 0))
+end
+
 function __readAllUnitsJson()
   local parts = {}
   local n = 0
@@ -699,7 +710,7 @@ function __readAllUnitsJson()
       q[i] = '{"id":' .. jstr(item.id) .. ',"count":' .. jnum(item.count) .. '}'
     end
     n = n + 1
-    parts[n] = '{"id":' .. jnum(r.id)
+    parts[n] = '{"id":' .. jint(r.id)
       .. ',"name":' .. jstr(r.name)
       .. ',"x":' .. jnum(r.x) .. ',"y":' .. jnum(r.y) .. ',"z":' .. jnum(r.z)
       .. ',"heading":' .. jnum(r.heading)
@@ -707,14 +718,14 @@ function __readAllUnitsJson()
       .. ',"maxHealth":' .. jnum(r.maxHealth)
       .. ',"moving":' .. tostring(r.moving)
       .. ',"fraction":' .. jnum(r.fraction)
-      .. ',"fireState":' .. jnum(r.fireState)
-      .. ',"guard":' .. jnum(r.guard)
-      .. ',"caps":' .. jnum(r.caps)
+      .. ',"fireState":' .. jint(r.fireState)
+      .. ',"guard":' .. jint(r.guard)
+      .. ',"caps":' .. jint(r.caps)
       .. ',"dead":' .. tostring(r.dead)
       .. ',"shieldRatio":' .. jnum(r.shieldRatio)
       .. ',"workProgress":' .. jnum(r.workProgress)
       .. ',"beingUpgraded":' .. tostring(r.beingUpgraded)
-      .. ',"born":' .. jnum(r.born)
+      .. ',"born":' .. jint(r.born)
       .. (function()
         -- The whole command queue (head first) for the command graph;
         -- 'order' stays as the head alias for existing consumers.

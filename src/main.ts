@@ -1261,6 +1261,28 @@ async function startSandbox(mapFolder: string): Promise<void> {
       `Karte <strong>${mapFolder}</strong> — Klick auf Einheit = Auswahl, ` +
       `Bau-Icon + Klick aufs Terrain = Gebäude setzen, Rechtsklick = Bewegung`
     log(`Sandbox bereit auf ${mapFolder} (Sim: 10 Ticks/s)`)
+    // DEV-only debug bridge for headless CDP diagnosis: it exposes the scene
+    // units, their screen positions, the selection and the command mode so a
+    // driver can issue precise clicks. Never present in a production build.
+    if (import.meta.env.DEV) {
+      ;(window as unknown as { __cfa: unknown }).__cfa = {
+        units: () =>
+          luaUnits.map((u) => {
+            const p = viewer.worldToScreen(u.mesh.position)
+            const r = viewportEl.getBoundingClientRect()
+            return {
+              id: u.id,
+              bp: u.bpId,
+              army: u.army,
+              selected: u.selected,
+              sx: p ? Math.round(r.left + p.x) : null,
+              sy: p ? Math.round(r.top + p.y) : null,
+            }
+          }),
+        commandMode: () => gameUi?.commandMode() ?? null,
+        selection: () => (gameUi ? gameUi.debugEval('return __uiSelectionJson()') : '[]'),
+      }
+    }
     const selftest = params.get('selftest')
     if (selftest) void runSelftest(selftest)
   } catch (err) {
