@@ -143,33 +143,48 @@ export interface SameTypeUnit {
 }
 
 /**
- * Double-click / Ctrl-click selection — every focus-army unit of the SAME
- * blueprint as the clicked one that is in view (HandleDoubleClickSelection,
- * Cfile:865E20; Ctrl-click same-type, Cfile:1291547-1291681).
+ * Same-blueprint selection — every focus-army unit of the SAME blueprint as the
+ * clicked one (HandleDoubleClickSelection, Cfile:865E20; Ctrl-click same-type,
+ * Cfile:1291547-1291681). Both the double-click and the Ctrl-click path REPLACE
+ * the selection with the same-type set (the engine's Ctrl branch builds a fresh
+ * set and calls SetSelection(v37), Cfile:1291573-1291591) — Ctrl-click does NOT
+ * add to the current selection.
  *
- *   'replace' — double-click: the same-type set becomes the whole selection.
- *   'add'     — Ctrl-click: add the same-type set to the current selection.
- *   'remove'  — Ctrl-Shift-click: drop the same-type set from the selection.
+ *   'replace' — double-click / Ctrl-click: the same-type set becomes the whole
+ *               selection.
+ *   'toggle'  — Ctrl-Shift-click: a CONDITIONAL toggle keyed on the clicked unit
+ *               (Cfile:1291596-1291635). If the clicked unit is already selected,
+ *               REMOVE the same-type set; otherwise ADD it. `clickedSelected`
+ *               carries that state.
  *
- * `clickedBpId` is null when the click missed a focus-army unit (a replace then
- * clears the selection, add/remove leave it unchanged).
+ * `clickedBpId` is null when the click missed a focus-army unit (replace then
+ * clears, toggle leaves the selection unchanged).
+ *
+ * NOTE: the engine's Ctrl-click collects same-type units from the whole spatial
+ * DB (map-wide, focus army, not being built, not dead — Cfile:1291641-1291684),
+ * while the double-click is limited to on-screen units. We approximate both with
+ * the caller's in-view candidate set; a map-wide Ctrl-click is a deliberate,
+ * documented reduction (selecting off-screen units the player can't see).
  */
 export function sameTypeIds(
   clickedBpId: string | null,
   focusArmy: number,
   candidates: readonly SameTypeUnit[],
   current: readonly number[],
-  mode: 'replace' | 'add' | 'remove',
+  mode: 'replace' | 'toggle',
+  clickedSelected = false,
 ): number[] {
   if (clickedBpId === null) return mode === 'replace' ? [] : [...current]
   const sameType = candidates
     .filter((u) => u.army === focusArmy && u.bpId === clickedBpId && u.inView)
     .map((u) => u.id)
   if (mode === 'replace') return sameType
+  // Ctrl+Shift toggle: the clicked unit's current selected state decides the
+  // direction for the ENTIRE same-type set (Cfile:1291604-1291635).
   const out = new Set(current)
   for (const id of sameType) {
-    if (mode === 'add') out.add(id)
-    else out.delete(id)
+    if (clickedSelected) out.delete(id)
+    else out.add(id)
   }
   return [...out]
 }

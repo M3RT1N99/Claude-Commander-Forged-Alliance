@@ -1559,14 +1559,16 @@ window.addEventListener('pointerup', (e) => {
   }
   if (luaUnits.length === 0) return
   // Dragged = box selection (SelectionDragger). A static click is one of:
-  //   Ctrl(+Shift)-click — add/remove all same-type units in view,
+  //   Ctrl-click         — REPLACE selection with all same-type units,
+  //   Ctrl+Shift-click   — toggle the same-type set (add, or remove if the
+  //                        clicked unit is already selected),
   //   double-click       — select all same-type units in view,
   //   plain/Shift click  — single-unit selection (DragRelease semantics).
   let luaMsg: string | null
   if (moved > 5) {
     luaMsg = boxSelect(start.x, start.y, e.clientX, e.clientY, e.shiftKey)
   } else if (e.ctrlKey) {
-    luaMsg = selectSameType(e.clientX, e.clientY, e.shiftKey ? 'remove' : 'add')
+    luaMsg = selectSameType(e.clientX, e.clientY, e.shiftKey ? 'toggle' : 'replace')
   } else if (e.detail >= 2) {
     luaMsg = selectSameType(e.clientX, e.clientY, 'replace')
   } else {
@@ -2206,14 +2208,15 @@ function selectLua(clientX: number, clientY: number, additive = false): string |
 
 /**
  * Select every focus-army unit of the SAME blueprint as the one under the
- * cursor that is currently in view — the engine's double-click and Ctrl-click
- * behaviour (HandleDoubleClickSelection, Cfile:865E20; Ctrl-click same-type,
+ * cursor — the engine's double-click and Ctrl-click behaviour
+ * (HandleDoubleClickSelection, Cfile:865E20; Ctrl-click same-type,
  * Cfile:1291547-1291681). `mode`:
- *   'replace' — double-click: the same-type set becomes the whole selection.
- *   'add'     — Ctrl-click: add the same-type set to the current selection.
- *   'remove'  — Ctrl-Shift-click: drop the same-type set from the selection.
+ *   'replace' — double-click / Ctrl-click: the same-type set becomes the whole
+ *               selection (Ctrl-click REPLACES, it does not add).
+ *   'toggle'  — Ctrl-Shift-click: remove the same-type set if the clicked unit
+ *               is already selected, otherwise add it.
  */
-function selectSameType(clientX: number, clientY: number, mode: 'replace' | 'add' | 'remove'): string | null {
+function selectSameType(clientX: number, clientY: number, mode: 'replace' | 'toggle'): string | null {
   const army = focusArmy()
   const hit = viewer.pickUnit(clientX, clientY)
   const clicked = hit ? luaUnits.find((u) => u.mesh === hit.mesh && u.army === army) : undefined
@@ -2224,7 +2227,9 @@ function selectSameType(clientX: number, clientY: number, mode: 'replace' | 'add
     inView: unitInView(u),
   }))
   const current = luaUnits.filter((u) => u.selected).map((u) => u.id)
-  const ids = new Set(sameTypeIds(clicked ? clicked.bpId : null, army, candidates, current, mode))
+  const ids = new Set(
+    sameTypeIds(clicked ? clicked.bpId : null, army, candidates, current, mode, clicked?.selected ?? false),
+  )
   return applySelection(
     luaUnits.filter((u) => ids.has(u.id)),
     false,

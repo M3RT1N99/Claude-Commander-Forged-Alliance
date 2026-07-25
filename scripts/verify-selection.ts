@@ -235,20 +235,27 @@ console.log('\n== Same-type selection (double-click / Ctrl-click) ==')
     const ids = sameTypeIds('bot', 1, units, [], 'replace')
     check(ids.sort().join() === '1,2', `double-click a bot selects the in-view own bots (${ids})`)
   }
-  // Ctrl-click a bot while a tank is selected -> add the bots to the tank.
+  // Ctrl-click a bot while a tank is selected -> REPLACE with the bots (the
+  // engine's Ctrl branch builds a fresh set, Cfile:1291573-1291591), NOT add.
   {
-    const ids = sameTypeIds('bot', 1, units, [4], 'add').sort()
-    check(ids.join() === '1,2,4', `Ctrl-click adds the same-type set to the current selection (${ids})`)
+    const ids = sameTypeIds('bot', 1, units, [4], 'replace').sort()
+    check(ids.join() === '1,2', `Ctrl-click replaces the selection with the same-type set (${ids})`)
   }
-  // Ctrl-Shift-click a bot -> remove the bots, keep the tank.
+  // Ctrl-Shift-click a bot that is ALREADY selected -> remove the bots, keep the
+  // tank (conditional toggle, clickedSelected=true, Cfile:1291604-1291635).
   {
-    const ids = sameTypeIds('bot', 1, units, [1, 2, 4], 'remove').sort()
-    check(ids.join() === '4', `Ctrl-Shift-click removes the same-type set (${ids})`)
+    const ids = sameTypeIds('bot', 1, units, [1, 2, 4], 'toggle', true).sort()
+    check(ids.join() === '4', `Ctrl-Shift-click removes the same-type set when the clicked unit is selected (${ids})`)
   }
-  // A click that missed a focus-army unit: replace clears, add/remove keep.
+  // Ctrl-Shift-click a bot that is NOT selected -> add the bots to the tank.
+  {
+    const ids = sameTypeIds('bot', 1, units, [4], 'toggle', false).sort()
+    check(ids.join() === '1,2,4', `Ctrl-Shift-click adds the same-type set when the clicked unit is not selected (${ids})`)
+  }
+  // A click that missed a focus-army unit: replace clears, toggle keeps.
   {
     check(sameTypeIds(null, 1, units, [4], 'replace').length === 0, 'a missed double-click clears the selection')
-    check(sameTypeIds(null, 1, units, [4], 'add').join() === '4', 'a missed Ctrl-click leaves the selection')
+    check(sameTypeIds(null, 1, units, [4], 'toggle').join() === '4', 'a missed Ctrl-click leaves the selection')
   }
   // The enemy bot (id 5, army 2) is never picked as the clicked unit and never
   // joins a same-type set.
