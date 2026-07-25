@@ -571,6 +571,12 @@ local function orderList(id, u)
       x, z = cmd.x, cmd.z
     elseif cmd.gx then
       x, z = cmd.gx, cmd.gz -- queued ground attack
+    elseif cmd.type == 'Reclaim' then
+      -- Reclaim targets a PROP (wreck / map feature), not a unit — resolve it
+      -- from __props so the command graph draws the reclaim line to it. Looking
+      -- it up in __units alone dropped every reclaim entry silently.
+      local p = __props and __props[cmd.target]
+      if p and p.__pos then x, z = p.__pos[1], p.__pos[3] end
     else
       local t = __units[cmd.target]
       if t and t.__pos then x, z = t.__pos[1], t.__pos[3] end

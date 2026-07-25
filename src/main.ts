@@ -1119,19 +1119,23 @@ async function startSandbox(mapFolder: string): Promise<void> {
       const ol = orderLines
       void (async () => {
         const base = 'textures/ui/common/game'
-        const [line, arrow, move, attack, repair, patrol] = await Promise.all([
+        const [line, arrow, move, attack, repair, patrol, guard, reclaim] = await Promise.all([
           loadFirstTexture([`${base}/orderline/orderline_generic.dds`]),
           loadFirstTexture([`${base}/orderline/orderline_arrow04.dds`]),
           loadFirstTexture([`${base}/waypoints/move_btn_up.dds`]),
           loadFirstTexture([`${base}/waypoints/attack_btn_up.dds`]),
           loadFirstTexture([`${base}/waypoints/repair_btn_up.dds`]),
           loadFirstTexture([`${base}/waypoints/patrol_btn_up.dds`]),
+          loadFirstTexture([`${base}/waypoints/guard_btn_up.dds`]),
+          loadFirstTexture([`${base}/waypoints/reclaim_btn_up.dds`]),
         ])
         const wps = new Map<string, THREE.Texture>()
         if (move) wps.set('move_btn_up', move)
         if (attack) wps.set('attack_btn_up', attack)
         if (repair) wps.set('repair_btn_up', repair)
         if (patrol) wps.set('patrol_btn_up', patrol)
+        if (guard) wps.set('guard_btn_up', guard)
+        if (reclaim) wps.set('reclaim_btn_up', reclaim)
         ol.setTextures(line, arrow, wps)
       })()
     }

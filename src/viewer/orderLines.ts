@@ -20,7 +20,7 @@ export interface OrderLineEntry {
   unitId: number
   /** Segment index within the unit's command queue (0 = active order). */
   seg?: number
-  type: 'Move' | 'Attack' | 'Repair' | 'BuildMobile' | 'Patrol'
+  type: 'Move' | 'Attack' | 'Repair' | 'BuildMobile' | 'Patrol' | 'Guard' | 'Reclaim'
   from: { x: number; y: number; z: number }
   to: { x: number; y: number; z: number }
 }
@@ -42,6 +42,14 @@ const PARAMS: Record<
   // its own line texture (orderline_arrow02, anim 0.25) is a named gap —
   // the waypoint sprite is the visible difference for now.
   Patrol: { color: 0x00ffff, alpha: 0xdd / 255, waypoint: 'patrol_btn_up' },
+  // UNITCOMMAND_Guard (:146-150) and UNITCOMMAND_Reclaim (:152-156): both
+  // inherit default_EngineeringColors ('ddffff00', same yellow as Repair) and
+  // carry their own waypoint texture. A queued Guard/Reclaim reaches this map
+  // as t='Guard'/'Reclaim' (units.lua orderList emits cmd.type verbatim); before
+  // these entries existed, PARAMS[type] was undefined and `p.color` threw a
+  // TypeError EVERY render frame, aborting the whole world-view update.
+  Guard: { color: 0xffff00, alpha: 0xdd / 255, waypoint: 'guard_btn_up' },
+  Reclaim: { color: 0xffff00, alpha: 0xdd / 255, waypoint: 'reclaim_btn_up' },
 }
 
 const LINE_WIDTH = 0.3 // approximation (renderer constant not recovered)
@@ -110,7 +118,11 @@ export class OrderLineSystem {
   }
 
   private create(type: OrderLineEntry['type']): DrawnOrder {
-    const p = PARAMS[type]
+    // Defensive: an order type without a PARAMS entry must never crash the
+    // render frame (a queued Guard once did, every frame). Fall back to the
+    // engineering color, which is what every unlisted command in
+    // commandgraphparams.lua inherits anyway (default_EngineeringColors).
+    const p = PARAMS[type] ?? { color: 0xffff00, alpha: 0xdd / 255, waypoint: 'repair_btn_up' }
     const group = new THREE.Group()
 
     const lineMat = new THREE.MeshBasicMaterial({
