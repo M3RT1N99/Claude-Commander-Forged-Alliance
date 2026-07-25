@@ -133,3 +133,43 @@ export function mergeSelection(
   }
   return [...out]
 }
+
+/** A unit visible to the same-type selection: its id, blueprint, army, in-view. */
+export interface SameTypeUnit {
+  id: number
+  bpId: string
+  army: number
+  inView: boolean
+}
+
+/**
+ * Double-click / Ctrl-click selection — every focus-army unit of the SAME
+ * blueprint as the clicked one that is in view (HandleDoubleClickSelection,
+ * Cfile:865E20; Ctrl-click same-type, Cfile:1291547-1291681).
+ *
+ *   'replace' — double-click: the same-type set becomes the whole selection.
+ *   'add'     — Ctrl-click: add the same-type set to the current selection.
+ *   'remove'  — Ctrl-Shift-click: drop the same-type set from the selection.
+ *
+ * `clickedBpId` is null when the click missed a focus-army unit (a replace then
+ * clears the selection, add/remove leave it unchanged).
+ */
+export function sameTypeIds(
+  clickedBpId: string | null,
+  focusArmy: number,
+  candidates: readonly SameTypeUnit[],
+  current: readonly number[],
+  mode: 'replace' | 'add' | 'remove',
+): number[] {
+  if (clickedBpId === null) return mode === 'replace' ? [] : [...current]
+  const sameType = candidates
+    .filter((u) => u.army === focusArmy && u.bpId === clickedBpId && u.inView)
+    .map((u) => u.id)
+  if (mode === 'replace') return sameType
+  const out = new Set(current)
+  for (const id of sameType) {
+    if (mode === 'add') out.add(id)
+    else out.delete(id)
+  }
+  return [...out]
+}

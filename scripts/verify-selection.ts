@@ -13,8 +13,10 @@ import { parseBlueprint, parseLuaAssignments, bpGet } from '../src/formats/bluep
 import {
   boxSelectIds,
   mergeSelection,
+  sameTypeIds,
   selectionBpData,
   selectionPriority,
+  type SameTypeUnit,
   type SelectionCandidate,
 } from '../src/ui/boxSelection'
 import {
@@ -207,6 +209,53 @@ console.log('\n== Selection brackets (Cfile:1215114-1215433) ==')
     uv.getX(0) === 0 && uv.getY(0) === 0 && uv.getX(4) === 0.5 && uv.getY(8) === 0.5,
     'each quad takes its own quadrant of the bracket texture',
   )
+}
+
+
+// === Double-click / Ctrl-click: same-type selection ===
+//
+// Double-click selects every focus-army unit of the same blueprint in view
+// (HandleDoubleClickSelection, Cfile:865E20); Ctrl-click adds them,
+// Ctrl-Shift-click removes them (Cfile:1291547-1291681). Enemy units and
+// off-screen units are excluded.
+console.log('\n== Same-type selection (double-click / Ctrl-click) ==')
+{
+  // Three army-1 bots (two in view, one off-screen), one army-1 tank in view,
+  // one army-2 bot in view. Clicking a bot picks blueprint 'bot'.
+  const units: SameTypeUnit[] = [
+    { id: 1, bpId: 'bot', army: 1, inView: true },
+    { id: 2, bpId: 'bot', army: 1, inView: true },
+    { id: 3, bpId: 'bot', army: 1, inView: false }, // off-screen
+    { id: 4, bpId: 'tank', army: 1, inView: true },
+    { id: 5, bpId: 'bot', army: 2, inView: true }, // enemy
+  ]
+  // Double-click a bot -> all IN-VIEW army-1 bots (1, 2), not 3 (off-screen),
+  // not 4 (tank), not 5 (enemy).
+  {
+    const ids = sameTypeIds('bot', 1, units, [], 'replace')
+    check(ids.sort().join() === '1,2', `double-click a bot selects the in-view own bots (${ids})`)
+  }
+  // Ctrl-click a bot while a tank is selected -> add the bots to the tank.
+  {
+    const ids = sameTypeIds('bot', 1, units, [4], 'add').sort()
+    check(ids.join() === '1,2,4', `Ctrl-click adds the same-type set to the current selection (${ids})`)
+  }
+  // Ctrl-Shift-click a bot -> remove the bots, keep the tank.
+  {
+    const ids = sameTypeIds('bot', 1, units, [1, 2, 4], 'remove').sort()
+    check(ids.join() === '4', `Ctrl-Shift-click removes the same-type set (${ids})`)
+  }
+  // A click that missed a focus-army unit: replace clears, add/remove keep.
+  {
+    check(sameTypeIds(null, 1, units, [4], 'replace').length === 0, 'a missed double-click clears the selection')
+    check(sameTypeIds(null, 1, units, [4], 'add').join() === '4', 'a missed Ctrl-click leaves the selection')
+  }
+  // The enemy bot (id 5, army 2) is never picked as the clicked unit and never
+  // joins a same-type set.
+  {
+    const ids = sameTypeIds('bot', 1, units, [], 'replace')
+    check(!ids.includes(5), 'the enemy bot is never selected (focus-army filter)')
+  }
 }
 
 await game.close()

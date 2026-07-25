@@ -36,7 +36,9 @@ import { BuildPreview } from './ui/buildPreview'
 import {
   boxSelectIds,
   mergeSelection,
+  sameTypeIds,
   selectionBpData,
+  type SameTypeUnit,
   type SelectionBpData,
   type SelectionCandidate,
 } from './ui/boxSelection'
@@ -1534,12 +1536,20 @@ window.addEventListener('pointerup', (e) => {
     return
   }
   if (luaUnits.length === 0) return
-  // Dragged = box selection (SelectionDragger), clicked = single selection.
-  // Both use the same Shift semantics from DragRelease.
-  const luaMsg =
-    moved > 5
-      ? boxSelect(start.x, start.y, e.clientX, e.clientY, e.shiftKey)
-      : selectLua(e.clientX, e.clientY, e.shiftKey)
+  // Dragged = box selection (SelectionDragger). A static click is one of:
+  //   Ctrl(+Shift)-click — add/remove all same-type units in view,
+  //   double-click       — select all same-type units in view,
+  //   plain/Shift click  — single-unit selection (DragRelease semantics).
+  let luaMsg: string | null
+  if (moved > 5) {
+    luaMsg = boxSelect(start.x, start.y, e.clientX, e.clientY, e.shiftKey)
+  } else if (e.ctrlKey) {
+    luaMsg = selectSameType(e.clientX, e.clientY, e.shiftKey ? 'remove' : 'add')
+  } else if (e.detail >= 2) {
+    luaMsg = selectSameType(e.clientX, e.clientY, 'replace')
+  } else {
+    luaMsg = selectLua(e.clientX, e.clientY, e.shiftKey)
+  }
   if (luaMsg) log(luaMsg)
 })
 
@@ -2147,10 +2157,56 @@ function ringExtents(bp: BpObject): BracketExtents {
  * `gamemain.OnSelectionChanged`, und daraus speisen sich orders.lua,
  * construction.lua und unitview.lua (Cfile:1294170).
  */
+/** The army the player selects for (GetFocusArmy). 1 in the sandbox. */
+function focusArmy(): number {
+  return gameUi ? gameUi.focusArmy() : 1
+}
+
+/** Is this own living unit inside the visible viewport? (GetArmyUnitsInFrustum) */
+function unitInView(u: LuaSceneUnit): boolean {
+  const s = luaSim?.state(u.id)
+  if (!s || s.dead) return false
+  const p = viewer.worldToScreen(u.mesh.position)
+  if (!p) return false
+  const r = viewportEl.getBoundingClientRect()
+  return p.x >= r.left && p.x <= r.right && p.y >= r.top && p.y <= r.bottom
+}
+
 function selectLua(clientX: number, clientY: number, additive = false): string | null {
   const hit = viewer.pickUnit(clientX, clientY)
-  const treffer = hit ? luaUnits.filter((u) => u.mesh === hit.mesh) : []
-  return applySelection(treffer, additive)
+  // The engine only selects SELECTABLE units — the focus army's own units
+  // (CanSelectUnit, Cfile:865830). A click on an enemy unit selects nothing:
+  // before this filter, enemy units were selectable and fed the order/build
+  // panel from the ENEMY blueprint.
+  const hits = hit ? luaUnits.filter((u) => u.mesh === hit.mesh && u.army === focusArmy()) : []
+  return applySelection(hits, additive)
+}
+
+/**
+ * Select every focus-army unit of the SAME blueprint as the one under the
+ * cursor that is currently in view — the engine's double-click and Ctrl-click
+ * behaviour (HandleDoubleClickSelection, Cfile:865E20; Ctrl-click same-type,
+ * Cfile:1291547-1291681). `mode`:
+ *   'replace' — double-click: the same-type set becomes the whole selection.
+ *   'add'     — Ctrl-click: add the same-type set to the current selection.
+ *   'remove'  — Ctrl-Shift-click: drop the same-type set from the selection.
+ */
+function selectSameType(clientX: number, clientY: number, mode: 'replace' | 'add' | 'remove'): string | null {
+  const army = focusArmy()
+  const hit = viewer.pickUnit(clientX, clientY)
+  const clicked = hit ? luaUnits.find((u) => u.mesh === hit.mesh && u.army === army) : undefined
+  const candidates: SameTypeUnit[] = luaUnits.map((u) => ({
+    id: u.id,
+    bpId: u.bpId,
+    army: u.army,
+    inView: unitInView(u),
+  }))
+  const current = luaUnits.filter((u) => u.selected).map((u) => u.id)
+  const ids = new Set(sameTypeIds(clicked ? clicked.bpId : null, army, candidates, current, mode))
+  return applySelection(
+    luaUnits.filter((u) => ids.has(u.id)),
+    false,
+  )
 }
 
 /**
