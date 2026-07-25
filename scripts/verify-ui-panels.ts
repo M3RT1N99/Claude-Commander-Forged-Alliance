@@ -873,6 +873,52 @@ console.log('\n== Console commands (keymap -> ConExecute) ==')
   check(stillMissing === '', `no console command reported missing (${stillMissing})`)
 }
 
+// The 'IssueCommand <cmd>' console func (CON_IssueCommand, Cfile:1255032) drives
+// the Stop/Pause/Dive/Silo hotkeys. It maps the argument to a UNITCOMMAND_* and
+// issues it to the selection through the same sendSim seam the Stop button uses.
+console.log('\n== IssueCommand hotkey + bool ConVar toggle ==')
+{
+  // A recorder that keeps name and the `clear` flag (ISSUE_Command's third arg).
+  host.eval('__ic = { calls = {} }')
+  host.setGlobal('__uiSimCommand', (name: string, _ids: unknown, value: unknown) => {
+    const clear = (value as { clear?: boolean } | undefined)?.clear === true
+    host.eval(`table.insert(__ic.calls, { name = '${name}', clear = ${clear ? 'true' : 'false'} })`)
+  })
+  host.eval(`
+    __uiSetUnit(2, 'uel0101', 1, 110, 20, 100, 500, 500, 0, true, 0, 0, -1, false, 0, 1, false)
+    __uiSelectByIds({ 2 })
+    ConExecute('IssueCommand Stop')
+  `)
+  check(
+    String(host.eval(`return __ic.calls[1] and __ic.calls[1].name or ''`)) === 'UNITCOMMAND_Stop',
+    "ConExecute('IssueCommand Stop') sends UNITCOMMAND_Stop to the selection (Cfile:1255061)",
+  )
+  check(
+    host.eval(`return __ic.calls[1] and __ic.calls[1].clear`) === true,
+    'Stop clears the queue — ISSUE_Command(..., 1) (Cfile:1255061)',
+  )
+  host.eval(`ConExecute('IssueCommand SiloBuildTactical')`)
+  check(
+    host.eval(`return __ic.calls[2] and __ic.calls[2].clear`) === false,
+    'SiloBuildTactical appends — ISSUE_Command(..., 0) (Cfile:1255091)',
+  )
+
+  // A bool ConVar with no value TOGGLES (the TConVar<bool> path prints
+  // "toggled %s is now %s", Cfile:453672) — that is Alt+L 'UI_RenderUnitBars'.
+  const before = host.eval(`return __conGet('ui_RenderUnitBars')`)
+  host.eval(`ConExecute('UI_RenderUnitBars')`)
+  const after = host.eval(`return __conGet('ui_RenderUnitBars')`)
+  check(
+    before === true && after === false,
+    'UI_RenderUnitBars with no value toggles the bool ConVar (Cfile:453672)',
+  )
+  host.eval(`ConExecute('UI_RenderUnitBars')`)
+  check(
+    host.eval(`return __conGet('ui_RenderUnitBars')`) === true,
+    'toggling UI_RenderUnitBars again restores it',
+  )
+}
+
 host.close()
 for (const f of openFiles) await f.close()
 console.log(failures === 0 ? '\nUI-PANELS BESTANDEN' : `\n${failures} CHECK(S) FEHLGESCHLAGEN`)
