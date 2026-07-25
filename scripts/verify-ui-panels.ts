@@ -609,6 +609,18 @@ check(
     return a and a.owner == 1 and a.units[1] == 4 and a.units[2] == 5
   `)
   check(argsOk === true, `SimCallback: Args-Snapshot als Lua-Literal auswertbar (${argsLua})`)
+
+  // Large integers must round-trip EXACTLY: the original CMarshaller writes a
+  // binary double, but '%.9g' rounded any integer past nine digits — an entity
+  // id, or a combined key code (0x40000000 = 1073741824, the Ctrl modifier bit)
+  // used as a table key. The same rounding trap that dropped the cap mask.
+  host.eval(`SimCallback({ Func = 'Big', Args = { id = 2147483648, mask = 1442559, [0x40000000] = true } })`)
+  const bigArgs = (sink ?? ['', '', null])[1]
+  const bigOk = host.eval(`
+    local a = ${bigArgs || 'nil'}
+    return a and a.id == 2147483648 and a.mask == 1442559 and a[0x40000000] == true
+  `)
+  check(bigOk === true, `SimCallback marshals large integers exactly (${bigArgs})`)
 }
 
 // GetSessionClients (Felder aus cfunc_GetSessionClientsL, Cfile:1321886-1321957).

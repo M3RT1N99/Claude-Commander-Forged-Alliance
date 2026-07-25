@@ -941,9 +941,21 @@ __uiSimCallbackSink = false
 -- Lua-sicher), das die Sim-VM beim Empfang auswertet — eine Kopie, keine
 -- Referenz. Funktionen/Userdata knallen wie im Original ("Unable to marshal
 -- lua function", CMarshaller Cfile:999128).
+-- The original CMarshaller (SCR_ToByteStream) writes a number as an EXACT
+-- binary double. '%.9g' kept only 9 significant digits, so an integer past nine
+-- digits (an entity id, a combined key code with modifier bits like
+-- 0x80000000 = 2147483648) was silently corrupted and a float lost precision —
+-- the same rounding trap as the command-cap mask. Serialize integers exactly
+-- ('%d') and floats at full double round-trip precision ('%.17g'); the sim VM
+-- evaluates the literal, so both parse back cleanly.
+local function marshalNumber(v)
+  if math.type(v) == 'integer' then return string.format('%d', v) end
+  return string.format('%.17g', v)
+end
+
 local function marshalArgs(v, depth)
   local t = type(v)
-  if t == 'number' then return string.format('%.9g', v) end
+  if t == 'number' then return marshalNumber(v) end
   if t == 'string' then return string.format('%q', v) end
   if t == 'boolean' then return tostring(v) end
   if t == 'nil' then return 'nil' end
@@ -956,7 +968,7 @@ local function marshalArgs(v, depth)
       if kt == 'string' then
         key = string.format('%q', k)
       elseif kt == 'number' then
-        key = string.format('%.9g', k)
+        key = marshalNumber(k)
       elseif kt == 'boolean' then
         key = tostring(k)
       else
