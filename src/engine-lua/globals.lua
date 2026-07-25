@@ -691,6 +691,7 @@ __focusArmy = 1
 function GetFocusArmy() return __focusArmy end
 function SetFocusArmy(a) __focusArmy = a end
 
+
 -- Sim-Global: Enhancements je Entity-Id. Die Sim fuellt es, die UI liest es
 -- ueber Sync.UserUnitEnhancements (simuistate.lua:44). unit.lua:576/2085
 -- indizieren es ungeprueft, es muss also immer eine Tabelle sein.

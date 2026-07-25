@@ -186,6 +186,125 @@ function __spawnUnit(scriptPath, bpId, x, y, z, army, complete)
   return id, ''
 end
 
+-- These are sim_SimInits globals: sim-only, like CreateUnit above. The UI
+-- VM must not have them (the core principle: never boot both into one VM).
+-- === Per-army state + the victory / game-over chain ===
+--
+-- The engine keeps these on CArmyImpl (mVarDat/mConstDat). aibrain.lua and
+-- victory.lua drive defeat and end-of-game with them; without the bindings the
+-- AI's IsDefeated loop (aibrain.lua:806) and CallEndGame (victory.lua:89-99)
+-- died at "access to nonexistent global".
+
+-- One lazy record per 1-based army index. Civilian and the unit cap are seeded
+-- from the session on first touch (ScenarioInfo, like the CArmyImpl ctor reads
+-- the army table, Cfile:1017244/1017634).
+__armyVarDat = {}
+function __armyVar(army)
+  local i = army
+  if type(i) ~= 'number' then error('Unexpected type for army object', 2) end
+  local r = __armyVarDat[i]
+  if not r then
+    -- UnitCap: session option, default 500 (Cfile:1017634-1017644).
+    local cap = 500
+    local civ = false
+    if ScenarioInfo then
+      if ScenarioInfo.Options and tonumber(ScenarioInfo.Options.UnitCap) then
+        cap = tonumber(ScenarioInfo.Options.UnitCap)
+      end
+      -- Civilian flag from the army setup row (Cfile:1017244).
+      for _, a in pairs((ScenarioInfo.ArmySetup) or {}) do
+        if a.ArmyIndex == i and a.Civilian == true then civ = true end
+      end
+    end
+    r = { isOutOfGame = false, isCivilian = civ, unitCap = cap, ignoreUnitCap = false }
+    __armyVarDat[i] = r
+  end
+  return r
+end
+
+-- "Signal the end of the game. Acts like a permanent pause." (EndGame,
+-- Cfile:1077480). Sets the ended flag; victory.lua:97 calls it 3 s after the
+-- result is synced.
+__gameEnded = false
+function EndGame()
+  __gameEnded = true
+end
+
+-- "Return true if the game is over (EndGame() has been called)." (IsGameOver,
+-- Cfile:1077505) — mGameEnded || mGameOver (Cfile:1077543). aibrain.lua:3586
+-- guards an AI loop with it.
+__gameOver = false
+function IsGameOver()
+  return __gameEnded == true or __gameOver == true
+end
+
+-- Defeat flag (Cfile:1026283/1026322). aibrain.lua:781 sets it first in
+-- OnDefeat; IsDefeated (aibrain.lua:806) reads it; victory.lua walks the armies.
+function ArmyIsOutOfGame(army) return __armyVar(army).isOutOfGame == true end
+function SetArmyOutOfGame(army) __armyVar(army).isOutOfGame = true end
+
+-- Civilian flag from the session (Cfile:1025673). victory.lua:28 skips
+-- civilians in the defeat/victory scan.
+function ArmyIsCivilian(army) return __armyVar(army).isCivilian == true end
+
+-- "SubmitXMLArmyStats" (Cfile:1091052) — the Lua-visible part is just a request
+-- flag; the gpg.net upload is the network layer's, which we do not have.
+-- victory.lua:91 calls it on every result, so it must not throw.
+__requestXMLArmyStatsSubmit = false
+function SubmitXMLArmyStats()
+  __requestXMLArmyStatsSubmit = true
+end
+
+-- === Unit cap ===
+-- GetArmyUnitCap/SetArmyUnitCap (Cfile:1024961/1025008), SetIgnoreArmyUnitCap
+-- (Cfile:1025065). simutils.lua:196-204 redistributes the total cap over the
+-- surviving brains after every defeat.
+function GetArmyUnitCap(army) return __armyVar(army).unitCap end
+function SetArmyUnitCap(army, cap)
+  if type(cap) ~= 'number' then error('SetArmyUnitCap: number expected', 2) end
+  __armyVar(army).unitCap = cap
+end
+function SetIgnoreArmyUnitCap(army, flag)
+  __armyVar(army).ignoreUnitCap = flag == true
+end
+
+-- "GetArmyUnitCostTotal(army)" (Cfile:1024895) — sums bp.General.CapCost over
+-- the army's units, skipping those in UNITSTATE_NoCost (Cfile:1016520-1016540).
+-- CapCost defaults to 1.0 (Cfile:656080).
+function GetArmyUnitCostTotal(army)
+  local total = 0
+  for _, u in ipairs(__armyUnits(army)) do
+    if not (u.IsUnitState and u:IsUnitState('NoCost')) then
+      local cc = (u.__bp and u.__bp.General and u.__bp.General.CapCost)
+      total = total + (cc or 1)
+    end
+  end
+  return total
+end
+
+-- "ListArmies()" (Cfile:1024337) — the army NAMES at 1-based indices, in army
+-- order (mConstDat.mArmyName, Cfile:1024383). siminit.lua:187 applies build
+-- restrictions to each; scenarioutilities iterates it. Strings, not brains.
+function ListArmies()
+  local out = {}
+  if ScenarioInfo and ScenarioInfo.ArmySetup then
+    for name, a in pairs(ScenarioInfo.ArmySetup) do
+      out[a.ArmyIndex] = a.ArmyName or name
+    end
+  end
+  return out
+end
+
+-- "CheatsEnabled()" (Cfile:1077381) — the session flag, and it LOGS the attempt
+-- either way (Cfile:1074063). ScenarioInfo.Options.CheatsEnabled == 'true'.
+__cheatsEnabled = false
+function CheatsEnabled()
+  if ScenarioInfo and ScenarioInfo.Options and ScenarioInfo.Options.CheatsEnabled == 'true' then
+    __cheatsEnabled = true
+  end
+  return __cheatsEnabled == true
+end
+
 -- === Creating units from Lua ===
 --
 -- CreateUnit(blueprint, army, tx, ty, tz, qx, qy, qz, qw, [layer])
