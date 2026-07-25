@@ -15,8 +15,19 @@ import { bpGet } from '../formats/blueprint'
  * Die Daten kommen trotzdem alle aus dem Spiel: das MODELL ist das Modell des
  * Blueprints, und die POSITION ist exakt der Raster-Snap der Engine
  * (`COORDS_GridSnap` @0x50B1E0 — `cell = trunc(p − size/2)`, zurück `+ size/2`,
- * Höhe erst nach dem Snap). Erfunden ist hier nichts außer der Tatsache, dass ein
- * Geist durchscheinend gezeichnet wird.
+ * Höhe erst nach dem Snap; unter Wasser auf die Oberfläche geklemmt, s.
+ * snapToGrid). Erfunden ist hier nichts außer der Tatsache, dass ein Geist
+ * durchscheinend gezeichnet wird.
+ *
+ * DOKUMENTIERTE LÜCKE — Rot/Grün-Validität: die Engine färbt den Geist ungültig,
+ * wenn dort nicht gebaut werden darf. Der maßgebliche Test ist
+ * `CAiBrain::CanBuildStructureAt` (@0x57cbb0), und dessen Kern ist
+ * `func_LocationIsFree(bp, mOGrid, pos)` — eine Abfrage des OCCUPANCY-GRID
+ * (`COGrid`, pro Zelle Layer + Belegung), dazu Skirt-Overlap mit unbeweglichen
+ * Strukturen und reservierte Bau-Positionen. Der OGrid ist eine echte
+ * Engine-Struktur, die es hier noch nicht gibt; eine Teil-Näherung (Overlap +
+ * Wasser-Layer) würde bei Randfällen falsches Feedback geben. Deshalb bleibt der
+ * Geist bis zum OGrid einfarbig — kein erfundener Validitäts-Check.
  */
 export class BuildPreview {
   private mesh: THREE.Mesh | null = null
