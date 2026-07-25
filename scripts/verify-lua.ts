@@ -123,6 +123,29 @@ for (const [code, want] of formatChecks) {
   console.log(`  ${ok ? 'OK  ' : 'FAIL'} ${code.replace('return ', '')} → ${JSON.stringify(got)}`)
 }
 
+// __foriter (generic-for dispatcher): FA's LuaPlus 5.0 tolerates
+// `for k,v in nil do` as a ZERO-iteration loop — the shipped UI relies on it
+// (construction.lua:889 `for index, unitStack in currentCommandQueue do`, where
+// currentCommandQueue is legitimately nil for a unit with no build queue,
+// AssignNil @Cfile:1257091). Standard Lua 5.4 raises "attempt to call a nil
+// value (for iterator)" and takes the whole click handler down. Tables and
+// iterator triples must keep working. Tested through the REAL transpiler.
+const forInChecks: [string, number][] = [
+  ['local q = nil local n = 0 for k,v in q do n = n + 1 end return n', 0],
+  ['local t = {a=1,b=2,c=3} local n = 0 for k,v in t do n = n + 1 end return n', 3],
+  ['local n = 0 for i,v in ipairs({10,20,30}) do n = n + 1 end return n', 3],
+  ['local n = 0 for k,v in pairs({x=1,y=2}) do n = n + 1 end return n', 2],
+]
+let forInOk = true
+for (const [src, want] of forInChecks) {
+  const { code } = transpileFaLua(src)
+  const got = Number(await lua.doString(code))
+  const ok = got === want
+  if (!ok) forInOk = false
+  console.log(`  ${ok ? 'OK  ' : 'FAIL'} for-in (${src.slice(6, 22)}…) → ${got} (want ${want})`)
+}
+console.log(`for-in nil tolerance (LuaPlus): ${forInOk ? 'OK' : 'FEHLER'}`)
+
 console.log(`Compat-Schicht im Lua-VM (wasmoon): ${compatOk && formatOk ? 'OK' : 'FEHLER'}`)
 
 for (const f of openFiles) await f.close()
@@ -133,4 +156,4 @@ for (const f of openFiles) await f.close()
 // check had already passed — turning a green run red at random. Setting
 // exitCode and returning lets the event loop finish that close cleanly.
 lua.global.close()
-process.exitCode = failures.length === 0 && compatOk && formatOk ? 0 : 1
+process.exitCode = failures.length === 0 && compatOk && formatOk && forInOk ? 0 : 1

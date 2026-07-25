@@ -2,7 +2,19 @@
 
 -- Generic-for dispatcher (see rewriteForIn): table -> pairs/next,
 -- pass iterator triples through unchanged.
+--
+-- NIL is a THIRD case: FA's LuaPlus 5.0 tolerates `for k,v in nil do` as a
+-- zero-iteration loop (the same nil-tolerance config.lua grants nil reads), and
+-- the shipped UI relies on it — e.g. construction.lua:889
+-- `for index, unitStack in currentCommandQueue do`, where currentCommandQueue is
+-- legitimately nil for a unit with no build queue (SetCurrentFactoryForQueueDisplay
+-- returns nil, AssignNil @Cfile:1257091). Standard Lua 5.4 would raise "attempt
+-- to call a nil value (for iterator)" and take the whole click handler down with
+-- it. Returning an empty iterator makes the loop a no-op, exactly as in FA.
 function __foriter(a, b, c)
+  if a == nil then
+    return function() return nil end
+  end
   if type(a) == 'table' then
     return next, a, nil
   end
