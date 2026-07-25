@@ -87,6 +87,178 @@ function Vector2(x, y)
   return { x or 0, y or 0, x = x or 0, y = y or 0 }
 end
 
+-- === Core math globals (scr_CoreInits => both VMs) ===
+
+-- "Dot product of two vectors" (VDot, Cfile:597741) — full 3D dot.
+function VDot(a, b)
+  local ax, ay, az = vxyz(a)
+  local bx, by, bz = vxyz(b)
+  return ax * bx + ay * by + az * bz
+end
+
+-- "Perp dot product of two vectors" (VPerpDot, Cfile:598057) — a.x*b.z -
+-- b.x*a.z, the XZ-plane perp-dot (the Y component is ignored, Cfile:598096).
+function VPerpDot(a, b)
+  local ax, _, az = vxyz(a)
+  local bx, _, bz = vxyz(b)
+  return ax * bz - bx * az
+end
+
+-- "Create a 2d Rectangle (x0,y0,x1,y1)" (Rect, Cfile:597354) — a plain table
+-- with the NAMED fields x0/y0/x1/y1, no array part (SCR_ToLua<Rect2f>,
+-- Cfile:597236-597244); GetUnitsInRect reads exactly those names. utilities.lua:22
+-- passes world x/z as the y0/y1 fields — the field names are the engine's.
+function Rect(x0, y0, x1, y1)
+  return { x0 = x0, y0 = y0, x1 = x1, y1 = y1 }
+end
+
+-- "Create a point vector(px,py,pz, vx,vy,vz)" (PointVector, Cfile:597151) —
+-- named fields only (SCR_ToLua<SPointVector>, Cfile:597070-597083).
+function PointVector(px, py, pz, vx, vy, vz)
+  return { px = px, py = py, pz = pz, vx = vx, vy = vy, vz = vz }
+end
+
+-- "Round a number to the nearest integer" (MATH_IRound, Cfile:598120). The
+-- x87 `fistp` uses the default control word = ROUND HALF TO EVEN (disasm
+-- 0x4D2005), not truncation and not round-half-away-from-zero: 2.5 -> 2,
+-- 3.5 -> 4, -2.5 -> -2.
+function MATH_IRound(n)
+  local f = math.floor(n)
+  local d = n - f
+  if d > 0.5 then
+    f = f + 1
+  elseif d == 0.5 and math.mod(f, 2) ~= 0 then
+    f = f + 1
+  end
+  return f
+end
+
+-- === Quaternion math (scr_CoreInits => both VMs) ===
+-- Lua quaternion order is {x, y, z, w} (SCR_ToLua<Quaternion>,
+-- Cfile:596768-596785; effectutilities.lua:418 unpacks qx,qy,qz,qw).
+
+-- "quaternion EulerToQuaternion(roll, pitch, yaw)" (Cfile:643413) — angles in
+-- radians (func_EulerToQuaternion, Cfile:617610-617643).
+function EulerToQuaternion(roll, pitch, yaw)
+  local cr, sr = math.cos(roll * 0.5), math.sin(roll * 0.5)
+  local cp, sp = math.cos(pitch * 0.5), math.sin(pitch * 0.5)
+  local cy, sy = math.cos(yaw * 0.5), math.sin(yaw * 0.5)
+  return {
+    sr * cp * cy + cr * sp * sy, -- x
+    cr * cp * sy - sr * sp * cy, -- y
+    sr * cp * cy - cr * sp * sy, -- z
+    cr * cp * cy + sr * sp * sy, -- w
+  }
+end
+
+-- func_MatrixToQuat (Cfile:617541-617603) — rows m[1..3], each {x,y,z}.
+local function matToQuat(m)
+  local t = m[1][1] + m[2][2] + m[3][3]
+  if t > 0 then
+    local s = math.sqrt(t + 1)
+    local h = 0.5 / s
+    return { (m[2][3] - m[3][2]) * h, (m[3][1] - m[1][3]) * h, (m[1][2] - m[2][1]) * h, s * 0.5 }
+  end
+  local sh = { 2, 3, 1 }
+  local i = (m[2][2] > m[1][1]) and 2 or 1
+  if m[3][3] > m[i][i] then i = 3 end
+  local j, k = sh[i], sh[sh[i]]
+  local s = math.sqrt(m[i][i] - (m[k][k] + m[j][j]) + 1)
+  local h = 0.5 / s
+  local v = {}
+  v[i] = s * 0.5
+  v[j] = (m[j][i] + m[i][j]) * h
+  v[k] = (m[i][k] + m[k][i]) * h
+  return { v[1], v[2], v[3], (m[j][k] - m[k][j]) * h }
+end
+
+-- "quaternion OrientFromDir(vector)" (Cfile:643353) — an orientation whose
+-- forward axis points along the direction (Moho::COORDS_Orient,
+-- Cfile:641728-641776). shield.lua:201/466, effectutilities.lua:1151 use it.
+function OrientFromDir(dir)
+  local dx = dir[1] or dir.x or 0
+  local dy = dir[2] or dir.y or 0
+  local dz = dir[3] or dir.z or 0
+  local l = math.sqrt(dx * dx + dy * dy + dz * dz)
+  if l == 0 then return { 0, 0, 0, 1 } end
+  local f = { dx / l, dy / l, dz / l }
+  local rl = math.sqrt(f[3] * f[3] + f[1] * f[1])
+  if rl == 0 then
+    -- Straight up/down (Cfile:641748-641757).
+    return { (dy > 0) and -0.70710677 or 0.70710677, 0, 0, 0.70710677 }
+  end
+  local r = { f[3] / rl, 0, -f[1] / rl }
+  local u = {
+    f[2] * r[3] - f[3] * r[2],
+    f[3] * r[1] - r[3] * f[1],
+    r[2] * f[1] - f[2] * r[1],
+  }
+  return matToQuat({ r, u, f })
+end
+
+local function quatsNearEqual(a, b)
+  return math.abs(a[1] - b[1]) <= 1e-6 and math.abs(a[2] - b[2]) <= 1e-6
+    and math.abs(a[3] - b[3]) <= 1e-6 and math.abs(a[4] - b[4]) <= 1e-6
+end
+local function quatNormalize(q)
+  local l = math.sqrt(q[1] * q[1] + q[2] * q[2] + q[3] * q[3] + q[4] * q[4])
+  if l <= 1e-6 then return { 0, 0, 0, 0 } end
+  return { q[1] / l, q[2] / l, q[3] / l, q[4] / l }
+end
+
+-- "quaternion MinLerp(alpha, L, R)" (Cfile:643493) — func_QuatLERP
+-- (Cfile:617768-617815): near-equal quats return L; else clamp alpha to [0,1],
+-- flip R on the shortest path, lerp and normalise.
+function MinLerp(alpha, L, R)
+  if quatsNearEqual(L, R) then return { L[1], L[2], L[3], L[4] } end
+  local t = alpha
+  if t >= 1 then t = 1 elseif t < 0 then t = 0 end
+  local d = R[1] * L[1] + R[2] * L[2] + R[3] * L[3] + R[4] * L[4]
+  local s = (d < 0) and -1 or 1
+  return quatNormalize({
+    L[1] * (1 - t) + s * R[1] * t, L[2] * (1 - t) + s * R[2] * t,
+    L[3] * (1 - t) + s * R[3] * t, L[4] * (1 - t) + s * R[4] * t,
+  })
+end
+
+-- "quaternion MinSlerp(alpha, L, R)" (Cfile:643570) — Moho::SLERP
+-- (Cfile:617818-617991): a true slerp when the angle is large enough, else the
+-- same normalised lerp as MinLerp.
+function MinSlerp(alpha, L, R)
+  if quatsNearEqual(L, R) then return { L[1], L[2], L[3], L[4] } end
+  local t = alpha
+  if t >= 1 then t = 1 elseif t < 0 then t = 0 end
+  local d = R[1] * L[1] + R[2] * L[2] + R[3] * L[3] + R[4] * L[4]
+  local s = 1
+  if d < 0 then s = -1; d = -d end
+  if (1 - d) > 0.001 then
+    local th = math.acos(d)
+    if (math.pi - th) >= 0.001 then
+      local isin = 1 / math.sin(th)
+      local a = math.sin(th * (1 - t)) * isin
+      local b = math.sin(th * t) * isin
+      return {
+        L[1] * a + s * R[1] * b, L[2] * a + s * R[2] * b,
+        L[3] * a + s * R[3] * b, L[4] * a + s * R[4] * b,
+      }
+    end
+  end
+  return quatNormalize({
+    L[1] * (1 - t) + s * R[1] * t, L[2] * (1 - t) + s * R[2] * t,
+    L[3] * (1 - t) + s * R[3] * t, L[4] * (1 - t) + s * R[4] * t,
+  })
+end
+
+-- "GetVersion()" (Cfile:599401) — a CORE global: the ENGINE version, not the
+-- game-data version. Moho::GetEngineVersion is compiled in as
+-- STR_Printf("%1.1f.%i", 1.5, 3764) = "1.5.3764" (Cfile:599330-599334). The
+-- host may override it (uiEngine.ts sets __engineVersion from package.json, so
+-- the main menu shows this reimplementation's version); the Sim VM reports the
+-- real FA engine version. main.lua:172 draws it.
+function GetVersion()
+  return __engineVersion or '1.5.3764'
+end
+
 -- === Entity-Praedikate (cfunc_IsDestroyed/IsUnit/…) ===
 --
 -- Die Praedikate muessen die ARTEN unterscheiden, nicht nur „hat ein Blueprint":

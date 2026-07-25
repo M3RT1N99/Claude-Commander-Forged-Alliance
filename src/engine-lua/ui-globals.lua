@@ -2401,14 +2401,8 @@ function __uiInitKeyMap()
 end
 
 -- === Session / Umgebung ===
--- GetVersion ist ein CORE-Global (Cfile:599401) und liefert die Version der
--- ENGINE, nicht die der Spieldaten: Moho::GetEngineVersion (@0x4D3D30) ist
--- schlicht `STR_Printf("%1.1f.%i", 1.5, 3764)` — einkompiliert. Die Engine hier
--- sind wir; also sagt der String, welche Engine laeuft. __engineVersion setzt
--- der Host aus der package.json (uiEngine.ts).
-function GetVersion()
-  return __engineVersion or 'unbekannt'
-end
+-- GetVersion lives in globals.lua (a CORE global, both VMs). Nothing to
+-- redefine here.
 function DebugFacilitiesEnabled() return false end
 -- SessionIsReplay/SessionIsMultiplayer/SessionIsActive sind WEITER OBEN
 -- definiert (bei den Session-Globals). Hier standen stille Zweitfassungen,

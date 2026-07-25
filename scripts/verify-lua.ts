@@ -123,8 +123,14 @@ for (const [code, want] of formatChecks) {
   console.log(`  ${ok ? 'OK  ' : 'FAIL'} ${code.replace('return ', '')} → ${JSON.stringify(got)}`)
 }
 
-lua.global.close()
 console.log(`Compat-Schicht im Lua-VM (wasmoon): ${compatOk && formatOk ? 'OK' : 'FEHLER'}`)
 
 for (const f of openFiles) await f.close()
-process.exit(failures.length === 0 && compatOk && formatOk ? 0 : 1)
+
+// Close the bare wasmoon engine and let libuv drain BEFORE exiting. On Windows
+// `process.exit()` used to tear the wasmoon async handle down mid-close and
+// assert `!(handle->flags & UV_HANDLE_CLOSING)` (src/win/async.c) AFTER every
+// check had already passed — turning a green run red at random. Setting
+// exitCode and returning lets the event loop finish that close cleanly.
+lua.global.close()
+process.exitCode = failures.length === 0 && compatOk && formatOk ? 0 : 1
