@@ -329,10 +329,16 @@ export class GameUi {
     lines.push(`import('/lua/ui/game/gamemain.lua').OnBeat()`)
     this.host.eval(lines.join('\n'))
 
-    // Der erste Beat MIT Units ist der Moment, in dem die Engine DoInitializing
-    // fährt (Cfile:1321067: StopLoadingDialog „nach dem ersten Beat mit
-    // Sync-Daten"). Erst jetzt sieht gamemain.OnFirstUpdate seine Avatare —
-    // vorher löschte dessen 3-s-Fork mit `SelectUnits(nil)` jede Auswahl.
+    // The engine runs DoInitializing on the FIRST sync beat, gated purely on
+    // HasSyncData() (mSyncdat is non-empty) with NO unit-count test
+    // (func_DoInitializing, Cfile:1321023/1066859). We DELIBERATELY keep the
+    // `units.length > 0` guard: our sandbox spawns the ACU with a fire-and-forget
+    // spawnViaLua AFTER startSandbox, so the first beat can arrive with zero
+    // units, and gamemain.OnFirstUpdate then forks a 3-s thread that reads
+    // avatars — nil at that point — and clears the selection (the "empty UI"
+    // bug). A real session's first sync beat always carries the ACU, so
+    // units>0 and HasSyncData coincide; the divergence only matters for a
+    // unit-less observer/replay start, which does not exist yet.
     if (this.worldInit && units.length > 0) {
       const init = this.worldInit
       this.worldInit = null
