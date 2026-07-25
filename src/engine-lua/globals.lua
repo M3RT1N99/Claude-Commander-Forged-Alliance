@@ -1489,8 +1489,11 @@ local function __startOrder(unitId, cmd)
     __issueBuildTask(unitId, cmd.target, 'Repair', true)
     return true
   elseif cmd.type == 'Reclaim' then
-    local t = __props[cmd.target]
-    if not t or t.__destroyed or t.__destroyQueued then return false end
+    -- The reclaim target is usually a PROP (wreck/tree), but a live UNIT is a
+    -- valid target too (the engine reclaims a being-built enemy structure a
+    -- selection cannot attack, dispatch 0x13 CUnitReclaimTask, Cfile:1240271).
+    local t = __props[cmd.target] or __units[cmd.target]
+    if not t or t.__destroyed or t.__dead or t.__destroyQueued then return false end
     __reclaimTasks[unitId] = { target = cmd.target, started = false }
     return true
   elseif cmd.type == 'Guard' then
@@ -1974,9 +1977,12 @@ end
 function __reclaimTick()
   for unitId, task in pairs(__reclaimTasks) do
     local u = __units[unitId]
-    local t = __props[task.target]
+    -- A reclaim target is a PROP (wreck/tree) or a live UNIT (a being-built
+    -- enemy structure the selection cannot attack, Cfile:1240271).
+    local t = __props[task.target] or __units[task.target]
+    local isUnit = t ~= nil and __props[task.target] == nil
     if not u or u.__dead or u.__destroyQueued
-      or not t or t.__destroyed or t.__destroyQueued then
+      or not t or t.__destroyed or t.__dead or t.__destroyQueued then
       __reclaimTasks[unitId] = nil
     else
       local p, q = u.__pos, t.__pos
@@ -1994,7 +2000,20 @@ function __reclaimTick()
         end
         if not task.started then
           task.started = true
-          local ok, time, energy, mass = pcall(function() return t:GetReclaimCosts(u) end)
+          local ok, time, energy, mass
+          if isUnit then
+            -- A unit's reclaim cost from the target blueprint (unit.lua:2705-
+            -- 2713): time = max(BuildCostEnergy, BuildCostMass) / build rate,
+            -- returned as time/10; ticks below multiply by 10 again.
+            local eco = (t.__bp and t.__bp.Economy) or {}
+            mass = eco.BuildCostMass or 0
+            energy = eco.BuildCostEnergy or 0
+            local buildRate = (u.__bp.Economy and u.__bp.Economy.BuildRate) or 1
+            time = math.max(mass, energy) / math.max(buildRate, 1) / 10
+            ok = true
+          else
+            ok, time, energy, mass = pcall(function() return t:GetReclaimCosts(u) end)
+          end
           if not ok or type(time) ~= 'number' then
             WARN('Failed to get valid reclaim costs from the target') -- Cfile:848452
             __reclaimTasks[unitId] = nil

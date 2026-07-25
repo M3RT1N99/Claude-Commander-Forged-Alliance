@@ -71,6 +71,10 @@ export interface HudUnitInfo {
   z: number
   y: number
   army: number
+  /** Own or allied (IsAlly with the focus army) — always gets a life bar. */
+  ally: boolean
+  /** Under the cursor — an enemy only shows a bar when hovered (or forced). */
+  hovered: boolean
   strategicIcon: string
   fadeZoom: number
   /** Baufortschritt (1 = fertig) — für die Icons, NICHT für die Balken. */
@@ -128,6 +132,12 @@ export class Hud {
    * (keyactions.lua:14). Wir lesen genau diese ConVar.
    */
   renderBars = true
+  /**
+   * ConVar `ui_ForceLifbarsOnEnemy` (Cfile:1285062, default false): when set,
+   * enemy units always show a life bar; otherwise an enemy shows one only while
+   * it is under the cursor (Cfile:1284554-1284570).
+   */
+  forceEnemyBars = false
   /** `fmod((tick + interp) * ui_FuelEmptyBlinkRate, 1)` (Cfile:1285384). */
   fuelBlinkPhase = 0
 
@@ -198,7 +208,9 @@ export class Hud {
         zoom >= LIFEBAR_CONVARS.lod ||
         !u.lifeBarRender ||
         u.hideLifebars ||
-        u.beingUpgraded
+        u.beingUpgraded ||
+        // Enemy units get a bar only when hovered or forced (Cfile:1284554).
+        !(u.ally || this.forceEnemyBars || u.hovered)
       ) {
         bar.style.display = 'none'
         continue

@@ -40,7 +40,7 @@ local KNOWN_VARS = {
   'ui_KeyboardRotateSpeed', 'ui_KeyboardRotateAccelerateMultiplier',
   'ui_ScreenEdgeScrollView', 'ui_ArrowKeysScrollView', 'ui_SelectTolerance',
   'ui_AlwaysRenderStrategicIcons', 'ui_RenderUnitBars', 'ui_NisRenderIcons',
-  'ui_RenderIcons',
+  'ui_RenderIcons', 'ui_ForceLifbarsOnEnemy',
   'graphics_Fidelity', 'shadow_Fidelity', 'ren_MipSkipLevels',
   'ren_SkyDome', 'ren_Bloom', 'ren_Oblivion', 'ren_SelectBoxes',
   'SC_CameraScaleLOD', 'SC_VerticalSync', 'SC_AntiAliasingSamples',
@@ -70,6 +70,7 @@ local DEFAULTS = {
   ui_RenderUnitBars = true,                      -- Cfile:421748
   ui_NisRenderIcons = true,                      -- Cfile:421760
   ui_RenderIcons = true,                         -- Cfile:421748
+  ui_ForceLifbarsOnEnemy = false,                -- Cfile:1285062
   graphics_Fidelity = 2,                         -- Cfile: int Moho::graphics_Fidelity = 2
   shadow_Fidelity = 2,                           -- Cfile: int Moho::shadow_Fidelity = 2
 }

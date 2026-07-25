@@ -46,9 +46,15 @@ export class BuildPreview {
     blueprintId: string,
     hit: { x: number; z: number },
     footprint: [number, number],
+    waterElevation?: number,
   ): Promise<void> {
-    const pos = snapToGrid(hit.x, hit.z, footprint[0], footprint[1], (x, z) =>
-      this.viewer.heightAt(x, z),
+    const pos = snapToGrid(
+      hit.x,
+      hit.z,
+      footprint[0],
+      footprint[1],
+      (x, z) => this.viewer.heightAt(x, z),
+      waterElevation,
     )
 
     if (this.blueprintId !== blueprintId) {

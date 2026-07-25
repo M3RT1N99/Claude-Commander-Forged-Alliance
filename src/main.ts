@@ -564,10 +564,20 @@ function conVarChanged(name: string, value: string | number | boolean): void {
   // hides ALL icons, ui_RenderIcons hides the normal ones.
   if (name.toLowerCase() === 'ui_rendericons') hud.renderIcons = an
   if (name.toLowerCase() === 'ui_nisrendericons') hud.nisRenderIcons = an
+  // Force enemy life bars on (Cfile:1285062) — otherwise enemies show a bar
+  // only under the cursor.
+  if (name.toLowerCase() === 'ui_forcelifbarsonenemy') hud.forceEnemyBars = an
 }
 let buildPreview: BuildPreview | null = null
 let currentScmap: ScmapData | null = null
+/** The map's water surface height, or undefined when the map has no water —
+ *  a build (and its preview) is clamped up to it (GetSurfaceHeight). */
+function mapWaterElevation(): number | undefined {
+  return currentScmap?.water.hasWater ? currentScmap.water.elevation : undefined
+}
 let spawnPoint = new THREE.Vector3(20, 0, 20)
+/** The unit id under the cursor (rollover) — drives the enemy life-bar rule. */
+let rolloverUnitId: number | null = null
 let massSpots: { x: number; z: number }[] = []
 const sandboxAssetCache = new Map<string, SandboxUnitAssets>()
 
@@ -1508,6 +1518,9 @@ window.addEventListener('pointermove', (e) => {
     const hit = viewer.pickUnit(e.clientX, e.clientY)
     const u = hit ? luaUnits.find((x) => x.scene === hit) : undefined
     gameUi.setRollover(u ? u.id : null)
+    // The hovered unit also drives the enemy life-bar rule: an enemy shows a
+    // bar only when hovered or ui_ForceLifbarsOnEnemy (Cfile:1284560-1284566).
+    rolloverUnitId = u ? u.id : null
   }
   // The cursor's world position — the engine keeps it per frame in
   // CWldSession::mCursorInfo.mMouseWorldPos; `UI_SelectByCategory +nearest`
@@ -1523,7 +1536,7 @@ window.addEventListener('pointermove', (e) => {
     if (cm.mode === 'build' || cm.mode === 'buildanchored') {
       const hit = viewer.pickTerrain(e.clientX, e.clientY)
       if (hit && cm.name) {
-        void buildPreview.show(cm.name, hit, gameUi.footprint(cm.name))
+        void buildPreview.show(cm.name, hit, gameUi.footprint(cm.name), mapWaterElevation())
       } else {
         buildPreview.hide()
       }
@@ -1608,6 +1621,9 @@ viewportEl.addEventListener('contextmenu', (e) => {
  */
 function zielUnter(clientX: number, clientY: number): {
   enemy?: number
+  /** The enemy is reclaimable (being built) — a non-attacking selection
+   *  reclaims it instead of doing nothing (Cfile:1240271). */
+  enemyReclaimable?: boolean
   repair?: number
   own?: number
   /** A wreck prop under the cursor (sim prop id) — reclaim target. */
@@ -1627,7 +1643,14 @@ function zielUnter(clientX: number, clientY: number): {
     // classification treats ALLIES like own units (repair/guard), not enemies
     // (Cfile:1240320) — with no allied army in the sandbox this never differs,
     // but a real session would need the UI VM's IsAlly here.
-    if (u.army !== 1) return { enemy: u.id }
+    if (u.army !== 1) {
+      // A being-built enemy is RECLAIMABLE (v52 = IsBeingBuilt||RECLAIMABLE,
+      // Cfile:1240220): a selection that cannot attack it reclaims it. The
+      // RECLAIMABLE-category case for finished units is a residual (the picker
+      // does not mirror blueprint categories).
+      const es = luaSim.state(u.id)
+      return { enemy: u.id, enemyReclaimable: !!es && es.fraction < 1 }
+    }
     const s = luaSim.state(u.id)
     // The engine's default-order precedence (Cfile:1240337-1240397):
     //   1. UNFINISHED own/allied unit -> Repair (resume construction).
@@ -1658,6 +1681,7 @@ async function issueWorldCommand(
   queue: boolean,
   ziel: {
     enemy?: number
+    enemyReclaimable?: boolean
     repair?: number
     own?: number
     reclaimProp?: number
@@ -1666,7 +1690,14 @@ async function issueWorldCommand(
 ): Promise<void> {
   if (!luaSim || !gameUi) return
   try {
-    const msg = await gameUi.worldClick(luaSim, hit, (x, z) => viewer.heightAt(x, z), queue, ziel)
+    const msg = await gameUi.worldClick(
+      luaSim,
+      hit,
+      (x, z) => viewer.heightAt(x, z),
+      queue,
+      ziel,
+      mapWaterElevation(),
+    )
     if (msg) log(msg)
     // Gesetzt (oder Befehl erteilt) → der Geist hat ausgedient, bis der nächste
     // Bau-Modus startet.
@@ -2064,6 +2095,12 @@ const hudSource: HudSource = {
       out.push({
         id: u.bpId, name: u.name, health: s.health, maxHealth: s.maxHealth, selected: u.selected,
         x: s.x, y: s.y, z: s.z, army: u.army, strategicIcon: u.strategicIcon, fadeZoom: u.fadeZoom,
+        // Own/allied units always get a life bar; an enemy only when hovered or
+        // ui_ForceLifbarsOnEnemy (Cfile:1284554-1284570). The sandbox has one
+        // army, so ally is always true here — a real session needs the UI VM's
+        // IsAlly for actual alliances.
+        ally: u.army === focusArmy(),
+        hovered: u.id === rolloverUnitId,
         // Baufortschritt (< 1 = Baustelle) und die halbe Breite der Einheit —
         // beides braucht die Lebensbalken-Schicht: der Balken schwebt über der
         // Einheit und zeigt bei einer Baustelle den Fortschritt statt der HP.

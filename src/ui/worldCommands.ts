@@ -102,6 +102,14 @@ export function footprintOf(host: LuaHost, blueprintId: string): [number, number
 /**
  * Rasterfang. `elevation` liefert die Geländehöhe — dieselbe Quelle, aus der die
  * Sim ihre Höhe zieht (sonst steht das Gebäude im Bild woanders als in der Sim).
+ *
+ * `waterElevation` (the map's water surface, or undefined when the map has no
+ * water) clamps the build height UP to the water surface on underwater cells,
+ * exactly like COORDS_ToWorldPos / GetSurfaceHeight (`y = max(terrainY,
+ * waterElevation)`, Cfile:641654 / 1089843-1089852). Seabed-anchored footprints
+ * (occupancy caps & LAYER_Seabed) keep the raw terrain, but those caps are not
+ * exposed to the UI VM, so every underwater build floats to the surface — a
+ * documented residual for the rare seabed structure.
  */
 export function snapToGrid(
   x: number,
@@ -109,12 +117,15 @@ export function snapToGrid(
   sizeX: number,
   sizeZ: number,
   elevation: (x: number, z: number) => number,
+  waterElevation?: number,
 ): { x: number; y: number; z: number } {
   const cellX = Math.trunc(x - sizeX / 2)
   const cellZ = Math.trunc(z - sizeZ / 2)
   const worldX = cellX + sizeX / 2
   const worldZ = cellZ + sizeZ / 2
-  return { x: worldX, y: elevation(worldX, worldZ), z: worldZ }
+  const terrainY = elevation(worldX, worldZ)
+  const y = waterElevation !== undefined && waterElevation > terrainY ? waterElevation : terrainY
+  return { x: worldX, y, z: worldZ }
 }
 
 /**
@@ -143,6 +154,13 @@ export async function worldClick(
     reclaimPropId?: number
     /** A map prop under the cursor — its scmap instance index. */
     reclaimMapPropIndex?: number
+    /** The map's water surface height (undefined = no water) — a build is
+     *  clamped up to it on underwater cells (GetSurfaceHeight, Cfile:641654). */
+    waterElevation?: number
+    /** The enemy under the cursor is RECLAIMABLE (being built, or category
+     *  RECLAIMABLE, and not busy — mirrors v52 @Cfile:1240220). When the
+     *  selection cannot attack it, the engine issues Reclaim (Cfile:1240271). */
+    enemyReclaimable?: boolean
   } = { queue: false },
 ): Promise<string | null> {
   // pull() liefert JSON — eine LEERE Lua-Tabelle wuerde als `{}` in JS ankommen,
@@ -327,7 +345,7 @@ export async function worldClick(
   if (cm.mode === 'build' || cm.mode === 'buildanchored') {
     if (!cm.name) return null
     const [sx, sz] = footprintOf(host, cm.name)
-    const pos = snapToGrid(hit.x, hit.z, sx, sz, elevation)
+    const pos = snapToGrid(hit.x, hit.z, sx, sz, elevation, opts.waterElevation)
     // The first builder of the selection places the site; every other
     // selected unit with RULEUCC_Repair joins the SAME site through the
     // repair/build task — the engine's BuildAssist result (dispatch 0x09;
@@ -370,13 +388,37 @@ export async function worldClick(
       sim.attack(u.id, opts.enemyTargetId, opts.queue)
       n++
     }
-    if (n === 0) return null
-    onCommandIssued(host, {
-      CommandType: 'Attack',
-      Position: { x: hit.x, y, z: hit.z },
-      Clear: !opts.queue,
-    })
-    return `Attack (${n}) → Unit ${opts.enemyTargetId}`
+    if (n > 0) {
+      onCommandIssued(host, {
+        CommandType: 'Attack',
+        Position: { x: hit.x, y, z: hit.z },
+        Clear: !opts.queue,
+      })
+      return `Attack (${n}) → Unit ${opts.enemyTargetId}`
+    }
+    // No selected unit can attack it (the engine's sub_81D080 short-circuit is
+    // false). If the enemy is reclaimable and the selection can reclaim, the
+    // engine issues Reclaim instead of doing nothing (Cfile:1240271-1240288) —
+    // e.g. a pure-engineer selection right-clicking an enemy structure under
+    // construction. Reclaim of a live unit target uses the same dispatch 0x13.
+    if (opts.enemyReclaimable) {
+      let r = 0
+      for (const u of selection) {
+        if (u.canReclaim) {
+          sim.reclaim(u.id, opts.enemyTargetId, opts.queue)
+          r++
+        }
+      }
+      if (r > 0) {
+        onCommandIssued(host, {
+          CommandType: 'Reclaim',
+          Position: { x: hit.x, y, z: hit.z },
+          Clear: !opts.queue,
+        })
+        return `Reclaim (${r}) → Unit ${opts.enemyTargetId}`
+      }
+    }
+    return null
   }
   // Click on an OWN UNFINISHED structure: units with RULEUCC_Repair resume
   // its construction (repair task, dispatch 0x14) — the engine default.

@@ -493,19 +493,26 @@ export class GameUi {
      *  Repair, own healthy → Guard (0x0F), prop → Reclaim (0x13). */
     ziel: {
       enemy?: number
+      /** The enemy is reclaimable (being built / category RECLAIMABLE) — a
+       *  non-attacking selection reclaims it instead. */
+      enemyReclaimable?: boolean
       repair?: number
       own?: number
       reclaimProp?: number
       reclaimMapProp?: number
     } = {},
+    /** The map's water surface height (undefined = no water) — clamps a build. */
+    waterElevation?: number,
   ): Promise<string | null> {
     return worldClick(this.host, sim, hit, elevation, {
       queue,
       enemyTargetId: ziel.enemy,
+      enemyReclaimable: ziel.enemyReclaimable,
       repairTargetId: ziel.repair,
       ownTargetId: ziel.own,
       reclaimPropId: ziel.reclaimProp,
       reclaimMapPropIndex: ziel.reclaimMapProp,
+      waterElevation,
     })
   }
 
