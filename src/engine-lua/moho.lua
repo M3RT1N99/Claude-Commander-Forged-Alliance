@@ -151,19 +151,18 @@ local entity = withNoops(ENTITY_NAMES, {
     -- `GetStat('KILLS',0).Value + 1` (unit.lua:3139) — das +1 gilt genau, WEIL
     -- die Engine diesen Kill noch nicht gezaehlt hat. Zaehlt man vorher, steigt
     -- die Unit einen Kill zu frueh auf.
+    -- A dying STRUCTURE releases its neighbours FIRST: the engine runs
+    -- OnNotAdjacentTo on both sides (Cfile:952148-952153) BEFORE OnKilled
+    -- (Cfile:952177), so the adjacency buffs are torn down before the death
+    -- callback sees them — defaultunits.lua:372 removes every Adjacency buff.
+    if self.__isUnit and __notifyNotAdjacent then __notifyNotAdjacent(self.__id) end
+
     if self.OnKilled then
       local ok, err = pcall(function()
         self:OnKilled(instigator, damageType or '', overkill)
       end)
       if not ok then WARN('OnKilled: ' .. tostring(err)) end
     end
-
-    -- A dying STRUCTURE releases its neighbours: the engine runs
-    -- OnNotAdjacentTo on both sides right after the kill, but only for an
-    -- immobile unit that was not still under construction
-    -- (Cfile:952133-952162). That is what takes the adjacency buffs away
-    -- again — defaultunits.lua:372 removes every buff of its Adjacency table.
-    if self.__isUnit and __notifyNotAdjacent then __notifyNotAdjacent(self.__id) end
 
     -- Die Kill-Statistik zaehlt die ENGINE (Cfile:936180-936183) — unit.lua:3083
     -- verlaesst sich darauf („kills through the engine are already counted").
@@ -618,17 +617,39 @@ local unit = withNoops(UNIT_NAMES, {
   GetBuildRate = function(self)
     return (self.__bp and self.__bp.Economy and self.__bp.Economy.BuildRate) or 0
   end,
+  -- The per-second rates are MUTABLE at runtime (SetProductionPerSecond* /
+  -- SetConsumptionPerSecond*, below): prefer the runtime value, fall back to the
+  -- blueprint. The original Lua drives the dynamic economy through the setters.
   GetProductionPerSecondEnergy = function(self)
-    return (self.__bp and self.__bp.Economy and self.__bp.Economy.ProductionPerSecondEnergy) or 0
+    return self.__prodE or (self.__bp and self.__bp.Economy and self.__bp.Economy.ProductionPerSecondEnergy) or 0
   end,
   GetProductionPerSecondMass = function(self)
-    return (self.__bp and self.__bp.Economy and self.__bp.Economy.ProductionPerSecondMass) or 0
+    return self.__prodM or (self.__bp and self.__bp.Economy and self.__bp.Economy.ProductionPerSecondMass) or 0
   end,
   GetConsumptionPerSecondEnergy = function(self)
-    return (self.__bp and self.__bp.Economy and self.__bp.Economy.MaintenanceConsumptionPerSecondEnergy) or 0
+    return self.__consE or (self.__bp and self.__bp.Economy and self.__bp.Economy.MaintenanceConsumptionPerSecondEnergy) or 0
   end,
   GetConsumptionPerSecondMass = function(self)
-    return (self.__bp and self.__bp.Economy and self.__bp.Economy.MaintenanceConsumptionPerSecondMass) or 0
+    return self.__consM or (self.__bp and self.__bp.Economy and self.__bp.Economy.MaintenanceConsumptionPerSecondMass) or 0
+  end,
+  -- Runtime rate setters (were no-op stubs): store the value AND push the one
+  -- changed field to the army economy (Cfile:976734-976735). This is how mass
+  -- extractors scale, adjacency bonuses apply and upgrades throttle.
+  SetProductionPerSecondMass = function(self, v)
+    self.__prodM = v
+    if __econUpdateRate and self.__id then __econUpdateRate(self.__army or 1, self.__id, 'prodM', v) end
+  end,
+  SetProductionPerSecondEnergy = function(self, v)
+    self.__prodE = v
+    if __econUpdateRate and self.__id then __econUpdateRate(self.__army or 1, self.__id, 'prodE', v) end
+  end,
+  SetConsumptionPerSecondMass = function(self, v)
+    self.__consM = v
+    if __econUpdateRate and self.__id then __econUpdateRate(self.__army or 1, self.__id, 'consM', v) end
+  end,
+  SetConsumptionPerSecondEnergy = function(self, v)
+    self.__consE = v
+    if __econUpdateRate and self.__id then __econUpdateRate(self.__army or 1, self.__id, 'consE', v) end
   end,
   SetProductionActive = function(self, active)
     __econSetProductionActive(self.__army or 1, self.__id, active)
@@ -729,6 +750,9 @@ local weapon = withNoops(WEAPON_NAMES, {
   ChangeRateOfFire = function(self, rof) self.__rateOfFire = rof end,
   ChangeMaxRadius = function(self, r) self.__maxRadius = r end,
   ChangeMinRadius = function(self, r) self.__minRadius = r end,
+  -- The vertical firing gate (weapons.lua reads __maxHeightDiff or the
+  -- blueprint MaxHeightDiff); was a no-op stub before.
+  ChangeMaxHeightDiff = function(self, v) self.__maxHeightDiff = v end,
   ChangeDamage = function(self, d) self.__damage = d end,
   ChangeDamageRadius = function(self, r) self.__damageRadius = r end,
   ChangeDamageType = function(self, t) self.__damageType = t end,

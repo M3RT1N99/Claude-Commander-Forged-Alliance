@@ -331,7 +331,12 @@ local function fireTick(w, u)
     local maxR = w.__maxRadius or bp.MaxRadius or 0
     local minR = w.__minRadius or bp.MinRadius or 0
     if d2 > maxR * maxR then return end
-    if minR > 0 and d2 < minR * minR then return end
+    -- Min range is INCLUSIVE: mMinRadiusSq >= distSq is too close (Cfile:985089).
+    if minR > 0 and d2 <= minR * minR then return end
+    -- Vertical gate: a weapon with a finite MaxHeightDiff cannot fire at a
+    -- target too far above/below it (TargetSolutionStatusGun, Cfile:985091-985098).
+    local mhd = w.__maxHeightDiff or bp.MaxHeightDiff
+    if mhd and math.abs(q[2] - p[2]) > mhd then return end
   elseif w.__targetGround then
     -- The fire clock's ground gate (weapons.md:70): CannotAttackGround
     -- weapons never fire at an AITARGET_Ground target; same range window
@@ -346,7 +351,9 @@ local function fireTick(w, u)
     local maxR = w.__maxRadius or bp.MaxRadius or 0
     local minR = w.__minRadius or bp.MinRadius or 0
     if d2 > maxR * maxR then return end
-    if minR > 0 and d2 < minR * minR then return end
+    if minR > 0 and d2 <= minR * minR then return end
+    local mhd = w.__maxHeightDiff or bp.MaxHeightDiff
+    if mhd and q[2] and math.abs(q[2] - p[2]) > mhd then return end
   end
 
   -- Und jetzt die Lua: OnFire startet die Salven-Zustandsmaschine.

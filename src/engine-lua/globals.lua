@@ -401,26 +401,29 @@ categories = setmetatable({}, {
 })
 categories.ALLUNITS = mkcat('all')
 
--- ParseEntityCategory('BUILTBYCOMMANDER UEF'): Leerzeichen = UND (wie in den
--- Blueprint-BuildableCategory-Termen); '+'/'-'/'*' werden ebenfalls erkannt.
+-- ParseEntityCategory('TECH1,TECH2 MOBILE'): the engine's string DSL
+-- (ParseEntityCategory @Cfile:698138-698245) splits on COMMAS into groups that
+-- are UNIONED, and on WHITESPACE within a group into tokens that are
+-- INTERSECTED. There are no '+'/'-' operators in the string form — those are
+-- looked up as category names, miss, and are skipped (Cfile:698215); '*' is the
+-- same and is redundant with the space-intersect. Real blueprints rely on the
+-- comma form: url0103_unit.bp:230 TargetAllow='TECH1,TECH2',
+-- uaa0103_unit.bp:287 TargetDisallow='TECH3,EXPERIMENTAL,COMMAND'. An empty or
+-- all-unrecognised expression is the EMPTY set (matches nothing), not ALLUNITS.
 function ParseEntityCategory(expr)
   if type(expr) ~= 'string' then return expr end
-  local cur = nil
-  local op = 'and'
-  for tok in string.gmatch(expr, '%S+') do
-    if tok == '+' then op = 'or'
-    elseif tok == '-' then op = 'sub'
-    elseif tok == '*' then op = 'and'
-    else
-      local c = categories[tok]
-      if not cur then cur = c
-      elseif op == 'or' then cur = cur + c
-      elseif op == 'sub' then cur = cur - c
-      else cur = cur * c end
-      op = 'and'
+  local result = nil
+  for group in string.gmatch(expr, '[^,]+') do
+    local inter = nil
+    for tok in string.gmatch(group, '%S+') do
+      if tok ~= '*' then
+        local c = categories[tok]
+        inter = inter and (inter * c) or c
+      end
     end
+    if inter then result = result and (result + inter) or inter end
   end
-  return cur or mkcat('all')
+  return result or mkcat('none')
 end
 
 local function bpCategorySet(bp)

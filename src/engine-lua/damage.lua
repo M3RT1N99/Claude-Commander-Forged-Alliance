@@ -89,17 +89,12 @@ local function damagePoint(instigator, origin, target, amount, damageType, damag
   local tp = target.__pos or { 0, 0, 0 }
   local vec = Vector(tp[1] - origin[1], tp[2] - origin[2], tp[3] - origin[3])
 
-  -- OnDamageBy(armyIndex) — the Lua counts who fired (Cfile:1063052; unit.lua
-  -- uses it for retaliation/stats). It fires whether or not a shield eats the hit.
-  if inst and inst.__army and target.OnDamageBy then
-    pcall(function() target:OnDamageBy(inst.__army) end)
-  end
-
   -- Shield: a unit with an ACTIVE shield takes the hit on the shield first
   -- (native shield-sphere routing, Cfile:1062695). shield.lua's OnDamage applies
   -- the shield's OWN armor/handicap (OnGetDamageAbsorption) and passes overkill
   -- to the owner (Owner:DoTakeDamage) — so it receives the RAW amount, BEFORE the
-  -- unit-armor reduction below.
+  -- unit-armor reduction below. A FULL shield absorb returns here and therefore
+  -- never fires the unit's OnDamageBy (Cfile:1063018).
   local shield = target.MyShield
   if shield and not shield.__destroyed and not shield.__destroyQueued
     and shield.IsOn and shield:IsOn() and shield:GetHealth() > 0 then
@@ -108,13 +103,22 @@ local function damagePoint(instigator, origin, target, amount, damageType, damag
     return
   end
 
+  -- Armor + handicap reduce the amount only for UNITS (Cfile:1063012-1063033);
+  -- props and projectiles take the raw amount.
   local dealt = amount
-  if target.__bp and not target.__isProj then
+  if target.__isUnit then
     dealt = dealt * __armorMult(target, damageType)
+    dealt = dealt / (1 + ArmyGetHandicap(target.__army or 1))
   end
-  dealt = dealt / (1 + ArmyGetHandicap(target.__army or 1))
 
   if dealt <= 0 then return end
+
+  -- OnDamageBy(armyIndex) — who fired (Cfile:1063052; unit.lua uses it for
+  -- retaliation/stats). It fires only AFTER the reduction, on a UNIT that
+  -- actually takes damage (not on a full shield absorb, a prop or a projectile).
+  if inst and inst.__army and target.__isUnit and target.OnDamageBy then
+    pcall(function() target:OnDamageBy(inst.__army) end)
+  end
 
   -- Und jetzt sagt es die Engine der Lua — sie zieht die HP selbst ab
   -- (RunScript_EntityOnDamage, Cfile:1063151).

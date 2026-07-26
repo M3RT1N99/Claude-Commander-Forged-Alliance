@@ -389,7 +389,10 @@ function __buildCollect()
         local bRate = (b.__bp and b.__bp.Economy and b.__bp.Economy.BuildRate) or 0
         local te = (t.__bp and t.__bp.Economy) or {}
         local bt = te.BuildTime or 1
-        if bt < 1 then bt = 1 end
+        -- The engine divides by BuildTime unclamped (Cfile:815339); the Lua
+        -- consumption model floors it at 0.1 (game.lua:38). Use 0.1, not 1 —
+        -- the old floor of 1 ran a BuildTime in (0.1,1) up to ~10x too slow.
+        if bt < 0.1 then bt = 0.1 end
         -- delta = BuildRate / BuildTime per second (Cfile:815339+815342),
         -- clamped to what is left (fraction or health fraction).
         local step = (bRate / bt) * 0.1

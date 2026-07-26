@@ -36,8 +36,11 @@ for (let i = 0; i < 8; i++) beat(engine)
 const frac0 = Number(host.eval(`return __units[${target}].__fraction or 1`))
 check(target > 0 && frac0 < 1, `enemy structure is a being-built site (fraction ${frac0.toFixed(2)})`)
 // Empty most of the starting storage so the reclaim credit is not capped
-// against a full store (the ACU spawns with a full mass reserve).
+// against a full store (the ACU spawns with a full mass reserve). GiveResource
+// now adds to this beat's income (like the engine), so a beat is needed to fold
+// the negative amount into storage before we read the baseline.
 host.eval(`__getBrain(1):GiveResource('MASS', -600)`)
+beat(engine)
 const mass0 = Number(host.eval(`return __getBrain(1):GetEconomyStored('MASS')`))
 
 // The reclaim command that the world-click fallback issues on a non-attackable

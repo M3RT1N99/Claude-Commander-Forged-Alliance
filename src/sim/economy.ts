@@ -133,6 +133,12 @@ export class ArmyEconomy {
   // reclaimed is NOT folded into income. Kept per second like income/expense.
   reclaimMass = 0
   reclaimEnergy = 0
+  // Resources GIVEN this beat (GiveResource / reclaim). The engine adds them to
+  // the INCOME accumulator (mResources), NOT to storage (Cfile:735044-735053,
+  // 848620-848639), so active demand consumes them first and only the leftover
+  // clamps into storage. Folded into `available` in tick(), then reset.
+  private pendingMass = 0
+  private pendingEnergy = 0
 
   private readonly units = new Map<number, UnitEcon>()
   /** Transiente Bau-Requests (pro Tick vom Bau-System gesetzt). */
@@ -164,6 +170,19 @@ export class ArmyEconomy {
   setConsumptionActive(id: number, active: boolean): void {
     const u = this.units.get(id)
     if (u) u.consActive = active
+  }
+  /**
+   * Runtime per-second rate update (Set{Production,Consumption}PerSecond{Mass,
+   * Energy}). The engine reads the mutable UnitAttributes each tick
+   * (Cfile:976734-976735) and the original Lua drives the whole dynamic economy
+   * through these setters: mass-extractor scaling by the MASS marker
+   * (defaultunits.lua:785), adjacency modifiers + maintenance (unit.lua:745-759),
+   * upgrade throttling (defaultunits.lua:817-841). Only the named field changes;
+   * the others keep their spawn-registered value.
+   */
+  setRate(id: number, field: 'prodM' | 'prodE' | 'consM' | 'consE', value: number): void {
+    const u = this.units.get(id)
+    if (u) u[field] = value
   }
   remove(id: number): void {
     this.units.delete(id)
@@ -226,8 +245,12 @@ export class ArmyEconomy {
     this.requestedMass = f(reqM / DT)
     this.requestedEnergy = f(reqE / DT)
 
-    const availMass = f(this.mass + f(prodM * DT))
-    const availEnergy = f(this.energy + f(prodE * DT))
+    // Given/reclaimed resources are income this beat (Cfile:1106670-1106674):
+    // fold them into `available` so demand can consume them, then reset.
+    const availMass = f(this.mass + f(prodM * DT) + this.pendingMass)
+    const availEnergy = f(this.energy + f(prodE * DT) + this.pendingEnergy)
+    this.pendingMass = 0
+    this.pendingEnergy = 0
     const { spentMass, spentEnergy } = distribute(availMass, availEnergy, consumers)
     // Persist each unit's granted rate for next tick's production factor.
     for (const [u, c] of unitConsumers) u.lastRate = c.rate
@@ -247,8 +270,12 @@ export class ArmyEconomy {
    * läuft GiveInitialResources im Original erst nach WaitTicks(5).
    */
   give(res: Res, amount: number): void {
-    if (res === 'MASS') this.mass = f(Math.min(Math.max(this.mass + amount, 0), this.maxMass))
-    else this.energy = f(Math.min(Math.max(this.energy + amount, 0), this.maxEnergy))
+    // Add to this beat's income (unclamped), NOT straight to storage: the
+    // engine lets given/reclaimed resources feed current demand and only clamps
+    // the leftover into storage (Cfile:735044-735053), so a full store no
+    // longer silently drops a reclaim.
+    if (res === 'MASS') this.pendingMass += amount
+    else this.pendingEnergy += amount
   }
 
   /**
@@ -330,6 +357,13 @@ export function installEconomy(host: LuaHost, mgr: EconomyManager): void {
   host.setGlobal('__econSetConsumptionActive', (army: number, id: number, v: boolean) => {
     mgr.army(army).setConsumptionActive(id, v !== false)
   })
+  // Runtime rate change from Set*PerSecond* (moho.lua) — the dynamic economy.
+  host.setGlobal(
+    '__econUpdateRate',
+    (army: number, id: number, field: 'prodM' | 'prodE' | 'consM' | 'consE', value: number) => {
+      mgr.army(army).setRate(id, field, value)
+    },
+  )
   // Bau-Requests: das Bau-System meldet vor dem Tick den Bedarf an und liest
   // danach die gewährte LimitingRate zurück (CEconRequest::LimitingRate).
   host.setGlobal('__econSetBuildRequest', (army: number, taskId: number, mass: number, energy: number) => {
