@@ -74,9 +74,9 @@ interface RawLayout {
  * Expand an uncompressed mip to BGRA8 — the ordering expected by
  * `bgraToRgba`.
  *
- * The masks come from the header; the 5-bit channels of 16-bit formats are
- * expanded to 8 bits with `(v << 3) | (v >> 2)` (standard bit replication, so
- * that 31 → 255 rather than 248).
+ * The masks come from the header; an N-bit channel is expanded to 8 bits by
+ * uniform scale `round(v * 255 / (2^N - 1))` (0 → 0, max → 255), which — unlike
+ * bit replication — also holds for 1..3-bit channels (see `scale` below).
  */
 function expandToBgra(src: Uint8Array, count: number, layout: RawLayout): Uint8Array {
   const { bytesPerPixel, rMask, gMask, bMask, aMask } = layout
@@ -115,9 +115,13 @@ function expandToBgra(src: Uint8Array, count: number, layout: RawLayout): Uint8A
     let px = 0
     for (let b = 0; b < bytesPerPixel; b++) px |= src[o + b]! << (8 * b) // little-endian
     const d = i * 4
-    out[d + 0] = bMask ? scale((px & bMask) >>> B.shift, B.bits) : 255
-    out[d + 1] = gMask ? scale((px & gMask) >>> G.shift, G.bits) : 255
-    out[d + 2] = rMask ? scale((px & rMask) >>> R.shift, R.bits) : 255
+    // A channel the source format does not carry: D3D UNORM sampling reads an
+    // absent COLOR channel as 0 and an absent ALPHA as 1.0 (255). So an A8
+    // texture presents RGB=0, not white (the old 255 default gave A8/L8 lookup
+    // textures a white instead of black RGB).
+    out[d + 0] = bMask ? scale((px & bMask) >>> B.shift, B.bits) : 0
+    out[d + 1] = gMask ? scale((px & gMask) >>> G.shift, G.bits) : 0
+    out[d + 2] = rMask ? scale((px & rMask) >>> R.shift, R.bits) : 0
     out[d + 3] = aMask ? scale((px >>> A.shift) & ((1 << A.bits) - 1), A.bits) : 255
   }
   return out

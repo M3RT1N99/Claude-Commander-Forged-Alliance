@@ -359,19 +359,24 @@ export class GameAudio {
       if (inst.stopped) return
       const source = this.ctx.createBufferSource()
       source.buffer = buffer
-      // Effect variation (types 4/6): pitch in cents, volume in dB via the
-      // volume-byte curve (flag inference 0x80=pitch/0x40=volume).
       const ev = cue.effectVariation
+      // Pitch: the sound's authored pitch (cents) plus the effect variation's
+      // random pitch offset (types 4/6, flag 0x80). The sound pitch was dropped
+      // before — now it stacks with the variation (Cfile XACT sound pitch @+4).
+      let cents = cue.pitchCents
       if (ev && (ev.flags & 0x80) !== 0 && ev.maxPitchCents > ev.minPitchCents) {
-        const cents = ev.minPitchCents + Math.random() * (ev.maxPitchCents - ev.minPitchCents)
-        source.playbackRate.value = Math.pow(2, cents / 1200)
+        cents += ev.minPitchCents + Math.random() * (ev.maxPitchCents - ev.minPitchCents)
       }
-      let base = 1
+      if (cents !== 0) source.playbackRate.value = Math.pow(2, cents / 1200)
+      // Volume: the sound's authored volume byte (was dropped, so nearly every
+      // sound mixed at 0 dB) stacked with the effect variation's random volume
+      // (flag 0x40). Category gain is applied by categoryNodes downstream.
+      let base = Math.pow(10, xactVolumeByteToDb(cue.volume) / 20)
       if (ev && (ev.flags & 0x40) !== 0 && ev.maxVolByte > ev.minVolByte) {
         const db =
           xactVolumeByteToDb(ev.minVolByte) +
           Math.random() * (xactVolumeByteToDb(ev.maxVolByte) - xactVolumeByteToDb(ev.minVolByte))
-        base = Math.pow(10, db / 20)
+        base *= Math.pow(10, db / 20)
       }
       if (!restart && fadeInMs > 0) {
         const t = this.ctx.currentTime

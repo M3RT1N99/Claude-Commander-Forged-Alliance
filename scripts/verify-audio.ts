@@ -83,6 +83,8 @@ let totalCues = 0
 let cuesWithVariants = 0
 let maxVariants = 1
 let badWaveRefs = 0
+let cuesWithNonZeroDbVolume = 0
+let cuesWithPitch = 0
 const xsbErrors: string[] = []
 for (const f of xsbFiles) {
   try {
@@ -94,6 +96,10 @@ for (const f of xsbFiles) {
         cuesWithVariants++
         maxVariants = Math.max(maxVariants, cue.variantCount)
       }
+      // The per-sound volume byte (0xB4 = 180 = 0 dB) and pitch (cents) were
+      // silently dropped before; confirm they are extracted now.
+      if (cue.volume !== 180) cuesWithNonZeroDbVolume++
+      if (cue.pitchCents !== 0) cuesWithPitch++
       // Ende-zu-Ende: der Verweis muss in eine echte, geparste Bank zeigen
       // und der Wave-Index existieren.
       const bank = banksByName.get(sb.waveBanks[cue.waveBankIndex]!)
@@ -106,6 +112,15 @@ for (const f of xsbFiles) {
 check(xsbErrors.length === 0, `alle Sound Banks parsen (${xsbErrors.length} Fehler)`)
 for (const e of xsbErrors.slice(0, 5)) console.log(`      ${e}`)
 check(totalCues === 1896, `1896 Cues gesamt (${totalCues}) — Zahl aus docs/research/effects-audio.md`)
+// The XACT sound header carries a volume byte @+3 and a pitch s16 @+4; both
+// were skipped before. Most sounds are authored at a non-0 dB level, and a
+// couple hundred carry a pitch offset — extracting them fixes near-universal
+// wrong mix levels.
+check(
+  cuesWithNonZeroDbVolume > 1000,
+  `per-sound volume is extracted: ${cuesWithNonZeroDbVolume} cues at a non-0 dB level`,
+)
+check(cuesWithPitch > 100, `per-sound pitch is extracted: ${cuesWithPitch} cues with a pitch offset`)
 check(
   badWaveRefs === 0,
   `jede Cue zeigt in eine existierende Bank auf einen existierenden Wave-Index (${badWaveRefs} kaputt)`,

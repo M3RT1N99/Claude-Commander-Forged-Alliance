@@ -97,6 +97,14 @@ export interface XsbCueTarget {
    * Weapons, Interface.xsb menu cues -> 9 Interface / selects -> 19).
    */
   category: number
+  /** The sound's authored volume BYTE (@+3 of the 9-byte header) — the same
+   *  XACT encoding as the xgs categories (0xB4 = 180 = 0 dB); convert with
+   *  xactVolumeByteToDb. Was silently dropped, so nearly every sound mixed at
+   *  the wrong level. */
+  volume: number
+  /** The sound's authored pitch in CENTS (s16 @+4), same units as the
+   *  effect-variation min/maxPitchCents. */
+  pitchCents: number
   /** PlayWave loopCount: 0 = play once, 255 = infinite
    *  (FACT_internal.c:272-277), else N extra iterations. */
   loopCount: number
@@ -196,6 +204,10 @@ export function parseXsb(bytes: Uint8Array): XsbBank {
     const base = {
       variantCount: 1,
       category,
+      // The authored volume byte @+3 and pitch (cents) s16 @+4 — the header
+      // comment documents them but resolveSound skipped straight to off+9.
+      volume: u8(off + 3),
+      pitchCents: view.getInt16(off + 4, true),
       loopCount: 0,
       playlist: null as XsbPlaylistEntry[] | null,
       newVariationOnLoop: false,
