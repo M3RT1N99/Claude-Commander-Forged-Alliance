@@ -33,6 +33,18 @@ __bpDefaults = {
     CapCost = 1.0,
     SelectionPriority = 1,
   },
+  -- RUnitBlueprintAir fields used by motion and weapon gates. The reflected
+  -- Lua name is MaxAirspeed (lower-case "s"), despite the C++ member being
+  -- mMaxAirSpeed (Cfile:656086-656127, 657447-657561).
+  Air = {
+    CanFly = false,
+    Winged = false,
+    FlyInWater = false,
+    MaxAirspeed = 0.0,
+    MinAirspeed = 0.0,
+    StartTurnDistance = 0.0,
+    PredictAheadForBombDrop = 0.0,
+  },
   -- IdleEffects: Tabellen-Feld im Struct -> leer, nie nil. unit.lua:2463
   -- indiziert es ungeprueft (bpTable[layer]).
   Display = {
@@ -229,6 +241,14 @@ end
 
 function RegisterUnitBlueprint(bp)
   fillDefaults(bp, __bpDefaults)
+  -- RUnitBlueprint::OnInitBlueprint-derived air values
+  -- (Cfile:655931-655939).
+  local air = bp.Air
+  local physics = bp.Physics
+  if not air.CanFly and physics.MotionType == 'RULEUMT_Air' then air.CanFly = true end
+  if air.MaxAirspeed == 0 and air.CanFly then air.MaxAirspeed = physics.MaxSpeed end
+  if air.MinAirspeed == 0 then air.MinAirspeed = air.MaxAirspeed end
+  if air.StartTurnDistance == 0 then air.StartTurnDistance = (bp.SizeZ or 0) * 3 end
   -- Jeder Waffen-Eintrag ist ein eigenes Struct — also auch eigene Defaults.
   for _, w in ipairs(bp.Weapon or {}) do
     fillDefaults(w, __weaponDefaults)

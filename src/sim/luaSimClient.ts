@@ -45,6 +45,16 @@ export interface LuaUnitSnapshot {
   /** Effective command-cap mask (UnitAttributes::commandCapsMask) — the UI
    *  mirror follows runtime Add/RemoveCommandCap through this sync. */
   caps?: number
+  /** Effective toggle-cap mask, mutated by Add/RemoveToggleCap. */
+  toggleCaps?: number
+  /** Unit script-bit mask (mScriptBits), authoritative in the sim. */
+  scriptBits?: number
+  /** Current movement layer (Land/Water/Sub/Seabed/Air/Orbit). */
+  layer?: string
+  /** Automatic silo-build mode (mAutoMode). */
+  autoMode?: boolean
+  /** Automatic submarine surfacing mode (mAutoSurfaceMode). */
+  autoSurfaceMode?: boolean
   /** Dead/DestroyQueued through the multi-beat death sequence — the UI mirror
    *  excludes it from selection/avatars (IsDead + DestroyQueued, Cfile:1361497). */
   dead?: boolean
@@ -491,10 +501,16 @@ export class LuaSimClient {
   setFireState(id: number, state: number): void {
     this.worker.postMessage({ type: 'fireState', id, state })
   }
-  /** ToggleScriptBit (cfunc_ToggleScriptBitL): the UI sends the DESIRED bit
-   *  state; the sim flips it via Unit:SetScriptBit (fires OnScriptBitSet/Clear). */
-  setScriptBit(id: number, bit: number, value: boolean): void {
-    this.worker.postMessage({ type: 'scriptBit', id, bit, value })
+  /** ToggleScriptBit (cfunc_ToggleScriptBitL): the UI has already filtered
+   *  units by their current state; ProcessInfo carries only the bit to flip. */
+  toggleScriptBit(id: number, bit: number): void {
+    this.worker.postMessage({ type: 'scriptBit', id, bit })
+  }
+  setAutoMode(id: number, enabled: boolean): void {
+    this.worker.postMessage({ type: 'autoMode', id, enabled })
+  }
+  setAutoSurfaceMode(id: number, enabled: boolean): void {
+    this.worker.postMessage({ type: 'autoSurfaceMode', id, enabled })
   }
   /** IssueUpgrade (cfunc_IssueUpgradeL, Cfile:1011315): upgrade this structure
    *  to `blueprint` (General.UpgradesTo). The successor is built at the old

@@ -34,10 +34,32 @@ end
 -- KEIN Klemmen auf [0,1] — die Engine laesst den Wert ueberschiessen. Wer hier
 -- ein math.min/max dazuerfindet, macht die Ein-/Ausblendungen der UI (die genau
 -- damit rechnen, effecthelpers.lua:446) an den Raendern falsch.
-function MATH_Lerp(s, a, b, c, d)
-  if d == nil then
+function MATH_Lerp(...)
+  local argc = select('#', ...)
+  if argc < 3 or argc > 5 then
+    error(
+      'MATH_Lerp(s, a, b) or MATH_Lerp(s, sMin, sMax, a, b) -> number'
+        .. '\n  expected between 3 and 5 args, but got ' .. tostring(argc),
+      2
+    )
+  end
+  local s, a, b, c, d = ...
+  -- The native binding accepts three to five arguments, but its four-argument
+  -- branch deliberately pushes nil (Cfile:598206-598265). Testing `d == nil`
+  -- cannot distinguish that call from the three-argument overload and used to
+  -- return an invented interpolation result.
+  if argc == 4 then return nil end
+  if argc == 3 then
+    if type(s) ~= 'number' then error("bad argument #1 to 'MATH_Lerp' (number expected)", 2) end
+    if type(a) ~= 'number' then error("bad argument #2 to 'MATH_Lerp' (number expected)", 2) end
+    if type(b) ~= 'number' then error("bad argument #3 to 'MATH_Lerp' (number expected)", 2) end
     return a + (b - a) * s
   end
+  if type(s) ~= 'number' then error("bad argument #1 to 'MATH_Lerp' (number expected)", 2) end
+  if type(a) ~= 'number' then error("bad argument #2 to 'MATH_Lerp' (number expected)", 2) end
+  if type(b) ~= 'number' then error("bad argument #3 to 'MATH_Lerp' (number expected)", 2) end
+  if type(c) ~= 'number' then error("bad argument #4 to 'MATH_Lerp' (number expected)", 2) end
+  if type(d) ~= 'number' then error("bad argument #5 to 'MATH_Lerp' (number expected)", 2) end
   local sMin, sMax = a, b
   return c + (d - c) * ((s - sMin) / (sMax - sMin))
 end
@@ -67,10 +89,6 @@ function VDist3Sq(a, b)
   local dx, dy, dz = ax - bx, ay - by, az - bz
   return dx * dx + dy * dy + dz * dz
 end
-function VAdd(a, b) local ax,ay,az = vxyz(a); local bx,by,bz = vxyz(b); return { ax+bx, ay+by, az+bz } end
-function VSub(a, b) local ax,ay,az = vxyz(a); local bx,by,bz = vxyz(b); return { ax-bx, ay-by, az-bz } end
-function VDiff(a, b) return VSub(a, b) end
-function VMult(a, s) local ax,ay,az = vxyz(a); return { ax*s, ay*s, az*s } end
 -- Ein Engine-Vektor traegt BEIDE Zugriffe — und das ist kein Komfort, sondern
 -- Voraussetzung: die Original-Lua benutzt wirklich beide Formen.
 --
@@ -79,13 +97,60 @@ function VMult(a, s) local ax,ay,az = vxyz(a); return { ax*s, ay*s, az*s } end
 --
 -- Ein Vektor nur mit Indizes laesst jeden Bau-Effekt an "attempt to perform
 -- arithmetic on a nil value" sterben (genau das stand im Log).
-function Vector(x, y, z)
-  return { x or 0, y or 0, z or 0, x = x or 0, y = y or 0, z = z or 0 }
+--
+-- The native Vector metatable does not duplicate named fields. Its __index and
+-- __newindex map x/y/z directly to raw array slots 1/2/3
+-- (Cfile:596930-596959). Keeping both copies made writes diverge: `v.x = 9`
+-- left `v[1]` unchanged and vice versa.
+local VectorMeta = {}
+local function vectorIndex(k)
+  if k == 'x' then return 1 end
+  if k == 'y' then return 2 end
+  if k == 'z' then return 3 end
+  error("'x', 'y', or 'z' expected", 3)
+end
+VectorMeta.__index = function(v, k)
+  local i = vectorIndex(k)
+  return rawget(v, i)
+end
+VectorMeta.__newindex = function(v, k, value)
+  local i = vectorIndex(k)
+  rawset(v, i, value)
 end
 
-function Vector2(x, y)
-  return { x or 0, y or 0, x = x or 0, y = y or 0 }
+function Vector(...)
+  local argc = select('#', ...)
+  if argc ~= 3 then
+    error('Create a vector (x,y,z)\n  expected 3 args, but got ' .. tostring(argc), 2)
+  end
+  local x, y, z = ...
+  if type(x) ~= 'number' then error("bad argument #1 to 'Vector' (number expected)", 2) end
+  if type(y) ~= 'number' then error("bad argument #2 to 'Vector' (number expected)", 2) end
+  if type(z) ~= 'number' then error("bad argument #3 to 'Vector' (number expected)", 2) end
+  return setmetatable({ x, y, z }, VectorMeta)
 end
+
+function Vector2(...)
+  local argc = select('#', ...)
+  if argc ~= 2 then
+    error('Create a vector (x,y)\n  expected 2 args, but got ' .. tostring(argc), 2)
+  end
+  local x, y = ...
+  if type(x) ~= 'number' then error("bad argument #1 to 'Vector2' (number expected)", 2) end
+  if type(y) ~= 'number' then error("bad argument #2 to 'Vector2' (number expected)", 2) end
+  return setmetatable({ x, y }, VectorMeta)
+end
+
+local function Quaternion(x, y, z, w)
+  -- SCR_ToLua<Quaternion> writes the fourth scalar component and then attaches
+  -- the same Vector metatable (Cfile:596768-596804).
+  return setmetatable({ x, y, z, w }, VectorMeta)
+end
+
+function VAdd(a, b) local ax,ay,az = vxyz(a); local bx,by,bz = vxyz(b); return Vector(ax+bx, ay+by, az+bz) end
+function VSub(a, b) local ax,ay,az = vxyz(a); local bx,by,bz = vxyz(b); return Vector(ax-bx, ay-by, az-bz) end
+function VDiff(a, b) return VSub(a, b) end
+function VMult(a, s) local ax,ay,az = vxyz(a); return Vector(ax*s, ay*s, az*s) end
 
 -- === Core math globals (scr_CoreInits => both VMs) ===
 
@@ -143,12 +208,12 @@ function EulerToQuaternion(roll, pitch, yaw)
   local cr, sr = math.cos(roll * 0.5), math.sin(roll * 0.5)
   local cp, sp = math.cos(pitch * 0.5), math.sin(pitch * 0.5)
   local cy, sy = math.cos(yaw * 0.5), math.sin(yaw * 0.5)
-  return {
-    sr * cp * cy + cr * sp * sy, -- x
+  return Quaternion(
+    sr * cp * sy + cr * sp * cy, -- x
     cr * cp * sy - sr * sp * cy, -- y
     sr * cp * cy - cr * sp * sy, -- z
-    cr * cp * cy + sr * sp * sy, -- w
-  }
+    cr * cp * cy + sr * sp * sy -- w
+  )
 end
 
 -- func_MatrixToQuat (Cfile:617541-617603) — rows m[1..3], each {x,y,z}.
@@ -157,7 +222,7 @@ local function matToQuat(m)
   if t > 0 then
     local s = math.sqrt(t + 1)
     local h = 0.5 / s
-    return { (m[2][3] - m[3][2]) * h, (m[3][1] - m[1][3]) * h, (m[1][2] - m[2][1]) * h, s * 0.5 }
+    return Quaternion((m[2][3] - m[3][2]) * h, (m[3][1] - m[1][3]) * h, (m[1][2] - m[2][1]) * h, s * 0.5)
   end
   local sh = { 2, 3, 1 }
   local i = (m[2][2] > m[1][1]) and 2 or 1
@@ -169,7 +234,7 @@ local function matToQuat(m)
   v[i] = s * 0.5
   v[j] = (m[j][i] + m[i][j]) * h
   v[k] = (m[i][k] + m[k][i]) * h
-  return { v[1], v[2], v[3], (m[j][k] - m[k][j]) * h }
+  return Quaternion(v[1], v[2], v[3], (m[j][k] - m[k][j]) * h)
 end
 
 -- "quaternion OrientFromDir(vector)" (Cfile:643353) — an orientation whose
@@ -180,12 +245,12 @@ function OrientFromDir(dir)
   local dy = dir[2] or dir.y or 0
   local dz = dir[3] or dir.z or 0
   local l = math.sqrt(dx * dx + dy * dy + dz * dz)
-  if l == 0 then return { 0, 0, 0, 1 } end
+  if l == 0 then return Quaternion(0, 0, 0, 1) end
   local f = { dx / l, dy / l, dz / l }
   local rl = math.sqrt(f[3] * f[3] + f[1] * f[1])
   if rl == 0 then
     -- Straight up/down (Cfile:641748-641757).
-    return { (dy > 0) and -0.70710677 or 0.70710677, 0, 0, 0.70710677 }
+    return Quaternion((dy > 0) and -0.70710677 or 0.70710677, 0, 0, 0.70710677)
   end
   local r = { f[3] / rl, 0, -f[1] / rl }
   local u = {
@@ -202,30 +267,30 @@ local function quatsNearEqual(a, b)
 end
 local function quatNormalize(q)
   local l = math.sqrt(q[1] * q[1] + q[2] * q[2] + q[3] * q[3] + q[4] * q[4])
-  if l <= 1e-6 then return { 0, 0, 0, 0 } end
-  return { q[1] / l, q[2] / l, q[3] / l, q[4] / l }
+  if l <= 1e-6 then return Quaternion(0, 0, 0, 0) end
+  return Quaternion(q[1] / l, q[2] / l, q[3] / l, q[4] / l)
 end
 
 -- "quaternion MinLerp(alpha, L, R)" (Cfile:643493) — func_QuatLERP
 -- (Cfile:617768-617815): near-equal quats return L; else clamp alpha to [0,1],
 -- flip R on the shortest path, lerp and normalise.
 function MinLerp(alpha, L, R)
-  if quatsNearEqual(L, R) then return { L[1], L[2], L[3], L[4] } end
+  if quatsNearEqual(L, R) then return Quaternion(L[1], L[2], L[3], L[4]) end
   local t = alpha
   if t >= 1 then t = 1 elseif t < 0 then t = 0 end
   local d = R[1] * L[1] + R[2] * L[2] + R[3] * L[3] + R[4] * L[4]
   local s = (d < 0) and -1 or 1
-  return quatNormalize({
+  return quatNormalize(Quaternion(
     L[1] * (1 - t) + s * R[1] * t, L[2] * (1 - t) + s * R[2] * t,
-    L[3] * (1 - t) + s * R[3] * t, L[4] * (1 - t) + s * R[4] * t,
-  })
+    L[3] * (1 - t) + s * R[3] * t, L[4] * (1 - t) + s * R[4] * t
+  ))
 end
 
 -- "quaternion MinSlerp(alpha, L, R)" (Cfile:643570) — Moho::SLERP
 -- (Cfile:617818-617991): a true slerp when the angle is large enough, else the
 -- same normalised lerp as MinLerp.
 function MinSlerp(alpha, L, R)
-  if quatsNearEqual(L, R) then return { L[1], L[2], L[3], L[4] } end
+  if quatsNearEqual(L, R) then return Quaternion(L[1], L[2], L[3], L[4]) end
   local t = alpha
   if t >= 1 then t = 1 elseif t < 0 then t = 0 end
   local d = R[1] * L[1] + R[2] * L[2] + R[3] * L[3] + R[4] * L[4]
@@ -237,16 +302,16 @@ function MinSlerp(alpha, L, R)
       local isin = 1 / math.sin(th)
       local a = math.sin(th * (1 - t)) * isin
       local b = math.sin(th * t) * isin
-      return {
+      return Quaternion(
         L[1] * a + s * R[1] * b, L[2] * a + s * R[2] * b,
-        L[3] * a + s * R[3] * b, L[4] * a + s * R[4] * b,
-      }
+        L[3] * a + s * R[3] * b, L[4] * a + s * R[4] * b
+      )
     end
   end
-  return quatNormalize({
+  return quatNormalize(Quaternion(
     L[1] * (1 - t) + s * R[1] * t, L[2] * (1 - t) + s * R[2] * t,
-    L[3] * (1 - t) + s * R[3] * t, L[4] * (1 - t) + s * R[4] * t,
-  })
+    L[3] * (1 - t) + s * R[3] * t, L[4] * (1 - t) + s * R[4] * t
+  ))
 end
 
 -- "GetVersion()" (Cfile:599401) — a CORE global: the ENGINE version, not the
@@ -366,10 +431,10 @@ end
 -- Flugbahn — ein geschaetzter Wert waere ein anderes Spiel.
 __simGravity = 4.9
 
--- Der Wasserspiegel der geladenen Karte (aus der .scmap). Ohne Karte: kein
--- Wasser.
-__mapWaterLevel = 0
-function __setWaterLevel(y) __mapWaterLevel = y or 0 end
+-- Der Wasserspiegel der geladenen Karte (aus der .scmap). Ohne Wasser setzt
+-- STIMap exakt -10000 ein (Entity::GetStartingLayer, Cfile:857506-857510).
+__mapWaterLevel = -10000
+function __setWaterLevel(y) __mapWaterLevel = type(y) == 'number' and y or -10000 end
 
 -- === Kategorie-System (EntityCategory, categories, ParseEntityCategory) ===
 -- Eine EntityCategory ist ein Ausdrucksbaum ueber Kategorie-Tokens; getestet
@@ -553,7 +618,14 @@ function ManipMeta:SetWorldUnits(v) self.__worldUnits = v ~= false; return self 
 function ManipMeta:ClearGoal() self.__goal = nil; return self end
 function ManipMeta:Disable() self.__enabled = false; return self end
 function ManipMeta:Enable() self.__enabled = true; return self end
-function ManipMeta:Destroy() self.__destroyed = true end
+function ManipMeta:Destroy()
+  self.__destroyed = true
+  -- CAimManipulator's destructor restores UnitWeapon::mCanFire to true
+  -- (Cfile:861517-861538).
+  if self.__kind == 'aim' and self.__weapon then
+    self.__weapon.__canFire = true
+  end
+end
 function ManipMeta:IsDestroyed() return self.__destroyed == true end
 -- BeenDestroyed() — the engine answers `opt == 0`, i.e. "the object is gone"
 -- (cfunc_CSlideManipulatorBeenDestroyedL, Cfile:879376). It was missing:
@@ -651,7 +723,12 @@ function CreateAimController(weapon, label, yawBone, pitchBone, muzzleBone)
   m.__yaw = 0
   m.__pitch = 0
   m.__onTarget = false
-  if weapon then weapon.__aim = m end
+  if weapon then
+    weapon.__aim = m
+    -- Constructing an aim manipulator clears mCanFire until tracking reports
+    -- OnTarget (Cfile:861326-861510, 862080-862097).
+    weapon.__canFire = false
+  end
   return m
 end
 
@@ -1268,12 +1345,70 @@ local function blueprintCommandCapMask(bp)
   return mask
 end
 
+local TOGGLE_CAP_BITS = {
+  RULEUTC_ShieldToggle = 0x1,
+  RULEUTC_WeaponToggle = 0x2,
+  RULEUTC_JammingToggle = 0x4,
+  RULEUTC_IntelToggle = 0x8,
+  RULEUTC_ProductionToggle = 0x10,
+  RULEUTC_StealthToggle = 0x20,
+  RULEUTC_GenericToggle = 0x40,
+  RULEUTC_SpecialToggle = 0x80,
+  RULEUTC_CloakToggle = 0x100,
+}
+
+local function toggleCapBit(cap)
+  if type(cap) == 'number' then return cap end
+  return TOGGLE_CAP_BITS[cap] or 0
+end
+
+local function blueprintToggleCapMask(bp)
+  local mask = 0
+  local caps = bp and bp.General and bp.General.ToggleCaps
+  for cap, bit in pairs(TOGGLE_CAP_BITS) do
+    if caps and caps[cap] == true then mask = mask | bit end
+  end
+  return mask
+end
+
+-- mToggleCaps is mutable independently of mCommandCaps. The original bindings
+-- request a UI refresh after each mutation (Cfile:975684-975858); synchronizing
+-- the mask every beat gives the mirror the same observable result.
+function __ensureToggleCapMask(u)
+  if not u then return 0 end
+  if u.__toggleCapMask == nil then
+    u.__toggleCapMask = blueprintToggleCapMask(u.__bp)
+  end
+  if not u.__toggleCapBindingsInstalled then
+    u.__toggleCapBindingsInstalled = true
+    u.AddToggleCap = function(self, cap)
+      local bit = toggleCapBit(cap)
+      if bit ~= 0 then self.__toggleCapMask = __ensureToggleCapMask(self) | bit end
+    end
+    u.RemoveToggleCap = function(self, cap)
+      local bit = toggleCapBit(cap)
+      if bit ~= 0 then self.__toggleCapMask = __ensureToggleCapMask(self) & ~bit end
+    end
+    u.RestoreToggleCaps = function(self)
+      self.__toggleCapMask = blueprintToggleCapMask(self.__bp)
+    end
+    -- Despite the mutable runtime mask, TestToggleCaps explicitly tests the
+    -- immutable blueprint field (Cfile:975885-975932).
+    u.TestToggleCaps = function(self, cap)
+      local bit = toggleCapBit(cap)
+      return bit ~= 0 and (blueprintToggleCapMask(self.__bp) & bit) ~= 0
+    end
+  end
+  return u.__toggleCapMask
+end
+
 -- The moho bindings mutate this state; keeping the implementation here makes
 -- command dispatch observe the exact same instance mask. The bindings are
 -- installed on the live unit instead of the blueprint-derived class so all
 -- existing derived Unit classes retain their copied method table.
 function __ensureCommandCapMask(u)
   if not u then return 0 end
+  __ensureToggleCapMask(u)
   if u.__commandCapMask == nil then
     u.__commandCapMask = blueprintCommandCapMask(u.__bp)
   end
@@ -1290,14 +1425,13 @@ function __ensureCommandCapMask(u)
     u.RestoreCommandCaps = function(self)
       self.__commandCapMask = blueprintCommandCapMask(self.__bp)
     end
-    -- NOTE: the engine's TestCommandCaps tests the blueprint's TOGGLE caps
-    -- (mGeneral.mToggleCaps, Cfile:975662-975663) — an apparent copy/paste quirk
-    -- for a "CommandCaps" test. We deliberately test the runtime COMMAND mask
-    -- (the sensible reading; no caller relies on the quirk). Documented so the
-    -- divergence is known, not accidental.
+    -- NOTE: the engine's TestCommandCaps tests the blueprint's TOGGLE caps,
+    -- an apparent native copy/paste quirk for a "CommandCaps" test.
     u.TestCommandCaps = function(self, cap)
       local bit = commandCapBit(cap)
-      return bit ~= 0 and (__ensureCommandCapMask(self) & bit) == bit
+      -- Exact native copy/paste quirk: a RULEUCC bit is tested against the
+      -- blueprint's ToggleCaps field (Cfile:975662-975663).
+      return bit ~= 0 and (blueprintToggleCapMask(self.__bp) & bit) ~= 0
     end
   end
   return u.__commandCapMask

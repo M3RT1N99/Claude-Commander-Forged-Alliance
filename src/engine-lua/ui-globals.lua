@@ -273,8 +273,8 @@ function UserUnitMeta:IsDead() return self.dead == true end
 -- Bau-Auftrag, keine Produktion) — nil ist hier ein Fehler, kein Idle.
 function UserUnitMeta:IsIdle() return self.idle == true end
 function UserUnitMeta:IsStunned() return false end
-function UserUnitMeta:IsAutoMode() return false end
-function UserUnitMeta:IsAutoSurfaceMode() return false end
+function UserUnitMeta:IsAutoMode() return self.autoMode == true end
+function UserUnitMeta:IsAutoSurfaceMode() return self.autoSurfaceMode == true end
 function UserUnitMeta:IsRepeatQueue() return false end
 function UserUnitMeta:IsOverchargePaused() return false end
 function UserUnitMeta:GetBuildRate() return self.buildRate or 0 end
@@ -349,7 +349,7 @@ function GetAttachedUnitsList(units)
 end
 
 -- Von der Engine pro Beat: der Zustand einer Unit aus der Sim.
-function __uiSetUnit(id, blueprintId, army, x, y, z, health, maxHealth, workProgress, idle, fireState, guardedId, capMask, deadFlag, shieldRatio, fractionComplete, beingUpgraded)
+function __uiSetUnit(id, blueprintId, army, x, y, z, health, maxHealth, workProgress, idle, fireState, guardedId, capMask, deadFlag, shieldRatio, fractionComplete, beingUpgraded, layer, scriptBits, toggleCapMask, autoMode, autoSurfaceMode)
   local u = __uiUnits[id]
   if not u then
     -- SUnitVarDat-Ctor (Cfile:772277): mFireState = FIRESTATE_ReturnFire (0).
@@ -385,6 +385,11 @@ function __uiSetUnit(id, blueprintId, army, x, y, z, health, maxHealth, workProg
   -- is the authority — runtime Add/RemoveCommandCap arrives here per beat
   -- (-1 = no value in this beat; keep the blueprint-derived mask).
   if capMask ~= nil and capMask >= 0 then u.__commandCapMask = capMask end
+  if layer ~= nil then u.layer = layer end
+  if scriptBits ~= nil then u.scriptBits = scriptBits end
+  if toggleCapMask ~= nil and toggleCapMask >= 0 then u.__toggleCapMask = toggleCapMask end
+  if autoMode ~= nil then u.autoMode = autoMode == true end
+  if autoSurfaceMode ~= nil then u.autoSurfaceMode = autoSurfaceMode == true end
   -- The sim marks a unit dead through its multi-beat death sequence (readRow
   -- sends `dead` = __dead or __destroyQueued). A dying unit stays in __uiUnits
   -- until it is flushed and __uiRemoveUnit runs, but is already excluded from
@@ -853,6 +858,69 @@ end
 -- the expression tree (catTest 'sub' = `true and not true` = false for any unit).
 local EMPTY_CATEGORY = categories.ALLUNITS - categories.ALLUNITS
 
+-- UnitAttributes::mCommandCaps is a mutable runtime bitmask. Its bit layout is
+-- the RULEUCC registration order (Cfile:656671-656719), identical to the sim
+-- mask synchronized by readRow. GetUnitCommandData reads this current mask in
+-- the native engine; rebuilding it from the immutable blueprint made removed
+-- commands remain visible and newly added ones invisible. The native result
+-- loop is deliberately limited to bits 0..22 (Cfile:1264740-1264761), so the
+-- registered bit-23 RULEUCC_Script is not a GetUnitCommandData result.
+local COMMAND_CAP_BITS = {
+  RULEUCC_Move = 0x1,
+  RULEUCC_Stop = 0x2,
+  RULEUCC_Attack = 0x4,
+  RULEUCC_Guard = 0x8,
+  RULEUCC_Patrol = 0x10,
+  RULEUCC_RetaliateToggle = 0x20,
+  RULEUCC_Repair = 0x40,
+  RULEUCC_Capture = 0x80,
+  RULEUCC_Transport = 0x100,
+  RULEUCC_CallTransport = 0x200,
+  RULEUCC_Nuke = 0x400,
+  RULEUCC_Tactical = 0x800,
+  RULEUCC_Teleport = 0x1000,
+  RULEUCC_Ferry = 0x2000,
+  RULEUCC_SiloBuildTactical = 0x4000,
+  RULEUCC_SiloBuildNuke = 0x8000,
+  RULEUCC_Sacrifice = 0x10000,
+  RULEUCC_Pause = 0x20000,
+  RULEUCC_Overcharge = 0x40000,
+  RULEUCC_Dive = 0x80000,
+  RULEUCC_Reclaim = 0x100000,
+  RULEUCC_SpecialAction = 0x200000,
+  RULEUCC_Dock = 0x400000,
+}
+
+local TOGGLE_CAP_BITS = {
+  RULEUTC_ShieldToggle = 0x1,
+  RULEUTC_WeaponToggle = 0x2,
+  RULEUTC_JammingToggle = 0x4,
+  RULEUTC_IntelToggle = 0x8,
+  RULEUTC_ProductionToggle = 0x10,
+  RULEUTC_StealthToggle = 0x20,
+  RULEUTC_GenericToggle = 0x40,
+  RULEUTC_SpecialToggle = 0x80,
+  RULEUTC_CloakToggle = 0x100,
+}
+
+local function blueprintCommandCapMask(bp)
+  local mask = 0
+  local caps = bp and bp.General and bp.General.CommandCaps
+  for cap, bit in pairs(COMMAND_CAP_BITS) do
+    if caps and caps[cap] == true then mask = mask | bit end
+  end
+  return mask
+end
+
+local function blueprintToggleCapMask(bp)
+  local mask = 0
+  local caps = bp and bp.General and bp.General.ToggleCaps
+  for cap, bit in pairs(TOGGLE_CAP_BITS) do
+    if caps and caps[cap] == true then mask = mask | bit end
+  end
+  return mask
+end
+
 function GetUnitCommandData(units)
   if type(units) ~= 'table' or table.getn(units) == 0 then
     return {}, {}, EMPTY_CATEGORY
@@ -869,11 +937,15 @@ function GetUnitCommandData(units)
     -- orders/toggles stay guarded, matching the engine.
     local unitCats = EMPTY_CATEGORY
     if bp then
-      for cap, on in pairs((bp.General and bp.General.CommandCaps) or {}) do
-        if on then orderSet[cap] = true end
+      local commandMask = u.__commandCapMask
+      if commandMask == nil then commandMask = blueprintCommandCapMask(bp) end
+      for cap, bit in pairs(COMMAND_CAP_BITS) do
+        if (commandMask & bit) == bit then orderSet[cap] = true end
       end
-      for cap, on in pairs((bp.General and bp.General.ToggleCaps) or {}) do
-        if on then toggleSet[cap] = true end
+      local toggleMask = u.__toggleCapMask
+      if toggleMask == nil then toggleMask = blueprintToggleCapMask(bp) end
+      for cap, bit in pairs(TOGGLE_CAP_BITS) do
+        if (toggleMask & bit) == bit then toggleSet[cap] = true end
       end
       -- Within one unit the BuildableCategory terms are UNIONED (the unit builds
       -- whatever matches ANY term); across units they are INTERSECTED
@@ -1845,8 +1917,10 @@ local function hasToggleCap(u, bit)
   local cap = TOGGLE_CAPS[bit]
   if not cap then return false end
   local bp = u:GetBlueprint()
-  local caps = bp and bp.General and bp.General.ToggleCaps
-  return caps ~= nil and caps[cap] == true
+  local mask = u.__toggleCapMask
+  if mask == nil then mask = blueprintToggleCapMask(bp) end
+  local capBit = TOGGLE_CAP_BITS[cap]
+  return capBit ~= nil and (mask & capBit) == capBit
 end
 
 local function bitSet(bits, bit)
@@ -1862,19 +1936,20 @@ function GetScriptBit(units, bit)
   return false
 end
 
--- ToggleScriptBit(units, bit, value) — die UI schickt den Wunsch an die Sim
--- (dort ruft er Unit:OnScriptBitSet/OnScriptBitClear, unit.lua:309/353).
-function ToggleScriptBit(units, bit, value)
-  local on = value == true
+-- ToggleScriptBit(units, bit, curState): parameter 3 is a FILTER, not the
+-- desired state (Cfile:1360244-1360330). Only live toggle-capable units whose
+-- authoritative mirrored bit still equals curState are sent to ProcessInfo;
+-- the sim then flips the bit. This matters for a mixed selection.
+function ToggleScriptBit(units, bit, curState)
+  local state = curState == true
+  local targets = {}
   for _, u in ipairs(units or {}) do
-    if hasToggleCap(u, bit) then
-      local bits = u.scriptBits or 0
-      if on ~= bitSet(bits, bit) then
-        u.scriptBits = on and (bits + 2 ^ bit) or (bits - 2 ^ bit)
-      end
+    if not u:IsDead() and hasToggleCap(u, bit)
+      and bitSet(u.scriptBits or 0, bit) == state then
+      targets[table.getn(targets) + 1] = u
     end
   end
-  sendSim('ToggleScriptBit', units, { bit = bit, value = on })
+  if table.getn(targets) > 0 then sendSim('ToggleScriptBit', targets, bit) end
 end
 
 -- === Pause (Produktion einer Fabrik/eines Bauers anhalten) ===
@@ -1904,30 +1979,55 @@ end
 --   GetIsAutoMode/SetAutoMode        RULEUCC_SiloBuildTactical/Nuke (auto-fill)
 --   GetIsAutoSurfaceMode/SetAutoSurfaceMode + GetIsSubmerged  RULEUCC_Dive
 --
--- Get* folds the selection like GetFireState/GetIsPaused: true iff ANY selected
--- unit carries the flag. These are complete UI-state bindings; the SIM does not
--- yet simulate silo auto-fill or a naval dive layer, so the toggle is a faithful
--- UI state without a gameplay effect (a separate, absent feature — not a stub).
-local function anyFlag(units, field)
+-- Both getters have ALL semantics and are vacuously true for an empty list
+-- (Cfile:1359413-1359467 / 1359660-1359714). Invalid/dead entries are skipped.
+local function allLiveFlag(units, method)
+  if type(units) ~= 'table' then return true end
   for _, u in ipairs(units or {}) do
-    if type(u) == 'table' and not u.dead and u[field] == true then return true end
+    if type(u) == 'table' and not u:IsDead() and not method(u) then return false end
   end
-  return false
-end
-local function setFlag(units, field, value)
-  local on = value == true
-  for _, u in ipairs(units or {}) do
-    if type(u) == 'table' then u[field] = on end
-  end
+  return true
 end
 
-function GetIsAutoMode(units) return anyFlag(units, 'autoMode') end
-function SetAutoMode(units, mode) setFlag(units, 'autoMode', mode) end
-function GetIsAutoSurfaceMode(units) return anyFlag(units, 'autoSurface') end
-function SetAutoSurfaceMode(units, mode) setFlag(units, 'autoSurface', mode) end
--- No naval/dive layer in the sim yet, so nothing is ever submerged — a truthful
--- default that keeps the Dive button's state query from throwing.
-function GetIsSubmerged(units) return anyFlag(units, 'submerged') end
+local function sendLiveFlag(name, units, value)
+  if type(units) ~= 'table' then return end
+  local live = {}
+  for _, u in ipairs(units or {}) do
+    if type(u) == 'table' and not u:IsDead() then
+      live[table.getn(live) + 1] = u
+    end
+  end
+  if table.getn(live) > 0 then sendSim(name, live, value == true) end
+end
+
+function GetIsAutoMode(units)
+  return allLiveFlag(units, UserUnitMeta.IsAutoMode)
+end
+function SetAutoMode(units, mode)
+  sendLiveFlag('SetAutoMode', units, mode)
+end
+function GetIsAutoSurfaceMode(units)
+  return allLiveFlag(units, UserUnitMeta.IsAutoSurfaceMode)
+end
+function SetAutoSurfaceMode(units, mode)
+  sendLiveFlag('SetAutoSurfaceMode', units, mode)
+end
+-- Numeric tri-state, not a boolean (Cfile:1359583-1359631):
+--   -1 all Sub, +1 all surfaced, 0 mixed/empty.
+function GetIsSubmerged(units)
+  if type(units) ~= 'table' then return 0 end
+  local state = 0
+  local have = false
+  for _, u in ipairs(units or {}) do
+    local current = u.layer == 'Sub' and -1 or 1
+    if not have then
+      state, have = current, true
+    elseif state ~= current then
+      return 0
+    end
+  end
+  return have and state or 0
+end
 
 -- === Die Uhr der UI-VM ===
 --

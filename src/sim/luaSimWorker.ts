@@ -64,9 +64,11 @@ type InMsg =
   // sSimDriver->ProcessInfo(entityId, "SetFireState", value)). EFireState
   // Cfile:702842-702850: ReturnFire=0, HoldFire=1, HoldGround=2.
   | { type: 'fireState'; id: number; state: number }
-  // ToggleScriptBit (cfunc_ToggleScriptBitL): desired bit state; the sim flips
-  // it via Unit:SetScriptBit (guards + fires OnScriptBitSet/Clear, moho.lua:426).
-  | { type: 'scriptBit'; id: number; bit: number; value: boolean }
+  // ToggleScriptBit (cfunc_ToggleScriptBitL): ProcessInfo carries the bit only.
+  // The user-side binding filters by curState before asking the sim to flip it.
+  | { type: 'scriptBit'; id: number; bit: number }
+  | { type: 'autoMode'; id: number; enabled: boolean }
+  | { type: 'autoSurfaceMode'; id: number; enabled: boolean }
   // Per-unit SetPaused (cfunc_SetPausedL "Pause builders in this list") —
   // DISTINCT from the whole-world 'pause' above (that halts the beat).
   | { type: 'unitPause'; id: number; paused: boolean }
@@ -267,9 +269,15 @@ ctx.onmessage = async (e: MessageEvent<InMsg>): Promise<void> => {
     // (Unit::SetFireState — weapons read it every tick, weapons.lua:89/229).
     host.eval(`local u=__units[${msg.id}]; if u then u:SetFireState(${msg.state}) end`)
   } else if (msg.type === 'scriptBit') {
-    // ToggleScriptBit: apply the DESIRED state; Unit:SetScriptBit guards and
-    // fires OnScriptBitSet/Clear (shields, weapon hold, stealth, intel, cloak).
-    host.eval(`local u=__units[${msg.id}]; if u then u:SetScriptBit(${msg.bit}, ${msg.value ? 'true' : 'false'}) end`)
+    // Unit::ToggleScriptBit performs the actual flip and fires
+    // OnScriptBitSet/OnScriptBitClear through SetScriptBit.
+    host.eval(`local u=__units[${msg.id}]; if u then u:ToggleScriptBit(${msg.bit}) end`)
+  } else if (msg.type === 'autoMode') {
+    host.eval(`local u=__units[${msg.id}]; if u then u:SetAutoMode(${msg.enabled ? 'true' : 'false'}) end`)
+  } else if (msg.type === 'autoSurfaceMode') {
+    // ProcessInfo invokes the native Unit setter; it is not a public sim-Lua
+    // binding, so keep the internal state write at this worker seam.
+    host.eval(`local u=__units[${msg.id}]; if u then u.__autoSurfaceMode=${msg.enabled ? 'true' : 'false'} end`)
   } else if (msg.type === 'upgrade') {
     // IssueUpgrade(units, blueprintId) — cfunc_IssueUpgradeL (Cfile:1011315):
     // exactly two arguments, no queue clear. The sim turns it into the

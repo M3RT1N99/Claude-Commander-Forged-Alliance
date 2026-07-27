@@ -1,16 +1,16 @@
 /**
  * Two UI commands that used to dead-end in the dispatcher now reach the sim:
  *
- *   ToggleScriptBit  -> Unit:SetScriptBit(bit, desiredState)
- *                       guards idempotently, fires OnScriptBitSet/Clear
- *                       (moho.lua:426; cfunc_ToggleScriptBitL).
+ *   ToggleScriptBit  -> Unit:ToggleScriptBit(bit)
+ *                       flips the UI-filtered unit and fires
+ *                       OnScriptBitSet/Clear (cfunc_ToggleScriptBitL).
  *   SetPaused        -> Unit:SetPaused(bool) sets mIsPaused; a paused builder
  *                       makes no build progress and requests no resources
  *                       (build.lua __buildCollect gate; cfunc_SetPausedL
  *                       "Pause builders in this list").
  *
  * This exercises the SIM side directly — exactly what the worker handler evals
- * (luaSimWorker.ts: `u:SetScriptBit(...)` / `u:SetPaused(...)`). The TS worker
+ * (luaSimWorker.ts: `u:ToggleScriptBit(...)` / `u:SetPaused(...)`). The TS worker
  * wiring is thin and type-checked; here we prove the game logic.
  *
  *   npx tsx --import ./scripts/register-lua.mjs scripts/verify-toggle-pause.ts
@@ -38,7 +38,7 @@ const acu = spawnLuaUnit(simHost, 'uel0001', { x: 100, y: 20, z: 100 }, 1)
 for (let i = 0; i < 8; i++) beat(engine)
 
 // ── ToggleScriptBit: the sim flips the bit and fires the callbacks ──
-console.log('\n== ToggleScriptBit reaches the sim (SetScriptBit) ==')
+console.log('\n== ToggleScriptBit reaches the sim ==')
 {
   simHost.eval(`
     local u = __units[${acu}]
@@ -50,15 +50,15 @@ console.log('\n== ToggleScriptBit reaches the sim (SetScriptBit) ==')
   const sets = (): number => simHost.eval(`return __units[${acu}].__sbSet`) as number
   const clears = (): number => simHost.eval(`return __units[${acu}].__sbClear`) as number
 
-  simHost.eval(`__units[${acu}]:SetScriptBit(0, true)`)
+  simHost.eval(`__units[${acu}]:ToggleScriptBit(0)`)
   check(on() === true, `bit 0 set (GetScriptBit -> ${on()})`)
   check(sets() === 1, `OnScriptBitSet fired once (${sets()})`)
 
-  // Idempotent guard (moho.lua:429): the same desired state does nothing.
+  // SetScriptBit remains the idempotent primitive used by the toggle.
   simHost.eval(`__units[${acu}]:SetScriptBit(0, true)`)
   check(sets() === 1, `re-setting the same state does not fire again (${sets()})`)
 
-  simHost.eval(`__units[${acu}]:SetScriptBit(0, false)`)
+  simHost.eval(`__units[${acu}]:ToggleScriptBit(0)`)
   check(on() === false, `bit 0 cleared (GetScriptBit -> ${on()})`)
   check(clears() === 1, `OnScriptBitClear fired once (${clears()})`)
 }

@@ -1194,13 +1194,18 @@ async function startSandbox(mapFolder: string): Promise<void> {
         return
       }
       // ToggleScriptBit (orders.lua: shield/weapon/stealth/intel/cloak toggles):
-      // the UI sends the DESIRED state {bit, value}; the sim applies it via
-      // Unit:SetScriptBit (guarded, fires OnScriptBitSet/Clear, moho.lua:426).
-      if (cmd === 'togglescriptbit') {
-        const sb = value as { bit?: number; value?: boolean } | undefined
-        if (sb && typeof sb.bit === 'number') {
-          for (const id of ids) luaSim?.setScriptBit(id, sb.bit, sb.value === true)
-        }
+      // the UI binding has already retained only units whose current bit equals
+      // curState. ProcessInfo carries only the bit index and the sim flips it.
+      if (cmd === 'togglescriptbit' && typeof value === 'number') {
+        for (const id of ids) luaSim?.toggleScriptBit(id, value)
+        return
+      }
+      if (cmd === 'setautomode' && typeof value === 'boolean') {
+        for (const id of ids) luaSim?.setAutoMode(id, value)
+        return
+      }
+      if (cmd === 'setautosurfacemode' && typeof value === 'boolean') {
+        for (const id of ids) luaSim?.setAutoSurfaceMode(id, value)
         return
       }
       // UNITCOMMAND_Upgrade (construction.lua:876 IssueBlueprintCommand): the

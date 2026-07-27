@@ -362,7 +362,7 @@ local UNIT_NAMES = {
   'WeaponChangeProjectileBlueprint', 'WeaponChangeRateOfFire', 'WeaponCreateProjectile',
   'WeaponGetBlueprint', 'WeaponGetCurrentTarget', 'WeaponGetCurrentTargetPos',
   'WeaponGetFireClockPct', 'WeaponGetFiringRandomness', 'WeaponGetProjectileBlueprint',
-  'WeaponHasTarget', 'WeaponIsFireControl', 'WeaponPlaySound', 'WeaponSetEnabled',
+  'WeaponIsFireControl', 'WeaponPlaySound', 'WeaponSetEnabled',
   'WeaponSetFireControl', 'WeaponSetFireTargetLayerCaps', 'WeaponSetFiringRandomness',
   'WeaponSetTargetingPriorities', 'WeaponTransferTarget',
   'GetStat', 'SetStat',
@@ -528,12 +528,32 @@ local unit = withNoops(UNIT_NAMES, {
       return false
     elseif state == 'BeingBuilt' then -- 39
       return self.__beingBuilt == true
+    elseif state == 'Busy' then
+      return self.__busy == true
+    elseif state == 'MakingAttackRun' then
+      -- The current attack task has no aircraft attack-run controller yet.
+      -- Keep the native state explicit instead of equating every generic
+      -- Attack order with the much narrower UNITSTATE_MakingAttackRun.
+      return self.__makingAttackRun == true
     elseif state == 'Immobile' then
+      if self.__immobile ~= nil then return self.__immobile == true end
       local bp = self.__bp
       return ((bp and bp.Physics and bp.Physics.MotionType) or 'RULEUMT_None') == 'RULEUMT_None'
     end
     return false
   end,
+  -- Runtime UNITSTATE_Immobile bit (cfunc_UnitSetImmobileL, Cfile:974091).
+  -- Keep it tri-state: before the first explicit setter call, the blueprint's
+  -- motion type supplies the construction-time state; afterwards Lua controls
+  -- the bit exactly, including an explicit SetImmobile(false).
+  SetImmobile = function(self, immobile)
+    self.__immobile = immobile == true
+  end,
+  -- UnitAttributes multipliers. Their native setters write the supplied float
+  -- directly (Cfile:977084-977233); motion.lua consumes the same three fields.
+  SetSpeedMult = function(self, value) self.__speedMult = value end,
+  SetAccMult = function(self, value) self.__accMult = value end,
+  SetTurnMult = function(self, value) self.__turnMult = value end,
   IsIdleState = function(self) return true end,
   -- SetPaused/IsPaused (cfunc_SetPausedL "Pause builders in this list"): the
   -- unit's mIsPaused flag. A paused builder / paused factory halts production
@@ -542,6 +562,16 @@ local unit = withNoops(UNIT_NAMES, {
   -- real method — as with IsPaused.
   IsPaused = function(self) return self.__paused == true end,
   SetPaused = function(self, paused) self.__paused = paused == true end,
+  -- Unit::SetAutoMode stores the flag and ALWAYS dispatches the corresponding
+  -- Lua callback (Cfile:951326-951337). Silo scripts use those callbacks to
+  -- start/stop automatic missile production.
+  SetAutoMode = function(self, enabled)
+    local on = enabled == true
+    self.__autoMode = on
+    local callback
+    if on then callback = self.OnAutoModeOn else callback = self.OnAutoModeOff end
+    if callback then callback(self) end
+  end,
   -- WorkProgress (mUnitVarDat.mWorkProgress, ctor Cfile:772278) — ONE field
   -- with two writers: the build task writes the progress of what the unit is
   -- working on every tick (Cfile:815482/815496/815547, build.lua), and Lua
@@ -599,10 +629,32 @@ local unit = withNoops(UNIT_NAMES, {
   GiveNukeSiloAmmo = function(self, n)
     self.__nukeSiloAmmo = (self.__nukeSiloAmmo or 0) + (n or 0)
   end,
+  -- The projectile weapon state removes one stored missile after a successful
+  -- shot (defaultweapons.lua:587-589). These bindings were absent, so silo
+  -- weapons crashed at that exact point and never consumed their ammunition.
+  RemoveTacticalSiloAmmo = function(self, n)
+    self.__tacticalSiloAmmo = math.max(0, (self.__tacticalSiloAmmo or 0) - (n or 0))
+  end,
+  RemoveNukeSiloAmmo = function(self, n)
+    self.__nukeSiloAmmo = math.max(0, (self.__nukeSiloAmmo or 0) - (n or 0))
+  end,
   SetShieldRatio = function(self, ratio) self.__shieldRatio = ratio end,
   SetFocusEntity = function(self, e) self.__focusEntity = e end,
   ClearFocusEntity = function(self) self.__focusEntity = nil end,
-  IsStunned = function(self) return false end,
+  -- SetStunned stores trunc(time * 10), not a rounded duration. MotionTick
+  -- decrements only positive values; a negative duration consequently remains
+  -- stunned exactly as in the retail engine (Cfile:952786, 973650, 974184).
+  SetStunned = function(self, seconds)
+    if type(seconds) ~= 'number' then error('SetStunned(unit, time): time must be a number', 2) end
+    local ticks = seconds * 10
+    self.__stunTicks = ticks < 0 and math.ceil(ticks) or math.floor(ticks)
+  end,
+  IsStunned = function(self) return not self or (self.__stunTicks or 0) ~= 0 end,
+  SetCapturable = function(self, value) self.__capturable = value == true end,
+  IsCapturable = function(self)
+    if self.__capturable == nil then return true end
+    return self.__capturable == true
+  end,
 
   -- Weapons: the engine builds one object per bp.Weapon entry (see units.lua).
   GetWeaponCount = function(self)
@@ -615,7 +667,11 @@ local unit = withNoops(UNIT_NAMES, {
   -- to one flag once killed the production of every finished building,
   -- because OnStopBeingBuilt calls SetConsumptionActive(false).
   GetBuildRate = function(self)
+    if self.__buildRate ~= nil then return self.__buildRate end
     return (self.__bp and self.__bp.Economy and self.__bp.Economy.BuildRate) or 0
+  end,
+  SetBuildRate = function(self, rate)
+    self.__buildRate = math.max(0, rate)
   end,
   -- The per-second rates are MUTABLE at runtime (SetProductionPerSecond* /
   -- SetConsumptionPerSecond*, below): prefer the runtime value, fall back to the
@@ -684,20 +740,253 @@ local WEAPON_NAMES = {
   'ChangeFiringTolerance', 'ChangeMaxHeightDiff', 'ChangeMaxRadius', 'ChangeMinRadius',
   'ChangeProjectileBlueprint', 'ChangeRateOfFire', 'CreateProjectile', 'GetBlueprint',
   'GetCurrentTarget', 'GetCurrentTargetPos', 'GetFireClockPct', 'GetFiringRandomness',
-  'GetParent', 'GetProjectileBlueprint', 'HasTarget', 'IsFireControl', 'PlaySound',
+  'GetParent', 'GetProjectileBlueprint', 'IsFireControl', 'PlaySound',
   'ResetTarget', 'SetEnabled', 'SetFireControl', 'SetFireTargetLayerCaps',
   'SetFiringRandomness', 'SetTargetEntity', 'SetTargetGround',
   'SetTargetingPriorities', 'SetValidTargetsForCurrentLayer', 'SetWeaponPriorities',
-  'TransferTarget',
+  'TransferTarget', 'WeaponHasTarget',
 }
+
+local function weaponUnitState(u, state)
+  if u and u.IsUnitState then return u:IsUnitState(state) end
+  if state == 'Busy' then return u and u.__busy == true end
+  if state == 'Immobile' then return u and u.__immobile == true end
+  if state == 'MakingAttackRun' then return u and u.__makingAttackRun == true end
+  return false
+end
+
+local function weaponMuzzleBone(w)
+  if w.__bone ~= nil then return w.__bone end
+  local aim = w.__aim
+  return aim and aim.__muzzleBone or nil
+end
+
+local function weaponMCanFire(w)
+  if w.__canFire ~= nil then return w.__canFire == true end
+  -- Compatibility for weapons/aim controllers created before mCanFire became
+  -- an explicit mirrored field.
+  local aim = w.__aim
+  return not aim or aim.__destroyed == true or aim.__onTarget == true
+end
+
+local function normalizeWeaponAngle(value)
+  while value > math.pi do value = value - 2 * math.pi end
+  while value < -math.pi do value = value + 2 * math.pi end
+  return value
+end
+
+local function unitHasSiloSubsystem(u)
+  if not u then return false end
+  if u.__siloBuild ~= nil then return u.__siloBuild ~= false end
+  for _, category in ipairs((u.__bp and u.__bp.Categories) or {}) do
+    if category == 'SILO' then return true end
+  end
+  return false
+end
+
+-- UnitWeapon::CheckSilo (Cfile:984729-984746). CountedProjectile alone is
+-- insufficient: the native gate only consults storage when the owning unit
+-- actually has the SILO subsystem.
+function __weaponCheckSilo(w)
+  local bp = w.__bp or {}
+  local u = w.__unit or w.unit
+  if not bp.CountedProjectile or not unitHasSiloSubsystem(u) then return true end
+  local count
+  if bp.NukeWeapon then
+    count = u.GetNukeSiloAmmoCount and u:GetNukeSiloAmmoCount() or u.__nukeSiloAmmo or 0
+  else
+    count = u.GetTacticalSiloAmmoCount and u:GetTacticalSiloAmmoCount()
+      or u.__tacticalSiloAmmo or 0
+  end
+  return count ~= 0
+end
+
+-- TargetSolutionStatusGun (Cfile:985075-985115). Radius overrides are kept as
+-- radii in this Lua mirror and squared here, including negative values. Only
+-- a negative MaxHeightDiff means "use the blueprint value".
+function __weaponTargetSolution(w, targetPos)
+  local u = w.__unit or w.unit
+  local unitPos = u and u.__pos
+  if not unitPos or not targetPos then return false end
+  local bp = w.__bp or {}
+  local dx = (targetPos[1] or 0) - (unitPos[1] or 0)
+  local dz = (targetPos[3] or 0) - (unitPos[3] or 0)
+  local distSq = dx * dx + dz * dz
+
+  local maxRadius = w.__maxRadius
+  if maxRadius == nil then maxRadius = bp.MaxRadius or 0 end
+  if distSq > maxRadius * maxRadius then return false end
+
+  local minRadius = w.__minRadius
+  if minRadius == nil then minRadius = bp.MinRadius or 0 end
+  if minRadius * minRadius >= distSq then return false end
+
+  local maxHeight = w.__maxHeightDiff
+  if maxHeight == nil then
+    maxHeight = math.huge
+  elseif maxHeight < 0 then
+    maxHeight = bp.MaxHeightDiff or math.huge
+  end
+  if math.abs((targetPos[2] or 0) - (unitPos[2] or 0)) > maxHeight then return false end
+
+  local arc = bp.HeadingArcRange or 180
+  if arc < 180 then
+    local origin = unitPos
+    local bone = weaponMuzzleBone(w)
+    if bone ~= nil and (type(bone) ~= 'number' or bone >= 0) then
+      origin = __boneWorld(u, bone)
+    end
+    local bearing = math.atan(
+      (targetPos[1] or 0) - (origin[1] or 0),
+      (targetPos[3] or 0) - (origin[3] or 0)
+    )
+    local center = (bp.HeadingArcCenter or 0) * 0.017453292
+    local delta = normalizeWeaponAngle(bearing - (u.__heading or 0) - center)
+    if math.abs(delta) > arc * 0.017453292 then return false end
+  end
+  return true
+end
+
+-- The retail bomb-drop solver, specialized to this sim's vertical gravity.
+-- CalcBombDrop first computes the horizontal release point from current
+-- velocity; UnitWeapon::CanFire then applies BombDropThreshold and the two
+-- unnormalised forward-dot tests (Cfile:858984-859065, 984551-984621).
+function __weaponBombDropCanFire(w)
+  local u = w.__unit or w.unit
+  local target = w.__target
+  local rawTarget = target and target.__pos or w.__targetGround
+  if not u or not u.__pos or not rawTarget then return false end
+
+  local targetPos = { rawTarget[1] or 0, rawTarget[2] or 0, rawTarget[3] or 0 }
+  local air = (u.__bp and u.__bp.Air) or {}
+  local predict = air.PredictAheadForBombDrop or 0
+  if predict > 0 and target and target.GetVelocity
+    and target.__unitMotion and target.__physBody then
+    -- PredictAheadBomb returns the unchanged position without both native
+    -- subsystems. With them, it rotates the tick velocity by impulse.y * 0.1
+    -- before integrating each whole/fractional prediction tick; Y is fixed.
+    local tvx, _, tvz = target:GetVelocity()
+    local impulse = target.__physBody.impulse or { 0, 0, 0 }
+    local angle = (impulse[2] or 0) * 0.1
+    local sinAngle, cosAngle = math.sin(angle), math.cos(angle)
+    local ticks = predict * 10
+    while ticks > 0 do
+      local nextX = cosAngle * tvx + sinAngle * tvz
+      local nextZ = -sinAngle * tvx + cosAngle * tvz
+      tvx, tvz = nextX, nextZ
+      local fraction = math.min(1, ticks)
+      targetPos[1] = targetPos[1] + tvx * fraction
+      targetPos[3] = targetPos[3] + tvz * fraction
+      ticks = ticks - 1
+    end
+  end
+
+  local vx, vy, vz
+  if u.GetVelocity then
+    vx, vy, vz = u:GetVelocity()
+  else
+    local speed, heading = u.__speed or 0, u.__heading or 0
+    vx, vy, vz = math.sin(heading) * speed, 0, math.cos(heading) * speed
+  end
+  vx, vy, vz = vx * 10, vy * 10, vz * 10
+  local gravity = __simGravity or 4.9
+  local discriminant = vy * vy + 2 * gravity * ((u.__pos[2] or 0) - targetPos[2])
+  if discriminant < 0 or gravity <= 0 then return false end
+  local root = math.sqrt(discriminant)
+  local projectedSpeed = math.abs(vy)
+  local flightTime = (projectedSpeed - root) / gravity
+  if flightTime < 0 then flightTime = (projectedSpeed + root) / gravity end
+  if flightTime < 0 then return false end
+
+  local dropX = targetPos[1] - vx * flightTime
+  local dropZ = targetPos[3] - vz * flightTime
+  local releaseDx = dropX - (u.__pos[1] or 0)
+  local releaseDz = dropZ - (u.__pos[3] or 0)
+  local distance = math.sqrt(releaseDx * releaseDx + releaseDz * releaseDz)
+  local threshold = (w.__bp and w.__bp.BombDropThreshold) or 0
+  if threshold >= distance * 2 then return false end
+  if threshold < distance then return true end
+
+  local heading = u.__heading or 0
+  local forwardX, forwardZ = math.sin(heading), math.cos(heading)
+  if releaseDx * forwardX + releaseDz * forwardZ > 0 then return false end
+  local targetDx = targetPos[1] - (u.__pos[1] or 0)
+  local targetDz = targetPos[3] - (u.__pos[3] or 0)
+  return targetDx * forwardX + targetDz * forwardZ >= 0.866
+end
+
+-- The non-range part of UnitWeapon::CanFire (Cfile:984489-984621). It is
+-- separate because CFireWeaponTask invokes this native method directly, while
+-- the public Lua binding additionally checks silo storage and target solution.
+function __weaponUnitCanFire(w)
+  local u = w.__unit or w.unit
+  if not u then return false end
+  if (u.__stunTicks or 0) ~= 0 or weaponUnitState(u, 'Busy') then return false end
+
+  local unitBp = u.__bp or {}
+  local air = unitBp.Air or {}
+  local layer = u.__layer or u.Layer or 'Land'
+  if air.CanFly and layer ~= 'Air' then return false end
+  if (unitBp.AI or {}).NeedUnpack and not weaponUnitState(u, 'Immobile') then
+    return false
+  end
+
+  local bp = w.__bp or {}
+  if bp.AboveWaterFireOnly or bp.BelowWaterFireOnly then
+    local transform = u.__pos or { 0, 0, 0 }
+    local bone = weaponMuzzleBone(w)
+    if bone ~= nil and (type(bone) ~= 'number' or bone >= 0) then
+      transform = __boneWorld(u, bone)
+    end
+    local above = (transform[2] or 0) > (__mapWaterLevel or -10000)
+    if bp.AboveWaterFireOnly and not above then return false end
+    if bp.BelowWaterFireOnly and above then return false end
+  end
+
+  local canFire = weaponMCanFire(w)
+  if not air.Winged then return canFire end
+
+  if bp.AutoInitiateAttackCommand then
+    local vx, vy, vz
+    if u.GetVelocity then
+      vx, vy, vz = u:GetVelocity()
+    else
+      local speed, heading = u.__speed or 0, u.__heading or 0
+      vx, vy, vz = math.sin(heading) * speed, 0, math.cos(heading) * speed
+    end
+    local velocityPerSecond = math.sqrt(vx * vx + vy * vy + vz * vz) * 10
+    if velocityPerSecond < (u.__speedMult or 1) * (air.MaxAirspeed or 0) * 0.25 then
+      return false
+    end
+  end
+
+  if not bp.NeedToComputeBombDrop
+    or (w.__target == nil and w.__targetGround == nil) then
+    return canFire
+  end
+  if not weaponUnitState(u, 'MakingAttackRun') then return false end
+  return __weaponBombDropCanFire(w) and canFire
+end
 
 local weapon = withNoops(WEAPON_NAMES, {
   GetBlueprint = function(self) return self.__bp end,
   GetParent = function(self) return self.__unit end,
   BeenDestroyed = function(self) return self.__destroyed == true end,
-  HasTarget = function(self) return self.__target ~= nil end,
+  -- The native binding is named WeaponHasTarget despite the C++ class already
+  -- being UnitWeapon (func_UnitWeaponHasTarget_LuaFuncDef, Cfile:987316).
+  -- CAiTarget::HasTarget is true for both entity and ground targets.
+  WeaponHasTarget = function(self)
+    local target = self.__target
+    if target ~= nil then
+      return target.__dead ~= true and target.__destroyed ~= true
+    end
+    return self.__targetGround ~= nil
+  end,
   GetCurrentTarget = function(self) return self.__target end,
-  SetEnabled = function(self, e) self.__enabled = e end,
+  SetEnabled = function(self, e)
+    self.__enabled = e
+    return self
+  end,
   SetFireTargetLayerCaps = function(self, caps)
     if type(caps) ~= 'string' then
       error('UnitWeapon:SetFireTargetLayerCaps(mask) requires a layer mask string', 2)
@@ -708,11 +997,13 @@ local weapon = withNoops(WEAPON_NAMES, {
   -- Weapon:CanFire() (Cfile:987703-987735): HasTarget && UnitWeapon::CanFire &&
   -- CheckSilo && Zielloesung verfuegbar. `mCanFire` selbst schreibt NUR der
   -- Aim-Manipulator (Cfile:862074-862092); ohne Turm bleibt es auf dem
-  -- Ctor-Wert 1 (Cfile:984168) — nicht-turmbewehrte Waffen koennen immer feuern.
+  -- Ctor-Wert 1. Enabled und CannotAttackGround gehoeren ausdruecklich nicht
+  -- zu dieser Lua-Bindung.
   CanFire = function(self)
-    if self.__enabled == false then return false end
-    if self.__unit and self.__unit.__stunned then return false end
-    return self.__target ~= nil
+    if not self:WeaponHasTarget() then return false end
+    if not __weaponUnitCanFire(self) or not __weaponCheckSilo(self) then return false end
+    local targetPos = self.__target and self.__target.__pos or self.__targetGround
+    return __weaponTargetSolution(self, targetPos)
   end,
 
   -- Das Ziel setzen — die FLANKE loest die Callbacks aus (Cfile:985364/985494):
@@ -745,8 +1036,9 @@ local weapon = withNoops(WEAPON_NAMES, {
     return 1 - ((self.__fireClock or 0) / full)
   end,
 
-  -- Laufzeit-Overrides. Der CWeaponAttributes-Ctor setzt sie auf -1
-  -- (Cfile:983289-983304): NEGATIV heisst „nimm den Blueprint-Wert".
+  -- Runtime-Overrides: Radiuswerte werden nativ quadriert, daher wirkt auch
+  -- ein negativer Radius als Betrag. Nur ein negatives MaxHeightDiff faellt
+  -- auf den Blueprint-Wert zurueck (Cfile:985083-985097, 987912-987982).
   ChangeRateOfFire = function(self, rof) self.__rateOfFire = rof end,
   ChangeMaxRadius = function(self, r) self.__maxRadius = r end,
   ChangeMinRadius = function(self, r) self.__minRadius = r end,
@@ -976,9 +1268,28 @@ local CONTROL_NAMES = {
 local control = withNoops(CONTROL_NAMES, {
   GetParent = function(self) return self.__parent or nil end,
   SetParent = function(self, parent)
-    self.__parent = parent or false
-    if parent then
-      parent.__children[table.getn(parent.__children) + 1] = self
+    local oldParent = self.__parent or false
+    local newParent = parent or false
+    if oldParent == newParent then return end
+
+    -- CMauiControl::SetParent first unlinks the intrusive child-list node from
+    -- its old parent, then inserts it once at the new parent (Cfile:1124016).
+    -- Remove every stale occurrence so state produced by the old adapter is
+    -- repaired when that control is reparented.
+    if oldParent then
+      local oldChildren = oldParent.__children or {}
+      for i = table.getn(oldChildren), 1, -1 do
+        if oldChildren[i] == self then table.remove(oldChildren, i) end
+      end
+    end
+
+    self.__parent = newParent
+    if newParent then
+      newParent.__children = newParent.__children or {}
+      for i = table.getn(newParent.__children), 1, -1 do
+        if newParent.__children[i] == self then table.remove(newParent.__children, i) end
+      end
+      newParent.__children[table.getn(newParent.__children) + 1] = self
     end
     __mauiDirty = true
   end,
@@ -1001,7 +1312,15 @@ local control = withNoops(CONTROL_NAMES, {
   Hide = function(self) self:SetHidden(true) end,
   Show = function(self) self:SetHidden(false) end,
   SetHidden = function(self, hidden)
-    self.__hidden = hidden == true
+    local value = hidden == true
+    -- OnHide returning true vetoes both the state change and propagation.
+    -- Otherwise the engine updates this control before recursively applying
+    -- the same operation to every child (Cfile:1124397-1124417).
+    if self.OnHide and self:OnHide(value) == true then return end
+    self.__hidden = value
+    for _, child in ipairs(self.__children or {}) do
+      child:SetHidden(value)
+    end
     __mauiDirty = true
   end,
   IsHidden = function(self) return self.__hidden == true end,
@@ -1326,10 +1645,23 @@ local projectile = withNoops(PROJECTILE_NAMES, {
   end,
   SetMaxSpeed = function(self, s) self.__maxSpeed = s; return self end,
   SetAcceleration = function(self, a) self.__accel = a; return self end,
-  SetBallisticAcceleration = function(self, a)
-    -- Ein Skalar: die Beschleunigung nach UNTEN (defaultexplosions.lua:319 setzt
-    -- damit die Schwerkraft der Truemmer).
-    self.__ballistic = { 0, a, 0 }
+  SetBallisticAcceleration = function(self, ...)
+    -- The binding accepts exactly three forms (Cfile:947551-947609):
+    --   p:SetBallisticAcceleration()          restore global gravity
+    --   p:SetBallisticAcceleration(y)         vertical acceleration
+    --   p:SetBallisticAcceleration(x, y, z)   full vector
+    local n = select('#', ...)
+    if n == 0 then
+      self.__ballistic = { 0, -(__simGravity or 4.9), 0 }
+    elseif n == 1 then
+      local y = ...
+      self.__ballistic = { 0, y, 0 }
+    elseif n == 3 then
+      local x, y, z = ...
+      self.__ballistic = { x, y, z }
+    else
+      error('Projectile:SetBallisticAcceleration expected 0, 1, or 3 arguments', 2)
+    end
     return self
   end,
   SetTurnRate = function(self, degPerSec) self.__turnRate = degPerSec; return self end,
@@ -1426,8 +1758,10 @@ local collision_beam = withNoops({
   Enable = function(self)
     if self.__enabled then return end
     self.__enabled = true
-    self.__lastImpact = nil
     if self.OnEnable then self:OnEnable() end
+    -- EnableCollisionCheck primes the counter to the interval (Cfile:911198);
+    -- MotionTick therefore checks on the very next tick, not after one period.
+    self.__intervalCount = self.__interval
   end,
   Disable = function(self)
     if not self.__enabled then return end
@@ -1440,7 +1774,13 @@ local collision_beam = withNoops({
   -- Bone 0 -> Bone 1) — hier nur merken.
   SetBeamFx = function(self, fx, collideOnStart)
     self.__fxBeam = fx
-    self.__collideOnStart = collideOnStart == true
+    -- The optional native argument defaults to TRUE (Cfile:911887-911900).
+    local collide = collideOnStart
+    if collide == nil then collide = true end
+    self.__collideOnStart = collide == true
+    if self.__collideOnStart and __beamCheckCollision then
+      __beamCheckCollision(self)
+    end
   end,
   GetBoneCount = function(self) return 2 end,
 }, entity)
@@ -1482,7 +1822,8 @@ rawset(moho, 'control_methods', Class() (control))
 --   index = ItemList:GetSelection()             ItemList:SetSelection(index)
 --   float ItemList:GetRowHeight()               ItemList:ShowItem(index)
 --   bool NeedsScrollBar()                       ItemList:ScrollToTop()
---   SetNewColors(fg, bg, selFg, selBg)          SetNewFont(family, pointsize)
+--   SetNewColors(fg, bg, selFg, selBg, mouseFg, mouseBg)
+--   SetNewFont(family, pointsize)
 --
 -- Die Auswahl ist 0-BASIERT (combo.lua rechnet mit index+1 in Lua-Tabellen), und
 -- "keine Auswahl" ist -1.
@@ -1541,9 +1882,20 @@ local item_list = withNoops(ITEM_LIST_NAMES, {
     self.__fontSize = pointsize or 12
     __mauiDirty = true
   end,
-  SetNewColors = function(self, fg, bg, selFg, selBg)
-    self.__colors = { fg = fg, bg = bg, selFg = selFg, selBg = selBg }
+  SetNewColors = function(self, fg, bg, selFg, selBg, mouseFg, mouseBg)
+    -- The six LazyVars call this binding one slot at a time. Nil means
+    -- "leave unchanged", not "clear" (Cfile:1140253-1140347).
+    local colors = self.__colors or {}
+    if fg ~= nil then colors.fg = fg end
+    if bg ~= nil then colors.bg = bg end
+    if selFg ~= nil then colors.selFg = selFg end
+    if selBg ~= nil then colors.selBg = selBg end
+    if mouseFg ~= nil then colors.mouseFg = mouseFg end
+    if mouseBg ~= nil then colors.mouseBg = mouseBg end
+    self.__colors = colors
     __mauiDirty = true
+    -- The binder leaves stack slot 1 in place and returns it.
+    return self
   end,
   ShowSelection = function(self, on) self.__showSelection = on ~= false end,
   ShowMouseoverItem = function(self, on) self.__showMouseover = on ~= false end,
@@ -1708,13 +2060,17 @@ local scrollbar = withNoops(SCROLLBAR_NAMES, {
     __mauiDirty = true
   end,
   SetNewTextures = function(self, background, thumbMiddle, thumbTop, thumbBottom)
-    self.__textures = {
-      background = background,
-      thumbMiddle = thumbMiddle,
-      thumbTop = thumbTop,
-      thumbBottom = thumbBottom,
-    }
+    -- scrollbar.lua's four LazyVars update one texture per call. The native
+    -- binding preserves every slot whose argument is nil (Cfile:1144046).
+    local textures = self.__textures or {}
+    if background ~= nil then textures.background = background end
+    if thumbMiddle ~= nil then textures.thumbMiddle = thumbMiddle end
+    if thumbTop ~= nil then textures.thumbTop = thumbTop end
+    if thumbBottom ~= nil then textures.thumbBottom = thumbBottom end
+    self.__textures = textures
     __mauiDirty = true
+    -- The binder leaves stack slot 1 in place and returns it.
+    return self
   end,
   DoScrollLines = function(self, lines)
     __mauiScroll(self.__scrollable, self.__axis, 'lines', lines)

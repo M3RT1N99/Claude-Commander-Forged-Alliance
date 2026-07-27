@@ -85,7 +85,100 @@ function __createWeapons(u, bp)
 end
 
 -- Unit spawnen: Original-Script-Klasse instanziieren + OnCreate ----------
-function __spawnUnit(scriptPath, bpId, x, y, z, army, complete)
+local LAYER_INFO = {
+  land = { name = 'Land', bit = 0x01, bp = 'LAYER_Land' },
+  seabed = { name = 'Seabed', bit = 0x02, bp = 'LAYER_Seabed' },
+  sub = { name = 'Sub', bit = 0x04, bp = 'LAYER_Sub' },
+  water = { name = 'Water', bit = 0x08, bp = 'LAYER_Water' },
+  air = { name = 'Air', bit = 0x10, bp = 'LAYER_Air' },
+  orbit = { name = 'Orbit', bit = 0x20, bp = 'LAYER_Orbit' },
+}
+
+-- COORDS_StringToLayer accepts exactly these six unprefixed names,
+-- case-insensitively; every other string maps to LAYER_None
+-- (Cfile:641397-641409). In particular, "LAYER_Air" is not an alias.
+local function coordsStringToLayer(value)
+  if type(value) ~= 'string' then return nil end
+  return LAYER_INFO[string.lower(value)]
+end
+
+-- RUnitBlueprintPhysics::ComputeDerivedQuantities writes these exact caps into
+-- the unit footprint (Cfile:656226-656293; FootprintOccupancyCaps). This is not
+-- a starting-layer heuristic: GetStartingLayer consumes the derived footprint
+-- caps, and the browser blueprint does not expose the native SFootprint.
+local MOTION_FOOTPRINT_CAPS = {
+  RULEUMT_None = 0x00,
+  RULEUMT_Land = 0x01,
+  RULEUMT_Air = 0x10,
+  RULEUMT_Water = 0x08,
+  RULEUMT_Biped = 0x01,
+  RULEUMT_SurfacingSub = 0x0C,
+  RULEUMT_Amphibious = 0x03,
+  RULEUMT_Hover = 0x09,
+  RULEUMT_AmphibiousFloating = 0x09,
+  RULEUMT_Special = 0x00,
+}
+
+local function footprintLayerCaps(bp)
+  local physics = bp.Physics or {}
+  local motion = physics.MotionType or 'RULEUMT_None'
+  -- The native derived-quantity pass forces zero-speed blueprints to None
+  -- before choosing the footprint (Cfile:656226-656238).
+  if (physics.MaxSpeed or 0) == 0 then motion = 'RULEUMT_None' end
+
+  local caps = MOTION_FOOTPRINT_CAPS[motion] or 0
+  if motion == 'RULEUMT_None' then
+    -- Buildings get the low byte of Physics.BuildOnLayerCaps instead
+    -- (Cfile:656283-656293).
+    local buildCaps = physics.BuildOnLayerCaps or {}
+    caps = 0
+    for _, info in pairs(LAYER_INFO) do
+      if buildCaps[info.bp] == true then caps = caps | info.bit end
+    end
+  end
+  return caps
+end
+
+local function fittingCapsAtPoint(caps, x, z)
+  local submerged = (__mapWaterLevel or -10000) > GetTerrainHeight(x, z)
+  if submerged then
+    -- The native OCCUPY_FootprintFits also checks every footprint sample,
+    -- slope, blocking terrain and occupied structure grids. Those grids and
+    -- resolved footprint depth limits do not exist in this simulator yet.
+    -- At a submerged centre point, conservatively do not claim LAND fits.
+    caps = caps & ~0x01
+  else
+    -- Conversely, water-only layers cannot fit when the centre terrain is at
+    -- or above the water plane. AIR/ORBIT remain independent of that plane.
+    caps = caps & ~0x0E
+  end
+  return caps, submerged
+end
+
+local function startingLayer(u, bp, x, z, requested)
+  local requestedInfo = coordsStringToLayer(requested)
+  local footprintCaps = footprintLayerCaps(bp)
+  local fittingCaps, submerged = fittingCapsAtPoint(footprintCaps, x, z)
+
+  -- Entity::GetStartingLayer first preserves a requested layer only if the
+  -- footprint actually fits it (Cfile:857497-857499).
+  if requestedInfo and (fittingCaps & requestedInfo.bit) ~= 0 then
+    return requestedInfo.name
+  end
+
+  local experimental = EntityCategoryContains(categories.EXPERIMENTAL, u)
+  if (fittingCaps & 0x10) ~= 0 then
+    return experimental and 'Land' or 'Air'
+  end
+  if not submerged then return 'Land' end
+  if (footprintCaps & 0x04) ~= 0 and not experimental then return 'Sub' end
+  if (footprintCaps & 0x08) ~= 0 or EntityCategoryContains(categories.FERRYBEACON, u) then
+    return 'Water'
+  end
+  return 'Seabed'
+end
+
+function __spawnUnit(scriptPath, bpId, x, y, z, army, complete, requestedLayer)
   local bp = __registered.Unit[bpId]
   if not bp then return -1, 'blueprint not registered: ' .. tostring(bpId) end
   local mod = import(scriptPath)
@@ -102,11 +195,13 @@ function __spawnUnit(scriptPath, bpId, x, y, z, army, complete)
   u.__army = army
   u.__brain = __getBrain(army)
   u.__pos = { x, y, z }
-  -- The native unit supplies this legacy field before Weapon.OnCreate, which
-  -- uses it to select FireTargetLayerCapsTable[unit.Layer]. Air blueprints
-  -- begin in the Air layer; all other motion types start in this model's
-  -- existing Land layer until layer transitions are simulated.
-  u.Layer = ((bp.Physics or {}).MotionType == 'RULEUMT_Air') and 'Air' or 'Land'
+  -- mVarDat.mLayer is initialized before Weapon.OnCreate. Original Lua also
+  -- reads the legacy `Layer` field, so both names must refer to the same
+  -- starting layer. Previously only `Layer` was set while GetCurrentLayer and
+  -- projectile impact classification read `__layer`, making every Air unit
+  -- report Land.
+  u.__layer = startingLayer(u, bp, x, z, requestedLayer)
+  u.Layer = u.__layer
   -- Das Skelett aus dem Modell (siehe __setBones). Es muss VOR OnCreate stehen:
   -- die Waffen pruefen ihre Turm-Knochen beim Aufbau (weapon.lua:67).
   u.__bones = __unitBones[string.lower(bpId)] or { names = {}, xform = {}, index = {} }
@@ -117,6 +212,8 @@ function __spawnUnit(scriptPath, bpId, x, y, z, army, complete)
   u.__speed = 0
   u.__health = (bp.Defense and bp.Defense.MaxHealth) or 0
   u.__fraction = 1
+  u.__autoMode = false
+  u.__autoSurfaceMode = false
   -- Erstellungs-Tick: die Build-/Wreckage-Shader zaehlen ihr Alter darueber
   -- (mesh.fx: material.x = time - creationTime).
   u.__spawnTick = __gameTick or 0
@@ -130,6 +227,14 @@ function __spawnUnit(scriptPath, bpId, x, y, z, army, complete)
   -- readRow beat and the cap change is silently lost
   -- (globals.lua __ensureCommandCapMask; UnitAttributes init Cfile:949126).
   __ensureCommandCapMask(u)
+
+  -- The native constructor calls SetAutoMode(InitialAutoMode) immediately
+  -- before OnPreCreate (Cfile:950066). SetAutoMode dispatches OnAutoModeOn/Off
+  -- even when the value equals the default.
+  local okAuto, errAuto = pcall(function()
+    u:SetAutoMode((bp.AI or {}).InitialAutoMode == true)
+  end)
+  if not okAuto then return id, tostring(errAuto) end
 
   -- Blueprint-Ökonomie in die Engine-Ökonomie der Armee einklinken (Original:
   -- CEconomy im CArmyImpl; die Unit registriert Produktion/Unterhalt).
@@ -318,7 +423,7 @@ end
 --
 -- Callers in the original: effectutilities.lua:436 (SpawnBuildBots — the
 -- Cybran build drones), scenarioframework, terranunits.lua (build pods).
-local function spawnCreateUnit(blueprint, army, x, y, z, heading, who)
+local function spawnCreateUnit(blueprint, army, x, y, z, heading, who, layer)
   local key = type(blueprint) == 'string' and string.lower(blueprint) or nil
   local bp = key and __registered and __registered.Unit[key]
   if not bp then error('Unknown unit kind: ' .. tostring(blueprint), 3) end
@@ -326,7 +431,7 @@ local function spawnCreateUnit(blueprint, army, x, y, z, heading, who)
     error('Invalid army index; must be >= 1 but got ' .. tostring(army), 3)
   end
   local scriptPath = bp.Script or ('/units/' .. key .. '/' .. key .. '_script.lua')
-  local id, err = __spawnUnit(scriptPath, key, x, y, z, army, true)
+  local id, err = __spawnUnit(scriptPath, key, x, y, z, army, true, layer)
   if id < 0 then error(who .. '(' .. tostring(blueprint) .. ') failed: ' .. tostring(err), 3) end
   local u = __units[id]
   u.__heading = heading or 0
@@ -341,7 +446,7 @@ local function headingFromQuat(qx, qy, qz, qw)
 end
 
 function CreateUnit(blueprint, army, tx, ty, tz, qx, qy, qz, qw, layer)
-  return spawnCreateUnit(blueprint, army, tx, ty, tz, headingFromQuat(qx, qy, qz, qw), 'CreateUnit')
+  return spawnCreateUnit(blueprint, army, tx, ty, tz, headingFromQuat(qx, qy, qz, qw), 'CreateUnit', layer)
 end
 
 --- CreateUnitHPR(blueprint, army, x, y, z, pitch, yaw, roll) — Cfile:980475.
@@ -353,7 +458,13 @@ end
 --- CreateUnit2(blueprint, army, layer, x, z, heading) — Cfile:980637. The
 --- height comes from the terrain (the signature has no y).
 function CreateUnit2(blueprint, army, layer, x, z, heading)
-  return spawnCreateUnit(blueprint, army, x, GetSurfaceHeight(x, z), z, heading, 'CreateUnit2')
+  -- CreateUnit2 alone specifies heading in degrees; the native binding
+  -- multiplies it by pi/180 before constructing the quaternion
+  -- (Cfile:980842-980853). Runtime headings in this engine are radians.
+  return spawnCreateUnit(
+    blueprint, army, x, GetSurfaceHeight(x, z), z,
+    math.rad(heading or 0), 'CreateUnit2', layer
+  )
 end
 
 -- === Adjacency (Moho::Unit::CollectAllOverlapping, Cfile:62d460) ===
@@ -633,6 +744,15 @@ local function readRow(id, u)
     -- Unit.cpp:8675-8813). Synced per beat so the UI mirror follows
     -- runtime cap changes instead of freezing at the blueprint state.
     caps = __ensureCommandCapMask(u),
+    toggleCaps = __ensureToggleCapMask(u),
+    -- ToggleScriptBit and the UI getters read the synchronized Unit variable
+    -- data, not an optimistic UI copy (cfunc_ToggleScriptBitL).
+    scriptBits = u.__scriptBits or 0,
+    -- Current layer (mVarDat.mLayer): GetIsSubmerged folds this value into
+    -- -1/0/+1 on the user side.
+    layer = u:GetCurrentLayer(),
+    autoMode = u.__autoMode == true,
+    autoSurfaceMode = u.__autoSurfaceMode == true,
     -- Shield strength ratio (0..1), fed by shield.lua UpdateShieldRatio ->
     -- Unit:SetShieldRatio (moho). The UI mirror shows it (GetShieldRatio; the
     -- rollover shield bar, unitview.lua).
@@ -721,6 +841,11 @@ function __readAllUnitsJson()
       .. ',"fireState":' .. jint(r.fireState)
       .. ',"guard":' .. jint(r.guard)
       .. ',"caps":' .. jint(r.caps)
+      .. ',"toggleCaps":' .. jint(r.toggleCaps)
+      .. ',"scriptBits":' .. jint(r.scriptBits)
+      .. ',"layer":' .. jstr(r.layer)
+      .. ',"autoMode":' .. tostring(r.autoMode)
+      .. ',"autoSurfaceMode":' .. tostring(r.autoSurfaceMode)
       .. ',"dead":' .. tostring(r.dead)
       .. ',"shieldRatio":' .. jnum(r.shieldRatio)
       .. ',"workProgress":' .. jnum(r.workProgress)

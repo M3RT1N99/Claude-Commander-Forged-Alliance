@@ -386,7 +386,9 @@ function __buildCollect()
           t.__engineBorn = true
           t.__spawnTick = __gameTick or 0
         end
-        local bRate = (b.__bp and b.__bp.Economy and b.__bp.Economy.BuildRate) or 0
+        -- The task reads UnitAttributes::mBuildRate, which SetBuildRate mutates;
+        -- it is not permanently tied to the blueprint value.
+        local bRate = b:GetBuildRate()
         local te = (t.__bp and t.__bp.Economy) or {}
         local bt = te.BuildTime or 1
         -- The engine divides by BuildTime unclamped (Cfile:815339); the Lua

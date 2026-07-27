@@ -122,13 +122,19 @@ end
 -- Entity::AdvanceCoords — advance every unit with a goal by one tick.
 function __advanceMotion()
   for id, u in pairs(__units) do
+    -- Unit::MotionTick decrements positive stun durations before delegating to
+    -- CUnitMotion. A value of 1 therefore blocks the weapon stage of this beat
+    -- but reaches zero before movement; negative values never count down.
+    local stunTicks = u.__stunTicks or 0
+    if stunTicks > 0 then u.__stunTicks = stunTicks - 1 end
+    local stunned = (u.__stunTicks or 0) ~= 0
     local goal = u.__goal
     local p = u.__pos
 
     -- DREH-ZIEL ohne Fahr-Ziel: die Unit steht und dreht sich zum Ziel — mit
     -- ihrer `Physics.TurnRate` (Grad/Sekunde), nicht sofort. Der Bauer sieht sein
     -- Gebaeude an, bevor er anfaengt (build.lua setzt __faceGoal).
-    if not goal and u.__faceGoal and p then
+    if not stunned and not goal and u.__faceGoal and p then
       local f = u.__faceGoal
       local m = motionParams(u)
       local wanted = atan2(f[1] - p[1], f[2] - p[3])
@@ -144,7 +150,12 @@ function __advanceMotion()
       end
     end
 
-    if goal and p then
+    if goal and p and (u:IsUnitState('Immobile') or stunned) then
+      -- SetImmobile is a runtime UNITSTATE bit. The native motion task waits
+      -- while it or the stun counter is set and keeps its waypoint, so clearing
+      -- the gate resumes the same order instead of discarding it.
+      u.__speed = 0
+    elseif goal and p then
       local m = motionParams(u)
       local dx = goal[1] - p[1]
       local dz = goal[2] - p[3]
