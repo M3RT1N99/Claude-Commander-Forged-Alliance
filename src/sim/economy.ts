@@ -300,13 +300,12 @@ export class ArmyEconomy {
    * counter (the engine writes to both places, Cfile:848614-848639). Reset in tick().
    */
   addReclaim(massPerTick: number, energyPerTick: number): void {
+    // ONLY the separate mReclaimed display counter. Reclaim's income contribution
+    // already flows through __reclaimTick's GiveResource -> pendingMass ->
+    // incomeMass (the engine writes reclaim to mResources->mIncome exactly ONCE,
+    // Cfile:848620); adding it here too double-counted it in GetEconomyIncome/Trend.
     this.reclaimMass = f(this.reclaimMass + massPerTick / DT)
     this.reclaimEnergy = f(this.reclaimEnergy + energyPerTick / DT)
-    // Reclaim also feeds income (mResources -> mIncome, Cfile:848620). This runs
-    // in phase 4 after tick() set income from production+given, so add on top;
-    // next tick() overwrites income fresh.
-    this.incomeMass = f(this.incomeMass + massPerTick / DT)
-    this.incomeEnergy = f(this.incomeEnergy + energyPerTick / DT)
   }
 
   /** brain:GetEconomyUsage(res) — actual spend per second (after throttling). */

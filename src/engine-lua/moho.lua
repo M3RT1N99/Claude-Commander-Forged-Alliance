@@ -66,6 +66,46 @@ local entity = withNoops(ENTITY_NAMES, {
   GetAIBrain = function(self) return self.__brain end,
   GetParent = function(self) return self.__parent end,
 
+  -- Intel bindings (cfunc_Entity{Init,Set,Get}IntelRadiusL / IsIntelEnabledL,
+  -- Cfile:933318-933807). We do NOT model the recon grids, but must honour the
+  -- numeric/boolean CONTRACT the original scripts read: SetupIntel / buff.lua
+  -- call InitIntel(army, type, radius) and enhancement threads compare
+  -- GetIntelRadius(type) as a NUMBER (units/xrb3301) and gate OnIntelEnabled on
+  -- IsIntelEnabled(type) as a BOOLEAN (unit.lua:1826). Before this both returned
+  -- nil (no-op), crashing those comparisons. Keyed per intel-type string
+  -- ('Radar','Omni','Vision','Cloak',…).
+  InitIntel = function(self, army, itype, radius)
+    self.__intel = self.__intel or {}
+    local slot = self.__intel[itype] or {}
+    if radius ~= nil then slot.radius = tonumber(radius) or 0 end
+    slot.radius = slot.radius or 0
+    self.__intel[itype] = slot
+  end,
+  SetIntelRadius = function(self, itype, radius)
+    self.__intel = self.__intel or {}
+    local slot = self.__intel[itype] or {}
+    slot.radius = math.max(0, tonumber(radius) or 0)
+    self.__intel[itype] = slot
+  end,
+  GetIntelRadius = function(self, itype)
+    local slot = self.__intel and self.__intel[itype]
+    return (slot and slot.radius) or 0
+  end,
+  EnableIntel = function(self, itype)
+    self.__intel = self.__intel or {}
+    local slot = self.__intel[itype] or {}
+    slot.enabled = true
+    self.__intel[itype] = slot
+  end,
+  DisableIntel = function(self, itype)
+    local slot = self.__intel and self.__intel[itype]
+    if slot then slot.enabled = false end
+  end,
+  IsIntelEnabled = function(self, itype)
+    local slot = self.__intel and self.__intel[itype]
+    return (slot and slot.enabled) == true
+  end,
+
   -- Lifecycle. Entity::Destroy (Cfile:916089) loescht NICHT sofort: es setzt
   -- mDestroyQueued und haengt die Entity in Sim::mDeletionQueue. Erst am Ende
   -- des Beats laeuft Entity::OnDestroy — und damit der Lua-Callback OnDestroy,

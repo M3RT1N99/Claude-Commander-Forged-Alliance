@@ -174,6 +174,16 @@ __uiPanels = {
     end,
   },
   {
+    -- gamemain.lua:146 — die Reiter oben (Diplomatie, Ziele, Punkte …). Sie
+    -- werden DIREKT nach der Economy-Bar gebaut, VOR multifunction/orders/
+    -- unitview: alle haengen in der mapGroup, und die Erzeugungs-Reihenfolge ist
+    -- die Geschwister-Tiefe (tabs sitzt dadurch HINTER unitview/unitviewDetail).
+    name = 'tabs',
+    build = function()
+      import('/lua/ui/game/tabs.lua').Create(__ui.mapGroup)
+    end,
+  },
+  {
     name = 'multifunction',
     build = function()
       __ui.mfd = import('/lua/ui/game/multifunction.lua').Create(__ui.controlCluster)
@@ -207,14 +217,7 @@ __uiPanels = {
       import('/lua/ui/game/unitviewDetail.lua').SetupUnitViewLayout(__ui.mapGroup, __ui.mapGroup)
     end,
   },
-  -- Ab hier der REST von gamemain.lua:146-165, in der Original-Reihenfolge.
-  {
-    -- gamemain.lua:146 — die Reiter oben (Diplomatie, Ziele, Punkte …).
-    name = 'tabs',
-    build = function()
-      import('/lua/ui/game/tabs.lua').Create(__ui.mapGroup)
-    end,
-  },
+  -- Ab hier der REST von gamemain.lua:155-165 (tabs steht oben, nach economy).
   {
     -- gamemain.lua:155 — die Spieler-Avatare (oben rechts).
     name = 'avatars',

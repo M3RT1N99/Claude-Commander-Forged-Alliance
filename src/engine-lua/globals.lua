@@ -2178,13 +2178,17 @@ function __reclaimTick()
           local ok, time, energy, mass
           if isUnit then
             -- A unit's reclaim cost from the target blueprint (unit.lua:2705-
-            -- 2713): time = max(BuildCostEnergy, BuildCostMass) / build rate,
-            -- returned as time/10; ticks below multiply by 10 again.
+            -- 2713): time = max(BuildCostEnergy, BuildCostMass) / the reclaimer's
+            -- BUILD RATE * (ReclaimTimeMultiplier or 1), returned as time/10;
+            -- ticks below multiply by 10 again. The rate is u:GetBuildRate() (the
+            -- runtime __buildRate from SetBuildRate/enhancements, moho.lua:715),
+            -- NOT the static blueprint value.
             local eco = (t.__bp and t.__bp.Economy) or {}
             mass = eco.BuildCostMass or 0
             energy = eco.BuildCostEnergy or 0
-            local buildRate = (u.__bp.Economy and u.__bp.Economy.BuildRate) or 1
-            time = math.max(mass, energy) / math.max(buildRate, 1) / 10
+            local buildRate = u:GetBuildRate()
+            if buildRate <= 0 then buildRate = 1 end
+            time = math.max(mass, energy) / buildRate * (u.ReclaimTimeMultiplier or 1) / 10
             ok = true
           else
             ok, time, energy, mass = pcall(function() return t:GetReclaimCosts(u) end)
