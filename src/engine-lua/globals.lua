@@ -469,19 +469,26 @@ categories.ALLUNITS = mkcat('all')
 -- ParseEntityCategory('TECH1,TECH2 MOBILE'): the engine's string DSL
 -- (ParseEntityCategory @Cfile:698138-698245) splits on COMMAS into groups that
 -- are UNIONED, and on WHITESPACE within a group into tokens that are
--- INTERSECTED. There are no '+'/'-' operators in the string form — those are
--- looked up as category names, miss, and are skipped (Cfile:698215); '*' is the
--- same and is redundant with the space-intersect. Real blueprints rely on the
--- comma form: url0103_unit.bp:230 TargetAllow='TECH1,TECH2',
--- uaa0103_unit.bp:287 TargetDisallow='TECH3,EXPERIMENTAL,COMMAND'. An empty or
--- all-unrecognised expression is the EMPTY set (matches nothing), not ALLUNITS.
+-- INTERSECTED. There are no '+'/'-'/'*' operators in the string form — a token
+-- not in the category rules map is SKIPPED (Cfile:698215, v14 == Myhead), so
+-- the operators contribute nothing rather than collapsing the group to empty.
+-- Real blueprints rely on the comma form: url0103_unit.bp:230
+-- TargetAllow='TECH1,TECH2', uaa0103_unit.bp:287
+-- TargetDisallow='TECH3,EXPERIMENTAL,COMMAND'. An empty or all-unrecognised
+-- expression is the EMPTY set (matches nothing), not ALLUNITS.
+-- Reduction: we have no separate registry of DECLARED categories (our
+-- `categories` table auto-vivifies any token), so an unknown category NAME
+-- (a typo) cannot be told apart from a real one and still empties its group —
+-- shipped FA strings never contain such typos, only valid tokens and the
+-- operators below, which we skip like the engine.
+local CAT_OPERATORS = { ['*'] = true, ['+'] = true, ['-'] = true }
 function ParseEntityCategory(expr)
   if type(expr) ~= 'string' then return expr end
   local result = nil
   for group in string.gmatch(expr, '[^,]+') do
     local inter = nil
     for tok in string.gmatch(group, '%S+') do
-      if tok ~= '*' then
+      if not CAT_OPERATORS[tok] then
         local c = categories[tok]
         inter = inter and (inter * c) or c
       end
@@ -1081,7 +1088,18 @@ function GetTerrainHeight(x, z)
   end
   return __terrainHeight(x, z)
 end
-function GetSurfaceHeight(x, z) return GetTerrainHeight(x, z) end
+-- GetSurfaceHeight clamps the terrain elevation UP to the water surface when
+-- the map has water (cfunc_GetSurfaceHeightL, Cfile:1089863-1089872: returns
+-- max(GetElevation, mWaterElevation) when mWaterEnabled). Over water it must be
+-- the water level, NOT the seabed — GetTerrainHeight stays the raw elevation.
+-- __mapWaterLevel is -10000 while water is disabled (line 436), so the max is a
+-- no-op there, exactly matching the engine's mWaterEnabled=false branch.
+function GetSurfaceHeight(x, z)
+  local h = GetTerrainHeight(x, z)
+  local w = __mapWaterLevel or -10000
+  if w > h then return w end
+  return h
+end
 
 -- GetTerrainType(x, z) returns a terrain-type record from TerrainTypes
 -- (lua/terraintypes.lua:126, a global list whose first entry is 'Default').

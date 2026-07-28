@@ -368,6 +368,27 @@ local UNIT_NAMES = {
   'GetStat', 'SetStat',
 }
 
+-- Script-bit argument -> bit INDEX. The engine's cfunc_UnitSetScriptBitL
+-- (Cfile:974905-974924) takes the RULEUTC_* string, runs it through SetLexical
+-- to the flag value, then right-shifts to the index; the original Lua always
+-- passes the string (unit.lua:3360, platoon.lua:447, url0101_script.lua:29).
+-- Our own UI dispatch path already sends the numeric index, so accept both.
+local SCRIPT_BIT_INDEX = {
+  RULEUTC_ShieldToggle = 0,
+  RULEUTC_WeaponToggle = 1,
+  RULEUTC_JammingToggle = 2,
+  RULEUTC_IntelToggle = 3,
+  RULEUTC_ProductionToggle = 4,
+  RULEUTC_StealthToggle = 5,
+  RULEUTC_GenericToggle = 6,
+  RULEUTC_SpecialToggle = 7,
+  RULEUTC_CloakToggle = 8,
+}
+local function scriptBitIndex(bit)
+  if type(bit) == 'number' then return math.floor(bit) end
+  return SCRIPT_BIT_INDEX[bit] or 0
+end
+
 local unit = withNoops(UNIT_NAMES, {
   GetUnitId = function(self)
     return (self.__bp and self.__bp.BlueprintId) or self.__id
@@ -443,7 +464,9 @@ local unit = withNoops(UNIT_NAMES, {
   GetFireState = function(self) return self.__fireState or 0 end,
   SetFireState = function(self, state) self.__fireState = state end,
   ToggleFireState = function(self)
-    self.__fireState = ((self.__fireState or 0) == 1) and 0 or 1
+    -- 3-state cycle ReturnFire(0) -> HoldFire(1) -> HoldGround(2) -> ReturnFire,
+    -- matching cfunc_UnitToggleFireStateL `(mFireState + 1) % 3` (Cfile:975053).
+    self.__fireState = ((self.__fireState or 0) + 1) % 3
   end,
 
   -- SCRIPT-BITS (Unit::ToggleScriptBit, Cfile:951395-951437): 1 << bit auf
@@ -452,11 +475,11 @@ local unit = withNoops(UNIT_NAMES, {
   -- 4 Production, 5 Stealth, 6 Generic, 7 Special, 8 Cloak.
   GetScriptBit = function(self, bit)
     local bits = self.__scriptBits or 0
-    local n = tonumber(bit) or 0
+    local n = scriptBitIndex(bit)
     return (math.floor(bits / (2 ^ n)) % 2) == 1
   end,
   SetScriptBit = function(self, bit, state)
-    local n = tonumber(bit) or 0
+    local n = scriptBitIndex(bit)
     local was = self:GetScriptBit(n)
     if was == (state == true) then return end
     self.__scriptBits = (self.__scriptBits or 0) + (state and (2 ^ n) or -(2 ^ n))
@@ -554,7 +577,26 @@ local unit = withNoops(UNIT_NAMES, {
   SetSpeedMult = function(self, value) self.__speedMult = value end,
   SetAccMult = function(self, value) self.__accMult = value end,
   SetTurnMult = function(self, value) self.__turnMult = value end,
-  IsIdleState = function(self) return true end,
+  -- Idle == the command queue is empty (cfunc_UnitIsIdleStateL, Cfile:973582-
+  -- 973597: idle unless a non-empty command list exists). AI wait-loops invert
+  -- on this (aibehaviors.lua:674, basemanagerplatoonthreads.lua:815), so a
+  -- constant `true` made their while-bodies never run. Derive it from the same
+  -- order/task state IsUnitState tracks: any active move goal, attack/guard/
+  -- reclaim order, build task where we are the builder, or a pending factory
+  -- queue counts as busy.
+  IsIdleState = function(self)
+    local id = self.__id
+    if self.__goal ~= nil and self.__goal ~= false then return false end
+    if __attackOrders and __attackOrders[id] then return false end
+    if __guardOrders and __guardOrders[id] then return false end
+    if __reclaimTasks and __reclaimTasks[id] then return false end
+    for _, task in pairs(__buildTasks or {}) do
+      if task.builder == id then return false end
+    end
+    local q = self.__buildQueue
+    if q and table.getn(q) > 0 then return false end
+    return true
+  end,
   -- SetPaused/IsPaused (cfunc_SetPausedL "Pause builders in this list"): the
   -- unit's mIsPaused flag. A paused builder / paused factory halts production
   -- and resource demand (build.lua __buildCollect/__factoryTick). SetPaused is
@@ -709,9 +751,21 @@ local unit = withNoops(UNIT_NAMES, {
   end,
   SetProductionActive = function(self, active)
     __econSetProductionActive(self.__army or 1, self.__id, active)
+    -- The engine dispatches the Lua callback on EVERY call, per the flag
+    -- (cfunc_UnitSetProductionActiveL, Cfile:973924-973930).
+    local cb = active and self.OnProductionActive or self.OnProductionInActive
+    if cb then pcall(function() cb(self) end) end
   end,
   SetConsumptionActive = function(self, active)
     __econSetConsumptionActive(self.__army or 1, self.__id, active)
+    -- The engine dispatches only on a CHANGE (Moho::Unit::SetConsumptionActive,
+    -- Cfile:953877-953883) — mass fabricators re-drive their production off this.
+    local want = active == true
+    if self.__consumptionActive ~= want then
+      self.__consumptionActive = want
+      local cb = want and self.OnConsumptionActive or self.OnConsumptionInActive
+      if cb then pcall(function() cb(self) end) end
+    end
   end,
   -- The granted share of the requested resources this tick
   -- (CEconRequest::LimitingRate); 1 means the demand was fully met.
