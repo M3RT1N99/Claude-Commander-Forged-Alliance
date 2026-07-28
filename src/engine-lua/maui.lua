@@ -605,17 +605,15 @@ end
 -- Ein Control ohne vollstaendiges Layout wirft beim Ziehen "circular
 -- dependency" (lazyvar.lua:21). Das faengt der Renderer NICHT ab — ein
 -- unfertiges Layout ist ein Fehler, kein Sonderfall.
--- Ein Control ist nur sichtbar, wenn weder es selbst noch ein Vorfahr versteckt
--- ist. Versteckte Controls rendert die Engine nicht — und zieht folglich auch
--- ihr Layout nicht. Ein Control, das nie positioniert wurde, weil es nie
--- angezeigt wird, ist also KEIN Fehler.
+-- A control is visible when ITS OWN mIsHidden is clear — the engine renders per
+-- control, flat, not by walking ancestors (CMauiControl render checks
+-- `!this->mIsHidden`; hiding a subtree works because SetHidden PROPAGATES to
+-- every child, Cfile:1124404-1124416). The ancestor walk was wrong for a Grid:
+-- Grid:OnHide vetoes its own hide (grid.lua:274-280) so the grid stays hidden
+-- while it shows each child individually via _CalculateVisible — the order-button
+-- icons live under exactly such a grid, and the ancestor walk pruned them all.
 local function visible(c)
-  local node = c
-  while node do
-    if node.__hidden then return false end
-    node = node.__parent or nil
-  end
-  return true
+  return not c.__hidden
 end
 
 -- Die Frame-Pumpe: die Engine ruft pro Bild OnFrame(delta) auf jedem Control,
@@ -1052,8 +1050,11 @@ function __mauiHitTest(x, y)
 
   local best, bestDepth = nil, nil
   local function walk(c)
-    if c.__destroyed or c.__hidden then return end
-    if c.__hitTest ~= false and draws(c) then
+    -- Flat, per-control hidden (like render/visible): a hidden control is not
+    -- hit itself, but we still recurse into its children — a Grid stays hidden
+    -- while its shown children (the order buttons) must remain clickable.
+    if c.__destroyed then return end
+    if not c.__hidden and c.__hitTest ~= false and draws(c) then
       -- Ohne Layout gibt es keine Flaeche, also auch keinen Treffer. Das ist
       -- kein Fehlerfall: die Mini-Ansicht laesst leere Gruppen ohne Layout
       -- stehen (borders_mini.lua), und die Engine fragt sie nie.

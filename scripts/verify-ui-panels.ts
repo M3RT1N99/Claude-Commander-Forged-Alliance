@@ -401,6 +401,25 @@ check(
   'Klick auf das Orders-Panel WIRD verbraucht (dort zeichnet ein Bitmap)',
 )
 
+// The order-button ICONS must actually reach the snapshot. They live under a
+// Grid the engine keeps hidden while showing each child individually (Grid:OnHide
+// veto, grid.lua:274-280) — an ancestor-walk visibility check pruned every icon,
+// leaving blank buttons. With the flat per-control hidden model they appear.
+const orderIcons = Number(
+  host.eval(`
+    local n = 0
+    for _, c in ipairs(__mauiSnapshot()) do
+      if type(c.texture) == 'string'
+        and string.find(c.texture, 'game/orders/', 1, true)
+        and string.find(c.texture, '_btn', 1, true) then
+        n = n + 1
+      end
+    end
+    return n
+  `),
+)
+check(orderIcons >= 3, `${orderIcons} Order-Button-Icons erscheinen im Snapshot (Grid-Kinder nicht mehr geprunt)`)
+
 console.log('\n== construction.lua: das Bau-Menü kommt aus dem Blueprint ==')
 // Die ACU baut, was ihre BuildableCategory hergibt (uel0001_unit.bp). Die Liste
 // zieht construction.lua über EntityCategoryGetUnitList — nicht über eine
