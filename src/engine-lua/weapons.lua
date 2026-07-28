@@ -123,9 +123,12 @@ end
 canTarget = function(w, u, target)
   if not u or not target then return false end
   if target.__destroyQueued or target.__dead then return false end
-  -- Commanded fire must reject allies, while a Neutral target remains valid.
-  -- Autonomous acquisition below separately limits itself to enemies.
-  if IsAlly(u.__army, target.__army) then return false end
+  -- No alliance test: CanAttackTarget -> func_PickTargetPoint checks only layer
+  -- caps, seabed above/below-water and the category masks, never IsAlly/IsEnemy
+  -- (Cfile:984750-984845 returns 1 with no alliance branch). A commanded/force-
+  -- fire order onto an allied or own entity therefore passes; friendly damage is
+  -- filtered separately. Autonomous acquisition below still limits itself to
+  -- enemies via IsEnemy, so this does not auto-target allies.
 
   local bp = w.__bp or {}
   if bp.IgnoreIfDisabled and w.__enabled == false then return false end
@@ -204,13 +207,17 @@ local function acquireTarget(w, u)
     end
   end
 
-  -- Steht das alte Ziel noch und ist es in Reichweite, bleibt es (die Engine
-  -- prueft es ueber CanAttackTarget, Cfile:793034).
+  -- Retention matches the engine's sticky path: keep the current target only
+  -- while the full FIRE solution is available (TargetIsTooClose == TRS_Available,
+  -- Cfile:793070) — that uses MaxRadius (not the larger tracking radius) and
+  -- also enforces MinRadius, MaxHeightDiff and the heading arc via
+  -- __weaponTargetSolution. Weapons flagged AlwaysRecheckTarget skip retention
+  -- and re-run the free search every interval (Cfile:793070 gates the keep path
+  -- on !mAlwaysRecheckTarget), letting them switch to a better target.
   local cur = w.__target
-  if cur and canTarget(w, u, cur) then
-    local p, q = u.__pos, cur.__pos
-    local dx, dz = q[1] - p[1], q[3] - p[3]
-    if dx * dx + dz * dz <= radius * radius then return end
+  if cur and not bp.AlwaysRecheckTarget and canTarget(w, u, cur)
+    and __weaponTargetSolution(w, __unitCollision(cur) or cur.__pos) then
+    return
   end
 
   local best, bestDist = nil, radius * radius
@@ -337,17 +344,16 @@ local function fireTick(w, u)
   -- CFireWeaponTask::Dispatch gate order (Cfile:983938-983947):
   -- CanAttackTarget, UnitWeapon::CanFire, CheckSilo, then the full
   -- TargetIsTooClose solution status (despite that misleading function name).
+  -- On a failed gate CFireWeaponTask::Dispatch does NOTHING to the target and
+  -- returns (Cfile:983938-983958 has no else/SetTarget). Clearing it here fired
+  -- spurious OnLostTarget and restarted the salvo FSM inside one acquire
+  -- interval; leave the target for acquireTarget (the CAcquireTargetTask
+  -- equivalent) to re-evaluate and clear on its own interval.
   local t = w.__target
   if t then
-    if not canTarget(w, u, t) then
-      __weaponSetTarget(w, nil, nil)
-      return
-    end
+    if not canTarget(w, u, t) then return end
   elseif w.__targetGround then
-    if not canTargetGround(w, w.__targetGround) then
-      __weaponSetTarget(w, nil, nil)
-      return
-    end
+    if not canTargetGround(w, w.__targetGround) then return end
   end
   if not __weaponUnitCanFire(w) or not __weaponCheckSilo(w) then return end
   local targetPos = t and t.__pos or w.__targetGround
