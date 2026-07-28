@@ -854,7 +854,12 @@ function __readAllEmittersJson()
   local kompakt, k = {}, 0
   for _, e in ipairs(__emitters) do
     local o = e.__owner
-    local lebt = not e.__destroyed and o ~= nil and not o.__destroyed and not o.__destroyQueued
+    -- A FIXED effect (splat/decal — CreateSplat/CreateDecal) lives at a stored
+    -- world transform, owner-independent, until its duration elapses; an
+    -- OWNER-attached emitter follows its bone and dies with the owner.
+    local expired = e.__expireTick and (__gameTick or 0) >= e.__expireTick
+    local lebt = not e.__destroyed and not expired
+      and (e.__fixedPos ~= nil or (o ~= nil and not o.__destroyed and not o.__destroyQueued))
     if lebt then
       k = k + 1
       kompakt[k] = e
@@ -862,7 +867,12 @@ function __readAllEmittersJson()
       -- drehen die Spawn-Richtungen EINMALIG beim Spawn in den Bone-Raum
       -- (CEfxEmitter::Tick, Cfile:894849-894859) — dafuer braucht der
       -- Spawner die Bone-Orientierung, nicht nur den Ort.
-      local pos, rot = __boneWorld(o, e.__bone)
+      local pos, rot
+      if e.__fixedPos then
+        pos, rot = e.__fixedPos, e.__fixedRot or { 1, 0, 0, 0 }
+      else
+        pos, rot = __boneWorld(o, e.__bone)
+      end
       local off = e.__offset
       -- Beam-Emitter mit zweitem Ende (AttachBeamEntityToEntity): die
       -- Zielposition wandert mit — stirbt das Ziel, endet der Beam
@@ -891,6 +901,15 @@ function __readAllEmittersJson()
   return '[' .. table.concat(parts, ',') .. ']'
 end
 function CreateAttachedEmitter(owner, bone, army, spec) return newEmitter(owner, bone, army, spec) end
+-- DOCUMENTED FIDELITY GAP: the engine's CreateEmitterAtBone/AtEntity spawn the
+-- emitter DETACHED at a fixed spawn transform that OUTLIVES the owner (they set
+-- only mMatrix, never mEnt; CEfxEmitter::InterpolatePosition returns the fixed
+-- matrix when mEnt is null, Cfile:892334/892375-892381), while CreateAttached
+-- Emitter/CreateEmitterOnEntity follow the owner (SetBone/SetEntity set mEnt,
+-- Cfile:895350/895570). We make AtBone/AtEntity follow the owner and die with it
+-- like the attached variants — deferred (a fixed detach would need a per-emitter
+-- lifetime to avoid leaking fire-and-forget effects; splats/decals below DO use
+-- the fixed-transform + duration path).
 function CreateEmitterAtBone(owner, bone, army, spec) return newEmitter(owner, bone, army, spec) end
 function CreateEmitterAtEntity(owner, army, spec) return newEmitter(owner, -1, army, spec) end
 function CreateEmitterOnEntity(owner, army, spec) return newEmitter(owner, -1, army, spec) end
@@ -949,8 +968,28 @@ function CreateBeamEntityToEntity(a, aBone, b, bBone, army, blueprint)
 end
 function CreateLightParticle(owner, bone, army, size, life, tex, ramp) end
 function CreateLightParticleIntel(owner, bone, army, size, life, tex, ramp) end
-function CreateSplat(pos, heading, tex, sx, sz, lod, life, army) return newEmitter(nil, -1, army, tex) end
-function CreateDecal(pos, heading, tex1, tex2, type, sx, sz, lod, life, army) return newEmitter(nil, -1, army, tex1) end
+-- CreateSplat(position, heading, texture, sizeX, sizeZ, lod, duration, army,
+-- fidelity) / CreateDecal(...) drop a GROUND effect at a FIXED world transform
+-- independent of any entity (cfunc_CreateDecalL builds a VTransform from the
+-- position + heading and constructs a CDecal there, Cfile:908234-908243). The
+-- position and heading are load-bearing — the old nil-owner emitter was
+-- compacted out of __emitters immediately and never rendered. Stored as a fixed
+-- transform with a duration (splat marks, scorch decals, tread marks).
+local function fixedGroundEffect(pos, heading, tex, size, life, army)
+  local e = newEmitter(nil, -1, army, tex)
+  local h = (heading or 0) * 0.5
+  e.__fixedPos = { (pos and pos[1]) or 0, (pos and pos[2]) or 0, (pos and pos[3]) or 0 }
+  e.__fixedRot = { math.cos(h), 0, math.sin(h), 0 } -- heading = rotation about Y
+  e.__scale = size or 1
+  if life and life > 0 then e.__expireTick = (__gameTick or 0) + math.floor(life * 10) end
+  return e
+end
+function CreateSplat(pos, heading, tex, sx, sz, lod, life, army)
+  return fixedGroundEffect(pos, heading, tex, sx, life, army)
+end
+function CreateDecal(pos, heading, tex1, tex2, type, sx, sz, lod, life, army)
+  return fixedGroundEffect(pos, heading, tex1, sx, life, army)
+end
 
 -- "CreateSplatOnBone(entity, offset, boneName, textureName, sizeX, sizeZ,
 -- lodParam, duration, army)" (Cfile:908461, sim only; the mHelp is incomplete

@@ -132,6 +132,12 @@ function __uiCreateScreenTree()
   __ui.gameParent = UIUtil.CreateScreenGroup(GetFrame(0), 'GameMain ScreenGroup')
   __ui.controlCluster, __ui.statusCluster, __ui.mapGroup, __ui.windowGroup =
     import('/lua/ui/game/borders.lua').SetupBorderControl(__ui.gameParent)
+  -- DOCUMENTED GAP: gamemain.lua:175-189 installs WheelRotation HandleEvents on
+  -- controlCluster/statusCluster that forward the wheel to
+  -- worldview.ForwardMouseWheelInput so wheeling over the border UI still zooms
+  -- the world. Not wired here (our worldview is a render stub whose wheel goes
+  -- to the browser camera bridge, not the Lua control ForwardMouseWheelInput
+  -- routes to); the wheel over the border panels is currently swallowed.
 
   -- Der ONE-SHOT aus gamemain.lua:136-140, woertlich: beim ERSTEN Bild nach dem
   -- Aufbau laeuft gamemain.OnFirstUpdate() — dort entsteht das Punkte-Panel
@@ -164,6 +170,13 @@ __uiPanels = {
     name = 'worldview',
     build = function()
       import('/lua/ui/game/worldview.lua').CreateMainWorldView(__ui.gameParent, __ui.mapGroup)
+      -- DOCUMENTED GAP: gamemain.lua:143 calls worldview.LockInput() here, which
+      -- puts up an input-modal worldBlock, hides the cursor and calls
+      -- SessionResume(); the intro-zoom ForkThread (gamemain.lua:99) later runs
+      -- UnlockInput. We skip the whole LockInput/intro/UnlockInput cycle — the
+      -- sandbox starts unpaused directly — because a LockInput without the intro
+      -- thread's UnlockInput would leave input modal-blocked and the game
+      -- unclickable.
     end,
   },
   {
