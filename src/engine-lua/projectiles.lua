@@ -299,32 +299,6 @@ end
 -- ---------------------------------------------------------------------
 local DEG_PER_SEC_TO_RAD_PER_TICK = 0.0017453292
 
---- Eine Quaternion zur Flugrichtung drehen, hoechstens `maxAngle` je Tick.
-local function alignToVelocity(q, v, maxAngle)
-  local len = math.sqrt(v[1] * v[1] + v[2] * v[2] + v[3] * v[3])
-  if len < 1e-6 then return q end
-  local want = __orientFromDir({ v[1] / len, v[2] / len, v[3] / len })
-  if maxAngle <= 0 then return want end
-  -- Winkel zwischen den Quaternionen (dot -> cos(theta/2)).
-  local dot = q[1] * want[1] + q[2] * want[2] + q[3] * want[3] + q[4] * want[4]
-  if dot < 0 then
-    want = { -want[1], -want[2], -want[3], -want[4] }
-    dot = -dot
-  end
-  if dot > 0.9999 then return want end
-  local theta = 2 * math.acos(math.min(1, dot))
-  if theta <= maxAngle then return want end
-  -- Slerp mit t = maxAngle / theta.
-  local t = maxAngle / theta
-  local sinT = math.sin(theta * 0.5)
-  local a = math.sin((1 - t) * theta * 0.5) / sinT
-  local b = math.sin(t * theta * 0.5) / sinT
-  return {
-    q[1] * a + want[1] * b, q[2] * a + want[2] * b,
-    q[3] * a + want[3] * b, q[4] * a + want[4] * b,
-  }
-end
-
 -- ---------------------------------------------------------------------
 -- GELENKTE MUNITION — Moho::Projectile::UpdateTracking (@944367) mit den
 -- Quaternion-Helfern der Engine (alles belegt, docs/research/
@@ -522,8 +496,12 @@ function __projectileTick()
         v[3] = v[3] + f[3] * p.__accel * 0.1
       end
       if p.__velocityAlign then
-        p.__orient = alignToVelocity(
-          p.__orient, v, (p.__turnRate or 0) * DEG_PER_SEC_TO_RAD_PER_TICK
+        -- MotionTick aligns orientation with func_QuatFromVecRot(orient,
+        -- velocity, turnRateRad) in BOTH the tracking and non-tracking branches
+        -- (Cfile:944180-944184) — the same routine UpdateTracking uses above, not
+        -- a separate slerp toward an absolute orientation.
+        p.__orient = quatFromVecRot(
+          p.__orient, v[1], v[2], v[3], (p.__turnRate or 0) * DEG_PER_SEC_TO_RAD_PER_TICK
         )
       end
       if p.__maxSpeed and p.__maxSpeed ~= 0 then

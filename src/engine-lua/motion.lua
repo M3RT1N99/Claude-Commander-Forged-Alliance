@@ -6,7 +6,8 @@
 --
 --   turnRate    = bp.TurnRate       * turnMult  * 0.0017453292  (deg/s -> rad/tick)
 --   maxSpeed    = bp.MaxSpeed       * speedMult * 0.1           (units/tick)
---   maxReverse  = bp.MaxSpeedReverse* speedMult * 0.1
+--   maxReverse  = bp.MaxSpeedReverse* speedMult * 0.1  (NOT modelled — reverse
+--                 motion is a documented reduction, see motionParams)
 --   maxAccel    = bp.MaxAcceleration* accMult   * 0.01          (units/tick^2)
 --   maxBrake    = (bp.MaxBrake ~= 0      and bp.MaxBrake      or bp.MaxAcceleration) * accMult * 0.01
 --   maxSteer    = (bp.MaxSteerForce ~= 0 and bp.MaxSteerForce or bp.MaxAcceleration) * accMult * 0.01
@@ -60,9 +61,16 @@ local function motionParams(u)
   local steerBp = phys.MaxSteerForce or 0
   local radiusBp = phys.TurnRadius or 0
 
+  -- Reverse motion (Physics.MaxSpeedReverse / BackUpDistance, Cfile:766097-
+  -- 766128, clamp mMaxReserveSpeed 942130-942133) is a DOCUMENTED REDUCTION: the
+  -- navigator only ever drives forward, so a unit ordered to a nearby point
+  -- behind it pivots and drives forward instead of backing up. Not modelled yet.
   return {
     turnRate = (phys.TurnRate or 0) * turnMult * DEG_PER_SEC_TO_RAD_PER_TICK,
     maxSpeed = (phys.MaxSpeed or 0) * speedMult * 0.1,
+    -- Raw blueprint MaxSpeed for the RotateOnSpot speed gate, which the engine
+    -- normalizes WITHOUT speedMult (Cfile:766083 |v|*10 / mMaxSpeed).
+    maxSpeedBp = phys.MaxSpeed or 0,
     accel = accel,
     brake = (brakeBp ~= 0 and brakeBp * accMult * 0.01) or accel,
     steer = (steerBp ~= 0 and steerBp * accMult * 0.01) or accel,
@@ -197,7 +205,10 @@ function __advanceMotion()
         local h0 = u.__heading or 0
         local fwdX = math.sin(h0)
         local fwdZ = math.cos(h0)
-        local speedFrac = speed / m.maxSpeed -- Cfile:766083: |v|*10 / MaxSpeed
+        -- Cfile:766083: |v|*10 / MaxSpeed, normalized by the RAW blueprint
+        -- MaxSpeed (NOT the speedMult-scaled per-tick maxSpeed), so a speed-
+        -- buffed/debuffed RotateOnSpot unit trips the gate at the right fraction.
+        local speedFrac = (m.maxSpeedBp > 0) and (speed * 10 / m.maxSpeedBp) or 0
 
         -- Turn toward the goal. Effektive Drehrate = max(turnRate,
         -- v / turnRadius), auf PI geklemmt (Cfile:766161-766163 + 942169-942170):
