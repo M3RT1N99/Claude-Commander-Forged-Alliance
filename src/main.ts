@@ -34,6 +34,14 @@ import { Hud, type HudSource, type HudUnitInfo, type EcoSnapshot } from './ui/hu
 import { GameUi } from './ui/gameUi'
 import { BuildPreview } from './ui/buildPreview'
 import {
+  blueprintPlacement,
+  canBuildStructureAt,
+  skirtRect,
+  type Placement,
+  type PlacedStructure,
+  type Validity,
+} from './sim/ogrid'
+import {
   boxSelectIds,
   mergeSelection,
   sameTypeIds,
@@ -581,6 +589,47 @@ let rolloverUnitId: number | null = null
 let massSpots: { x: number; z: number }[] = []
 const sandboxAssetCache = new Map<string, SandboxUnitAssets>()
 
+// --- Build-placement validity (the ghost's red/green) ------------------------
+//
+// canBuildStructureAt (src/sim/ogrid.ts) is the engine's own query; here we
+// just feed it the data the main thread already holds: the heightfield, the
+// water level, the map cell bounds and every placed structure's skirt. The
+// blueprint of each placed unit is already cached (it was loaded to render it),
+// so the per-blueprint placement is derived once and memoised.
+const buildPlacementCache = new Map<string, Placement>()
+function placementOf(bpId: string): Placement | null {
+  const hit = buildPlacementCache.get(bpId)
+  if (hit) return hit
+  const assets = sandboxAssetCache.get(bpId)
+  if (!assets) return null
+  const p = blueprintPlacement(assets.bp)
+  buildPlacementCache.set(bpId, p)
+  return p
+}
+/** Placed immobile units whose skirts block new placement. */
+function placedStructures(): PlacedStructure[] {
+  const out: PlacedStructure[] = []
+  for (const u of luaUnits) {
+    const p = placementOf(u.bpId)
+    if (!p || p.isMobile) continue
+    const pos = u.mesh.position
+    out.push({ skirt: skirtRect(p, pos.x, pos.z) })
+  }
+  return out
+}
+/** The ghost's verdict at a snapped centre (drives its tint). */
+function buildValidity(bpId: string, cx: number, cz: number): Validity {
+  const p = placementOf(bpId)
+  if (!p || !currentScmap) return 'unknown'
+  return canBuildStructureAt(p, cx, cz, {
+    heightAt: (x, z) => viewer.heightAt(x, z),
+    waterElevation: mapWaterElevation() ?? -10000,
+    mapWidth: currentScmap.width,
+    mapHeight: currentScmap.height,
+    structures: placedStructures(),
+  })
+}
+
 // --- Projektile: die fliegenden Schüsse der Sim, mit ihrem echten Mesh -------
 //
 // Die Engine rendert jede Sim-Entity (CUIWorldView) — auch Projektile, mit
@@ -1059,6 +1108,8 @@ async function startSandbox(mapFolder: string): Promise<void> {
     // Die Bau-Vorschau (Geistergebäude am Raster) — Engine-Rendering mit den
     // echten Blueprint-Modellen.
     buildPreview = new BuildPreview(viewer, loadSandboxAssets)
+    // Red/green validity: the same query the engine's ghost uses.
+    buildPreview.setValidityProvider(buildValidity)
     // Das Partikelsystem — frisch pro Sitzung (setMap → clearContent wirft
     // die Helper-Meshes weg, also auch die Batches).
     particles?.dispose()

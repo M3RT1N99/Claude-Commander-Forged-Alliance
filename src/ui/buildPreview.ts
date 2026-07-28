@@ -3,6 +3,22 @@ import type { UnitViewer, SceneUnit } from '../viewer/unitViewer'
 import type { SandboxUnitAssets } from '../sandbox/sandbox'
 import { snapToGrid } from './worldCommands'
 import { bpGet } from '../formats/blueprint'
+import type { Validity } from '../sim/ogrid'
+
+/**
+ * Ghost tints. These colours are a UI affordance (like the translucency below),
+ * NOT engine values — but WHICH one is shown is the engine's verdict
+ * (canBuildStructureAt, src/sim/ogrid.ts): green = buildable here, red = blocked,
+ * blue = we cannot judge faithfully (mobile / deposit-restricted, no markers).
+ */
+const TINT_VALID = new THREE.Color(0x33ff66)
+const TINT_INVALID = new THREE.Color(0xff3333)
+const TINT_UNKNOWN = new THREE.Color(0x66ccff)
+const TINT: Record<Validity, THREE.Color> = {
+  valid: TINT_VALID,
+  invalid: TINT_INVALID,
+  unknown: TINT_UNKNOWN,
+}
 
 /**
  * Die Bau-Vorschau: das Geistergebäude am gerasterten Punkt unter dem Cursor.
@@ -35,11 +51,23 @@ export class BuildPreview {
   private unit: SceneUnit | null = null
   private blueprintId = ''
   private loading = ''
+  private validity: Validity = 'unknown'
+  /**
+   * Answers "can this blueprint be built at the snapped centre (x, z)?" — the
+   * host wires it to canBuildStructureAt with the map's terrain/water/occupancy
+   * (src/main.ts). Absent -> the ghost stays neutral (the old behaviour).
+   */
+  private validityAt: ((blueprintId: string, x: number, z: number) => Validity) | null = null
 
   constructor(
     private readonly viewer: UnitViewer,
     private readonly loadAssets: (id: string) => Promise<SandboxUnitAssets | null>,
   ) {}
+
+  /** Wire the placement-validity query (canBuildStructureAt). */
+  setValidityProvider(fn: (blueprintId: string, x: number, z: number) => Validity): void {
+    this.validityAt = fn
+  }
 
   /** Kein Bau-Modus mehr (oder Cursor außerhalb der Karte): Geist verschwindet. */
   hide(): void {
@@ -105,6 +133,13 @@ export class BuildPreview {
     if (this.mesh) {
       this.mesh.position.set(pos.x, pos.y, pos.z)
       this.mesh.visible = true
+      // Red/green feedback — recomputed every move, since the same ghost turns
+      // valid/invalid as it slides across cells and over other structures.
+      this.validity = this.validityAt ? this.validityAt(blueprintId, pos.x, pos.z) : 'unknown'
+      const mat = this.mesh.material as THREE.ShaderMaterial
+      if (mat.uniforms && mat.uniforms.teamColor) {
+        ;(mat.uniforms.teamColor.value as THREE.Color).copy(TINT[this.validity])
+      }
     }
   }
 
@@ -112,7 +147,7 @@ export class BuildPreview {
   debugPosition(): string | null {
     if (!this.mesh || !this.mesh.visible) return null
     const p = this.mesh.position
-    return `${this.blueprintId} @ ${p.x.toFixed(1)}, ${p.z.toFixed(1)}`
+    return `${this.blueprintId} @ ${p.x.toFixed(1)}, ${p.z.toFixed(1)} [${this.validity}]`
   }
 
   /**
