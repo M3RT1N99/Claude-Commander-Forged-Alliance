@@ -84,8 +84,12 @@ function __decayTick()
   for id, u in pairs(__units) do
     -- __engineBorn: our click-time placeholder does not exist in the engine
     -- until OnStartBuild ran (startTask) — only from then on it decays.
+    -- Decay only when the site has NOT been materialized in the last tick: the
+    -- engine resets mCreationTick on every Materialize (Cfile:953443), so an
+    -- attended/stalled-but-attended site keeps its clock fresh. Fall back to the
+    -- creation tick before the first materialize.
     if u.__beingBuilt and u.__engineBorn and not u.__dead and not u.__destroyQueued
-      and (__gameTick - (u.__spawnTick or 0)) > 1 then
+      and (__gameTick - (u.__lastMaterializedTick or u.__spawnTick or 0)) > 1 then
       local e = (u.__bp and u.__bp.Economy) or {}
       local maxVal = math.max(e.BuildCostEnergy or 0, e.BuildCostMass or 0, e.BuildTime or 0)
       if maxVal > 0 then
@@ -188,6 +192,26 @@ local function approach(task)
     -- Winkelgeschwindigkeit wie jede andere Drehung.
     b.__faceGoal = { tp[1], tp[3] }
   end
+end
+
+-- Is the builder close enough to actually start the build? A factory build and
+-- an upgrade sit ON the builder (no approach). For a MobileBuild the engine
+-- emits OnStartBuild only from CBuildTaskHelper::SetFocus, reached in
+-- TASKSTATE_Processing AFTER navigation completes and the builder is within
+-- MaxBuildDistance (Cfile:816481-816487 returns while still too far) — never
+-- during the walk.
+local function inBuildRange(task)
+  local b = __units[task.builder]
+  local t = __units[task.target]
+  if not b or not t then return false end
+  if task.order == 'FactoryBuild' or task.order == 'Upgrade' then return true end
+  local mbd = (b.__bp and b.__bp.Economy and b.__bp.Economy.MaxBuildDistance) or 0
+  if mbd <= 0 then return true end
+  local bp = b.__pos or { 0, 0, 0 }
+  local tp = t.__pos or { 0, 0, 0 }
+  local dx = tp[1] - bp[1]
+  local dz = tp[3] - bp[3]
+  return math.sqrt(dx * dx + dz * dz) <= mbd
 end
 
 -- === Die Bau-Warteschlange einer Fabrik ===
@@ -343,7 +367,10 @@ function __buildCollect()
     if a and atid then
       aktiv[atid] = true
       approach(a)
-      if not a.started then startTask(a, atid) end
+      -- OnStartBuild fires on ARRIVAL, not during the walk: SetFocus (and thus
+      -- RunScript_OnStartBuild, Cfile:815102) is reached only once the builder
+      -- is within MaxBuildDistance. FactoryBuild/Upgrade sit on the builder.
+      if not a.started and inBuildRange(a) then startTask(a, atid) end
     end
   end
 
@@ -386,6 +413,12 @@ function __buildCollect()
           t.__engineBorn = true
           t.__spawnTick = __gameTick or 0
         end
+        -- Attended this tick (builder in range): the engine resets the decay
+        -- clock on EVERY Materialize, including the delta==0 econ-stall path
+        -- (Cfile:953443-953444 runs before the `a2 != 0` body), so an attended
+        -- site — even a stalled one — never decays. This runs before the econ
+        -- tick, so it covers a build that will get rate 0 this beat too.
+        if not repairOnly then t.__lastMaterializedTick = __gameTick or 0 end
         -- The task reads UnitAttributes::mBuildRate, which SetBuildRate mutates;
         -- it is not permanently tied to the blueprint value.
         local bRate = b:GetBuildRate()
@@ -447,7 +480,8 @@ function __buildApply()
       end
     elseif b and t and task.step > 0 then
       local rate = __econBuildRate(army, tid)
-      local f = (t.__fraction or 0) + task.step * rate
+      local oldFrac = t.__fraction or 0
+      local f = oldFrac + task.step * rate
       if f > 1 then f = 1 end
       t.__fraction = f
       t.__health = t:GetMaxHealth() * f
@@ -455,6 +489,17 @@ function __buildApply()
       -- (Cfile:815480-815482) — that is the value the UI shows
       -- (construction.lua:380 GetWorkProgress).
       b.__workProgress = f
+      -- Quarter/half/three-quarter progress callbacks: OnBuildProgress on the
+      -- builder, OnBeingBuiltProgress on the site, fired when the fraction
+      -- crosses 0.25/0.5/0.75 this tick (Cfile:815458-815476, pre vs post
+      -- fraction).
+      for _, thr in ipairs({ 0.25, 0.5, 0.75 }) do
+        if oldFrac < thr and f >= thr then
+          if b.OnBuildProgress then pcall(function() b:OnBuildProgress(t, oldFrac, f) end) end
+          if t.OnBeingBuiltProgress then pcall(function() t:OnBeingBuiltProgress(b, oldFrac, f) end) end
+          break
+        end
+      end
       if f >= 1 then
         -- With several builders on one site every task finishes here, but
         -- the TARGET gets OnStopBeingBuilt exactly once — the engine guards
