@@ -127,10 +127,11 @@ export class ArmyEconomy {
   /** Demand before throttling (brain:GetEconomyRequested). */
   requestedMass = 0
   requestedEnergy = 0
-  // Reclaim income this beat — kept separate from income (mTotals.mReclaimed,
-  // the third pair in SSTIArmyVariableData, Cfile:1016010-1016024). The engine
-  // writes reclaim to TWO places: storage AND this counter (Cfile:848614-848639);
-  // reclaimed is NOT folded into income. Kept per second like income/expense.
+  // Reclaim income this beat. The engine writes reclaim to THREE places: storage,
+  // the separate mTotals.mReclaimed counter (this pair, Cfile:1016010-1016024),
+  // AND mResources — which becomes mIncome (Cfile:848620/848632, 1106784-1106791).
+  // So reclaim IS folded into reported income (done in addReclaim, phase 4) and
+  // ALSO surfaced as its own breakdown counter here. Kept per second like income.
   reclaimMass = 0
   reclaimEnergy = 0
   // Resources GIVEN this beat (GiveResource / reclaim). The engine adds them to
@@ -247,8 +248,10 @@ export class ArmyEconomy {
 
     // Given/reclaimed resources are income this beat (Cfile:1106670-1106674):
     // fold them into `available` so demand can consume them, then reset.
-    const availMass = f(this.mass + f(prodM * DT) + this.pendingMass)
-    const availEnergy = f(this.energy + f(prodE * DT) + this.pendingEnergy)
+    const givenMass = this.pendingMass
+    const givenEnergy = this.pendingEnergy
+    const availMass = f(this.mass + f(prodM * DT) + givenMass)
+    const availEnergy = f(this.energy + f(prodE * DT) + givenEnergy)
     this.pendingMass = 0
     this.pendingEnergy = 0
     const { spentMass, spentEnergy } = distribute(availMass, availEnergy, consumers)
@@ -257,10 +260,22 @@ export class ArmyEconomy {
 
     this.mass = f(Math.min(Math.max(availMass - spentMass, 0), maxM))
     this.energy = f(Math.min(Math.max(availEnergy - spentEnergy, 0), maxE))
-    this.incomeMass = prodM
-    this.incomeEnergy = prodE
+    // Reported income = production + given (+ reclaim, added in addReclaim during
+    // phase 4). The engine's mIncome is mResources = production + given + reclaim
+    // (Cfile:954020/735044/848620 -> 1106784-1106791). given is absolute per tick,
+    // so /DT to the per-second convention the getters use.
+    this.incomeMass = f(prodM + givenMass / DT)
+    this.incomeEnergy = f(prodE + givenEnergy / DT)
     this.expenseMass = f(spentMass / DT)
     this.expenseEnergy = f(spentEnergy / DT)
+    // Documented reductions (no impact at the 1-army default, deferred):
+    //  * Reported usage is the true per-consumer spend; the engine reports the
+    //    aggregate both.X*r1 + single.X*r2 (Cfile:1106779-1106788), which differs
+    //    only during a stall with single-resource-only consumers.
+    //  * Per-army handicap multiplies income by (1+handicap) before the ratios
+    //    (Cfile:1106655-1106664) — gated on handicap != 0, unused at default.
+    //  * mResourceSharing water-fills overflow to allies before the storage clamp
+    //    (Cfile:1106826-1106960); a lone army drops its overflow either way.
   }
 
   /**
@@ -287,6 +302,11 @@ export class ArmyEconomy {
   addReclaim(massPerTick: number, energyPerTick: number): void {
     this.reclaimMass = f(this.reclaimMass + massPerTick / DT)
     this.reclaimEnergy = f(this.reclaimEnergy + energyPerTick / DT)
+    // Reclaim also feeds income (mResources -> mIncome, Cfile:848620). This runs
+    // in phase 4 after tick() set income from production+given, so add on top;
+    // next tick() overwrites income fresh.
+    this.incomeMass = f(this.incomeMass + massPerTick / DT)
+    this.incomeEnergy = f(this.incomeEnergy + energyPerTick / DT)
   }
 
   /** brain:GetEconomyUsage(res) — actual spend per second (after throttling). */
