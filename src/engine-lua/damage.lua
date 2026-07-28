@@ -70,6 +70,56 @@ function ArmyGetHandicap(army)
   return (__armyHandicap and __armyHandicap[army]) or 0
 end
 
+-- Active shields as a per-beat list (SIM_DoDamage walks a1->mShields,
+-- Cfile:1062762): each carries its owner's position and its collision radius
+-- (the shield entity Size = bp.Defense.Shield.ShieldSize, shield.lua:72).
+-- Rebuilt when the tick changes so a splash over many targets scans this small
+-- list, not every unit per hit.
+__shieldListTick = -1
+__shieldList = {}
+local function shieldOn(s)
+  return s and not s.__destroyed and not s.__destroyQueued
+    and s.IsOn and s:IsOn() and s.GetHealth and s:GetHealth() > 0
+end
+local function activeShieldList()
+  if __shieldListTick ~= (__gameTick or 0) then
+    __shieldListTick = __gameTick or 0
+    __shieldList = {}
+    for _, u in pairs(__units) do
+      local s = u.MyShield
+      if shieldOn(s) then
+        local p = u.__pos or { 0, 0, 0 }
+        local r = s.Size or 0
+        if r > 0 then
+          __shieldList[table.getn(__shieldList) + 1] =
+            { shield = s, owner = u, x = p[1], y = p[2], z = p[3], r2 = r * r }
+        end
+      end
+    end
+  end
+  return __shieldList
+end
+
+-- The shield that intercepts a hit on `target`: its OWN active shield, or a
+-- COVERING dome whose sphere geometrically contains the target but NOT the
+-- damage origin (sub_736E40 subtracts every containing shield's absorption,
+-- Cfile:1062711; a shell fired from inside the dome is not absorbed). This is
+-- how a shield generator protects the units standing under it.
+local function coveringShield(target, tp, origin)
+  local own = target.MyShield
+  if shieldOn(own) then return own end
+  for _, e in ipairs(activeShieldList()) do
+    if e.owner ~= target then
+      local dtx, dty, dtz = tp[1] - e.x, tp[2] - e.y, tp[3] - e.z
+      if dtx * dtx + dty * dty + dtz * dtz <= e.r2 then
+        local dox, doy, doz = origin[1] - e.x, origin[2] - e.y, origin[3] - e.z
+        if dox * dox + doy * doy + doz * doz > e.r2 then return e.shield end
+      end
+    end
+  end
+  return nil
+end
+
 -- ---------------------------------------------------------------------
 -- func_DoDamagePoint (Cfile:1062873) — EIN Ziel.
 -- ---------------------------------------------------------------------
@@ -89,15 +139,16 @@ local function damagePoint(instigator, origin, target, amount, damageType, damag
   local tp = target.__pos or { 0, 0, 0 }
   local vec = Vector(tp[1] - origin[1], tp[2] - origin[2], tp[3] - origin[3])
 
-  -- Shield: a unit with an ACTIVE shield takes the hit on the shield first
-  -- (native shield-sphere routing, Cfile:1062695). shield.lua's OnDamage applies
-  -- the shield's OWN armor/handicap (OnGetDamageAbsorption) and passes overkill
-  -- to the owner (Owner:DoTakeDamage) — so it receives the RAW amount, BEFORE the
-  -- unit-armor reduction below. A FULL shield absorb returns here and therefore
-  -- never fires the unit's OnDamageBy (Cfile:1063018).
-  local shield = target.MyShield
-  if shield and not shield.__destroyed and not shield.__destroyQueued
-    and shield.IsOn and shield:IsOn() and shield:GetHealth() > 0 then
+  -- Shield: an active shield COVERING the target takes the hit first — its OWN
+  -- dome, or an ally shield-generator's dome the target stands under
+  -- (coveringShield -> sub_736E40, Cfile:1062695/1062711). shield.lua's OnDamage
+  -- applies the shield's OWN armor/handicap (OnGetDamageAbsorption) and passes
+  -- overkill to the SHIELD's owner, so a full absorb returns here and the
+  -- target's OnDamageBy never fires (Cfile:1063018). Reduction: we route a hit
+  -- through ONE covering shield (the engine subtracts each overlapping dome's
+  -- absorption in turn) — enough to model a base under a shield generator.
+  local shield = coveringShield(target, tp, origin)
+  if shield then
     local ok, err = pcall(function() shield:OnDamage(inst, amount, vec, damageType) end)
     if not ok then WARN('Shield OnDamage: ' .. tostring(err)) end
     return

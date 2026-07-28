@@ -1774,6 +1774,12 @@ function __ordersTick()
         -- goal cell (the task's SNavGoal box, Cfile:845637-845650) and a
         -- navigator idle AWAY from it (after a kill) re-issues the goal
         -- (TaskTick idle path, Cfile:845598-845601).
+        -- DOCUMENTED REDUCTION: the engine's patrol tick also auto-REPAIRS a
+        -- damaged/being-built ally (Cfile:845611) and auto-RECLAIMS a prop
+        -- (Cfile:845620) found within GuardScanRadius along the route. We scan
+        -- for enemies only; the repair/reclaim-on-patrol behaviour is not
+        -- modelled yet (it would spawn the same repair/reclaim tasks used
+        -- elsewhere, gated on an independent GuardScanRadius scan).
         if not __attackOrders[unitId] then
           local enemy = patrolFindEnemy(u)
           if enemy then

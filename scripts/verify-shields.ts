@@ -86,5 +86,23 @@ const before = shieldHp()
 for (let i = 0; i < 15; i++) beat(engine) // RegenStartTime 1 s + ~0.5 s regen at 20/s
 check(shieldHp() > before, `shield regenerates ${before} -> ${shieldHp()}`)
 
+console.log('\n== Bubble shield: a unit under the generator dome is protected ==')
+// u's shield sits at (100,100) with ShieldSize 10 and is up (recharged above).
+const hpOf = (id: number): number =>
+  Number(host.eval(`local x=__units[${id}]; return x and (x.__health or 0) or -1`))
+const covered = spawnLuaUnit(host, 'uel0001', { x: 105, y: 20, z: 100 }, 1) // dist 5 < 10 -> under the dome
+const outside = spawnLuaUnit(host, 'uel0001', { x: 124, y: 20, z: 100 }, 1) // dist 24 > 10 -> outside
+const coveredHp0 = hpOf(covered)
+const outsideHp0 = hpOf(outside)
+const domeHp0 = shieldHp()
+// Damage the covered unit from a point OUTSIDE the dome (origin dist 100 > 10).
+host.eval(`Damage(nil, { 200, 20, 100 }, __units[${covered}], 60, 'Normal')`)
+check(shieldOn(), "the generator's dome is up")
+check(hpOf(covered) === coveredHp0, `a unit under the dome takes no damage (${coveredHp0} -> ${hpOf(covered)})`)
+check(shieldHp() < domeHp0, `the covering dome lost health instead (${domeHp0} -> ${shieldHp()})`)
+// A unit OUTSIDE the dome takes the hit directly.
+host.eval(`Damage(nil, { 200, 20, 100 }, __units[${outside}], 60, 'Normal')`)
+check(hpOf(outside) < outsideHp0, `a unit outside the dome takes the hit (${outsideHp0} -> ${hpOf(outside)})`)
+
 console.log(failures === 0 ? '\nSHIELDS PASSED' : `\nSHIELDS FAILED (${failures})`)
 process.exit(failures === 0 ? 0 : 1)
