@@ -397,6 +397,26 @@ export class GameUi {
     return Number(this.host.eval('return table.getn(GetSelectedUnits() or {})'))
   }
 
+  /**
+   * Self-destruct the current selection (Ctrl+K). Fires the SAME SimCallback the
+   * original UI uses (confirmunitdestroy.lua:24 -> selfdestruct.lua): a 5-second
+   * countdown then Kill, toggled off if fired again while counting down. Runs in
+   * the UI VM so it goes through the real SimCallback -> sim path. Returns how
+   * many units it was sent for.
+   */
+  selfDestructSelection(): number {
+    return Number(
+      this.host.eval(`
+        local sel = GetSelectedUnits()
+        if not sel or table.getn(sel) == 0 then return 0 end
+        local ids = {}
+        for i, u in ipairs(sel) do ids[i] = u.id end
+        SimCallback({ Func = 'ToggleSelfDestruct', Args = { units = ids, owner = GetFocusArmy() } })
+        return table.getn(ids)
+      `),
+    )
+  }
+
   /** NUR Debug (CDP-Abnahmen): einen Lua-Ausdruck in der UI-VM auswerten. */
   debugEval(code: string): unknown {
     return this.host.eval(code)

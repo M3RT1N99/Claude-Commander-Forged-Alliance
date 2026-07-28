@@ -778,6 +778,20 @@ __focusArmy = 1
 function GetFocusArmy() return __focusArmy end
 function SetFocusArmy(a) __focusArmy = a end
 
+-- Cheats flag (Sim::CheatsEnabled) — off in a normal sandbox; a cheat host would
+-- flip it to allow commanding any army.
+__cheatsEnabled = false
+
+-- OkayToMessWithArmy(army) — may the local player command this army?
+-- (cfunc_OkayToMessWithArmyL, Cfile:1026233: NOT out-of-game AND the current
+-- command source is a valid source for the army, OR cheats are on.) Self-destruct
+-- (selfdestruct.lua:17) and the control-group callbacks gate on it. Our single
+-- local player owns the focus army, so that army is commandable; a defeated
+-- army would be out of the game (not modelled — no army is out-of-game here).
+function OkayToMessWithArmy(army)
+  return army == GetFocusArmy() or __cheatsEnabled == true
+end
+
 
 -- Sim-Global: Enhancements je Entity-Id. Die Sim fuellt es, die UI liest es
 -- ueber Sync.UserUnitEnhancements (simuistate.lua:44). unit.lua:576/2085

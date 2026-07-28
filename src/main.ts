@@ -1776,6 +1776,22 @@ window.addEventListener('keydown', (e) => {
     spaceHeld = true
     e.preventDefault()
   }
+  // Ctrl+K — Selbstzerstörung der Auswahl: feuert dieselbe SimCallback wie die
+  // Original-UI (confirmunitdestroy.lua:24 -> selfdestruct.lua), also 5-Sekunden-
+  // Countdown und dann Kill; nochmaliges Drücken bricht ab. Kein Web-Sonderweg —
+  // der echte Sim-Pfad übernimmt.
+  if (
+    e.code === 'KeyK' &&
+    e.ctrlKey &&
+    sandbox &&
+    gameUi &&
+    !(e.target instanceof HTMLInputElement) &&
+    !(e.target instanceof HTMLSelectElement)
+  ) {
+    e.preventDefault()
+    const n = gameUi.selfDestructSelection()
+    log(n > 0 ? `Selbstzerstörung: ${n} Einheit(en) (5 s Countdown)` : 'Selbstzerstörung: keine Auswahl')
+  }
   // ESC verlässt den Spielmodus und bringt den Launcher zurück. Ein
   // Übergangsweg: sobald das echte Hauptmenü läuft (lua/ui/menus/main.lua),
   // gehört ESC der Original-UI.
