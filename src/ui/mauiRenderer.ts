@@ -125,11 +125,62 @@ export class MauiRenderer {
     this.root.style.cssText =
       'position:absolute;inset:0;overflow:hidden;pointer-events:none;user-select:none'
     document.body.appendChild(this.root)
+    // Command-mode cursor bridge (Cursor:SetNewTexture -> __uiSetCursorTexture,
+    // moho.lua:1300). Declared `false` until the engine (us) supplies it.
+    host.setGlobal('__uiSetCursorTexture', (path: string, hx: number, hy: number) =>
+      this.setCursorTexture(path, hx, hy),
+    )
+  }
+
+  /** The DDS key of the cursor frame currently being applied (guards stale async decodes). */
+  private cursorKey = ''
+
+  /**
+   * Apply a skin cursor to the mouse (the command-mode cursor: Move/Attack/Build,
+   * skins.lua:170-… via UIUtil.GetCursor). Decodes the DDS (cached like every
+   * bitmap) and sets it as the DOM cursor with its hotspot; the animated cursors
+   * arrive as a stream of `<name>-NN.dds` frames from the cursor thread. An empty
+   * path clears back to the default arrow. Applied to document.body because the
+   * maui overlay is pointer-events:none — the world/canvas under it shows it.
+   */
+  setCursorTexture(path: string, hotspotX: number, hotspotY: number): void {
+    if (!path) {
+      this.cursorKey = ''
+      document.body.style.cursor = ''
+      return
+    }
+    const key = path.replace(/^\/+/, '').toLowerCase()
+    this.cursorKey = key
+    const apply = (url: string): void => {
+      if (this.cursorKey !== key) return // a newer frame/mode superseded this decode
+      document.body.style.cursor = `url("${url}") ${Math.round(hotspotX)} ${Math.round(hotspotY)}, auto`
+    }
+    const hit = this.textures.get(key)
+    if (typeof hit === 'string' && hit !== 'pending' && hit !== 'failed') {
+      apply(hit)
+      return
+    }
+    if (hit === 'failed') return
+    this.textures.set(key, 'pending')
+    void (async () => {
+      try {
+        if (!this.vfs.exists(key)) {
+          this.textures.set(key, 'failed')
+          return
+        }
+        const url = ddsToDataUrl(key, await this.vfs.read(key))
+        this.textures.set(key, url ?? 'failed')
+        if (url) apply(url)
+      } catch {
+        this.textures.set(key, 'failed')
+      }
+    })()
   }
 
   dispose(): void {
     this.root.remove()
     this.els.clear()
+    document.body.style.cursor = ''
   }
 
   /** Zieht den Zustand aus der UI-VM und schreibt ihn ins DOM. */

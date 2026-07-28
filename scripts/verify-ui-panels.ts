@@ -420,6 +420,30 @@ const orderIcons = Number(
 )
 check(orderIcons >= 3, `${orderIcons} Order-Button-Icons erscheinen im Snapshot (Grid-Kinder nicht mehr geprunt)`)
 
+console.log('\n== Command-Mode-Cursor (worldview.lua OnUpdateCursor -> skins.cursors) ==')
+// Capture what the cursor object pushes to the DOM bridge (__uiSetCursorTexture).
+host.eval(`
+  __t.cursorCalls = {}
+  __uiSetCursorTexture = function(f) __t.cursorCalls[table.getn(__t.cursorCalls) + 1] = f end
+`)
+check(host.eval('return GetCursor() ~= nil') === true, 'GetCursor() liefert das Cursor-Objekt (uimain.lua CreateCursor)')
+// Order mode (a Move order button pressed) -> the skin's move cursor.
+host.eval(`import('/lua/ui/game/commandmode.lua').StartCommandMode('order', { name = 'RULEUCC_Move' })`)
+host.eval('__uiCursorId = false; __uiUpdateCursor()')
+host.eval('__mauiFrame(0.05)') // let the cursor animation thread push its first frame
+const cursorFile = String(host.eval(`return __t.cursorCalls[table.getn(__t.cursorCalls)] or 'none'`))
+check(
+  cursorFile.toLowerCase().includes('cursor') && cursorFile.toLowerCase().includes('move'),
+  `Order-Modus setzt den Move-Cursor (${cursorFile})`,
+)
+// Ending the command mode clears the cursor back to the default arrow.
+host.eval(`import('/lua/ui/game/commandmode.lua').EndCommandMode(true)`)
+host.eval('__uiUpdateCursor()')
+check(
+  host.eval(`return __t.cursorCalls[table.getn(__t.cursorCalls)]`) === '',
+  'Ende des Command-Modus löscht den Cursor (leerer Pfad -> Default)',
+)
+
 console.log('\n== construction.lua: das Bau-Menü kommt aus dem Blueprint ==')
 // Die ACU baut, was ihre BuildableCategory hergibt (uel0001_unit.bp). Die Liste
 // zieht construction.lua über EntityCategoryGetUnitList — nicht über eine

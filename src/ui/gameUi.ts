@@ -480,6 +480,9 @@ export class GameUi {
     // ein. Die Engine macht es genauso (CMauiControl::Frame → RunScript).
     try {
       this.renderer.update(delta)
+      // Drive the command-mode cursor (worldview.lua OnUpdateCursor equivalent);
+      // guarded so a pre-boot frame or a missing seam never stalls the pump.
+      this.host.eval('if __uiUpdateCursor then __uiUpdateCursor() end')
     } catch (err) {
       this.reportUiError(err)
     }
