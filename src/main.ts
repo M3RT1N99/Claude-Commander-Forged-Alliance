@@ -1753,6 +1753,7 @@ async function issueWorldCommand(
       queue,
       ziel,
       mapWaterElevation(),
+      buildValidity,
     )
     if (msg) log(msg)
     // Gesetzt (oder Befehl erteilt) → der Geist hat ausgedient, bis der nächste

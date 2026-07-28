@@ -22,6 +22,7 @@ import {
   type WorldCommandSim,
 } from './worldCommands'
 import { translateKey } from './keys'
+import type { Validity } from '../sim/ogrid'
 import type { GameVfs } from '../vfs/vfs'
 import type { EcoSnapshot } from './hud'
 import type { LuaUnitSnapshot } from '../sim/luaSimClient'
@@ -505,6 +506,8 @@ export class GameUi {
     } = {},
     /** The map's water surface height (undefined = no water) — clamps a build. */
     waterElevation?: number,
+    /** Placement validity at the snapped cell — a red ghost blocks the order. */
+    buildValidity?: (blueprintId: string, x: number, z: number) => Validity,
   ): Promise<string | null> {
     return worldClick(this.host, sim, hit, elevation, {
       queue,
@@ -515,6 +518,7 @@ export class GameUi {
       reclaimPropId: ziel.reclaimProp,
       reclaimMapPropIndex: ziel.reclaimMapProp,
       waterElevation,
+      buildValidity,
     })
   }
 

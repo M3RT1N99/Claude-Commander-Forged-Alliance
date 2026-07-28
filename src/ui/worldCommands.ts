@@ -1,4 +1,5 @@
 import type { LuaHost } from '../lua/host'
+import type { Validity } from '../sim/ogrid'
 
 /**
  * Der Engine-Teil der Weltansicht: Klick → Befehl.
@@ -161,6 +162,10 @@ export async function worldClick(
      *  RECLAIMABLE, and not busy — mirrors v52 @Cfile:1240220). When the
      *  selection cannot attack it, the engine issues Reclaim (Cfile:1240271). */
     enemyReclaimable?: boolean
+    /** Placement validity at the snapped cell (canBuildStructureAt). The world
+     *  view (UIBuildDragger) does not issue a build where the ghost is red —
+     *  the same query that colours the ghost gates the order. */
+    buildValidity?: (blueprintId: string, x: number, z: number) => Validity
   } = { queue: false },
 ): Promise<string | null> {
   // pull() liefert JSON — eine LEERE Lua-Tabelle wuerde als `{}` in JS ankommen,
@@ -346,6 +351,12 @@ export async function worldClick(
     if (!cm.name) return null
     const [sx, sz] = footprintOf(host, cm.name)
     const pos = snapToGrid(hit.x, hit.z, sx, sz, elevation, opts.waterElevation)
+    // Red ghost -> no order. The engine's world view refuses to place a
+    // structure where CanBuildStructureAt fails; 'unknown' (mobile / deposit-
+    // restricted, no markers) is left to pass, matching the neutral ghost.
+    if (opts.buildValidity && opts.buildValidity(cm.name, pos.x, pos.z) === 'invalid') {
+      return `Bau: ${cm.name} auf ${pos.x.toFixed(1)}, ${pos.z.toFixed(1)} blockiert — kein Befehl`
+    }
     // The first builder of the selection places the site; every other
     // selected unit with RULEUCC_Repair joins the SAME site through the
     // repair/build task — the engine's BuildAssist result (dispatch 0x09;

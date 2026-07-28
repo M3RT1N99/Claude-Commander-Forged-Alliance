@@ -191,6 +191,20 @@ const sim = {
     return uid
   },
 }
+// A red ghost blocks the order: with an 'invalid' verdict worldClick issues
+// nothing and leaves the command mode active (the world view refuses to place
+// where CanBuildStructureAt fails). 'unknown'/'valid' would pass through.
+const blocked = await worldClick(uiHost, sim, { x: 103.4, z: 108.9 }, () => 20, {
+  queue: false,
+  buildValidity: () => 'invalid' as const,
+})
+check(blocked !== null && blocked.includes('blockiert'), `blocked build → ${String(blocked)}`)
+check(
+  Number(simHost.eval('local n = 0 for _ in pairs(__buildTasks) do n = n + 1 end return n')) === 0,
+  'A blocked build creates no build task',
+)
+check(getCommandMode(uiHost).mode === 'build', 'The command mode stays active after a blocked build')
+
 const msg = await worldClick(uiHost, sim, { x: 103.4, z: 108.9 }, () => 20)
 check(msg !== null && msg.startsWith('Bau: ueb0101'), `worldClick → ${String(msg)}`)
 check(
