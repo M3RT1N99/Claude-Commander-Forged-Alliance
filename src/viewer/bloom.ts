@@ -110,6 +110,17 @@ export class BloomPipeline {
     return this.sceneRT
   }
 
+  /**
+   * The per-map bloom amount fed to the bright-pass copy (`DoBloom(amt)` ->
+   * frame shader `GlowCopyAdd`, Cfile:1212943/1209602). The engine sources it
+   * from `CWldTerrainRes::GetBloom()` = the map's `mBloom` (default 0.08,
+   * Cfile:1337597); with no map loaded it is 0.0 (Cfile:1212939). Only the copy
+   * pass reads `glowCopyAdd`, so set it there.
+   */
+  setGlowCopyAdd(amount: number): void {
+    this.copyMat.uniforms.glowCopyAdd!.value = amount
+  }
+
   private pass(
     renderer: THREE.WebGLRenderer,
     material: THREE.ShaderMaterial,

@@ -97,6 +97,14 @@ export interface ScmapLighting {
   shadowFillColor: [number, number, number]
   specularColor: [number, number, number, number]
   lightingMultiplier: number
+  /**
+   * The map's glow/bloom amount (`CWldTerrainRes::mBloom`, default 0.08,
+   * Cfile:1337597). The engine feeds it into the frame shader's `GlowCopyAdd`
+   * var each frame — `GetBloom()` -> `DoBloom(amt)` -> `SetFloat(GlowCopyAdd,
+   * amt)` (Cfile:1212932/1212943/1209602); with no map it is 0.0
+   * (Cfile:1212939). Lifts the bright-pass floor of the bloom copy pass.
+   */
+  bloom: number
 }
 
 export interface ScmapData {
@@ -270,7 +278,7 @@ export function parseScmap(data: Uint8Array): ScmapData {
   const sunColor = r.vec3()
   const shadowFillColor = r.vec3()
   const specularColor = r.vec4()
-  r.f32() // bloom
+  const bloom = r.f32() // CWldTerrainRes::mBloom -> frame shader GlowCopyAdd
   r.vec3() // fogColor
   r.f32() // fogStart
   r.f32() // fogEnd
@@ -475,6 +483,7 @@ export function parseScmap(data: Uint8Array): ScmapData {
       shadowFillColor,
       specularColor,
       lightingMultiplier,
+      bloom,
     },
     water: {
       hasWater,

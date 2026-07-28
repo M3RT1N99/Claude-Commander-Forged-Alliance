@@ -152,6 +152,12 @@ export class UnitViewer {
   }
   /** Glow/bloom chain (CBloomRenderer::DoBloom @0x7F5160). */
   private bloom: BloomPipeline | null = null
+  /**
+   * The loaded map's bloom amount (scmap `mBloom`) fed to DoBloom's GlowCopyAdd.
+   * 0.0 until a map is set, matching the engine's no-terrain fallback
+   * (Cfile:1212939).
+   */
+  private mapBloom = 0
   /** Shadow pass (H7): depth from the sun, ComputeShadowPCF receivers. */
   readonly shadow = new ShadowRenderer()
   /** Deferred normal pass (TerrainNormalsPS + TDecalsNormals into a
@@ -323,6 +329,8 @@ export class UnitViewer {
     this.renderer.setScissorTest(false)
     this.renderer.setRenderTarget(null)
     this.renderer.setViewport(0, 0, width, height)
+    // DoBloom's amt = the map's GetBloom() (Cfile:1212932/1212943).
+    this.bloom.setGlowCopyAdd(this.mapBloom)
     this.bloom.composite(this.renderer)
   }
 
@@ -1257,6 +1265,8 @@ export class UnitViewer {
       shadowFillColor: new THREE.Color(...scmap.lighting.shadowFillColor),
       lightingMultiplier: scmap.lighting.lightingMultiplier,
     }
+    // The map's glow amount feeds DoBloom's GlowCopyAdd each frame (see render()).
+    this.mapBloom = scmap.lighting.bloom
     // Kein Distanznebel auf der Karte: der Fog gehört zum Unit-Viewer-Werkzeug
     // (Bodenraster-Optik). Im Original gibt es keinen solchen Nebel — er
     // tönte MeshBasic-Objekte (Projektile, Ringe) jenseits ~220 m dunkelblau.
@@ -1486,9 +1496,17 @@ export class UnitViewer {
         fresnelPower: scmap.water.fresnelPower,
         skyReflectionAmount: scmap.water.skyReflection,
         sunShininess: scmap.water.sunShininess,
-        // The water block carries its OWN sun (water2.fx SunDirection).
-        sunDirection: new THREE.Vector3(...scmap.water.sunDirection).normalize(),
-        sunColor: new THREE.Color(...scmap.water.sunColor),
+        // The water block carries its OWN sun (water2.fx SunDirection). The
+        // engine sends it RAW — water2 LoadShaderVars SetMem(SunDirection, 3,
+        // a5+100) with no normalize (Cfile:1229482); normalizing here shifts the
+        // glint whenever the map value is not unit-length.
+        sunDirection: new THREE.Vector3(...scmap.water.sunDirection),
+        // water2 pre-multiplies SunColor by SunReflectionAmount before handing
+        // it to the shader (Cfile:1229484-1229491: v30 = sunColor.y * a5+124),
+        // so the glint scales with the map's SunReflection (often ~5).
+        sunColor: new THREE.Color(...scmap.water.sunColor).multiplyScalar(
+          scmap.water.sunReflection,
+        ),
         waterMap: waterMapTex,
         waves,
         skyCube: skyCube ?? dummy,
