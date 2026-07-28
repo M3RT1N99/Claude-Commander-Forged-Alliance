@@ -1,9 +1,10 @@
 /**
- * Die Feldreihenfolge im SCM-Vertex — Normale vor Tangente, nicht umgekehrt.
+ * The field order inside the SCM vertex — normal before tangent, not the other
+ * way round.
  *
- * Anlass: der Parser las `tangent` bei Offset 12 und `normal` bei Offset 24,
- * weil die GPG-Mod-SDK-Doku das so beschreibt. Die Doku ist falsch. Die
- * Vertex-Deklaration der Engine liegt wörtlich in ForgedAlliance.exe:
+ * Background: the parser read `tangent` at offset 12 and `normal` at offset 24,
+ * because the GPG mod SDK documentation says so. The documentation is wrong.
+ * The engine's own vertex declaration sits verbatim in ForgedAlliance.exe:
  *
  *   struct VS_MESHSOFTWAREINSTANCED{
  *       float4 Pos : POSITION;
@@ -12,16 +13,16 @@
  *       float3 Binormal : BINORMAL;
  *       ...
  *
- * Folge des Fehlers: `normal` bekam die Tangente, `scmTangent` die Normale.
- * Beide landen ungefiltert in der TBN-Matrix von prop.vert.glsl und
- * buildFaction.vert.glsl — die Beleuchtung war also auf allen Meshes falsch,
- * ohne dass etwas sichtbar abstürzt.
+ * Effect of the bug: `normal` received the tangent and `scmTangent` the normal.
+ * Both feed unfiltered into the TBN matrix in prop.vert.glsl and
+ * buildFaction.vert.glsl, so lighting was wrong on every mesh without anything
+ * visibly failing.
  *
- * Geprüft wird gegen die Geometrie selbst, nicht gegen eine Doku: das
- * Kreuzprodukt der Dreieckskanten muss in dieselbe Richtung zeigen wie das
- * Normalenfeld. Zusätzlich müssen Tangente und Binormale senkrecht auf der
- * Normalen stehen — das trennt die drei Felder eindeutig voneinander, weil
- * nur eines davon mit der Flächennormalen korreliert.
+ * This checks against the geometry itself, not against documentation: the cross
+ * product of the triangle edges must point the same way as the normal field.
+ * On top of that, tangent and binormal must be perpendicular to the normal —
+ * that separates the three fields unambiguously, because only one of them
+ * correlates with the face normal.
  *
  *   npx tsx --import ./scripts/register-lua.mjs scripts/verify-scm-vertex.ts
  */
@@ -34,7 +35,7 @@ const check = (ok: boolean, label: string): void => {
   if (!ok) failures++
 }
 
-/** Anteil der Dreiecke, deren Kanten-Kreuzprodukt mit `field` gleichgerichtet ist. */
+/** Fraction of triangles whose edge cross product points the same way as `field`. */
 function agreementWithWinding(m: ScmModel, field: Float32Array, maxTris = 4000): number {
   const triCount = Math.min(maxTris, Math.floor(m.indices.length / 3))
   let agree = 0
@@ -53,8 +54,9 @@ function agreementWithWinding(m: ScmModel, field: Float32Array, maxTris = 4000):
     const cy = az * bx - ax * bz
     const cz = ax * by - ay * bx
     const len = Math.hypot(cx, cy, cz)
-    if (len < 1e-12) continue // entartetes Dreieck
-    // Gemittelte Eckwerte — Vertexnormalen sind interpoliert, die Flächennormale nicht.
+    if (len < 1e-12) continue // degenerate triangle
+    // Average the corner values — vertex normals are interpolated, the face
+    // normal is not.
     const fx = (field[i0 * 3]! + field[i1 * 3]! + field[i2 * 3]!) / 3
     const fy = (field[i0 * 3 + 1]! + field[i1 * 3 + 1]! + field[i2 * 3 + 1]!) / 3
     const fz = (field[i0 * 3 + 2]! + field[i1 * 3 + 2]! + field[i2 * 3 + 2]!) / 3
@@ -65,7 +67,7 @@ function agreementWithWinding(m: ScmModel, field: Float32Array, maxTris = 4000):
   return counted === 0 ? 0 : agree / counted
 }
 
-/** Anteil der Vertices, bei denen `field` senkrecht auf der Normalen steht. */
+/** Fraction of vertices where `field` is perpendicular to the normal. */
 function perpendicularToNormal(m: ScmModel, field: Float32Array): number {
   let perp = 0
   let counted = 0
@@ -85,8 +87,8 @@ function perpendicularToNormal(m: ScmModel, field: Float32Array): number {
   return counted === 0 ? 0 : perp / counted
 }
 
-// Quer durch alle vier Fraktionen und alle Größenklassen: T1-Panzer (465
-// Vertices) bis Monkeylord (10710), dazu ein Gebäude und ein Bot.
+// Across all four factions and every size class: T1 tank (465 vertices) up to
+// the Monkeylord (10,710), plus a building and a bot.
 const UNITS = [
   'units/UEL0201/UEL0201_LOD0.scm',
   'units/UAL0201/UAL0201_LOD0.scm',
@@ -98,11 +100,11 @@ const UNITS = [
 
 const game = await GameFiles.open()
 
-console.log('\n== SCM-Vertexlayout: Normale bei Offset 12 ==')
+console.log('\n== SCM vertex layout: normal at offset 12 ==')
 for (const path of UNITS) {
   const key = [...game.paths].find((p) => p.toLowerCase() === path.toLowerCase())
   if (!key) {
-    check(false, `${path} — nicht im Archiv gefunden`)
+    check(false, `${path} — not found in the archives`)
     continue
   }
   const m = parseScm(await game.read(key))
@@ -111,22 +113,22 @@ for (const path of UNITS) {
   const nAgree = agreementWithWinding(m, m.normals)
   check(
     nAgree > 0.99,
-    `${id.padEnd(8)} normals folgen dem Winding: ${(nAgree * 100).toFixed(1)}% (erwartet >99%)`,
+    `${id.padEnd(8)} normals follow the winding: ${(nAgree * 100).toFixed(1)}% (expected >99%)`,
   )
 
-  // Gegenprobe: Tangente und Binormale dürfen NICHT mit der Flächennormalen
-  // korrelieren. Täten sie es, läge das Normalenfeld am falschen Offset.
+  // Counter-check: tangent and binormal must NOT correlate with the face
+  // normal. If they did, the normal field would be at the wrong offset.
   const tAgree = agreementWithWinding(m, m.tangents)
   check(
     tAgree > 0.3 && tAgree < 0.7,
-    `${id.padEnd(8)} tangents korrelieren nicht mit dem Winding: ${(tAgree * 100).toFixed(1)}% (erwartet ~50%)`,
+    `${id.padEnd(8)} tangents do not correlate with the winding: ${(tAgree * 100).toFixed(1)}% (expected ~50%)`,
   )
 
   const tPerp = perpendicularToNormal(m, m.tangents)
   const bPerp = perpendicularToNormal(m, m.binormals)
-  check(tPerp > 0.9, `${id.padEnd(8)} tangent ⟂ normal bei ${(tPerp * 100).toFixed(1)}% der Vertices`)
-  check(bPerp > 0.9, `${id.padEnd(8)} binormal ⟂ normal bei ${(bPerp * 100).toFixed(1)}% der Vertices`)
+  check(tPerp > 0.9, `${id.padEnd(8)} tangent perpendicular to normal on ${(tPerp * 100).toFixed(1)}% of vertices`)
+  check(bPerp > 0.9, `${id.padEnd(8)} binormal perpendicular to normal on ${(bPerp * 100).toFixed(1)}% of vertices`)
 }
 
-console.log(failures === 0 ? '\nAlle Prüfungen bestanden.' : `\n${failures} Prüfung(en) fehlgeschlagen.`)
+console.log(failures === 0 ? '\nAll checks passed.' : `\n${failures} check(s) failed.`)
 process.exit(failures === 0 ? 0 : 1)
