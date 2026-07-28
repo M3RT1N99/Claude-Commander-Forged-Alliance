@@ -1714,7 +1714,19 @@ function zielUnter(clientX: number, clientY: number): {
     //      Guard, NOT Repair: the guard task itself repairs a damaged target
     //      (globals.lua guardProcess), so Guard wins and repair follows from it.
     // Classifying a finished damaged unit as Repair (as before) inverted this.
-    if (s && s.fraction < 1) return { repair: u.id }
+    if (s && s.fraction < 1) {
+      // The engine excludes an immobile FACTORY/SILO from the being-built Repair
+      // branch (v36 = 0, Cfile:1240342-1240350): it falls through to Guard, a
+      // permanent assist that keeps feeding the factory's queue after it
+      // finishes. Only a mobile unit or a non-factory/non-silo structure resumes
+      // construction via a one-shot Repair.
+      const cats = bpGet(sandboxAssetCache.get(u.bpId)?.bp, 'Categories')
+      const isCat = (c: string): boolean => Array.isArray(cats) && cats.includes(c)
+      if (placementOf(u.bpId)?.isMobile || (!isCat('FACTORY') && !isCat('SILO'))) {
+        return { repair: u.id }
+      }
+      return { own: u.id }
+    }
     return { own: u.id }
   }
   if (hit.kind === 'wreck') {

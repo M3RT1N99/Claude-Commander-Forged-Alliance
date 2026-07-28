@@ -813,7 +813,14 @@ local function jsonNum(v, what)
     end
     return 'null'
   end
-  return string.format('%.4g', v)
+  -- Full precision: the engine holds Left/Top/Width/Height/Depth as 32-bit float
+  -- LazyVars (Cfile:1123926-1123932) and compares Depth raw (GetTopmostControl,
+  -- Cfile:1124508). `%.4g` keeps only 4 significant digits, so 5-digit depths
+  -- (99998/99999/100000 -> all 100000) and coordinates >= 10000 collapse,
+  -- breaking z-order and layout. Integers go out exact via %d (the same integer
+  -- %g-trap as the sim serializer), fractional layout values via %.9g round-trip.
+  if v == math.floor(v) then return string.format('%d', math.floor(v)) end
+  return string.format('%.9g', v)
 end
 
 local function jsonOpt(v)
@@ -1122,6 +1129,20 @@ __mauiHover = false
 -- (Die Regel war frueher "alles ausser dem Root-Frame ist UI" — damit fras die
 -- Screen-Group jeden Klick und keine Einheit war mehr selektierbar.)
 function __mauiMouse(evType, x, y, mods, keyCode)
+  -- Hover (MouseEnter/MouseExit) is updated FIRST, on EVERY mouse event — the
+  -- engine tracks hover before the dragger/focus logic, so it stays correct
+  -- during a drag too (the dragger early-return used to skip it).
+  local hit = __mauiHitTest(x, y)
+  if hit ~= __mauiHover then
+    if __mauiHover then
+      __mauiDispatch(__mauiHover, { Type = 'MouseExit', MouseX = x, MouseY = y, Modifiers = mods })
+    end
+    if hit then
+      __mauiDispatch(hit, { Type = 'MouseEnter', MouseX = x, MouseY = y, Modifiers = mods })
+    end
+    __mauiHover = hit or false
+  end
+
   -- Ein aktiver Dragger hat die Maus ERFASST: Bewegung und Loslassen gehen an
   -- ihn, nicht in den maui-Baum (CMauiLuaDragger::OnMove/OnRelease,
   -- Cfile:1130393/1130403). Genau so kommt ein Button ueberhaupt zu seinem
@@ -1132,35 +1153,26 @@ function __mauiMouse(evType, x, y, mods, keyCode)
       if d.OnMove then d:OnMove(x, y) end
       return true
     elseif evType == 'ButtonRelease' then
-      -- Nur die Taste, mit der der Dragger gestartet wurde, beendet ihn
-      -- (PostDragger bekommt den KeyCode des ButtonPress-Events).
+      -- Only the button that STARTED the dragger ends (and consumes) it; a
+      -- release of a DIFFERENT button mid-drag falls through to normal dispatch
+      -- (PostDragger stores the ButtonPress KeyCode).
       if __mauiDraggerKey == 0 or keyCode == nil or keyCode == __mauiDraggerKey then
         __mauiDragger = false
         if d.OnRelease then d:OnRelease(x, y) end
+        return true
       end
-      return true
     end
   end
 
-  local hit = __mauiHitTest(x, y)
-
-  -- Ein ButtonPress auf ein ANDERES Control entzieht den Tastatur-Fokus
-  -- (Cfile:1147523-1147531). Sonst tippt man weiter in ein Eingabefeld, das man
-  -- laengst verlassen hat.
-  if evType == 'ButtonPress' and __mauiFocus and hit ~= __mauiFocus then
+  -- Ein ButtonPress ODER ButtonDClick auf ein ANDERES Control entzieht den
+  -- Tastatur-Fokus (Cfile:1147523-1147531) — NACH dem Hover-Update, wie in der
+  -- Engine (der Fokus-Verlust folgt der Enter/Exit-Ausgabe). Sonst tippt man
+  -- weiter in ein Eingabefeld, das man laengst verlassen hat.
+  if (evType == 'ButtonPress' or evType == 'ButtonDClick')
+    and __mauiFocus and hit ~= __mauiFocus then
     local old = __mauiFocus
     __mauiFocus = false
     if old.OnLoseKeyboardFocus then old:OnLoseKeyboardFocus() end
-  end
-
-  if hit ~= __mauiHover then
-    if __mauiHover then
-      __mauiDispatch(__mauiHover, { Type = 'MouseExit', MouseX = x, MouseY = y, Modifiers = mods })
-    end
-    if hit then
-      __mauiDispatch(hit, { Type = 'MouseEnter', MouseX = x, MouseY = y, Modifiers = mods })
-    end
-    __mauiHover = hit or false
   end
 
   -- KeyCode gehoert ins Event (func_CreateLuaEvent setzt ihn, Cfile:1136341):
@@ -1204,6 +1216,17 @@ end
 
 function __mauiWheel(x, y, rotation, mods)
   local hit = __mauiHitTest(x, y)
+  -- Hover (MouseEnter/MouseExit) is updated on the wheel event too — the engine
+  -- refreshes hover on every mouse event, not just motion/press.
+  if hit ~= __mauiHover then
+    if __mauiHover then
+      __mauiDispatch(__mauiHover, { Type = 'MouseExit', MouseX = x, MouseY = y, Modifiers = mods })
+    end
+    if hit then
+      __mauiDispatch(hit, { Type = 'MouseEnter', MouseX = x, MouseY = y, Modifiers = mods })
+    end
+    __mauiHover = hit or false
+  end
   local handled = __mauiDispatch(hit, {
     Type = 'WheelRotation',
     MouseX = x, MouseY = y,
@@ -1306,7 +1329,10 @@ function __mauiKey(evType, keyCode, rawKeyCode, mods)
 
   local top = GetInputCapture()
   if top then
-    return __mauiDispatch(top, event)
+    -- The input-capture control gets HandleEvent on ITSELF only — a key event
+    -- does NOT bubble up its parent chain (like the focus branch above; the
+    -- engine routes a captured key straight to the capturing control).
+    return top:HandleEvent(event) == true
   end
   return false
 end

@@ -277,6 +277,15 @@ function __flushDeletions()
         end
         __props[e.__id] = nil
       else
+        -- OnDestroy strips this structure's adjacency buffs from its neighbours,
+        -- but ONLY when it was NOT killed (the Kill path already ran the teardown,
+        -- moho.lua:158) and only for a complete immobile structure
+        -- (Cfile:952388-952409; the `not e.__dead` guard mirrors the engine's
+        -- `!mIsDead` at 952388, __notifyNotAdjacent enforces the immobile /
+        -- not-being-built gate). Without this an upgrade or reclaim
+        -- (defaultunits.lua:267 self:Destroy()) leaks the old building's buffs
+        -- onto its neighbours and they stack across the upgrade chain.
+        if not e.__dead and __notifyNotAdjacent then __notifyNotAdjacent(e.__id) end
         __units[e.__id] = nil
         __econUnregister(e.__army or 1, e.__id)
       end

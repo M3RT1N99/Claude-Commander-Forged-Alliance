@@ -166,8 +166,12 @@ local entity = withNoops(ENTITY_NAMES, {
 
     -- Die Kill-Statistik zaehlt die ENGINE (Cfile:936180-936183) — unit.lua:3083
     -- verlaesst sich darauf („kills through the engine are already counted").
-    -- BENIGN-Ziele (Wracks, Reklamierbares) zaehlen NICHT (Cfile:936164).
-    if instigator and instigator.__isUnit and not self.__beingBuilt
+    -- The VICTIM must be a Unit or a Projectile (Cfile:936069
+    -- `v4->IsUnit() || v4->IsProjectile()`) — killing a prop (tree/rock/wreck)
+    -- credits no kill. Wreckage props are RECLAIMABLE, not BENIGN, so the BENIGN
+    -- category never excluded them; the victim-type check does.
+    if instigator and instigator.__isUnit and (self.__isUnit or self.__isProj)
+      and not self.__beingBuilt
       and instigator.__army ~= self.__army
       and not EntityCategoryContains(categories.BENIGN, self) then
       local stat = instigator.__stats or {}
