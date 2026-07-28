@@ -120,6 +120,14 @@ local function damagePoint(instigator, origin, target, amount, damageType, damag
     pcall(function() target:OnDamageBy(inst.__army) end)
   end
 
+  -- OnExtraDamageDealt(damageType): the engine fires it on a UNIT when armor
+  -- AMPLIFIED the hit to >= 2x the raw amount (func_DoDamagePoint, Cfile:1063057-
+  -- 1063059: ratio = dealt/rawAmount >= 2.0). dealt already includes the armor
+  -- multiplier and the handicap divisor.
+  if target.__isUnit and amount > 0 and (dealt / amount) >= 2.0 and target.OnExtraDamageDealt then
+    pcall(function() target:OnExtraDamageDealt(damageType) end)
+  end
+
   -- Und jetzt sagt es die Engine der Lua — sie zieht die HP selbst ab
   -- (RunScript_EntityOnDamage, Cfile:1063151).
   if target.OnDamage then
@@ -157,6 +165,12 @@ end
 --- (the shield-sphere subtraction, Cfile:1062695, arrives with the shield system).
 --- The engine ERRORS on degenerate input rather than silently no-oping
 --- (cfunc_DamageAreaL, Cfile:1064381/1064383).
+--- DOCUMENTED GAP: the engine iterates the OGrid for Unit|Prop|Projectile|Entity
+--- (func_DoDamageArea, Cfile:1063234) so splash also destroys trees/wrecks and
+--- in-flight projectiles. We iterate only __units — props and projectiles carry
+--- __health but no damage->destroy path (they are removed via the reclaim/
+--- renderer-instance path, globals.lua __dispatchReclaimMapProp, or projectile
+--- impact), so splashing them needs that removal wiring; deferred, not faked.
 function DamageArea(instigator, location, radius, amount, damageType, damageFriendly, damageSelf)
   if amount == 0 then error('0 damage specified.', 2) end
   if radius == 0 then error('0 radius specified.', 2) end
@@ -182,6 +196,8 @@ function DamageRing(instigator, location, minRadius, maxRadius, amount, damageTy
   if amount == 0 then error('0 damage specified.', 2) end
   if minRadius == 0 then error('0 min radius specified.', 2) end
   if maxRadius == 0 then error('0 max radius specified.', 2) end
+  -- cfunc_DamageRingL also rejects a degenerate ring (Cfile:1064508-1064509).
+  if minRadius >= maxRadius then error('Max radius must be greater than min radius.', 2) end
   local origin = __vec3(location)
   local inst = instigator
   if inst and inst.__isProj then inst = inst.__launcher or inst end
