@@ -263,9 +263,14 @@ local function aimAxis(current, wanted, center, range, slew)
 end
 
 local function aimControlsWeapon(w, aim)
-  local weaponLabel = w.Label or ((w.__bp or {}).Label) or ''
-  local aimLabel = aim.__label or ''
-  return string.lower(tostring(weaponLabel)) == string.lower(tostring(aimLabel))
+  -- The aim manipulator drives exactly the weapon it was constructed for:
+  -- CreateAimController stores the back-pointer m.__weapon = weapon and mirrors
+  -- weapon.__aim = m (globals.lua:718/727), 1:1 like the engine's CAimManipulator
+  -- holding a direct pointer to its weapon and writing that weapon's mCanFire.
+  -- The aim's __label ('Default'/'Turret', passed by weapon.lua:63) is a lookup
+  -- name, NOT the weapon's blueprint Label ('maingun') — comparing the two never
+  -- matched, so on-target never reached mCanFire and turreted weapons never fired.
+  return aim.__weapon == w
 end
 
 local function aimTick(w, u)
