@@ -408,6 +408,17 @@ World position (`__readAllEmittersJson`, globals.lua; owner+bones above
   moho name list: `GetHealth` was in ENTITY_NAMES *and* UNIT_NAMES —
   the no-op on the unit overshadowed the real implementation, every unit
   meldete 0 HP.
+- **The thread scheduler sleeps `max(1, N-1)` ticks for `WaitTicks(N)`, not N.**
+  `WaitTicks = coroutine.yield` (raw count) and `WaitSeconds(n) =
+  WaitTicks(max(1, n*10))` with the fractional value passed straight to yield
+  (siminit.lua:35-40). The engine reads the yield with `GetInteger` — which
+  TRUNCATES (CLuaTask::TaskTick, Cfile:592180) — then `CTaskThread::DoTaskTick`
+  (Cfile:438898) stores `mWaitTicks = v4-1` for a count v4>=2 (default) and `1`
+  for v4==1 (TASKSTATUS_Wait), PRE-decrements each frame (`--mWaitTicks`) and runs
+  when `<= 0`. So `WaitTicks(1)` and `WaitTicks(2)` both resume after 1 tick, and
+  `WaitTicks(N)` after N-1. Storing the raw count resumed every WaitTicks(N>=2) /
+  WaitSeconds **one tick late** — the mistake baked into an early scheduler test.
+  Implemented via `waitFromYield` ([threads.lua](../../src/engine-lua/threads.lua)).
 
 ## Shadows (H7 groundwork — mesh.fx, read and verified, not yet built)
 
