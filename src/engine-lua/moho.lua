@@ -647,7 +647,17 @@ local unit = withNoops(UNIT_NAMES, {
   -- in UNIT_NAMES (the noop list), but withNoops skips names that already have a
   -- real method — as with IsPaused.
   IsPaused = function(self) return self.__paused == true end,
-  SetPaused = function(self, paused) self.__paused = paused == true end,
+  SetPaused = function(self, paused)
+    -- The engine dispatches OnPaused/OnUnpaused on a real transition (unit
+    -- scripts toggle active consumption + the build-effect ambient loop off
+    -- these). Fire only on a change, like SetConsumptionActive.
+    local want = paused == true
+    if self.__paused ~= want then
+      self.__paused = want
+      local cb = want and self.OnPaused or self.OnUnpaused
+      if cb then pcall(function() cb(self) end) end
+    end
+  end,
   -- Unit::SetAutoMode stores the flag and ALWAYS dispatches the corresponding
   -- Lua callback (Cfile:951326-951337). Silo scripts use those callbacks to
   -- start/stop automatic missile production.
@@ -658,12 +668,15 @@ local unit = withNoops(UNIT_NAMES, {
     if on then callback = self.OnAutoModeOn else callback = self.OnAutoModeOff end
     if callback then callback(self) end
   end,
-  -- WorkProgress (mUnitVarDat.mWorkProgress, ctor Cfile:772278) — ONE field
-  -- with two writers: the build task writes the progress of what the unit is
-  -- working on every tick (Cfile:815482/815496/815547, build.lua), and Lua
-  -- writes it directly for enhancements and pod rebuilds
-  -- (unit.lua:3572-3616 EnhanceThread, terranunits.lua:595-633).
-  -- The UI shows exactly this value (construction.lua:380 GetWorkProgress).
+  -- WorkProgress (mUnitVarDat.mWorkProgress, ctor Cfile:772278). The BUILD task
+  -- writes it every tick (Cfile:815482/815496/815547, build.lua). ENHANCEMENT
+  -- progress is ALSO engine-driven — UpdateWorkProgress's UNITSTATE_Enhancing
+  -- branch (Cfile:815272-815314, mirroring lua/sim/tasks/enhancetask.lua:47-80)
+  -- computes delta = (1/(WorkItemBuildTime/BuildRate)) * ResourceConsumed * 0.1.
+  -- DOCUMENTED GAP: that enhancing driver is NOT implemented here, so an issued
+  -- ACU enhancement never advances (there is no Lua 'EnhanceThread'; unit.lua:
+  -- 3572-3616 is the TELEPORT thread). The UI shows this value
+  -- (construction.lua:380 GetWorkProgress).
   SetWorkProgress = function(self, progress) self.__workProgress = progress or 0 end,
   GetWorkProgress = function(self) return self.__workProgress or 0 end,
   -- SetBusy / SetBlockCommandQueue (defaultunits.lua:529/639): a factory that
@@ -812,7 +825,12 @@ local unit = withNoops(UNIT_NAMES, {
     end
   end,
   -- The granted share of the requested resources this tick
-  -- (CEconRequest::LimitingRate); 1 means the demand was fully met.
+  -- (CEconRequest::LimitingRate). The engine inits mResourceConsumed to 0 and
+  -- sets it each tick to the granted LimitingRate only while consumption is
+  -- active (idle=0, full supply=1, stall=partial). DOCUMENTED APPROXIMATION: we
+  -- return 1 (assume full supply) — no per-unit granted rate is wired here yet,
+  -- so shield regen / mass-fab scaling do NOT throttle during an energy stall.
+  -- Returning 0 without that driver would stop them entirely, which is worse.
   GetResourceConsumed = function(self) return self.__resourceConsumed or 1 end,
 
   -- Motion.

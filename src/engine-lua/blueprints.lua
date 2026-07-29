@@ -105,6 +105,11 @@ __bpDefaults = {
     CatchUpAcc = 0.0, BackUpDistance = -1.0, LayerChangeOffsetHeight = -0.1,
     LayerTransitionDuration = 0.0, FuelUseTime = 0.0, FuelRechargeRate = 0.0,
     GroundCollisionOffset = 0.0,
+    -- RUnitBlueprintPhysics ctor (Cfile:656146-656172): a .bp omitting these
+    -- still exposes them. BuildOnLayerCaps is the LAYER_Land bit — as a table
+    -- for our table-based readers (OGrid packBuildOnLayerCaps).
+    MotionType = 'RULEUMT_None', AltMotionType = 'RULEUMT_None',
+    BuildOnLayerCaps = { LAYER_Land = true }, BuildRestriction = 'RULEUBR_None',
   },
   -- Footprint-Felder sind uchar (AddField_uchar "SizeX", Cfile:642465) -> 0.
   Footprint = { SizeX = 0, SizeZ = 0 },
@@ -186,29 +191,31 @@ __projDefaults = {
 -- stirbt in schook/lua/sim/weapon.lua:17). Genau so gefunden — im Durchlauf.
 --
 -- Die Feldliste ist die der Engine, nicht eine geratene Auswahl.
--- Die NICHT-NULL-Defaults kommen aus dem Struct-Ctor. Der ist im Retail-Binary
--- nicht als eigene Funktion dekompilierbar; die beste Quelle ist faf-re
--- (RUnitBlueprint.cpp:1015-1086, dokumentiert in weapons.md:1001):
---   FiringTolerance 0.01, MaxHeightDiff inf, RateOfFire 1.0, TrackingRadius 1.0,
---   HeadingArcRange 180, IgnoresAlly 1, LeadTarget 1, TargetCheckInterval 3.0
--- Sie sind nicht kosmetisch: IgnoresAlly=1 laesst Projektile durch Verbuendete
--- fliegen (sonst stirbt der Schuss einer bauenden ACU in der eigenen
--- Baustelle), und TargetCheckInterval=0 hiesse „jeden Tick Ziele suchen".
+-- The NON-NULL defaults come from the weapon struct ctor sub_51F4C0 @0x51F4C0
+-- (Cfile:656326-656412 — the offsets match the weapon AddFields Cfile:658290-
+-- 658477), NOT from faf-re. Verified values: FiringTolerance 0.01, MaxHeightDiff
+-- inf, RateOfFire 1.0, TrackingRadius 1.0, HeadingArcRange 180, IgnoresAlly 1,
+-- LeadTarget 1, TargetCheckInterval 3.0, DamageType "Normal" (a1+168,
+-- Cfile:656372), SlavedToBodyArcRange 1.0 (a1+72), EffectiveRadius -1.0 (a1+100),
+-- AlwaysRecheckTarget 1 (a1+84), AttackGroundTries 3 (a1+308), BombDropThreshold
+-- 1.5 (a1+324). Not cosmetic: IgnoresAlly=1 lets projectiles fly through allies,
+-- TargetCheckInterval=0 would mean "search every tick", and DamageType='' vs
+-- 'Normal' changes armor lookups for a .bp that omits it.
 __weaponDefaults = {
-  -- float (Feldliste: Cfile:658290-658520; Nicht-Null-Werte: weapons.md:1001)
-  BombDropThreshold = 0.0, Damage = 0.0, DamageRadius = 0.0, EffectiveRadius = 0.0,
+  -- float
+  BombDropThreshold = 1.5, Damage = 0.0, DamageRadius = 0.0, EffectiveRadius = -1.0,
   FiringRandomness = 0.0, FiringTolerance = 0.01, HeadingArcCenter = 0.0,
   HeadingArcRange = 180.0, MaxHeightDiff = math.huge, MaxRadius = 0.0,
   MaximumBeamLength = 0.0, MinRadius = 0.0, MuzzleVelocity = 0.0,
   MuzzleVelocityRandom = 0.0, MuzzleVelocityReduceDistance = 0.0,
   ProjectileLifetime = 0.0, ProjectileLifetimeUsesMultiplier = 0.0,
   RateOfFire = 1.0, RequiresEnergy = 0.0, RequiresMass = 0.0,
-  SlavedToBodyArcRange = 0.0, TargetCheckInterval = 3.0, TrackingRadius = 1.0,
+  SlavedToBodyArcRange = 1.0, TargetCheckInterval = 3.0, TrackingRadius = 1.0,
   -- int
-  AttackGroundTries = 0, MaxProjectileStorage = 0,
+  AttackGroundTries = 3, MaxProjectileStorage = 0,
   -- bool
   AboveWaterFireOnly = false, AboveWaterTargetsOnly = false,
-  AimsStraightOnDisable = false, AlwaysRecheckTarget = false,
+  AimsStraightOnDisable = false, AlwaysRecheckTarget = true,
   AutoInitiateAttackCommand = false, BelowWaterFireOnly = false,
   BelowWaterTargetsOnly = false, CannotAttackGround = false,
   CountedProjectile = false, DummyWeapon = false, IgnoreIfDisabled = false,
@@ -218,7 +225,7 @@ __weaponDefaults = {
   StopOnPrimaryWeaponBusy = false, Turreted = false,
   UseFiringSolutionInsteadOfAimBone = false, YawOnlyOnTarget = false,
   -- string
-  DamageType = '', DisplayName = '', Label = '',
+  DamageType = 'Normal', DisplayName = '', Label = '',
   TargetRestrictDisallow = '', TargetRestrictOnlyAllow = '',
   UIMaxRangeVisualId = '', UIMinRangeVisualId = '',
   ProjectileId = '',

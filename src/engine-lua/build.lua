@@ -345,6 +345,11 @@ function __factoryTick()
           WARN('Fabrik ' .. tostring(id) .. ' kann ' .. tostring(item.id) .. ' nicht bauen: ' .. tostring(err))
           table.remove(q, 1)
         else
+          -- A factory-built unit inherits the factory's fire state (the engine
+          -- copies SetFireState(child, factory.mFireState) at creation), so a
+          -- factory set to HoldFire produces HoldFire units, not ReturnFire.
+          local child = __units[uid]
+          if child then child.__fireState = f.__fireState or 0 end
           __issueBuildTask(id, uid, 'FactoryBuild')
           item.count = item.count - 1
           if item.count <= 0 then table.remove(q, 1) end
