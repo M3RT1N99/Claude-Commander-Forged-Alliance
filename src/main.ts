@@ -229,9 +229,7 @@ async function startFrontEndUi(): Promise<void> {
       gameUi.connectAudio(
         (bank, cue, id) => audio.play(bank, cue, id),
         (id) => audio.stop(id),
-        (enabled) => {
-          simWorldSoundsEnabled = enabled
-        },
+        (enabled) => audio.setWorldSoundsEnabled(enabled),
       )
       gameUi.connectVolume((cat, vol) => audio.setVolume(cat, vol))
     }
@@ -730,13 +728,6 @@ let orderLines: OrderLineSystem | null = null
 let commandFeedback: CommandFeedbackSystem | null = null
 const blipAssetCache = new Map<string, Promise<BlipAssets | null>>()
 let gameAudio: GameAudio | null = null
-/**
- * World-sound enable byte (Moho::CUserSoundManager, Cfile:1346188), driven by
- * EnableWorldSounds/DisableWorldSounds in the UI VM. The sim audio requests
- * (weapon fire, unit ambient loops) ARE the world sounds — score.lua:220 /
- * NIS mute them. Defaults true so sounds play before OnFirstUpdate wires it.
- */
-let simWorldSoundsEnabled = true
 /** Sim loop handles (HSound analog) map into their own id space. */
 const SIM_LOOP_HANDLE_BASE = 1_000_000_000
 /** One-shot sim sounds get unique negative handles (fire and forget). */
@@ -1104,9 +1095,7 @@ async function startSandbox(mapFolder: string): Promise<void> {
       gameUi.connectAudio(
         (bank, cue, id) => audio.play(bank, cue, id),
         (id) => audio.stop(id),
-        (enabled) => {
-          simWorldSoundsEnabled = enabled
-        },
+        (enabled) => audio.setWorldSoundsEnabled(enabled),
       )
       // The volume options (options.lua:700-779 -> SetVolume) reach the
       // XACT category gains; boot-time values are replayed by connectVolume.
@@ -2503,11 +2492,11 @@ function luaSimUpdate(): void {
   // never collide with the UI-VM's sound handles.
   if (gameAudio) {
     for (const r of luaSim.drainAudioRequests()) {
-      // A STOP always fires (a loop already playing must be able to end); a
-      // world-sound START is suppressed while DisableWorldSounds is active
-      // (score screen / NIS) — the sim keeps emitting, only playback is muted.
+      // World sounds always play and keep their handles; DisableWorldSounds mutes
+      // the World bus in GameAudio (Cfile:1346188) — instantly silencing loops
+      // already playing and restoring them on EnableWorldSounds — instead of
+      // suppressing starts here (which would strand a loop started while muted).
       if (r.t === 2) gameAudio.stop(SIM_LOOP_HANDLE_BASE + r.h)
-      else if (!simWorldSoundsEnabled) continue
       else if (r.t === 1) gameAudio.play(r.bank, r.cue, SIM_LOOP_HANDLE_BASE + r.h)
       else gameAudio.play(r.bank, r.cue, nextSimOneShotHandle--)
     }

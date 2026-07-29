@@ -721,7 +721,13 @@ export class GameUi {
     this.host.setGlobal('__uiAudioStopSink', (id: number) => stop(id))
     // EnableWorldSounds/DisableWorldSounds (ui-globals.lua) push the world-sound
     // enable byte here so the sim audio requests can be muted (score screen/NIS).
-    if (worldToggle) this.host.setGlobal('__uiWorldSoundsSink', (enabled: boolean) => worldToggle(enabled))
+    if (worldToggle) {
+      this.host.setGlobal('__uiWorldSoundsSink', (enabled: boolean) => worldToggle(enabled))
+      // Re-sync the current enable byte: a Disable/Enable that ran before this
+      // wiring (init order) is otherwise lost. __uiWorldSounds defaults false
+      // (world sounds off until gamemain.OnFirstUpdate enables them).
+      worldToggle(this.host.eval('return __uiWorldSounds == true') === true)
+    }
   }
 
   /**

@@ -50,6 +50,13 @@ import type { GameVfs } from '../vfs/vfs'
  * float and never reads it back — AudioEngine::SetVolume/GetVolume,
  * Cfile:603714/605038).
  */
+/**
+ * The XACT category that carries the WORLD sounds (weapon fire, unit ambient
+ * loops) — the one EnableWorldSounds/DisableWorldSounds gate (SupCom.xgs; the
+ * category graph chains its children through this node, so muting it cascades).
+ */
+const WORLD_CATEGORY = 'World'
+
 export class GameAudio {
   private readonly ctx: AudioContext
   /** xgs categories in file order (= xsb category index). */
@@ -57,6 +64,8 @@ export class GameAudio {
   private categoryNodes: GainNode[] = []
   /** User volume per category NAME — SetVolume cache, default 1.0. */
   private readonly userVolumes = new Map<string, number>()
+  /** WORLD-bus enable byte (EnableWorldSounds/DisableWorldSounds, Cfile:1346188). */
+  private worldBusEnabled = true
   /** soundBankName (klein) → geparste .xsb. */
   private readonly soundBanks = new Map<string, XsbBank>()
   /** innerer WaveBank-Name (klein) → VFS-Pfad der .xwb. */
@@ -167,7 +176,33 @@ export class GameAudio {
       this.warnOnce(`SetVolume: Kategorie '${category}' unbekannt`)
       return
     }
-    this.categoryNodes[i]!.gain.value = this.xgs.categories[i]!.volumeLinear * volume
+    this.categoryNodes[i]!.gain.value = this.categoryGain(i)
+  }
+
+  /**
+   * EnableWorldSounds/DisableWorldSounds — the enable byte for the WORLD bus
+   * (Moho::CUserSoundManager, Cfile:1346188). Disabling mutes the entire World
+   * category — weapon fire and unit ambient loops, *including loops already
+   * playing* — instantly, because the category graph is chained (children flow
+   * through the World gain node). Enabling restores the user gain. The UI cues
+   * live in other categories (UI_*, Music) and stay audible — that is why
+   * score.lua:220 disables world sounds without silencing the score music.
+   */
+  setWorldSoundsEnabled(enabled: boolean): void {
+    this.worldBusEnabled = enabled
+    if (!this.xgs) return
+    const i = this.xgs.categories.findIndex((c) => c.name === WORLD_CATEGORY)
+    if (i < 0) return
+    this.categoryNodes[i]!.gain.value = this.categoryGain(i)
+  }
+
+  /** Effective linear gain for a category node: authored x user volume, with the
+   *  World bus muted to 0 while DisableWorldSounds is active. */
+  private categoryGain(i: number): number {
+    const cat = this.xgs!.categories[i]!
+    const userVol = this.userVolumes.get(cat.name) ?? 1.0
+    const busMute = cat.name === WORLD_CATEGORY && !this.worldBusEnabled ? 0 : 1
+    return cat.volumeLinear * userVol * busMute
   }
 
   getVolume(category: string): number {
