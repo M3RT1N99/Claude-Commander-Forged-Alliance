@@ -668,30 +668,53 @@ local function activeOrder(id, u)
   return nil
 end
 
+-- Resolve one command's waypoint position by its type — the SAME rules for the
+-- executing head and the waiting queue (both are entries of the command list).
+local function resolveOrderPos(cmd)
+  if cmd.type == 'Move' or cmd.type == 'Patrol' then
+    return cmd.x, cmd.z
+  elseif cmd.gx then
+    return cmd.gx, cmd.gz -- ground attack (queued or active)
+  elseif cmd.type == 'Reclaim' then
+    -- Reclaim targets a PROP (wreck / map feature) or, rarely, a live unit
+    -- (globals.lua:1703) — resolve from either so the reclaim line draws.
+    local p = (__props and __props[cmd.target]) or __units[cmd.target]
+    if p and p.__pos then return p.__pos[1], p.__pos[3] end
+  else
+    local t = __units[cmd.target]
+    if t and t.__pos then return t.__pos[1], t.__pos[3] end
+  end
+  return nil
+end
+
 -- The FULL order list for the command graph: the active order first, then
 -- the queued commands (__orders FIFO) with entity targets resolved to
 -- their CURRENT position — the original graph tracks entity targets live
 -- (DirtyCommandGraph re-tesselation).
 local function orderList(id, u)
   local out = nil
-  local ot, ox, oz = activeOrder(id, u)
-  if ot then out = { { t = ot, x = ox, z = oz } } end
+  -- HEAD: the executing command keeps its OWN UNITCOMMAND type. The engine's
+  -- UICommandGraph::CreateMeshes (Cfile:1247191) walks the whole command queue
+  -- INCLUDING the running head, and every node keeps its EUnitCommandType
+  -- (LoadPathParams builds one node per type, Cfile:1244312). __orderActive[id]
+  -- IS that head (globals.lua). Reading it fixes an active Patrol drawn as a Move
+  -- waypoint and an active Reclaim/Guard (whose __goal is cleared while it works)
+  -- drawn as no line at all — activeOrder() reconstructed the type from live
+  -- physics and got both wrong.
+  local active = __orderActive and __orderActive[id]
+  if active then
+    local x, z = resolveOrderPos(active)
+    if x then out = { { t = active.type, x = x, z = z } } end
+  else
+    -- Commands that do NOT flow through the order queue keep their execution
+    -- state elsewhere: a mobile builder's structure build/repair lives only in
+    -- __buildTasks (luaSimWorker.ts:219), and an auto-engagement attack in
+    -- __attackOrders. activeOrder() surfaces those as the head.
+    local ot, ox, oz = activeOrder(id, u)
+    if ot then out = { { t = ot, x = ox, z = oz } } end
+  end
   for _, cmd in ipairs((__orders and __orders[id]) or {}) do
-    local x, z
-    if cmd.type == 'Move' or cmd.type == 'Patrol' then
-      x, z = cmd.x, cmd.z
-    elseif cmd.gx then
-      x, z = cmd.gx, cmd.gz -- queued ground attack
-    elseif cmd.type == 'Reclaim' then
-      -- Reclaim targets a PROP (wreck / map feature), not a unit — resolve it
-      -- from __props so the command graph draws the reclaim line to it. Looking
-      -- it up in __units alone dropped every reclaim entry silently.
-      local p = __props and __props[cmd.target]
-      if p and p.__pos then x, z = p.__pos[1], p.__pos[3] end
-    else
-      local t = __units[cmd.target]
-      if t and t.__pos then x, z = t.__pos[1], t.__pos[3] end
-    end
+    local x, z = resolveOrderPos(cmd)
     if x then
       out = out or {}
       out[#out + 1] = { t = cmd.type, x = x, z = z }
