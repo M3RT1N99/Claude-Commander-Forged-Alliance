@@ -80,8 +80,10 @@ check(
   'Er entsteht AN der Fabrik (120, 120)',
 )
 check(
-  Number(host.eval(`return table.getn(__units[${factory}].__buildQueue) > 0 and __units[${factory}].__buildQueue[1].count or 0`)) === 1,
-  'Die Warteschlange steht noch auf 1 (der zweite Panzer wartet)',
+  Number(host.eval(`return table.getn(__units[${factory}].__buildQueue) > 0 and __units[${factory}].__buildQueue[1].count or 0`)) === 2,
+  'Die Warteschlange steht noch auf 2 — die BAUENDE Einheit bleibt gezaehlt ' +
+    '(die Engine dekrementiert die BuildFactory-Command erst bei COMPLETION, ' +
+    'Cfile:838029), also zeigt die Anzeige die echte Reststueckzahl',
 )
 
 console.log('\n== Der Panzer wird gebaut und rollt vom Hof ==')
@@ -94,6 +96,12 @@ while (readLuaUnit(host, tank1)!.fraction < 1 && ticks < 3000) {
 const t1 = readLuaUnit(host, tank1)!
 check(t1.fraction >= 1, `Panzer fertig nach ${ticks} Beats (${(ticks / 10).toFixed(1)} s)`)
 check(t1.health === t1.maxHealth, `Volles Leben: ${t1.health}`)
+// COMPLETION decrements the queue (Cfile:838029: count>1 -> DecreaseCount(1)):
+// 2 -> 1 now that the first tank is done, so the second still waits at count 1.
+check(
+  Number(host.eval(`return table.getn(__units[${factory}].__buildQueue) > 0 and __units[${factory}].__buildQueue[1].count or 0`)) === 1,
+  'Nach der Fertigstellung steht die Warteschlange auf 1 (Dekrement bei COMPLETION)',
+)
 check(engine.economy.army(1).mass < massBefore, `Masse bezahlt: ${massBefore.toFixed(0)} → ${engine.economy.army(1).mass.toFixed(0)}`)
 
 // FactoryUnit.OnStopBuild → RollOffUnit → IssueMove: der Panzer bekommt ein Ziel.

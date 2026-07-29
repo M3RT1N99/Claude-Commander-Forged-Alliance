@@ -223,9 +223,25 @@ end
 --
 -- Die Eintraege haben die Form { id = <blueprintId>, count = <n> } — dieselbe,
 -- die die UI erwartet (construction.lua:1620).
+-- Category FACTORY test (bp.Categories carries 'FACTORY'), mirrors the local
+-- isFactory in globals.lua:1541.
+local function isFactoryUnit(u)
+  local bp = u and u.__bp
+  for _, category in ipairs((bp and bp.Categories) or {}) do
+    if category == 'FACTORY' then return true end
+  end
+  return false
+end
+
 function __queueFactoryBuild(factoryId, bpId, count)
   local f = __units[factoryId]
   if not f then return false end
+  -- The engine issues the BuildFactory queue command ONLY to selected units in
+  -- category FACTORY (cfunc_IssueBlueprintCommandL: IsInCategory('FACTORY'),
+  -- Cfile:1265854-1265856; non-factory units are skipped). Without this gate a
+  -- non-factory unit that somehow receives the command would get a phantom
+  -- __buildQueue and __factoryTick would produce units at its own position.
+  if not isFactoryUnit(f) then return false end
   f.__buildQueue = f.__buildQueue or {}
   local q = f.__buildQueue
   local n = table.getn(q)
@@ -351,8 +367,14 @@ function __factoryTick()
           local child = __units[uid]
           if child then child.__fireState = f.__fireState or 0 end
           __issueBuildTask(id, uid, 'FactoryBuild')
-          item.count = item.count - 1
-          if item.count <= 0 then table.remove(q, 1) end
+          -- Do NOT decrement the queue count here. The engine decrements the
+          -- BuildFactory command count only on COMPLETION (Cfile:838029: if
+          -- count <= 1 RemoveCommandFromQueue, else DecreaseCount(1); only THEN
+          -- does the next CFactoryBuildTask start at Cfile:838062), so the
+          -- in-progress unit stays counted and the displayed queue shows the true
+          -- remaining count. The `not isBuilding(id)` gate above already stops a
+          -- re-spawn of this same head while the task runs; the decrement happens
+          -- in the FactoryBuild completion path (__buildApply).
         end
       end
     end
@@ -536,6 +558,17 @@ function __buildApply()
         -- (defaultunits.lua:571): off the pad first, then to the rally point.
         if task.order == 'FactoryBuild' and b.__rally then
           __issueOrder(task.target, { type = 'Move', x = b.__rally[1], z = b.__rally[3] }, false)
+        end
+        -- Now the produced unit is counted OUT of the factory's queue — the
+        -- engine decrements the BuildFactory command on completion (Cfile:838029:
+        -- count <= 1 removes the command, else DecreaseCount(1)). The building
+        -- unit was q[1] all along (__factoryTick always spawns the head), so its
+        -- completion drains one from the head. Repeat-build (Cfile:838042) is not
+        -- modelled — a drained queue simply empties.
+        if task.order == 'FactoryBuild' and b.__buildQueue and b.__buildQueue[1] then
+          local head = b.__buildQueue[1]
+          head.count = head.count - 1
+          if head.count <= 0 then table.remove(b.__buildQueue, 1) end
         end
         n = n + 1
         done[n] = tid
