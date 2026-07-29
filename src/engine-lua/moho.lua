@@ -1207,7 +1207,24 @@ local weapon = withNoops(WEAPON_NAMES, {
     end
 
     local speed = nil
-    if bp.MuzzleVelocity and bp.MuzzleVelocity ~= 0 then speed = bp.MuzzleVelocity end
+    if bp.MuzzleVelocity and bp.MuzzleVelocity ~= 0 then
+      speed = bp.MuzzleVelocity
+      -- GetMuzzleVelocity (Cfile:656416-656432 / 0x51F710): the shot speed is
+      -- scaled DOWN at close range — when MuzzleVelocityReduceDistance > dist
+      -- (muzzle to target-pos-gun), speed = MuzzleVelocity * sqrt(dist /
+      -- MuzzleVelocityReduceDistance). CreateProjectile then rescales the oriented
+      -- velocity by that value (Cfile:985766-985775). The reduced speed feeds BOTH
+      -- the flight magnitude and the v0 the ballistic pitch below solves for, so
+      -- the arc stays consistent with the actual flight speed. (MuzzleVelocityRandom
+      -- is FRandGaussian-driven and needs the lockstep sim random stream —
+      -- documented gap, not applied here.)
+      local rd = bp.MuzzleVelocityReduceDistance
+      if rd and rd > 0 and tp then
+        local rdx, rdy, rdz = tp[1] - pos[1], tp[2] - pos[2], tp[3] - pos[3]
+        local dist = math.sqrt(rdx * rdx + rdy * rdy + rdz * rdz)
+        if rd > dist then speed = speed * math.sqrt(dist / rd) end
+      end
+    end
 
     if tp then
       local dx, dy, dz = tp[1] - pos[1], tp[2] - pos[2], tp[3] - pos[3]
@@ -1263,14 +1280,22 @@ local weapon = withNoops(WEAPON_NAMES, {
       self.__damageType or bp.DamageType or 'Normal', self.__target,
       bp.IgnoresAlly ~= false
     )
-    -- Lebensdauer (Cfile:985760ff).
+    -- Lebensdauer (Cfile:985775-985791): TWO INDEPENDENT overrides, not if/elseif.
+    -- ProjectileLifetime sets the lifetime; then ProjectileLifetimeUsesMultiplier
+    -- OVERRIDES it when > 0 (the second block runs after and wins, gated on the
+    -- MULTIPLIER field — not MuzzleVelocity). If neither applies the projectile
+    -- keeps its own Physics.Lifetime, so SetLifetime is only called when one did.
     if proj and not proj.__destroyQueued then
-      local life
+      local life = nil
       if bp.ProjectileLifetime and bp.ProjectileLifetime > 0 then
         life = bp.ProjectileLifetime
-      elseif bp.MuzzleVelocity and bp.MuzzleVelocity > 0 then
-        life = ((bp.MaxRadius or 0) / bp.MuzzleVelocity)
-          * (bp.ProjectileLifetimeUsesMultiplier or 1)
+      end
+      -- MaxRadius/MuzzleVelocity would divide by zero for a degenerate blueprint;
+      -- weapons that set the multiplier always carry a nonzero MuzzleVelocity, so
+      -- guarding it is a safe no-op that avoids a Lua inf.
+      if bp.ProjectileLifetimeUsesMultiplier and bp.ProjectileLifetimeUsesMultiplier > 0
+        and bp.MuzzleVelocity and bp.MuzzleVelocity ~= 0 then
+        life = ((bp.MaxRadius or 0) / bp.MuzzleVelocity) * bp.ProjectileLifetimeUsesMultiplier
       end
       if life and life > 0 then proj:SetLifetime(life) end
     end
