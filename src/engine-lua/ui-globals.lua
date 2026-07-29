@@ -560,7 +560,16 @@ __uiSelectionSink = false
 
 function GetSelectedUnits()
   if not __uiSelection or table.getn(__uiSelection) == 0 then return nil end
-  return __uiSelection
+  -- Return a COPY, never the stored table: cfunc_GetSelectedUnitsL fills a
+  -- BRAND-NEW table each call (AssignNewTable + SetObject loop,
+  -- Cfile:1361355-1361388), so mutating the result cannot touch the selection.
+  -- Shift-add callers do sel=GetSelectedUnits(); table.insert(sel,u);
+  -- SelectUnits(sel) (avatars.lua:369-372, selection.lua:134-139) — aliasing
+  -- __uiSelection here would make SelectUnits see old==new, and gamemain.lua's
+  -- isOldSelection would then skip PlaySelectionSound and the rallypoint refresh.
+  local out = {}
+  for i, u in ipairs(__uiSelection) do out[i] = u end
+  return out
 end
 
 -- SelectUnits(nil) heisst "alles abwaehlen" (uiutil.lua:103) und ist legal.
@@ -577,8 +586,18 @@ function SelectUnits(units)
   local old = __uiSelection or {}
   local new = {}
   if type(units) == 'table' then
+    -- The engine selection is a SET: WeakSet_UserEntity::Add (Cfile:1361502 ->
+    -- 1153912) keeps each entity at most once, and GetSelectionUnits enumerates
+    -- the unique std::map. Dedupe by id so a shift-add of an already-selected
+    -- unit (avatars.lua:369-372, selection.lua:136-139) does not appear twice in
+    -- __uiSelection and over-count every per-unit walk (table.getn,
+    -- PlaySelectionSound, GetUnitCommandData).
+    local seen = {}
     for _, u in ipairs(units) do
-      if not u:IsDead() then new[table.getn(new) + 1] = u end
+      if not u:IsDead() and not seen[u.id] then
+        seen[u.id] = true
+        new[table.getn(new) + 1] = u
+      end
     end
   end
   __uiSelection = new
