@@ -191,6 +191,54 @@ console.log('\n== Rally point: the new unit drives there ==')
   )
 }
 
+// === Queue edited mid-build: completion drains the task's OWN command ===
+//
+// The engine decrements the specific command the CFactoryBuildTask was built
+// from (DecreaseCount(1, v18), Cfile:838029), NOT a positional head. Reorder the
+// queue while a unit builds and the completing unit must still drain ITS item.
+console.log('\n== Queue edited mid-build: the right item is drained ==')
+for (let i = 0; i < 40 && host.eval(`return __units[${factory}].__busy == true`) === true; i++) beat(engine)
+queueFactoryBuild(host, factory, 'uel0101', 2)
+beat(engine) // __factoryTick spawns the first tank from the (only) stack
+const midTank = Number(
+  host.eval(`
+    local newest = 0
+    for id, u in pairs(__units) do
+      if u.__bp and u.__bp.BlueprintId == 'uel0101' and (u.__fraction or 1) < 1 and id > newest then newest = id end
+    end
+    return newest
+  `),
+)
+check(midTank > 0, `a tank is building from the stack (id ${midTank})`)
+// Slip a foreign stack in FRONT of the building one — now q[1] is NOT the item
+// the running task was built from.
+host.eval(`table.insert(__units[${factory}].__buildQueue, 1, { id = 'ZZFOREIGN', count = 5 })`)
+let mb = 0
+while (readLuaUnit(host, midTank)!.fraction < 1 && mb < 3000) {
+  beat(engine)
+  mb++
+}
+check(readLuaUnit(host, midTank)!.fraction >= 1, `the tank finished (${mb} beats)`)
+check(
+  Number(host.eval(`return __units[${factory}].__buildQueue[1].count`)) === 5,
+  'the foreign stack at q[1] is UNTOUCHED (completion drained its own item by identity, not q[1])',
+)
+check(
+  Number(
+    host.eval(`
+      for _, it in ipairs(__units[${factory}].__buildQueue) do
+        if it.id == 'uel0101' then return it.count end
+      end
+      return -1
+    `),
+  ) === 1,
+  'the tank stack it WAS building dropped 2 -> 1',
+)
+host.eval(`
+  local q = __units[${factory}].__buildQueue
+  for i = table.getn(q), 1, -1 do if q[i].id == 'ZZFOREIGN' then table.remove(q, i) end end
+`)
+
 const badWarnings = warnings.filter((w) => !/effectutilities|Emitter|Animator|Sound/i.test(w))
 if (badWarnings.length > 0) {
   console.log(`\n  (${badWarnings.length} WARN aus der Sim, erste 3:)`)

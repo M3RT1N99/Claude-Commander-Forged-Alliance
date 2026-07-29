@@ -366,7 +366,15 @@ function __factoryTick()
           -- factory set to HoldFire produces HoldFire units, not ReturnFire.
           local child = __units[uid]
           if child then child.__fireState = f.__fireState or 0 end
-          __issueBuildTask(id, uid, 'FactoryBuild')
+          local ftid = __issueBuildTask(id, uid, 'FactoryBuild')
+          -- Bind the task to the exact queue item it was built from (the engine
+          -- decrements the task's OWN command, DecreaseCount(1, v18), Cfile:838029
+          -- — not a positional head). If the queue is edited mid-build
+          -- (__adjustFactoryQueue shifts q[1] away), completion must still drain
+          -- THIS item, resolved by identity.
+          if ftid and ftid >= 0 and __buildTasks[ftid] then
+            __buildTasks[ftid].__factoryItem = item
+          end
           -- Do NOT decrement the queue count here. The engine decrements the
           -- BuildFactory command count only on COMPLETION (Cfile:838029: if
           -- count <= 1 RemoveCommandFromQueue, else DecreaseCount(1); only THEN
@@ -560,15 +568,20 @@ function __buildApply()
           __issueOrder(task.target, { type = 'Move', x = b.__rally[1], z = b.__rally[3] }, false)
         end
         -- Now the produced unit is counted OUT of the factory's queue — the
-        -- engine decrements the BuildFactory command on completion (Cfile:838029:
-        -- count <= 1 removes the command, else DecreaseCount(1)). The building
-        -- unit was q[1] all along (__factoryTick always spawns the head), so its
-        -- completion drains one from the head. Repeat-build (Cfile:838042) is not
-        -- modelled — a drained queue simply empties.
-        if task.order == 'FactoryBuild' and b.__buildQueue and b.__buildQueue[1] then
-          local head = b.__buildQueue[1]
-          head.count = head.count - 1
-          if head.count <= 0 then table.remove(b.__buildQueue, 1) end
+        -- engine decrements the task's OWN BuildFactory command on completion
+        -- (Cfile:838029: count <= 1 removes it, else DecreaseCount(1)). Drain the
+        -- exact item this task was built from (task.__factoryItem), resolved by
+        -- identity so a queue edited mid-build (__adjustFactoryQueue) does not
+        -- drain the wrong stack. Repeat-build (Cfile:838042) is not modelled — a
+        -- drained queue simply empties.
+        if task.order == 'FactoryBuild' and task.__factoryItem then
+          local item = task.__factoryItem
+          item.count = item.count - 1
+          if item.count <= 0 and b.__buildQueue then
+            for i = table.getn(b.__buildQueue), 1, -1 do
+              if b.__buildQueue[i] == item then table.remove(b.__buildQueue, i); break end
+            end
+          end
         end
         n = n + 1
         done[n] = tid
