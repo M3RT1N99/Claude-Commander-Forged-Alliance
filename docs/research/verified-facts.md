@@ -306,6 +306,32 @@ Full mapping: func_UnitCommandCapToCommandType
   a "CommandCaps" test. UnitAttributes seeds the runtime command mask from
   `bp.General.CommandCaps` (Cfile:949126); AddCommandCap `|= bit` (Cfile:975473),
   RemoveCommandCap `&= ~bit` (Cfile:975542), RestoreCommandCaps resets to blueprint.
+- **`GetSelectedUnits` returns a FRESH table, and the selection is a SET.**
+  cfunc_GetSelectedUnitsL AssignNewTable + fills a brand-new table each call
+  (Cfile:1361355-1361388) — mutating it never touches `CWldSession::mSelection`, so
+  a UI mirror must return a *copy*, not the live list (else shift-add callers alias
+  it and gamemain's `isOldSelection` skips the selection sound + rallypoint).
+  `SelectUnits` stores via `WeakSet_UserEntity::Add` (Cfile:1361502→1153912), which
+  keeps each entity at most once → dedupe by id.
+- **The command graph draws the EXECUTING head with its own command type.**
+  UICommandGraph::CreateMeshes walks the whole command queue *including* the
+  running head (Cfile:1247191), and LoadPathParams builds one node per
+  EUnitCommandType 0..39 (Cfile:1244312) — so an active Patrol/Reclaim/Guard keeps
+  its own waypoint texture. Reconstructing the head's type from live physics
+  (goal/target) mislabels it (Patrol→Move, Reclaim→none).
+- **A factory's BuildFactory count decrements on COMPLETION, not on spawn.**
+  When a factory-built unit finishes: `if count <= 1` RemoveCommandFromQueue else
+  `DecreaseCount(1)`, and only *then* the next CFactoryBuildTask starts
+  (Cfile:838029/838062) — the in-progress unit stays counted, so the displayed
+  queue shows the true remaining count. The command is issued only to selected
+  units in category FACTORY (`IsInCategory('FACTORY')`, Cfile:1265854-1265856);
+  non-factory units are skipped.
+- **World sounds vs UI cues are separate switches.**
+  `Moho::CUserSoundManager::StopAllSounds` (Cfile:1346492) destroys every entity
+  loop and every live IXACTCue — nothing keeps playing. `EnableWorldSounds`/
+  `DisableWorldSounds` store an enable byte (Cfile:1346188/1348520) that gates the
+  *world* sounds (weapon fire, unit ambient loops) — score.lua:220 mutes them at
+  the score screen — while UI cues run through a separate path and stay audible.
 
 ## Guided ammunition (projectile tracking — decomp + faf-re, all documented)
 
