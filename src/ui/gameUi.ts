@@ -712,9 +712,16 @@ export class GameUi {
    * id), StopSound __uiAudioStopSink(id) — ohne Sink protokolliert die UI-VM
    * die Cues nur (ui-globals.lua, __uiSoundsRequested).
    */
-  connectAudio(play: (bank: string, cue: string, id: number) => void, stop: (id: number) => void): void {
+  connectAudio(
+    play: (bank: string, cue: string, id: number) => void,
+    stop: (id: number) => void,
+    worldToggle?: (enabled: boolean) => void,
+  ): void {
     this.host.setGlobal('__uiAudioSink', (bank: string, cue: string, id: number) => play(bank, cue, id))
     this.host.setGlobal('__uiAudioStopSink', (id: number) => stop(id))
+    // EnableWorldSounds/DisableWorldSounds (ui-globals.lua) push the world-sound
+    // enable byte here so the sim audio requests can be muted (score screen/NIS).
+    if (worldToggle) this.host.setGlobal('__uiWorldSoundsSink', (enabled: boolean) => worldToggle(enabled))
   }
 
   /**

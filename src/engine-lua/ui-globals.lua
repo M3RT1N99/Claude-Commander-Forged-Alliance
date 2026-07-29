@@ -1703,16 +1703,23 @@ local warnedNoAudio = false
 -- EnableWorldSounds()/DisableWorldSounds() (Cfile:1348520-1348545, 0 Argumente):
 -- der Schalter fuer die WELT-Gerausche (Waffen, Einheiten — nicht die UI-Cues).
 -- gamemain.OnFirstUpdate() schaltet sie beim Spielstart an (gamemain.lua:78),
--- splash/NIS schalten sie aus. Echter Zustand; die Audio-Ausgabe liest ihn,
--- sobald es sie gibt.
+-- splash/NIS/score.lua:220 schalten sie aus. Moho::CUserSoundManager stores the
+-- enable byte (Cfile:1346188) and the world-sound output reads it. Our world
+-- sounds are the SIM audio requests (weapon fire, unit ambient loops) drained in
+-- main.ts; the sink pushes the flag there so DisableWorldSounds actually mutes
+-- them (the UI cues run through __uiAudioSink, a separate path, and stay audible).
 __uiWorldSounds = false
+--- Set by the audio side: main.ts gates the sim world-sound playback on it.
+__uiWorldSoundsSink = false
 
 function EnableWorldSounds()
   __uiWorldSounds = true
+  if __uiWorldSoundsSink then __uiWorldSoundsSink(true) end
 end
 
 function DisableWorldSounds()
   __uiWorldSounds = false
+  if __uiWorldSoundsSink then __uiWorldSoundsSink(false) end
 end
 
 local function newHandle(params, kind)
@@ -1773,7 +1780,17 @@ function StopSound(handle, immediate)
 end
 
 function StopAllSounds()
+  -- Moho::CUserSoundManager::StopAllSounds (Cfile:1346492) actually TEARS DOWN
+  -- every live sound: SND_DestroyEntityLoop on each entity loop, then Stop+Destroy
+  -- on every IXACTCue in mSoundsLinkedList — nothing keeps playing afterwards.
+  -- Mirror StopSound: drop the flags AND reach the audio output for each handle
+  -- that is still sounding (score.lua:221 relies on this to silence the score
+  -- screen). Sim-side ambient loops live in a separate handle space (main.ts) and
+  -- are not reached from here.
   for _, h in ipairs(__uiSoundsRequested) do
+    if h.playing and not h.stopped and __uiAudioStopSink then
+      __uiAudioStopSink(h.id)
+    end
     h.playing = false
     h.stopped = true
   end
