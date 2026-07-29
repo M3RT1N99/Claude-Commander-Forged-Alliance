@@ -46,7 +46,14 @@ function __getNavigator(id)
       local u = __units[id]
       return u and (u.__goal and { u.__goal[1], 0, u.__goal[2] })
     end,
-    SetSpeedThroughGoal = function() end,
+    -- SetSpeedThroughGoal(flag): "know whether to stop at final goal"
+    -- (Cfile:756703). flag=1 -> the unit flows through the current goal cell at
+    -- MaxSpeed (intermediate queued Move / any Patrol leg); flag=0 -> it brakes
+    -- to a stop (the final leg). Drives the arrival/stop-cap gates below.
+    SetSpeedThroughGoal = function(_, flag)
+      local u = __units[id]
+      if u then u.__speedThroughGoal = flag == 1 or flag == true end
+    end,
   }
 end
 
@@ -197,7 +204,10 @@ function __advanceMotion()
           p[3] = goal[2]
           p[2] = GetSurfaceHeight(p[1], p[3])
           u.__goal = false
-          u.__speed = 0
+          -- Keep the momentum through an intermediate/patrol goal (speed-through);
+          -- only a final goal brakes to 0 (the order system re-issues the next
+          -- leg, so the unit flows on without a full stop).
+          if not u.__speedThroughGoal then u.__speed = 0 end
         end
       else
         -- Heading/Forward VOM TICK-ANFANG: die Cap-Kaskade der Engine rechnet
@@ -261,9 +271,14 @@ function __advanceMotion()
         if cap > m.maxSpeed then cap = m.maxSpeed end
 
         -- Anhalte-Kinematik (Cfile:766249-766262): innerhalb eines
-        -- Brems-Ticks exakt die Restdistanz, sonst v = sqrt(2*brake*dist).
-        local stopCap = (dist <= m.brake) and dist or math.sqrt(2 * m.brake * dist)
-        if stopCap < cap then cap = stopCap end
+        -- Brems-Ticks exakt die Restdistanz, sonst v = sqrt(2*brake*dist). The
+        -- engine applies this only on a STOP path (PT_0, Cfile:766249); a
+        -- speed-through goal (intermediate Move / patrol leg) skips it and holds
+        -- MaxSpeed, so the unit does not brake at every queued waypoint.
+        if not u.__speedThroughGoal then
+          local stopCap = (dist <= m.brake) and dist or math.sqrt(2 * m.brake * dist)
+          if stopCap < cap then cap = stopCap end
+        end
 
         local dv = cap - speed
         if dv > m.accel then speed = speed + m.accel

@@ -1807,8 +1807,17 @@ function __ordersTick()
     else
       local done = false
       if cmd.type == 'Move' then
+        -- Speed-through this leg when a further Move/Patrol is queued behind it
+        -- (NextCommand chain, Cfile:955444): the unit flows through the goal cell
+        -- at MaxSpeed instead of braking; only the FINAL leg stops. Off otherwise.
+        local nxt = __orders[unitId] and __orders[unitId][1]
+        local through = nxt ~= nil and (nxt.type == 'Move' or nxt.type == 'Patrol')
+        u:GetNavigator():SetSpeedThroughGoal(through and 1 or 0)
         done = not u.__goal -- motion.lua sets __goal = false on arrival
       elseif cmd.type == 'Patrol' then
+        -- A patrol leg always flows through its waypoint (SetSpeedThroughGoal(1),
+        -- Cfile:850088/850132/850199) — the unit never stops at a patrol point.
+        u:GetNavigator():SetSpeedThroughGoal(1)
         -- Engage on the way; otherwise the leg completes inside the 1x1
         -- goal cell (the task's SNavGoal box, Cfile:845637-845650) and a
         -- navigator idle AWAY from it (after a kill) re-issues the goal
