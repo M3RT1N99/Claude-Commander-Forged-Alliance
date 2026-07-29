@@ -28,6 +28,19 @@ local function newThread(fn)
     return setmetatable({ co = coroutine.create(fn), wait = 0 }, ThreadMeta)
 end
 
+-- Convert a coroutine yield into the wait the engine STORES (CTaskThread::
+-- DoTaskTick, Cfile:438898): the yield is read with GetInteger (truncated to an
+-- integer, must be >= 0), then a count v>=2 is stored as v-1 (default case) and
+-- v==1 as 1 (TASKSTATUS_Wait). Combined with the per-tick PRE-decrement in
+-- __simAdvanceThreads (--mWaitTicks; run when <= 0), WaitTicks(N) sleeps
+-- max(1, N-1) ticks -- one fewer than storing the raw count, so WaitTicks(N>=2)
+-- and WaitSeconds resume on the engine's tick instead of one late.
+local function waitFromYield(res)
+    local v = math.floor(tonumber(res) or 1) -- GetInteger truncates the yield
+    if v >= 2 then return v - 1 end
+    return v -- 0 -> 0, 1 -> 1
+end
+
 -- ForkThread(fn, ...) -> Thread object. Runs from the next tick onward.
 function ForkThread(fn, ...)
     if type(fn) ~= 'function' then error('ForkThread: function expected', 2) end
@@ -49,7 +62,7 @@ function __startThread(fn)
     __currentThread = false
     if not ok then return false, res end
     if coroutine.status(t.co) ~= 'dead' then
-        if res == -1 then t.suspended = true else t.wait = tonumber(res) or 1 end
+        if res == -1 then t.suspended = true else t.wait = waitFromYield(res) end
         nthreads = nthreads + 1
         threads[nthreads] = t
     end
@@ -61,8 +74,11 @@ function WaitTicks(n)
     coroutine.yield(n or 1)
 end
 
+-- WaitSeconds(n) = WaitTicks(max(1, n*10)) with the fractional value passed
+-- straight to yield (original siminit.lua:37-40); the engine's GetInteger then
+-- TRUNCATES it (CLuaTask::TaskTick, Cfile:592180). Do NOT round here.
 function WaitSeconds(s)
-    coroutine.yield(math.floor((s or 0) * 10 + 0.5))
+    coroutine.yield(math.max(1, (s or 0) * 10))
 end
 
 function KillThread(t)
@@ -112,7 +128,7 @@ function __simAdvanceThreads()
                 elseif res == -1 then
                     t.suspended = true
                 else
-                    t.wait = tonumber(res) or 1
+                    t.wait = waitFromYield(res)
                 end
             end
         end

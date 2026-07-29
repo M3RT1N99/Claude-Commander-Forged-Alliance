@@ -62,13 +62,16 @@ check(num(host, 'counter') === 5, `Zähler nach 5 Ticks = ${num(host, 'counter')
 check(currentTick(host) === 5, `Tick = ${currentTick(host)}`)
 check(Math.abs(num(host, 'GetGameTimeSeconds()') - 0.5) < 1e-9, `GetGameTimeSeconds = ${num(host, 'GetGameTimeSeconds()')} (0.5 s)`)
 
-console.log('\n== WaitTicks(3): resümiert exakt 3 Ticks nach dem ersten Lauf ==')
+console.log('\n== WaitTicks(3): resümiert wie die Engine max(1, N-1) Ticks nach dem ersten Lauf ==')
 host.eval('resumeTick = -1')
 host.eval('ForkThread(function() WaitTicks(3); resumeTick = GetGameTick() end)')
 const startTick = currentTick(host)
 for (let i = 0; i < 4; i++) simTick(host)
-// erster Lauf bei startTick+1, WaitTicks(3) -> resume bei startTick+4
-check(num(host, 'resumeTick') === startTick + 4, `resümiert bei Tick ${num(host, 'resumeTick')} (erwartet ${startTick + 4})`)
+// Engine (DoTaskTick, Cfile:438898): the yield count N>=2 is stored as N-1 and
+// pre-decremented each tick, so WaitTicks(3) sleeps 2 ticks. First run at
+// startTick+1, resume at startTick+3 — NOT startTick+4 (that was a one-tick-late
+// off-by-one the raw store produced).
+check(num(host, 'resumeTick') === startTick + 3, `resümiert bei Tick ${num(host, 'resumeTick')} (erwartet ${startTick + 3})`)
 
 console.log('\n== ForkThread-Argumente ==')
 host.eval('argsum = 0')
