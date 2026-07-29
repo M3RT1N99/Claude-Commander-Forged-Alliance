@@ -834,6 +834,10 @@ export class UnitViewer {
     Object.entries({
       cam_ZoomAmount: 0.40000001, // Cfile:421825
       cam_NearZoom: 5.0, // Cfile: float Moho::cam_NearZoom = 5.0
+      cam_NearFOV: 65.0, // Cfile:421821 — vertical FOV (deg) at near zoom
+      cam_FarFOV: 60.0, // Cfile:421822 — vertical FOV (deg) at far zoom
+      cam_NearPitch: 40.0, // Cfile:421823 — camera pitch (deg) at near zoom
+      cam_FarPitch: 89.900002, // Cfile:421824 — pitch (deg) at far zoom (top-down)
       cam_PanSpeed: 1.0, // Cfile: float Moho::cam_PanSpeed = 1.0
       ui_KeyboardPanSpeed: 90.0, // Cfile:421739
       ui_KeyboardPanAccelerateMultiplier: 4.0, // Cfile:421740
@@ -883,11 +887,28 @@ export class UnitViewer {
     }
   }
 
-  private rtsPitch(dist: number): number {
-    // Original-Gefühl: oberhalb ~60 Einheiten Draufsicht, darunter kippen
-    const t = Math.min(Math.max((dist - 6) / 54, 0), 1)
-    const base = 0.6 + (1.45 - 0.6) * Math.sqrt(t)
-    return Math.min(Math.max(base + this.rts.pitchOffset, 0.35), 1.5)
+  /**
+   * Log-zoom lerp fraction (0 at cam_NearZoom, 1 at the map's max zoom) — the
+   * domain CalculateFarPitch / CalculateFOV use (Cfile:1151061-1151072):
+   * t = (clamp(log(zoom), log(near), log(max)) - log(near)) / (log(max) - log(near)).
+   */
+  private camZoomT(zoom: number): number {
+    const ln = Math.log(this.conVarNumber('cam_NearZoom'))
+    const lm = Math.log(this.rtsMaxZoom())
+    if (!(lm > ln)) return 0
+    const lz = Math.min(Math.max(Math.log(Math.max(zoom, 1e-6)), ln), lm)
+    return (lz - ln) / (lm - ln)
+  }
+
+  private rtsPitch(zoom: number): number {
+    // Camera pitch is a log-zoom lerp between cam_NearPitch (40 deg) and
+    // cam_FarPitch (89.9 deg) — CalculateFarPitch, Cfile:1151074-1151077 * DEG2RAD.
+    // The old sqrt curve (0.6..1.45 rad = 34..83 deg) was invented and never
+    // reached the near-top-down far view.
+    const deg =
+      this.camZoomT(zoom) * (this.conVarNumber('cam_FarPitch') - this.conVarNumber('cam_NearPitch')) +
+      this.conVarNumber('cam_NearPitch')
+    return Math.min(Math.max(deg * 0.017453292 + this.rts.pitchOffset, 0.1), 1.553)
   }
 
   private updateRtsCamera(dt: number): void {
@@ -908,7 +929,10 @@ export class UnitViewer {
     if (r.panX !== 0 || r.panZ !== 0) {
       let input = this.conVarNumber('ui_KeyboardPanSpeed')
       if (this.ctrlDown) input *= this.conVarNumber('ui_KeyboardPanAccelerateMultiplier')
-      const speed = (r.dist / this.canvas.clientHeight) * this.conVarNumber('cam_PanSpeed') * input
+      // Scale by the TARGET zoom (mTargetZoom), not the current animating dist,
+      // so a pan during a simultaneous zoom matches the engine (CameraPan,
+      // Cfile:1149107).
+      const speed = (r.goalDist / this.canvas.clientHeight) * this.conVarNumber('cam_PanSpeed') * input
       const cos = Math.cos(r.yaw)
       const sin = Math.sin(r.yaw)
       r.goalTarget.x += (r.panX * cos - r.panZ * sin) * speed
@@ -955,6 +979,13 @@ export class UnitViewer {
   private applyRtsCameraTransform(): void {
     const r = this.rts
     const pitch = this.rtsPitch(r.dist)
+    // Vertical FOV varies with zoom too: cam_NearFOV(65 deg) near, cam_FarFOV
+    // (60 deg) far (CalculateFOV, Cfile:1150863-1150866). The old fixed 45 deg
+    // was markedly more telephoto than the original at every zoom.
+    const fov =
+      this.camZoomT(r.dist) * (this.conVarNumber('cam_FarFOV') - this.conVarNumber('cam_NearFOV')) +
+      this.conVarNumber('cam_NearFOV')
+    if (Math.abs(this.camera.fov - fov) > 1e-3) this.camera.fov = fov
     const horiz = Math.cos(pitch) * r.dist
     this.camera.position.set(
       r.target.x + Math.sin(r.yaw) * horiz,
