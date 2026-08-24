@@ -1,4 +1,5 @@
 import type { LuaHost } from '../lua/host'
+import type { Validity } from '../sim/ogrid'
 
 /**
  * Der Engine-Teil der Weltansicht: Klick → Befehl.
@@ -102,6 +103,14 @@ export function footprintOf(host: LuaHost, blueprintId: string): [number, number
 /**
  * Rasterfang. `elevation` liefert die Geländehöhe — dieselbe Quelle, aus der die
  * Sim ihre Höhe zieht (sonst steht das Gebäude im Bild woanders als in der Sim).
+ *
+ * `waterElevation` (the map's water surface, or undefined when the map has no
+ * water) clamps the build height UP to the water surface on underwater cells,
+ * exactly like COORDS_ToWorldPos / GetSurfaceHeight (`y = max(terrainY,
+ * waterElevation)`, Cfile:641654 / 1089843-1089852). Seabed-anchored footprints
+ * (occupancy caps & LAYER_Seabed) keep the raw terrain, but those caps are not
+ * exposed to the UI VM, so every underwater build floats to the surface — a
+ * documented residual for the rare seabed structure.
  */
 export function snapToGrid(
   x: number,
@@ -109,12 +118,15 @@ export function snapToGrid(
   sizeX: number,
   sizeZ: number,
   elevation: (x: number, z: number) => number,
+  waterElevation?: number,
 ): { x: number; y: number; z: number } {
   const cellX = Math.trunc(x - sizeX / 2)
   const cellZ = Math.trunc(z - sizeZ / 2)
   const worldX = cellX + sizeX / 2
   const worldZ = cellZ + sizeZ / 2
-  return { x: worldX, y: elevation(worldX, worldZ), z: worldZ }
+  const terrainY = elevation(worldX, worldZ)
+  const y = waterElevation !== undefined && waterElevation > terrainY ? waterElevation : terrainY
+  return { x: worldX, y, z: worldZ }
 }
 
 /**
@@ -143,6 +155,17 @@ export async function worldClick(
     reclaimPropId?: number
     /** A map prop under the cursor — its scmap instance index. */
     reclaimMapPropIndex?: number
+    /** The map's water surface height (undefined = no water) — a build is
+     *  clamped up to it on underwater cells (GetSurfaceHeight, Cfile:641654). */
+    waterElevation?: number
+    /** The enemy under the cursor is RECLAIMABLE (being built, or category
+     *  RECLAIMABLE, and not busy — mirrors v52 @Cfile:1240220). When the
+     *  selection cannot attack it, the engine issues Reclaim (Cfile:1240271). */
+    enemyReclaimable?: boolean
+    /** Placement validity at the snapped cell (canBuildStructureAt). The world
+     *  view (UIBuildDragger) does not issue a build where the ghost is red —
+     *  the same query that colours the ghost gates the order. */
+    buildValidity?: (blueprintId: string, x: number, z: number) => Validity
   } = { queue: false },
 ): Promise<string | null> {
   // pull() liefert JSON — eine LEERE Lua-Tabelle wuerde als `{}` in JS ankommen,
@@ -268,10 +291,72 @@ export async function worldClick(
       : `Reclaim (${n}) → map prop #${opts.reclaimMapPropIndex}`
   }
 
+  // The Move button/hotkey (orders.lua, RULEUCC_Move): a FORCED move — the
+  // click goes to the ground point regardless of what is under the cursor (an
+  // enemy is NOT attacked, an own unit is NOT guarded). Factories rally.
+  if (cm.mode === 'order' && cm.name === 'RULEUCC_Move') {
+    let moved = 0
+    let rallied = 0
+    for (const u of selection) {
+      if (u.canMove) {
+        sim.move(u.id, hit.x, hit.z, opts.queue)
+        moved++
+      } else if (u.isFactory) {
+        sim.setRallyPoint(u.id, hit.x, elevation(hit.x, hit.z), hit.z)
+        rallied++
+      }
+    }
+    if (moved === 0 && rallied === 0) return null
+    onCommandIssued(host, {
+      // The rally point is issued as UNITCOMMAND_Move (IssueFactoryRallyPoint,
+      // Cfile:1008346) — its feedback is a Move blip, not an invented type.
+      CommandType: 'Move',
+      Position: { x: hit.x, y: elevation(hit.x, hit.z), z: hit.z },
+      Clear: !opts.queue,
+    })
+    return `Move (${moved}) → ${hit.x.toFixed(0)}, ${hit.z.toFixed(0)}`
+  }
+
+  // The Repair button/hotkey (orders.lua, RULEUCC_Repair): a FORCED repair on
+  // the unit under the cursor (own, finished or unfinished) — the same repair
+  // task as the default right-click (dispatch 0x14). Bare ground does nothing.
+  if (cm.mode === 'order' && cm.name === 'RULEUCC_Repair') {
+    const target = opts.repairTargetId ?? opts.ownTargetId
+    if (target === undefined) return null
+    let n = 0
+    for (const u of selection) {
+      if (u.canRepair && u.id !== target) {
+        sim.repair(u.id, target, opts.queue)
+        n++
+      }
+    }
+    if (n === 0) return null
+    onCommandIssued(host, {
+      CommandType: 'Repair',
+      Position: { x: hit.x, y: elevation(hit.x, hit.z), z: hit.z },
+      Clear: !opts.queue,
+    })
+    return `Repair (${n}) → Unit ${target}`
+  }
+
+  // Any OTHER order mode (Capture, Overcharge, Nuke, Tactical, Teleport, Ferry,
+  // Transport, Sacrifice, Dive, SiloBuild*, Script): the sim has no task for it
+  // yet. FAIL LOUDLY (CLAUDE.md) rather than fall through to the default
+  // handler, which would silently misroute the click to Attack/Move.
+  if (cm.mode === 'order') {
+    return `command mode ${cm.name} is not wired to the sim yet — click ignored`
+  }
+
   if (cm.mode === 'build' || cm.mode === 'buildanchored') {
     if (!cm.name) return null
     const [sx, sz] = footprintOf(host, cm.name)
-    const pos = snapToGrid(hit.x, hit.z, sx, sz, elevation)
+    const pos = snapToGrid(hit.x, hit.z, sx, sz, elevation, opts.waterElevation)
+    // Red ghost -> no order. The engine's world view refuses to place a
+    // structure where CanBuildStructureAt fails; 'unknown' (mobile / deposit-
+    // restricted, no markers) is left to pass, matching the neutral ghost.
+    if (opts.buildValidity && opts.buildValidity(cm.name, pos.x, pos.z) === 'invalid') {
+      return `Bau: ${cm.name} auf ${pos.x.toFixed(1)}, ${pos.z.toFixed(1)} blockiert — kein Befehl`
+    }
     // The first builder of the selection places the site; every other
     // selected unit with RULEUCC_Repair joins the SAME site through the
     // repair/build task — the engine's BuildAssist result (dispatch 0x09;
@@ -314,13 +399,37 @@ export async function worldClick(
       sim.attack(u.id, opts.enemyTargetId, opts.queue)
       n++
     }
-    if (n === 0) return null
-    onCommandIssued(host, {
-      CommandType: 'Attack',
-      Position: { x: hit.x, y, z: hit.z },
-      Clear: !opts.queue,
-    })
-    return `Attack (${n}) → Unit ${opts.enemyTargetId}`
+    if (n > 0) {
+      onCommandIssued(host, {
+        CommandType: 'Attack',
+        Position: { x: hit.x, y, z: hit.z },
+        Clear: !opts.queue,
+      })
+      return `Attack (${n}) → Unit ${opts.enemyTargetId}`
+    }
+    // No selected unit can attack it (the engine's sub_81D080 short-circuit is
+    // false). If the enemy is reclaimable and the selection can reclaim, the
+    // engine issues Reclaim instead of doing nothing (Cfile:1240271-1240288) —
+    // e.g. a pure-engineer selection right-clicking an enemy structure under
+    // construction. Reclaim of a live unit target uses the same dispatch 0x13.
+    if (opts.enemyReclaimable) {
+      let r = 0
+      for (const u of selection) {
+        if (u.canReclaim) {
+          sim.reclaim(u.id, opts.enemyTargetId, opts.queue)
+          r++
+        }
+      }
+      if (r > 0) {
+        onCommandIssued(host, {
+          CommandType: 'Reclaim',
+          Position: { x: hit.x, y, z: hit.z },
+          Clear: !opts.queue,
+        })
+        return `Reclaim (${r}) → Unit ${opts.enemyTargetId}`
+      }
+    }
+    return null
   }
   // Click on an OWN UNFINISHED structure: units with RULEUCC_Repair resume
   // its construction (repair task, dispatch 0x14) — the engine default.
@@ -399,7 +508,9 @@ export async function worldClick(
   if (moved === 0 && rallied === 0) return null
 
   onCommandIssued(host, {
-    CommandType: moved > 0 ? 'Move' : 'RallyPoint',
+    // The rally point is a UNITCOMMAND_Move under the hood (Cfile:1008346), so
+    // its feedback is a Move blip — 'RallyPoint' is not a valid EUnitCommandType.
+    CommandType: 'Move',
     Position: { x: hit.x, y, z: hit.z },
     Clear: !opts.queue,
   })

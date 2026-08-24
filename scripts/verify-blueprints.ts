@@ -60,6 +60,19 @@ const check = (ok: boolean, label: string): void => {
   if (!ok) failures++
 }
 
+// Lua long-string VALUES [[...]] / [=[...]=] — the real effect/emitter
+// blueprints use them for texture paths (a3_end_nis_01_emit.bp:26); before, the
+// whole blueprint failed to parse on the first one.
+{
+  const { parseBlueprint, bpGet } = await import('../src/formats/blueprint')
+  const bp = parseBlueprint(
+    'EmitterBlueprint { Texture = [[/textures/particles/glow_03.dds]], RampTexture = [=[a]]b]=], Count = 5 }',
+  )
+  check(bpGet(bp, 'Texture') === '/textures/particles/glow_03.dds', 'long-string [[...]] value parses')
+  check(bpGet(bp, 'RampTexture') === 'a]]b', 'level-1 long-string [=[...]=] keeps inner ]]')
+  check(bpGet(bp, 'Count') === 5, 'the assignment after a long string still parses')
+}
+
 const warnings: string[] = []
 const host = await LuaHost.create(files, (level, msg) => {
   if (level === 'WARN') warnings.push(msg)

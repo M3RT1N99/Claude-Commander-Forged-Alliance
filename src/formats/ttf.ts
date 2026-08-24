@@ -90,9 +90,18 @@ export function parseTtf(bytes: Uint8Array): FontMetrics {
     descent,
     lineGap,
     advance(text: string, size: number): number {
-      let units = 0
-      for (const ch of text) units += advanceOf(lookup(ch.codePointAt(0)!))
-      return (units * size) / unitsPerEm
+      // The engine (CD3DFont::GetAdvance, Cfile:460774) sums a per-glyph
+      // INTEGER pixel advance and has NO kerning: each glyph's mAdvance is
+      // rc.right-rc.left from DrawTextW(DT_CALCRECT|DT_SINGLELINE|DT_NOPREFIX),
+      // measured one character at a time (GetCharInfo, Cfile:460471/460509) —
+      // a GDI text extent cast from a LONG, so an integer. Round EACH glyph to
+      // an integer pixel at the point size before summing, not once at the end.
+      // (Round-to-nearest approximates GDI's scaled advance; exact GDI hinting /
+      // grid-fitting is a Windows internal we cannot reproduce, so this can
+      // differ by ~1px on hinted glyphs — documented, not invented.)
+      let px = 0
+      for (const ch of text) px += Math.round((advanceOf(lookup(ch.codePointAt(0)!)) * size) / unitsPerEm)
+      return px
     },
   }
 }

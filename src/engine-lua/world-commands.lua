@@ -145,6 +145,48 @@ end
 
 --- Der Command-Mode, wie die Original-Lua ihn fuehrt (commandmode.lua:109).
 --- Rueckgabe als JSON: { mode = 'build'|'order'|false, name = <string>|false }
+-- Command-mode cursor (worldview.lua:131-181 OnUpdateCursor): the world control
+-- swaps the mouse cursor to the mode's SKIN cursor (skins.lua:170ff, a dedicated
+-- animated cursor texture, NOT the order-button icon). Our worldview is a render
+-- stub, so we drive the same mapping here each frame; GetCursor():SetTexture
+-- (cursor.lua) forks the frame animation and pushes each frame through
+-- SetNewTexture -> __uiSetCursorTexture (moho.lua:1300) to the DOM cursor.
+__uiCursorId = false
+function __uiUpdateCursor()
+  local cur = GetCursor()
+  if not cur or not cur.SetTexture then return end
+  local cm = import('/lua/ui/game/commandmode.lua').GetCommandMode()
+  local mode = cm and cm[1]
+  local data = cm and cm[2]
+  local id
+  if mode == 'order' and data and data.name then
+    id = data.name -- RULEUCC_* -> skins.cursors[RULEUCC_*]
+  elseif mode == 'build' or mode == 'buildanchored' then
+    id = 'BUILD'
+  elseif mode then
+    id = 'RULEUCC_Invalid'
+  else
+    id = false
+  end
+  -- Only touch the cursor when the mode changes, or the animation thread would
+  -- be re-forked every frame (worldview.lua only sets it on a real change).
+  if id == __uiCursorId then return end
+  __uiCursorId = id
+  if id then
+    -- UIUtil.GetCursor returns the cursor def UNPACKED (texture, hotspotX,
+    -- hotspotY, numFrames, fps — uiutil.lua:347), exactly what SetTexture wants;
+    -- worldview.lua wraps it in a table then unpacks, we pass it straight
+    -- through. SetTexture forks the frame animation and pushes each frame to the
+    -- DOM bridge (cursor.lua _filename.OnDirty -> SetNewTexture).
+    local tex, hx, hy, frames, fps = import('/lua/ui/uiutil.lua').GetCursor(id)
+    if tex then cur:SetTexture(tex, hx, hy, frames, fps) end
+  else
+    if cur.Reset then cur:Reset() elseif cur.ResetToDefault then cur:ResetToDefault() end
+    -- No default arrow texture is defined, so clear the DOM cursor explicitly.
+    if __uiSetCursorTexture then __uiSetCursorTexture('', 0, 0) end
+  end
+end
+
 function __uiCommandModeJson()
   local cm = import('/lua/ui/game/commandmode.lua').GetCommandMode()
   local mode = cm[1]

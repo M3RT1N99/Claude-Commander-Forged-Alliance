@@ -85,7 +85,100 @@ function __createWeapons(u, bp)
 end
 
 -- Unit spawnen: Original-Script-Klasse instanziieren + OnCreate ----------
-function __spawnUnit(scriptPath, bpId, x, y, z, army, complete)
+local LAYER_INFO = {
+  land = { name = 'Land', bit = 0x01, bp = 'LAYER_Land' },
+  seabed = { name = 'Seabed', bit = 0x02, bp = 'LAYER_Seabed' },
+  sub = { name = 'Sub', bit = 0x04, bp = 'LAYER_Sub' },
+  water = { name = 'Water', bit = 0x08, bp = 'LAYER_Water' },
+  air = { name = 'Air', bit = 0x10, bp = 'LAYER_Air' },
+  orbit = { name = 'Orbit', bit = 0x20, bp = 'LAYER_Orbit' },
+}
+
+-- COORDS_StringToLayer accepts exactly these six unprefixed names,
+-- case-insensitively; every other string maps to LAYER_None
+-- (Cfile:641397-641409). In particular, "LAYER_Air" is not an alias.
+local function coordsStringToLayer(value)
+  if type(value) ~= 'string' then return nil end
+  return LAYER_INFO[string.lower(value)]
+end
+
+-- RUnitBlueprintPhysics::ComputeDerivedQuantities writes these exact caps into
+-- the unit footprint (Cfile:656226-656293; FootprintOccupancyCaps). This is not
+-- a starting-layer heuristic: GetStartingLayer consumes the derived footprint
+-- caps, and the browser blueprint does not expose the native SFootprint.
+local MOTION_FOOTPRINT_CAPS = {
+  RULEUMT_None = 0x00,
+  RULEUMT_Land = 0x01,
+  RULEUMT_Air = 0x10,
+  RULEUMT_Water = 0x08,
+  RULEUMT_Biped = 0x01,
+  RULEUMT_SurfacingSub = 0x0C,
+  RULEUMT_Amphibious = 0x03,
+  RULEUMT_Hover = 0x09,
+  RULEUMT_AmphibiousFloating = 0x09,
+  RULEUMT_Special = 0x00,
+}
+
+local function footprintLayerCaps(bp)
+  local physics = bp.Physics or {}
+  local motion = physics.MotionType or 'RULEUMT_None'
+  -- The native derived-quantity pass forces zero-speed blueprints to None
+  -- before choosing the footprint (Cfile:656226-656238).
+  if (physics.MaxSpeed or 0) == 0 then motion = 'RULEUMT_None' end
+
+  local caps = MOTION_FOOTPRINT_CAPS[motion] or 0
+  if motion == 'RULEUMT_None' then
+    -- Buildings get the low byte of Physics.BuildOnLayerCaps instead
+    -- (Cfile:656283-656293).
+    local buildCaps = physics.BuildOnLayerCaps or {}
+    caps = 0
+    for _, info in pairs(LAYER_INFO) do
+      if buildCaps[info.bp] == true then caps = caps | info.bit end
+    end
+  end
+  return caps
+end
+
+local function fittingCapsAtPoint(caps, x, z)
+  local submerged = (__mapWaterLevel or -10000) > GetTerrainHeight(x, z)
+  if submerged then
+    -- The native OCCUPY_FootprintFits also checks every footprint sample,
+    -- slope, blocking terrain and occupied structure grids. Those grids and
+    -- resolved footprint depth limits do not exist in this simulator yet.
+    -- At a submerged centre point, conservatively do not claim LAND fits.
+    caps = caps & ~0x01
+  else
+    -- Conversely, water-only layers cannot fit when the centre terrain is at
+    -- or above the water plane. AIR/ORBIT remain independent of that plane.
+    caps = caps & ~0x0E
+  end
+  return caps, submerged
+end
+
+local function startingLayer(u, bp, x, z, requested)
+  local requestedInfo = coordsStringToLayer(requested)
+  local footprintCaps = footprintLayerCaps(bp)
+  local fittingCaps, submerged = fittingCapsAtPoint(footprintCaps, x, z)
+
+  -- Entity::GetStartingLayer first preserves a requested layer only if the
+  -- footprint actually fits it (Cfile:857497-857499).
+  if requestedInfo and (fittingCaps & requestedInfo.bit) ~= 0 then
+    return requestedInfo.name
+  end
+
+  local experimental = EntityCategoryContains(categories.EXPERIMENTAL, u)
+  if (fittingCaps & 0x10) ~= 0 then
+    return experimental and 'Land' or 'Air'
+  end
+  if not submerged then return 'Land' end
+  if (footprintCaps & 0x04) ~= 0 and not experimental then return 'Sub' end
+  if (footprintCaps & 0x08) ~= 0 or EntityCategoryContains(categories.FERRYBEACON, u) then
+    return 'Water'
+  end
+  return 'Seabed'
+end
+
+function __spawnUnit(scriptPath, bpId, x, y, z, army, complete, requestedLayer)
   local bp = __registered.Unit[bpId]
   if not bp then return -1, 'blueprint not registered: ' .. tostring(bpId) end
   local mod = import(scriptPath)
@@ -102,11 +195,13 @@ function __spawnUnit(scriptPath, bpId, x, y, z, army, complete)
   u.__army = army
   u.__brain = __getBrain(army)
   u.__pos = { x, y, z }
-  -- The native unit supplies this legacy field before Weapon.OnCreate, which
-  -- uses it to select FireTargetLayerCapsTable[unit.Layer]. Air blueprints
-  -- begin in the Air layer; all other motion types start in this model's
-  -- existing Land layer until layer transitions are simulated.
-  u.Layer = ((bp.Physics or {}).MotionType == 'RULEUMT_Air') and 'Air' or 'Land'
+  -- mVarDat.mLayer is initialized before Weapon.OnCreate. Original Lua also
+  -- reads the legacy `Layer` field, so both names must refer to the same
+  -- starting layer. Previously only `Layer` was set while GetCurrentLayer and
+  -- projectile impact classification read `__layer`, making every Air unit
+  -- report Land.
+  u.__layer = startingLayer(u, bp, x, z, requestedLayer)
+  u.Layer = u.__layer
   -- Das Skelett aus dem Modell (siehe __setBones). Es muss VOR OnCreate stehen:
   -- die Waffen pruefen ihre Turm-Knochen beim Aufbau (weapon.lua:67).
   u.__bones = __unitBones[string.lower(bpId)] or { names = {}, xform = {}, index = {} }
@@ -117,12 +212,29 @@ function __spawnUnit(scriptPath, bpId, x, y, z, army, complete)
   u.__speed = 0
   u.__health = (bp.Defense and bp.Defense.MaxHealth) or 0
   u.__fraction = 1
+  u.__autoMode = false
+  u.__autoSurfaceMode = false
   -- Erstellungs-Tick: die Build-/Wreckage-Shader zaehlen ihr Alter darueber
   -- (mesh.fx: material.x = time - creationTime).
   u.__spawnTick = __gameTick or 0
   -- Engine-bereitgestellte Instanz-Felder (vor OnCreate vorhanden)
   u.Trash = TrashBag()
   __units[id] = u
+
+  -- Install the command-cap bindings up front (seeded from the blueprint mask)
+  -- so a script's OnCreate/OnStopBeingBuilt can already call AddCommandCap/
+  -- RemoveCommandCap. Without this they hit the withNoops stub until the first
+  -- readRow beat and the cap change is silently lost
+  -- (globals.lua __ensureCommandCapMask; UnitAttributes init Cfile:949126).
+  __ensureCommandCapMask(u)
+
+  -- The native constructor calls SetAutoMode(InitialAutoMode) immediately
+  -- before OnPreCreate (Cfile:950066). SetAutoMode dispatches OnAutoModeOn/Off
+  -- even when the value equals the default.
+  local okAuto, errAuto = pcall(function()
+    u:SetAutoMode((bp.AI or {}).InitialAutoMode == true)
+  end)
+  if not okAuto then return id, tostring(errAuto) end
 
   -- Blueprint-Ökonomie in die Engine-Ökonomie der Armee einklinken (Original:
   -- CEconomy im CArmyImpl; die Unit registriert Produktion/Unterhalt).
@@ -172,8 +284,308 @@ function __spawnUnit(scriptPath, bpId, x, y, z, army, complete)
       ok2, err2 = pcall(function() u:OnStopBeingBuilt(nil, u:GetCurrentLayer()) end)
     end
     if not ok2 then return id, tostring(err2) end
+    -- The engine tells an immobile unit and its neighbours about each other
+    -- right after creation (Cfile:950616-950645).
+    __notifyAdjacent(id)
   end
   return id, ''
+end
+
+-- These are sim_SimInits globals: sim-only, like CreateUnit above. The UI
+-- VM must not have them (the core principle: never boot both into one VM).
+-- === Per-army state + the victory / game-over chain ===
+--
+-- The engine keeps these on CArmyImpl (mVarDat/mConstDat). aibrain.lua and
+-- victory.lua drive defeat and end-of-game with them; without the bindings the
+-- AI's IsDefeated loop (aibrain.lua:806) and CallEndGame (victory.lua:89-99)
+-- died at "access to nonexistent global".
+
+-- One lazy record per 1-based army index. Civilian and the unit cap are seeded
+-- from the session on first touch (ScenarioInfo, like the CArmyImpl ctor reads
+-- the army table, Cfile:1017244/1017634).
+__armyVarDat = {}
+function __armyVar(army)
+  local i = army
+  if type(i) ~= 'number' then error('Unexpected type for army object', 2) end
+  local r = __armyVarDat[i]
+  if not r then
+    -- UnitCap: session option, default 500 (Cfile:1017634-1017644).
+    local cap = 500
+    local civ = false
+    if ScenarioInfo then
+      if ScenarioInfo.Options and tonumber(ScenarioInfo.Options.UnitCap) then
+        cap = tonumber(ScenarioInfo.Options.UnitCap)
+      end
+      -- Civilian flag from the army setup row (Cfile:1017244).
+      for _, a in pairs((ScenarioInfo.ArmySetup) or {}) do
+        if a.ArmyIndex == i and a.Civilian == true then civ = true end
+      end
+    end
+    r = { isOutOfGame = false, isCivilian = civ, unitCap = cap, ignoreUnitCap = false }
+    __armyVarDat[i] = r
+  end
+  return r
+end
+
+-- "Signal the end of the game. Acts like a permanent pause." (EndGame,
+-- Cfile:1077480). Sets the ended flag; victory.lua:97 calls it 3 s after the
+-- result is synced.
+__gameEnded = false
+function EndGame()
+  __gameEnded = true
+end
+
+-- "Return true if the game is over (EndGame() has been called)." (IsGameOver,
+-- Cfile:1077505) — mGameEnded || mGameOver (Cfile:1077543). aibrain.lua:3586
+-- guards an AI loop with it.
+__gameOver = false
+function IsGameOver()
+  return __gameEnded == true or __gameOver == true
+end
+
+-- Defeat flag (Cfile:1026283/1026322). aibrain.lua:781 sets it first in
+-- OnDefeat; IsDefeated (aibrain.lua:806) reads it; victory.lua walks the armies.
+function ArmyIsOutOfGame(army) return __armyVar(army).isOutOfGame == true end
+function SetArmyOutOfGame(army) __armyVar(army).isOutOfGame = true end
+
+-- Civilian flag from the session (Cfile:1025673). victory.lua:28 skips
+-- civilians in the defeat/victory scan.
+function ArmyIsCivilian(army) return __armyVar(army).isCivilian == true end
+
+-- "SubmitXMLArmyStats" (Cfile:1091052) — the Lua-visible part is just a request
+-- flag; the gpg.net upload is the network layer's, which we do not have.
+-- victory.lua:91 calls it on every result, so it must not throw.
+__requestXMLArmyStatsSubmit = false
+function SubmitXMLArmyStats()
+  __requestXMLArmyStatsSubmit = true
+end
+
+-- === Unit cap ===
+-- GetArmyUnitCap/SetArmyUnitCap (Cfile:1024961/1025008), SetIgnoreArmyUnitCap
+-- (Cfile:1025065). simutils.lua:196-204 redistributes the total cap over the
+-- surviving brains after every defeat.
+function GetArmyUnitCap(army) return __armyVar(army).unitCap end
+function SetArmyUnitCap(army, cap)
+  if type(cap) ~= 'number' then error('SetArmyUnitCap: number expected', 2) end
+  __armyVar(army).unitCap = cap
+end
+function SetIgnoreArmyUnitCap(army, flag)
+  __armyVar(army).ignoreUnitCap = flag == true
+end
+
+-- "GetArmyUnitCostTotal(army)" (Cfile:1024895) — sums bp.General.CapCost over
+-- the army's units, skipping those in UNITSTATE_NoCost (Cfile:1016520-1016540).
+-- CapCost defaults to 1.0 (Cfile:656080).
+function GetArmyUnitCostTotal(army)
+  local total = 0
+  for _, u in ipairs(__armyUnits(army)) do
+    if not (u.IsUnitState and u:IsUnitState('NoCost')) then
+      local cc = (u.__bp and u.__bp.General and u.__bp.General.CapCost)
+      total = total + (cc or 1)
+    end
+  end
+  return total
+end
+
+-- "ListArmies()" (Cfile:1024337) — the army NAMES at 1-based indices, in army
+-- order (mConstDat.mArmyName, Cfile:1024383). siminit.lua:187 applies build
+-- restrictions to each; scenarioutilities iterates it. Strings, not brains.
+function ListArmies()
+  local out = {}
+  if ScenarioInfo and ScenarioInfo.ArmySetup then
+    for name, a in pairs(ScenarioInfo.ArmySetup) do
+      out[a.ArmyIndex] = a.ArmyName or name
+    end
+  end
+  return out
+end
+
+-- "CheatsEnabled()" (Cfile:1077381) — the session flag, and it LOGS the attempt
+-- either way (Cfile:1074063). ScenarioInfo.Options.CheatsEnabled == 'true'.
+__cheatsEnabled = false
+function CheatsEnabled()
+  if ScenarioInfo and ScenarioInfo.Options and ScenarioInfo.Options.CheatsEnabled == 'true' then
+    __cheatsEnabled = true
+  end
+  return __cheatsEnabled == true
+end
+
+-- === Creating units from Lua ===
+--
+-- CreateUnit(blueprint, army, tx, ty, tz, qx, qy, qz, qw, [layer])
+-- (cfunc_CreateUnitL, Cfile:980268, help text Cfile:980258). The engine checks
+-- the blueprint ("Unknown unit kind: %s", Cfile:980337) and the army index
+-- ("Invalid army index; must be >= 1 and < %d", Cfile:980352), builds
+-- SUnitConstructionParams(layer, pos, army, bp, creator = 0, complete = 1) from
+-- them and calls Sim::CreateUnit — the unit comes into being COMPLETE, not as
+-- a construction site (Cfile:980435-980444). It returns the unit; if creation
+-- fails the engine throws "CreateUnit(%s) failed".
+--
+-- Callers in the original: effectutilities.lua:436 (SpawnBuildBots — the
+-- Cybran build drones), scenarioframework, terranunits.lua (build pods).
+local function spawnCreateUnit(blueprint, army, x, y, z, heading, who, layer)
+  local key = type(blueprint) == 'string' and string.lower(blueprint) or nil
+  local bp = key and __registered and __registered.Unit[key]
+  if not bp then error('Unknown unit kind: ' .. tostring(blueprint), 3) end
+  if type(army) ~= 'number' or army < 1 then
+    error('Invalid army index; must be >= 1 but got ' .. tostring(army), 3)
+  end
+  local scriptPath = bp.Script or ('/units/' .. key .. '/' .. key .. '_script.lua')
+  local id, err = __spawnUnit(scriptPath, key, x, y, z, army, true, layer)
+  if id < 0 then error(who .. '(' .. tostring(blueprint) .. ') failed: ' .. tostring(err), 3) end
+  local u = __units[id]
+  u.__heading = heading or 0
+  return u
+end
+
+--- The yaw from a quaternion (the engine hands out orientations as
+--- quaternions, GetOrientation -> {x, y, z, w}).
+local function headingFromQuat(qx, qy, qz, qw)
+  qx, qy, qz, qw = qx or 0, qy or 0, qz or 0, qw or 1
+  return math.atan(2 * (qw * qy + qx * qz), 1 - 2 * (qy * qy + qz * qz))
+end
+
+function CreateUnit(blueprint, army, tx, ty, tz, qx, qy, qz, qw, layer)
+  return spawnCreateUnit(blueprint, army, tx, ty, tz, headingFromQuat(qx, qy, qz, qw), 'CreateUnit', layer)
+end
+
+--- CreateUnitHPR(blueprint, army, x, y, z, pitch, yaw, roll) — Cfile:980475.
+--- The same creation, only with Euler angles instead of a quaternion.
+function CreateUnitHPR(blueprint, army, x, y, z, pitch, yaw, roll)
+  return spawnCreateUnit(blueprint, army, x, y, z, yaw or 0, 'CreateUnitHPR')
+end
+
+--- CreateUnit2(blueprint, army, layer, x, z, heading) — Cfile:980637. The
+--- height comes from the terrain (the signature has no y).
+function CreateUnit2(blueprint, army, layer, x, z, heading)
+  -- CreateUnit2 alone specifies heading in degrees; the native binding
+  -- multiplies it by pi/180 before constructing the quaternion
+  -- (Cfile:980842-980853). Runtime headings in this engine are radians.
+  return spawnCreateUnit(
+    blueprint, army, x, GetSurfaceHeight(x, z), z,
+    math.rad(heading or 0), 'CreateUnit2', layer
+  )
+end
+
+-- === Adjacency (Moho::Unit::CollectAllOverlapping, Cfile:62d460) ===
+--
+-- When an immobile unit comes into being — created complete (Cfile:950616) or
+-- finished by a build task (Materialize, Cfile:953548) — the engine collects
+-- every overlapping structure and runs the Lua callback on BOTH sides:
+--
+--   new:OnAdjacentTo(other, new)      Cfile:953563
+--   other:OnAdjacentTo(new,   new)    Cfile:953568
+--
+-- That is where FA's adjacency bonuses come from: StructureUnit.OnAdjacentTo
+-- (defaultunits.lua:357) looks up bp.Adjacency in AdjacencyBuffs and applies
+-- every buff of that table to the neighbour. Without the callback a power
+-- generator next to a factory does nothing at all — one of the game's core
+-- mechanics was missing.
+
+--- The ENGINE's skirt rect (Moho::RUnitBlueprint::GetSkirtRect, Cfile:51ec50).
+--- NOT the same as the Lua one in unit.lua:240: the engine TRUNCATES the lower
+--- corner to whole ogrids (grid alignment) and falls back to the footprint when
+--- a skirt size is 0.
+local function skirtRect(u)
+  local bp = u.__bp or {}
+  local fp = bp.Footprint or {}
+  local phys = bp.Physics or {}
+  local p = u.__pos or { 0, 0, 0 }
+  local fpX = fp.SizeX or 0
+  local fpZ = fp.SizeZ or 0
+  -- (int) truncates toward zero; map coordinates are positive.
+  local xLower = math.floor(p[1] - fpX * 0.5)
+  local zLower = math.floor(p[3] - fpZ * 0.5)
+  local x0, x1, z0, z1
+  if (phys.SkirtSizeX or 0) == 0 then
+    x0, x1 = xLower, xLower + fpX
+  else
+    x0 = xLower + (phys.SkirtOffsetX or 0)
+    x1 = x0 + phys.SkirtSizeX
+  end
+  if (phys.SkirtSizeZ or 0) == 0 then
+    z0, z1 = zLower, zLower + fpZ
+  else
+    z0 = zLower + (phys.SkirtOffsetZ or 0)
+    z1 = z0 + phys.SkirtSizeZ
+  end
+  return x0, z0, x1, z1
+end
+
+--- Moho::Unit::OverlapsWith (Cfile:62d2b0) — two skirts count as adjacent when
+--- they TOUCH on one axis (edge distance < 1 ogrid) and one of them CONTAINS
+--- the other on the other axis. That containment rule is why FA's adjacency is
+--- so picky about alignment.
+local function overlapsWith(a, b)
+  local ax0, az0, ax1, az1 = skirtRect(a)
+  local bx0, bz0, bx1, bz1 = skirtRect(b)
+  local touchX = math.abs(ax0 - bx1) < 1 or math.abs(ax1 - bx0) < 1
+  if not touchX then
+    -- Not touching along X: then they must touch along Z and overlap in X.
+    local touchZ = math.abs(az0 - bz1) < 1 or math.abs(az1 - bz0) < 1
+    if not touchZ then return false end
+    if ax0 >= bx0 and bx1 >= ax1 then return true end
+    if bx0 >= ax0 and ax1 >= bx1 then return true end
+    return false
+  end
+  -- Touching along X: they must contain each other along Z.
+  if az0 >= bz0 and bz1 >= az1 then return true end
+  if bz0 >= az0 and az1 >= bz1 then return true end
+  return false
+end
+
+local function immobile(u)
+  return ((u.__bp and u.__bp.Physics and u.__bp.Physics.MotionType) or 'RULEUMT_None') == 'RULEUMT_None'
+end
+
+--- Every structure of the same army whose skirt overlaps this one's.
+--- Filter per Cfile:62d56a-62d5be: alive, IMMOBILE, SAME ARMY, not itself,
+--- same layer, within 20 ogrids, and OverlapsWith.
+local function overlappingNeighbours(id, u)
+  local out = {}
+  local p = u.__pos or { 0, 0, 0 }
+  for oid, o in pairs(__units) do
+    if oid ~= id and not o.__dead and not o.__destroyQueued and immobile(o)
+      and (o.__army or 1) == (u.__army or 1) and o.Layer == u.Layer then
+      local q = o.__pos or { 0, 0, 0 }
+      local dx, dz = q[1] - p[1], q[3] - p[3]
+      -- The engine's spatial query uses a 20 ogrid radius (Cfile:62d4f9).
+      if dx * dx + dz * dz <= 400 and overlapsWith(u, o) then
+        out[table.getn(out) + 1] = o
+      end
+    end
+  end
+  return out
+end
+
+--- Tell a freshly completed structure and its neighbours about each other
+--- (Cfile:953563/953568). The second argument is the TRIGGERING unit in both
+--- calls — the one that just came into being.
+function __notifyAdjacent(id)
+  local u = __units[id]
+  if not u or u.__dead or u.__destroyQueued or not immobile(u) then return end
+  for _, o in ipairs(overlappingNeighbours(id, u)) do
+    local ok, err = pcall(function() u:OnAdjacentTo(o, u) end)
+    if not ok then WARN('OnAdjacentTo: ' .. tostring(err)) end
+    local ok2, err2 = pcall(function() o:OnAdjacentTo(u, u) end)
+    if not ok2 then WARN('OnAdjacentTo: ' .. tostring(err2)) end
+  end
+end
+
+--- The counterpart when a structure DIES (Cfile:952133-952162): if it is
+--- immobile and was NOT still under construction, both sides get
+--- `OnNotAdjacentTo(other)` — one argument, not two (defaultunits.lua:372).
+--- That is what REMOVES the adjacency buffs again; without it a destroyed
+--- power generator kept boosting its neighbour forever.
+function __notifyNotAdjacent(id)
+  local u = __units[id]
+  if not u or not immobile(u) or u.__beingBuilt then return end
+  for _, o in ipairs(overlappingNeighbours(id, u)) do
+    local ok, err = pcall(function() u:OnNotAdjacentTo(o) end)
+    if not ok then WARN('OnNotAdjacentTo: ' .. tostring(err)) end
+    local ok2, err2 = pcall(function() o:OnNotAdjacentTo(u) end)
+    if not ok2 then WARN('OnNotAdjacentTo: ' .. tostring(err2)) end
+  end
 end
 
 -- Baustelle: wie __spawnUnit, aber UNFERTIG (FractionComplete 0, Health 0,
@@ -219,6 +631,9 @@ function __finishUnit(id, builderId)
   else
     ok, err = pcall(function() u:OnStopBeingBuilt(builder, u:GetCurrentLayer()) end)
   end
+  -- Materialize runs the adjacency scan once the unit is complete
+  -- (Cfile:953548-953576).
+  __notifyAdjacent(id)
   return ok, (ok and '' or tostring(err))
 end
 
@@ -253,24 +668,53 @@ local function activeOrder(id, u)
   return nil
 end
 
+-- Resolve one command's waypoint position by its type — the SAME rules for the
+-- executing head and the waiting queue (both are entries of the command list).
+local function resolveOrderPos(cmd)
+  if cmd.type == 'Move' or cmd.type == 'Patrol' then
+    return cmd.x, cmd.z
+  elseif cmd.gx then
+    return cmd.gx, cmd.gz -- ground attack (queued or active)
+  elseif cmd.type == 'Reclaim' then
+    -- Reclaim targets a PROP (wreck / map feature) or, rarely, a live unit
+    -- (globals.lua:1703) — resolve from either so the reclaim line draws.
+    local p = (__props and __props[cmd.target]) or __units[cmd.target]
+    if p and p.__pos then return p.__pos[1], p.__pos[3] end
+  else
+    local t = __units[cmd.target]
+    if t and t.__pos then return t.__pos[1], t.__pos[3] end
+  end
+  return nil
+end
+
 -- The FULL order list for the command graph: the active order first, then
 -- the queued commands (__orders FIFO) with entity targets resolved to
 -- their CURRENT position — the original graph tracks entity targets live
 -- (DirtyCommandGraph re-tesselation).
 local function orderList(id, u)
   local out = nil
-  local ot, ox, oz = activeOrder(id, u)
-  if ot then out = { { t = ot, x = ox, z = oz } } end
+  -- HEAD: the executing command keeps its OWN UNITCOMMAND type. The engine's
+  -- UICommandGraph::CreateMeshes (Cfile:1247191) walks the whole command queue
+  -- INCLUDING the running head, and every node keeps its EUnitCommandType
+  -- (LoadPathParams builds one node per type, Cfile:1244312). __orderActive[id]
+  -- IS that head (globals.lua). Reading it fixes an active Patrol drawn as a Move
+  -- waypoint and an active Reclaim/Guard (whose __goal is cleared while it works)
+  -- drawn as no line at all — activeOrder() reconstructed the type from live
+  -- physics and got both wrong.
+  local active = __orderActive and __orderActive[id]
+  if active then
+    local x, z = resolveOrderPos(active)
+    if x then out = { { t = active.type, x = x, z = z } } end
+  else
+    -- Commands that do NOT flow through the order queue keep their execution
+    -- state elsewhere: a mobile builder's structure build/repair lives only in
+    -- __buildTasks (luaSimWorker.ts:219), and an auto-engagement attack in
+    -- __attackOrders. activeOrder() surfaces those as the head.
+    local ot, ox, oz = activeOrder(id, u)
+    if ot then out = { { t = ot, x = ox, z = oz } } end
+  end
   for _, cmd in ipairs((__orders and __orders[id]) or {}) do
-    local x, z
-    if cmd.type == 'Move' or cmd.type == 'Patrol' then
-      x, z = cmd.x, cmd.z
-    elseif cmd.gx then
-      x, z = cmd.gx, cmd.gz -- queued ground attack
-    else
-      local t = __units[cmd.target]
-      if t and t.__pos then x, z = t.__pos[1], t.__pos[3] end
-    end
+    local x, z = resolveOrderPos(cmd)
     if x then
       out = out or {}
       out[#out + 1] = { t = cmd.type, x = x, z = z }
@@ -318,9 +762,43 @@ local function readRow(id, u)
     -- The guarded unit id (mUnit->mGuardedUnit, task-synced Cfile:839316) —
     -- feeds GetGuardedEntity/GetAssistingUnitsList in the user mirror.
     guard = u.__guardedUnit or 0,
+    -- The effective command-cap mask (UnitAttributes::commandCapsMask:
+    -- blueprint-initialized, mutated by Add/RemoveCommandCap, faf-re
+    -- Unit.cpp:8675-8813). Synced per beat so the UI mirror follows
+    -- runtime cap changes instead of freezing at the blueprint state.
+    caps = __ensureCommandCapMask(u),
+    toggleCaps = __ensureToggleCapMask(u),
+    -- ToggleScriptBit and the UI getters read the synchronized Unit variable
+    -- data, not an optimistic UI copy (cfunc_ToggleScriptBitL).
+    scriptBits = u.__scriptBits or 0,
+    -- Current layer (mVarDat.mLayer): GetIsSubmerged folds this value into
+    -- -1/0/+1 on the user side.
+    layer = u:GetCurrentLayer(),
+    autoMode = u.__autoMode == true,
+    autoSurfaceMode = u.__autoSurfaceMode == true,
+    -- Shield strength ratio (0..1), fed by shield.lua UpdateShieldRatio ->
+    -- Unit:SetShieldRatio (moho). The UI mirror shows it (GetShieldRatio; the
+    -- rollover shield bar, unitview.lua).
+    shieldRatio = u.__shieldRatio or 0,
+    -- WorkProgress (mUnitVarDat.mWorkProgress): what this unit is working on,
+    -- written by the build task every tick (Cfile:815482) and by Lua for
+    -- enhancements (unit.lua:3579). The UI shows exactly this
+    -- (construction.lua:380 GetWorkProgress) — for an upgrading structure it is
+    -- the progress of its successor.
+    workProgress = u.__workProgress or 0,
+    -- UNITSTATE_BeingUpgraded (37) — the successor growing on top of a
+    -- structure. The drag box skips it (Cfile:1290062), so the box keeps
+    -- selecting the working original.
+    beingUpgraded = u:IsUnitState('BeingUpgraded'),
     born = u.__spawnTick or 0,
     mesh = u.__meshBp,
     army = u.__army or 1,
+    -- Death mirror: a unit lingers in __units through its multi-beat death
+    -- sequence (Kill -> OnKilled thread -> Destroy), so readRow still sends it.
+    -- Without this flag __uiSetUnit marks it alive (u.dead = false) and
+    -- SelectUnits/avatars/ValidateUnitsList would keep a dying unit selectable —
+    -- the engine excludes IsDead AND DestroyQueued (Cfile:1361497-1361498).
+    dead = (u.__dead == true) or (u.__destroyQueued == true),
     -- „idle" im Sinn der Engine (die Idle-Sets am UserArmy, Cfile:1352334-1352374,
     -- werden aus dem TASK-Zustand gepflegt): kein Bewegungsziel, kein laufender
     -- oder wartender Bau-Auftrag, keine Fabrik-Produktion — und eine BAUSTELLE
@@ -354,6 +832,17 @@ local function jnum(v)
   return string.format('%.6g', v or 0)
 end
 
+-- Integer fields need an EXACT serialization, not '%.6g'. '%.6g' keeps only 6
+-- significant digits, so a 7-digit value is rounded: the command-cap BITMASK
+-- 0x1602FF = 1442559 became 1442560 = 0x160300 — silently dropping the whole
+-- low byte (RULEUCC_Move 0x1, Attack, Guard, Repair, ...) while keeping the
+-- high bits (Reclaim 0x100000). The UI then reported canMove=false and the
+-- commander could not be moved, only reclaim. Entity ids and the spawn tick
+-- (which grows past 6 digits) have the same latent corruption.
+local function jint(v)
+  return string.format('%d', math.floor(v or 0))
+end
+
 function __readAllUnitsJson()
   local parts = {}
   local n = 0
@@ -364,7 +853,7 @@ function __readAllUnitsJson()
       q[i] = '{"id":' .. jstr(item.id) .. ',"count":' .. jnum(item.count) .. '}'
     end
     n = n + 1
-    parts[n] = '{"id":' .. jnum(r.id)
+    parts[n] = '{"id":' .. jint(r.id)
       .. ',"name":' .. jstr(r.name)
       .. ',"x":' .. jnum(r.x) .. ',"y":' .. jnum(r.y) .. ',"z":' .. jnum(r.z)
       .. ',"heading":' .. jnum(r.heading)
@@ -372,9 +861,19 @@ function __readAllUnitsJson()
       .. ',"maxHealth":' .. jnum(r.maxHealth)
       .. ',"moving":' .. tostring(r.moving)
       .. ',"fraction":' .. jnum(r.fraction)
-      .. ',"fireState":' .. jnum(r.fireState)
-      .. ',"guard":' .. jnum(r.guard)
-      .. ',"born":' .. jnum(r.born)
+      .. ',"fireState":' .. jint(r.fireState)
+      .. ',"guard":' .. jint(r.guard)
+      .. ',"caps":' .. jint(r.caps)
+      .. ',"toggleCaps":' .. jint(r.toggleCaps)
+      .. ',"scriptBits":' .. jint(r.scriptBits)
+      .. ',"layer":' .. jstr(r.layer)
+      .. ',"autoMode":' .. tostring(r.autoMode)
+      .. ',"autoSurfaceMode":' .. tostring(r.autoSurfaceMode)
+      .. ',"dead":' .. tostring(r.dead)
+      .. ',"shieldRatio":' .. jnum(r.shieldRatio)
+      .. ',"workProgress":' .. jnum(r.workProgress)
+      .. ',"beingUpgraded":' .. tostring(r.beingUpgraded)
+      .. ',"born":' .. jint(r.born)
       .. (function()
         -- The whole command queue (head first) for the command graph;
         -- 'order' stays as the head alias for existing consumers.

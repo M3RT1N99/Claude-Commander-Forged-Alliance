@@ -33,6 +33,31 @@ import type { HeightfieldData } from './sim/terrain'
 import { Hud, type HudSource, type HudUnitInfo, type EcoSnapshot } from './ui/hud'
 import { GameUi } from './ui/gameUi'
 import { BuildPreview } from './ui/buildPreview'
+import {
+  blueprintPlacement,
+  canBuildStructureAt,
+  skirtRect,
+  type Placement,
+  type PlacedStructure,
+  type Validity,
+} from './sim/ogrid'
+import {
+  boxSelectIds,
+  mergeSelection,
+  sameTypeIds,
+  selectionBpData,
+  type SameTypeUnit,
+  type SelectionBpData,
+  type SelectionCandidate,
+} from './ui/boxSelection'
+import {
+  SELECT_PARAM_DEFAULTS,
+  bracketThickness,
+  createBracketGeometry,
+  updateBracketGeometry,
+  type BracketExtents,
+  type SelectParams,
+} from './ui/selectionBrackets'
 import type { ScmapData } from './formats/scmap'
 import {
   createUefBuildMaterials,
@@ -194,6 +219,20 @@ async function startFrontEndUi(): Promise<void> {
     gameUi?.dispose()
     gameUi = await GameUi.create(vfs, await loadGameFonts(), log, 'frontend', conVarChanged)
     gameUi.attachEvents()
+    // Wire audio in the FRONT END too — main.lua:231/236 starts the ambient loop
+    // and the "Main_Menu" music, and the options dialog drives the sound-volume
+    // sliders (SetVolume). Only the session start connected these before, so the
+    // whole menu was silent and the menu sound options did nothing.
+    if (!gameAudio) gameAudio = await GameAudio.create(vfs, log)
+    if (gameAudio) {
+      const audio = gameAudio
+      gameUi.connectAudio(
+        (bank, cue, id) => audio.play(bank, cue, id),
+        (id) => audio.stop(id),
+        (enabled) => audio.setWorldSoundsEnabled(enabled),
+      )
+      gameUi.connectVolume((cat, vol) => audio.setVolume(cat, vol))
+    }
     setIngame(true)
 
     // GameUi.render() fängt Lua-Fehler selbst ab und meldet jeden genau einmal
@@ -403,6 +442,8 @@ async function loadMap(folder: string): Promise<void> {
 let sandbox: SandboxController | null = null
 let hud: Hud | null = null
 let gameUi: GameUi | null = null
+/** Feeds the UI VM the cursor's world position (mCursorInfo.mMouseWorldPos). */
+let setCursorWorld: ((x: number, y: number, z: number) => void) | null = null
 
 type UiCameraBridge = (operation: string, ...args: (string | number | boolean)[]) => unknown
 
@@ -427,7 +468,12 @@ function requireCameraNumber(value: string | number | boolean | undefined, label
     const what = args[1]
     if (typeof what !== 'string') throw new Error('Invalid UI camera setter')
     const value = args[2]
-    const seconds = args[3] === undefined ? 0 : requireCameraNumber(args[3], 'transition duration')
+    // A missing transition duration is 0 (instant) — the original Lua calls
+    // `Camera:SetTargetZoom(zoom)` without one (zoomslider.lua:66). wasmoon
+    // hands a Lua nil over as `undefined` OR as `null` depending on the path;
+    // checking only for `undefined` threw "Invalid UI camera transition
+    // duration" on every zoom click.
+    const seconds = args[3] == null ? 0 : requireCameraNumber(args[3], 'transition duration')
     viewer.rtsSetCameraValue(what, typeof value === 'boolean' ? value : requireCameraNumber(value, what), seconds)
     return undefined
   }
@@ -523,12 +569,67 @@ function conVarChanged(name: string, value: string | number | boolean): void {
   // (ui_AlwaysRenderStrategicIcons, Cfile:421748) und im Optionen-Dialog
   // schaltbar. Ohne sie erscheinen die Icons erst ab Display.Mesh.IconFadeInZoom.
   if (name.toLowerCase() === 'ui_alwaysrenderstrategicicons') hud.alwaysIcons = an
+  // The two strategic-icon master switches (Cfile:1284579): ui_NisRenderIcons
+  // hides ALL icons, ui_RenderIcons hides the normal ones.
+  if (name.toLowerCase() === 'ui_rendericons') hud.renderIcons = an
+  if (name.toLowerCase() === 'ui_nisrendericons') hud.nisRenderIcons = an
+  // Force enemy life bars on (Cfile:1285062) — otherwise enemies show a bar
+  // only under the cursor.
+  if (name.toLowerCase() === 'ui_forcelifbarsonenemy') hud.forceEnemyBars = an
 }
 let buildPreview: BuildPreview | null = null
 let currentScmap: ScmapData | null = null
+/** The map's water surface height, or undefined when the map has no water —
+ *  a build (and its preview) is clamped up to it (GetSurfaceHeight). */
+function mapWaterElevation(): number | undefined {
+  return currentScmap?.water.hasWater ? currentScmap.water.elevation : undefined
+}
 let spawnPoint = new THREE.Vector3(20, 0, 20)
+/** The unit id under the cursor (rollover) — drives the enemy life-bar rule. */
+let rolloverUnitId: number | null = null
 let massSpots: { x: number; z: number }[] = []
 const sandboxAssetCache = new Map<string, SandboxUnitAssets>()
+
+// --- Build-placement validity (the ghost's red/green) ------------------------
+//
+// canBuildStructureAt (src/sim/ogrid.ts) is the engine's own query; here we
+// just feed it the data the main thread already holds: the heightfield, the
+// water level, the map cell bounds and every placed structure's skirt. The
+// blueprint of each placed unit is already cached (it was loaded to render it),
+// so the per-blueprint placement is derived once and memoised.
+const buildPlacementCache = new Map<string, Placement>()
+function placementOf(bpId: string): Placement | null {
+  const hit = buildPlacementCache.get(bpId)
+  if (hit) return hit
+  const assets = sandboxAssetCache.get(bpId)
+  if (!assets) return null
+  const p = blueprintPlacement(assets.bp)
+  buildPlacementCache.set(bpId, p)
+  return p
+}
+/** Placed immobile units whose skirts block new placement. */
+function placedStructures(): PlacedStructure[] {
+  const out: PlacedStructure[] = []
+  for (const u of luaUnits) {
+    const p = placementOf(u.bpId)
+    if (!p || p.isMobile) continue
+    const pos = u.mesh.position
+    out.push({ skirt: skirtRect(p, pos.x, pos.z) })
+  }
+  return out
+}
+/** The ghost's verdict at a snapped centre (drives its tint). */
+function buildValidity(bpId: string, cx: number, cz: number): Validity {
+  const p = placementOf(bpId)
+  if (!p || !currentScmap) return 'unknown'
+  return canBuildStructureAt(p, cx, cz, {
+    heightAt: (x, z) => viewer.heightAt(x, z),
+    waterElevation: mapWaterElevation() ?? -10000,
+    mapWidth: currentScmap.width,
+    mapHeight: currentScmap.height,
+    structures: placedStructures(),
+  })
+}
 
 // --- Projektile: die fliegenden Schüsse der Sim, mit ihrem echten Mesh -------
 //
@@ -542,6 +643,8 @@ interface ProjectileAssets {
   scale: number
 }
 const projAssetCache = new Map<string, Promise<ProjectileAssets | null>>()
+/** Shader names already reported as missing (report once, not per frame). */
+const projSkipLogged = new Set<string>()
 const projMeshes = new Map<number, THREE.Mesh>()
 const projBaseScales = new Map<number, number>()
 const projPending = new Set<number>()
@@ -558,14 +661,51 @@ function loadProjectileAssets(bpId: string): Promise<ProjectileAssets | null> {
       const m = path.match(/^((?:projectiles|effects\/entities)\/[^/]+\/[^/]+)_proj\.bp$/)
       if (!m) return null
       const base = m[1]!
-      const meshPath = `${base}_lod0.scm`
+      if (!vfs.exists(path)) return null
+      const bp = parseBlueprint(await vfs.readText(path))
+      // The mesh is named IN THE BLUEPRINT (`Display.Mesh.LODs[n].MeshName`)
+      // — that is how the engine reads it. Deriving it from the blueprint PATH
+      // was a guess, and a wrong one for the build effects: the build cube
+      // (`effects/entities/uefbuildeffect/uefbuildeffect03_proj.bp`) points at
+      // `/meshes/generic/cube01_lod0.scm` and has no model of its own. The
+      // path next to it stays as the fallback (weapon projectiles use it).
+      const lodsRaw = bpGet(bp, 'Display.Mesh.LODs.1') ?? bpGet(bp, 'Display.Mesh.LODs')
+      const lod = (Array.isArray(lodsRaw) ? lodsRaw[0] : lodsRaw) as BpObject | undefined
+      // The shader is named in the blueprint. The projectile material here is
+      // TMeshGlow (unlit, pure albedo) — exactly what the weapon projectiles
+      // ask for. A blueprint naming a DIFFERENT shader (`UEFBuildCube`,
+      // `AeonBuildPuddle`) does NOT get its mesh: with the wrong material a
+      // white box would stand around the building. Those shaders are an open
+      // step (docs/STATUS.md), not a footnote here.
+      const shader = lod ? bpGet(lod, 'ShaderName') : undefined
+      if (typeof shader === 'string' && /Build/i.test(shader)) {
+        if (!projSkipLogged.has(shader)) {
+          projSkipLogged.add(shader)
+          log(`projectile shader ${shader} missing — ${bpId} stays invisible`)
+        }
+        return null
+      }
+      const lodMesh = lod ? bpGet(lod, 'MeshName') : undefined
+      const meshPath =
+        typeof lodMesh === 'string' && lodMesh.length > 0
+          ? lodMesh.replace(/^\//, '').toLowerCase()
+          : `${base}_lod0.scm`
       // KEIN Mesh ist bei vielen Projektilen die Wahrheit (ACU-Laser,
       // Maschinengewehr, Bau-Effekte): sie sind reine Emitter/Trail-Effekte
       // und werden erst mit dem Partikelsystem sichtbar.
       if (!vfs.exists(meshPath)) return null
       const model = parseScm(await vfs.read(meshPath))
-      const albedo = await loadFirstTexture([`${base}_albedo.dds`])
-      const bp = parseBlueprint(await vfs.readText(path))
+      // The texture belongs to the MESH, not to the blueprint folder: if the
+      // mesh lives elsewhere, so does its albedo.
+      const meshBase = meshPath.replace(/_lod\d+\.scm$/i, '')
+      const lodAlbedo = lod ? bpGet(lod, 'AlbedoName') : undefined
+      const albedo = await loadFirstTexture(
+        [
+          typeof lodAlbedo === 'string' && lodAlbedo.length > 0 ? lodAlbedo.replace(/^\//, '').toLowerCase() : '',
+          `${meshBase}_albedo.dds`,
+          `${base}_albedo.dds`,
+        ].filter((p) => p.length > 0),
+      )
       const scale = bpGet(bp, 'Display.UniformScale')
       return { model, albedo, scale: typeof scale === 'number' && scale > 0 ? scale : 1 }
     })()
@@ -955,6 +1095,7 @@ async function startSandbox(mapFolder: string): Promise<void> {
       gameUi.connectAudio(
         (bank, cue, id) => audio.play(bank, cue, id),
         (id) => audio.stop(id),
+        (enabled) => audio.setWorldSoundsEnabled(enabled),
       )
       // The volume options (options.lua:700-779 -> SetVolume) reach the
       // XACT category gains; boot-time values are replayed by connectVolume.
@@ -969,6 +1110,8 @@ async function startSandbox(mapFolder: string): Promise<void> {
     // Die Bau-Vorschau (Geistergebäude am Raster) — Engine-Rendering mit den
     // echten Blueprint-Modellen.
     buildPreview = new BuildPreview(viewer, loadSandboxAssets)
+    // Red/green validity: the same query the engine's ghost uses.
+    buildPreview.setValidityProvider(buildValidity)
     // Das Partikelsystem — frisch pro Sitzung (setMap → clearContent wirft
     // die Helper-Meshes weg, also auch die Batches).
     particles?.dispose()
@@ -1045,19 +1188,23 @@ async function startSandbox(mapFolder: string): Promise<void> {
       const ol = orderLines
       void (async () => {
         const base = 'textures/ui/common/game'
-        const [line, arrow, move, attack, repair, patrol] = await Promise.all([
+        const [line, arrow, move, attack, repair, patrol, guard, reclaim] = await Promise.all([
           loadFirstTexture([`${base}/orderline/orderline_generic.dds`]),
           loadFirstTexture([`${base}/orderline/orderline_arrow04.dds`]),
           loadFirstTexture([`${base}/waypoints/move_btn_up.dds`]),
           loadFirstTexture([`${base}/waypoints/attack_btn_up.dds`]),
           loadFirstTexture([`${base}/waypoints/repair_btn_up.dds`]),
           loadFirstTexture([`${base}/waypoints/patrol_btn_up.dds`]),
+          loadFirstTexture([`${base}/waypoints/guard_btn_up.dds`]),
+          loadFirstTexture([`${base}/waypoints/reclaim_btn_up.dds`]),
         ])
         const wps = new Map<string, THREE.Texture>()
         if (move) wps.set('move_btn_up', move)
         if (attack) wps.set('attack_btn_up', attack)
         if (repair) wps.set('repair_btn_up', repair)
         if (patrol) wps.set('patrol_btn_up', patrol)
+        if (guard) wps.set('guard_btn_up', guard)
+        if (reclaim) wps.set('reclaim_btn_up', reclaim)
         ol.setTextures(line, arrow, wps)
       })()
     }
@@ -1099,8 +1246,57 @@ async function startSandbox(mapFolder: string): Promise<void> {
         for (const id of ids) luaSim?.setFireState(id, value)
         return
       }
+      // ToggleScriptBit (orders.lua: shield/weapon/stealth/intel/cloak toggles):
+      // the UI binding has already retained only units whose current bit equals
+      // curState. ProcessInfo carries only the bit index and the sim flips it.
+      if (cmd === 'togglescriptbit' && typeof value === 'number') {
+        for (const id of ids) luaSim?.toggleScriptBit(id, value)
+        return
+      }
+      if (cmd === 'setautomode' && typeof value === 'boolean') {
+        for (const id of ids) luaSim?.setAutoMode(id, value)
+        return
+      }
+      if (cmd === 'setautosurfacemode' && typeof value === 'boolean') {
+        for (const id of ids) luaSim?.setAutoSurfaceMode(id, value)
+        return
+      }
+      // UNITCOMMAND_Upgrade (construction.lua:876 IssueBlueprintCommand): the
+      // structure builds its successor (General.UpgradesTo) on its own spot.
+      // Same seam as every other order — IssueUpgrade in the sim VM
+      // (cfunc_IssueUpgradeL, Cfile:1011315).
+      if (cmd === 'upgrade' && v?.blueprint) {
+        for (const id of ids) luaSim?.upgrade(id, v.blueprint)
+        log(`upgrade ${ids.join(',')} → ${v.blueprint}`)
+        return
+      }
+      // SetPaused (cfunc_SetPausedL "Pause builders in this list"): a SEPARATE
+      // per-unit path — NOT the whole-world session pause (that freezes the
+      // entire sim). value is the boolean; the sim halts production + demand.
+      if (cmd === 'setpaused' && typeof value === 'boolean') {
+        for (const id of ids) luaSim?.setUnitPaused(id, value)
+        return
+      }
       log(`Befehl an die Sim: ${name}(${ids.join(',')}) — noch kein Weg dorthin`)
     })
+    // The UI VM selects on its own for control groups (UI_ApplySelectionSet),
+    // UI_SelectByCategory and UI_ExpandCurrentSelection. The brackets live on
+    // the 3D side, so it follows that selection here.
+    gameUi.connectSelection((ids) => {
+      const wanted = new Set(ids)
+      for (const u of luaUnits) u.selected = wanted.has(u.id)
+    })
+    // `UI_SelectByCategory +inview` asks the camera which units are on screen
+    // (GetArmyUnitsInFrustum, Cfile:866323) — worldToScreen answers it.
+    gameUi.connectInView((id) => {
+      const u = luaUnits.find((x) => x.id === id)
+      if (!u) return false
+      const p = viewer.worldToScreen(u.mesh.position)
+      if (!p) return false
+      const r = viewportEl.getBoundingClientRect()
+      return p.x >= r.left && p.x <= r.right && p.y >= r.top && p.y <= r.bottom
+    })
+    setCursorWorld = gameUi.connectCursorWorld()
     // SimCallback (Ctrl-K-Selbstzerstörung, Kontrollgruppen, Diplomatie):
     // die UI ruft eine Funktion aus lua/simcallbacks.lua in der Sim.
     gameUi.connectSimCallback((func, argsLua, unitIds) => {
@@ -1137,6 +1333,28 @@ async function startSandbox(mapFolder: string): Promise<void> {
       `Karte <strong>${mapFolder}</strong> — Klick auf Einheit = Auswahl, ` +
       `Bau-Icon + Klick aufs Terrain = Gebäude setzen, Rechtsklick = Bewegung`
     log(`Sandbox bereit auf ${mapFolder} (Sim: 10 Ticks/s)`)
+    // DEV-only debug bridge for headless CDP diagnosis: it exposes the scene
+    // units, their screen positions, the selection and the command mode so a
+    // driver can issue precise clicks. Never present in a production build.
+    if (import.meta.env.DEV) {
+      ;(window as unknown as { __cfa: unknown }).__cfa = {
+        units: () =>
+          luaUnits.map((u) => {
+            const p = viewer.worldToScreen(u.mesh.position)
+            const r = viewportEl.getBoundingClientRect()
+            return {
+              id: u.id,
+              bp: u.bpId,
+              army: u.army,
+              selected: u.selected,
+              sx: p ? Math.round(r.left + p.x) : null,
+              sy: p ? Math.round(r.top + p.y) : null,
+            }
+          }),
+        commandMode: () => gameUi?.commandMode() ?? null,
+        selection: () => (gameUi ? gameUi.debugEval('return __uiSelectionJson()') : '[]'),
+      }
+    }
     const selftest = params.get('selftest')
     if (selftest) void runSelftest(selftest)
   } catch (err) {
@@ -1358,6 +1576,16 @@ window.addEventListener('pointermove', (e) => {
     const hit = viewer.pickUnit(e.clientX, e.clientY)
     const u = hit ? luaUnits.find((x) => x.scene === hit) : undefined
     gameUi.setRollover(u ? u.id : null)
+    // The hovered unit also drives the enemy life-bar rule: an enemy shows a
+    // bar only when hovered or ui_ForceLifbarsOnEnemy (Cfile:1284560-1284566).
+    rolloverUnitId = u ? u.id : null
+  }
+  // The cursor's world position — the engine keeps it per frame in
+  // CWldSession::mCursorInfo.mMouseWorldPos; `UI_SelectByCategory +nearest`
+  // measures against it (Cfile:866617-866685).
+  if (sandbox && setCursorWorld) {
+    const hit = viewer.pickTerrain(e.clientX, e.clientY)
+    if (hit) setCursorWorld(hit.x, hit.y ?? 0, hit.z)
   }
   // Bau-Modus: das Geistergebäude folgt dem Cursor — auf dem Raster, mit dem
   // die Sim es gleich setzt (src/ui/buildPreview.ts).
@@ -1366,7 +1594,7 @@ window.addEventListener('pointermove', (e) => {
     if (cm.mode === 'build' || cm.mode === 'buildanchored') {
       const hit = viewer.pickTerrain(e.clientX, e.clientY)
       if (hit && cm.name) {
-        void buildPreview.show(cm.name, hit, gameUi.footprint(cm.name))
+        void buildPreview.show(cm.name, hit, gameUi.footprint(cm.name), mapWaterElevation())
       } else {
         buildPreview.hide()
       }
@@ -1393,20 +1621,35 @@ window.addEventListener('pointerup', (e) => {
   boxStart = null
   selectBox.hidden = true
   const moved = Math.hypot(e.clientX - start.x, e.clientY - start.y)
-  if (moved > 5 || !luaSim) return
+  if (!luaSim) return
 
   // Was ein Linksklick in der Welt bedeutet, entscheidet die UI-Lua, nicht wir:
   // steht ein Command-Mode an (Bau-Icon geklickt, Move-Button gedrückt), ist der
   // Klick ein BEFEHL. Sonst ist er eine Auswahl.
   if (gameUi && gameUi.commandMode().mode !== false) {
+    if (moved > 5) return
     const hit = viewer.pickTerrain(e.clientX, e.clientY)
     if (hit) void issueWorldCommand(hit, e.shiftKey, zielUnter(e.clientX, e.clientY))
     return
   }
-  if (luaUnits.length > 0) {
-    const luaMsg = selectLua(e.clientX, e.clientY)
-    if (luaMsg) log(luaMsg)
+  if (luaUnits.length === 0) return
+  // Dragged = box selection (SelectionDragger). A static click is one of:
+  //   Ctrl-click         — REPLACE selection with all same-type units,
+  //   Ctrl+Shift-click   — toggle the same-type set (add, or remove if the
+  //                        clicked unit is already selected),
+  //   double-click       — select all same-type units in view,
+  //   plain/Shift click  — single-unit selection (DragRelease semantics).
+  let luaMsg: string | null
+  if (moved > 5) {
+    luaMsg = boxSelect(start.x, start.y, e.clientX, e.clientY, e.shiftKey)
+  } else if (e.ctrlKey) {
+    luaMsg = selectSameType(e.clientX, e.clientY, e.shiftKey ? 'toggle' : 'replace')
+  } else if (e.detail >= 2) {
+    luaMsg = selectSameType(e.clientX, e.clientY, 'replace')
+  } else {
+    luaMsg = selectLua(e.clientX, e.clientY, e.shiftKey)
   }
+  if (luaMsg) log(luaMsg)
 })
 
 viewportEl.addEventListener('contextmenu', (e) => {
@@ -1436,6 +1679,9 @@ viewportEl.addEventListener('contextmenu', (e) => {
  */
 function zielUnter(clientX: number, clientY: number): {
   enemy?: number
+  /** The enemy is reclaimable (being built) — a non-attacking selection
+   *  reclaims it instead of doing nothing (Cfile:1240271). */
+  enemyReclaimable?: boolean
   repair?: number
   own?: number
   /** A wreck prop under the cursor (sim prop id) — reclaim target. */
@@ -1451,11 +1697,38 @@ function zielUnter(clientX: number, clientY: number): {
   if (hit.kind === 'unit') {
     const u = luaUnits.find((x) => x.scene === hit.unit)
     if (!u) return {}
-    if (u.army !== 1) return { enemy: u.id }
+    // The player is army 1 in the sandbox. NOTE: the engine's target
+    // classification treats ALLIES like own units (repair/guard), not enemies
+    // (Cfile:1240320) — with no allied army in the sandbox this never differs,
+    // but a real session would need the UI VM's IsAlly here.
+    if (u.army !== 1) {
+      // A being-built enemy is RECLAIMABLE (v52 = IsBeingBuilt||RECLAIMABLE,
+      // Cfile:1240220): a selection that cannot attack it reclaims it. The
+      // RECLAIMABLE-category case for finished units is a residual (the picker
+      // does not mirror blueprint categories).
+      const es = luaSim.state(u.id)
+      return { enemy: u.id, enemyReclaimable: !!es && es.fraction < 1 }
+    }
     const s = luaSim.state(u.id)
-    // Repair target: unfinished (resume construction) OR finished but
-    // damaged (HP repair — same CBuildTaskHelper, Cfile:815445).
-    if (s && (s.fraction < 1 || s.health < s.maxHealth)) return { repair: u.id }
+    // The engine's default-order precedence (Cfile:1240337-1240397):
+    //   1. UNFINISHED own/allied unit -> Repair (resume construction).
+    //   2. otherwise -> Guard (dispatch 0x0F). A FINISHED but DAMAGED unit is
+    //      Guard, NOT Repair: the guard task itself repairs a damaged target
+    //      (globals.lua guardProcess), so Guard wins and repair follows from it.
+    // Classifying a finished damaged unit as Repair (as before) inverted this.
+    if (s && s.fraction < 1) {
+      // The engine excludes an immobile FACTORY/SILO from the being-built Repair
+      // branch (v36 = 0, Cfile:1240342-1240350): it falls through to Guard, a
+      // permanent assist that keeps feeding the factory's queue after it
+      // finishes. Only a mobile unit or a non-factory/non-silo structure resumes
+      // construction via a one-shot Repair.
+      const cats = bpGet(sandboxAssetCache.get(u.bpId)?.bp, 'Categories')
+      const isCat = (c: string): boolean => Array.isArray(cats) && cats.includes(c)
+      if (placementOf(u.bpId)?.isMobile || (!isCat('FACTORY') && !isCat('SILO'))) {
+        return { repair: u.id }
+      }
+      return { own: u.id }
+    }
     return { own: u.id }
   }
   if (hit.kind === 'wreck') {
@@ -1478,6 +1751,7 @@ async function issueWorldCommand(
   queue: boolean,
   ziel: {
     enemy?: number
+    enemyReclaimable?: boolean
     repair?: number
     own?: number
     reclaimProp?: number
@@ -1486,7 +1760,15 @@ async function issueWorldCommand(
 ): Promise<void> {
   if (!luaSim || !gameUi) return
   try {
-    const msg = await gameUi.worldClick(luaSim, hit, (x, z) => viewer.heightAt(x, z), queue, ziel)
+    const msg = await gameUi.worldClick(
+      luaSim,
+      hit,
+      (x, z) => viewer.heightAt(x, z),
+      queue,
+      ziel,
+      mapWaterElevation(),
+      buildValidity,
+    )
     if (msg) log(msg)
     // Gesetzt (oder Befehl erteilt) → der Geist hat ausgedient, bis der nächste
     // Bau-Modus startet.
@@ -1507,6 +1789,22 @@ window.addEventListener('keydown', (e) => {
   ) {
     spaceHeld = true
     e.preventDefault()
+  }
+  // Ctrl+K — Selbstzerstörung der Auswahl: feuert dieselbe SimCallback wie die
+  // Original-UI (confirmunitdestroy.lua:24 -> selfdestruct.lua), also 5-Sekunden-
+  // Countdown und dann Kill; nochmaliges Drücken bricht ab. Kein Web-Sonderweg —
+  // der echte Sim-Pfad übernimmt.
+  if (
+    e.code === 'KeyK' &&
+    e.ctrlKey &&
+    sandbox &&
+    gameUi &&
+    !(e.target instanceof HTMLInputElement) &&
+    !(e.target instanceof HTMLSelectElement)
+  ) {
+    e.preventDefault()
+    const n = gameUi.selfDestructSelection()
+    log(n > 0 ? `Selbstzerstörung: ${n} Einheit(en) (5 s Countdown)` : 'Selbstzerstörung: keine Auswahl')
   }
   // ESC verlässt den Spielmodus und bringt den Launcher zurück. Ein
   // Übergangsweg: sobald das echte Hauptmenü läuft (lua/ui/menus/main.lua),
@@ -1725,8 +2023,12 @@ interface LuaSceneUnit {
   caps: ReadonlySet<string>
   /** Der Szenen-Eintrag mit Skelett-Animator (für die Laufanimation). */
   scene: SceneUnit
-  /** Halbachsen + Versatz des Auswahlrings (aus dem Blueprint, siehe ringExtents). */
-  ringExtents: { x: number; z: number; ox: number; oz: number }
+  /** Half extents + offsets of the selection box (blueprint, see ringExtents). */
+  ringExtents: BracketExtents
+  /** What box selection needs from the blueprint (src/ui/boxSelection.ts). */
+  select: SelectionBpData
+  /** What the unit bars need from the blueprint (src/ui/lifeBars.ts). */
+  bars: { size: number; height: number; offset: number; render: boolean; hide: boolean }
   /**
    * Läuft die Gehanimation gerade? Die SIM sagt, ob die Einheit fährt
    * (`moving` aus `__readAllUnitsJson`) — der Renderer spielt nur ab, was die
@@ -1831,6 +2133,7 @@ const EMPTY_ECO: EcoSnapshot = {
   mass: 0, massStorage: 0, massIncome: 0, massExpense: 0,
   energy: 0, energyStorage: 0, energyIncome: 0, energyExpense: 0,
   massRequested: 0, energyRequested: 0,
+  reclaimMass: 0, reclaimEnergy: 0,
 }
 
 /**
@@ -1879,11 +2182,29 @@ const hudSource: HudSource = {
       out.push({
         id: u.bpId, name: u.name, health: s.health, maxHealth: s.maxHealth, selected: u.selected,
         x: s.x, y: s.y, z: s.z, army: u.army, strategicIcon: u.strategicIcon, fadeZoom: u.fadeZoom,
+        // Own/allied units always get a life bar; an enemy only when hovered or
+        // ui_ForceLifbarsOnEnemy (Cfile:1284554-1284570). The sandbox has one
+        // army, so ally is always true here — a real session needs the UI VM's
+        // IsAlly for actual alliances.
+        ally: u.army === focusArmy(),
+        hovered: u.id === rolloverUnitId,
         // Baufortschritt (< 1 = Baustelle) und die halbe Breite der Einheit —
         // beides braucht die Lebensbalken-Schicht: der Balken schwebt über der
         // Einheit und zeigt bei einer Baustelle den Fortschritt statt der HP.
         fraction: s.fraction,
         halfWidth: u.ringExtents.x,
+        // The bar geometry comes from the BLUEPRINT (REntityBlueprint
+        // mLifeBar*, Cfile:646995-646998), the values from the sim.
+        lifeBarSize: u.bars.size,
+        lifeBarHeight: u.bars.height,
+        lifeBarOffset: u.bars.offset,
+        lifeBarRender: u.bars.render,
+        hideLifebars: u.bars.hide,
+        beingUpgraded: s.beingUpgraded === true,
+        shieldRatio: s.shieldRatio ?? 0,
+        // mFuelRatio defaults to -1 = "no fuel" (Cfile:772265), not 0.
+        fuelRatio: -1,
+        workProgress: s.workProgress ?? 0,
       })
     }
     return out
@@ -1891,29 +2212,36 @@ const hudSource: HudSource = {
 }
 
 /**
- * Der Auswahlring — ein Kreis mit Radius 1, der pro Einheit SKALIERT wird.
- *
- * Die Maße stehen im Blueprint, nicht im Renderer (Cfile:1215195-1215210):
- *
- *   halbX = SelectionSizeX > 0 ? SelectionSizeX · ren_UnitSelectionScale
- *                              : Kollisions-Extent · ren_SelectionSizeFudge
- *
- * dazu der Versatz `SelectionCenterOffsetX/Z` und die Höhe
- * `ren_SelectionHeightFudge`. Die drei ConVars kommen aus der Original-Datei
- * `lua/renderselectparams.lua` (die Engine liest genau sie, Cfile:1215033) —
- * kein geschätzter Wert.
- *
- * Vorher war der Ring ein fester Kreis mit Radius 1: um eine ACU zu groß, um
- * eine Fabrik viel zu klein.
+ * The selection marker — FOUR textured bracket quads, not a ring
+ * (`func_DrawSelectionBrackets`, Cfile:1215114-1215433; the maths and the
+ * texture atlas live in src/ui/selectionBrackets.ts). The green circle that
+ * used to sit here was invented: the engine has no ring asset at all, only
+ * `selection_brackets_*.dds` and `selection.dds` for the drag rectangle.
  */
-const luaRingGeo = (() => {
-  const g = new THREE.RingGeometry(0.85, 1, 48)
-  g.rotateX(-Math.PI / 2)
-  return g
-})()
+const bracketMaterial = new THREE.MeshBasicMaterial({
+  transparent: true,
+  depthTest: false,
+  side: THREE.DoubleSide,
+  // ren_SelectColor = 0xFFFFFFFF: the texture carries the colour.
+  color: 0xffffff,
+})
+let bracketTextureLoaded = false
+async function loadBracketTexture(): Promise<void> {
+  if (bracketTextureLoaded) return
+  bracketTextureLoaded = true
+  const tex = await loadFirstTexture([
+    'textures/ui/common/game/selection/selection_brackets_player.dds',
+  ])
+  if (tex) {
+    bracketMaterial.map = tex
+    bracketMaterial.needsUpdate = true
+  } else {
+    log('selection_brackets_player.dds missing — selection stays untextured')
+  }
+}
 
 /** Die Werte aus `lua/renderselectparams.lua` (Original-Datei, kein Nachbau). */
-let selectParams = { sizeFudge: 1.85, heightFudge: 0.12, unitScale: 0.75 }
+let selectParams: SelectParams = { ...SELECT_PARAM_DEFAULTS }
 async function loadSelectParams(): Promise<void> {
   if (!vfs || !vfs.exists('lua/renderselectparams.lua')) return
   const text = new TextDecoder('utf-8').decode(await vfs.read('lua/renderselectparams.lua'))
@@ -1922,15 +2250,41 @@ async function loadSelectParams(): Promise<void> {
     const v = bpGet(p, `RenderSelectParams.${k}`)
     return typeof v === 'number' ? v : fallback
   }
+  // All SIX keys of the file, not three: the bracket size and its minimum
+  // pixel size decide how thick the marker is (Cfile:1215259-1215270).
   selectParams = {
-    sizeFudge: num('ren_SelectionSizeFudge', 1.85),
-    heightFudge: num('ren_SelectionHeightFudge', 0.12),
-    unitScale: num('ren_UnitSelectionScale', 0.75),
+    sizeFudge: num('ren_SelectionSizeFudge', SELECT_PARAM_DEFAULTS.sizeFudge),
+    heightFudge: num('ren_SelectionHeightFudge', SELECT_PARAM_DEFAULTS.heightFudge),
+    unitScale: num('ren_UnitSelectionScale', SELECT_PARAM_DEFAULTS.unitScale),
+    bracketMinPixelSize: num('ren_SelectBracketMinPixelSize', SELECT_PARAM_DEFAULTS.bracketMinPixelSize),
+    bracketSize: num('ren_SelectBracketSize', SELECT_PARAM_DEFAULTS.bracketSize),
+    selectColor: num('ren_SelectColor', SELECT_PARAM_DEFAULTS.selectColor),
   }
 }
 
-/** Die Halbachsen des Auswahlrings einer Einheit (Weltmeter). */
-function ringExtents(bp: BpObject): { x: number; z: number; ox: number; oz: number } {
+/**
+ * The bar fields of REntityBlueprint (Cfile:646995-646998): LifeBarSize (1.0),
+ * LifeBarHeight (0.1), LifeBarOffset (0.0), LifeBarRender (0 for entities, but
+ * the RUnitBlueprint constructor sets it to 1 for every unit, Cfile:655716) —
+ * plus Display.HideLifebars, which switches the bars off per blueprint.
+ */
+function barBpData(bp: BpObject): LuaSceneUnit['bars'] {
+  const n = (path: string, fallback: number): number => {
+    const v = bpGet(bp, path)
+    return typeof v === 'number' ? v : fallback
+  }
+  return {
+    size: n('LifeBarSize', 1),
+    height: n('LifeBarHeight', 0.1),
+    offset: n('LifeBarOffset', 0),
+    // Every unit renders bars; only props do not.
+    render: bpGet(bp, 'LifeBarRender') !== false,
+    hide: bpGet(bp, 'Display.HideLifebars') === true,
+  }
+}
+
+/** Die Halbachsen der Auswahl-Box einer Einheit (Weltmeter). */
+function ringExtents(bp: BpObject): BracketExtents {
   const n = (path: string): number => {
     const v = bpGet(bp, path)
     return typeof v === 'number' ? v : 0
@@ -1941,7 +2295,10 @@ function ringExtents(bp: BpObject): { x: number; z: number; ox: number; oz: numb
     x: selX > 0 ? selX * selectParams.unitScale : (n('SizeX') / 2) * selectParams.sizeFudge,
     z: selZ > 0 ? selZ * selectParams.unitScale : (n('SizeZ') / 2) * selectParams.sizeFudge,
     ox: n('SelectionCenterOffsetX'),
+    oy: n('SelectionCenterOffsetY'),
     oz: n('SelectionCenterOffsetZ'),
+    // Display.SelectionThickness (Cfile:1215259) — 0 means ren_SelectBracketSize.
+    thickness: n('Display.SelectionThickness') || n('SelectionThickness'),
   }
 }
 
@@ -1952,19 +2309,162 @@ function ringExtents(bp: BpObject): { x: number; z: number; ox: number; oz: numb
  * `gamemain.OnSelectionChanged`, und daraus speisen sich orders.lua,
  * construction.lua und unitview.lua (Cfile:1294170).
  */
-function selectLua(clientX: number, clientY: number): string | null {
+/** The army the player selects for (GetFocusArmy). 1 in the sandbox. */
+function focusArmy(): number {
+  return gameUi ? gameUi.focusArmy() : 1
+}
+
+/** Is this own living unit inside the visible viewport? (GetArmyUnitsInFrustum) */
+function unitInView(u: LuaSceneUnit): boolean {
+  const s = luaSim?.state(u.id)
+  if (!s || s.dead) return false
+  const p = viewer.worldToScreen(u.mesh.position)
+  if (!p) return false
+  const r = viewportEl.getBoundingClientRect()
+  return p.x >= r.left && p.x <= r.right && p.y >= r.top && p.y <= r.bottom
+}
+
+function selectLua(clientX: number, clientY: number, additive = false): string | null {
   const hit = viewer.pickUnit(clientX, clientY)
-  let name: string | null = null
+  // The engine only selects SELECTABLE units — the focus army's own units
+  // (CanSelectUnit, Cfile:865830). A click on an enemy unit selects nothing:
+  // before this filter, enemy units were selectable and fed the order/build
+  // panel from the ENEMY blueprint.
+  const hits = hit ? luaUnits.filter((u) => u.mesh === hit.mesh && u.army === focusArmy()) : []
+  return applySelection(hits, additive)
+}
+
+/**
+ * Select every focus-army unit of the SAME blueprint as the one under the
+ * cursor — the engine's double-click and Ctrl-click behaviour
+ * (HandleDoubleClickSelection, Cfile:865E20; Ctrl-click same-type,
+ * Cfile:1291547-1291681). `mode`:
+ *   'replace' — double-click / Ctrl-click: the same-type set becomes the whole
+ *               selection (Ctrl-click REPLACES, it does not add).
+ *   'toggle'  — Ctrl-Shift-click: remove the same-type set if the clicked unit
+ *               is already selected, otherwise add it.
+ */
+function selectSameType(clientX: number, clientY: number, mode: 'replace' | 'toggle'): string | null {
+  const army = focusArmy()
+  const hit = viewer.pickUnit(clientX, clientY)
+  const clicked = hit ? luaUnits.find((u) => u.mesh === hit.mesh && u.army === army) : undefined
+  const candidates: SameTypeUnit[] = luaUnits.map((u) => ({
+    id: u.id,
+    bpId: u.bpId,
+    army: u.army,
+    inView: unitInView(u),
+  }))
+  const current = luaUnits.filter((u) => u.selected).map((u) => u.id)
+  const ids = new Set(
+    sameTypeIds(clicked ? clicked.bpId : null, army, candidates, current, mode, clicked?.selected ?? false),
+  )
+  return applySelection(
+    luaUnits.filter((u) => ids.has(u.id)),
+    false,
+  )
+}
+
+/**
+ * Apply a selection — the one place where `selected`, the original UI and the
+ * Shift semantics come together.
+ *
+ * Shift follows `DragRelease` (Cfile:1289882-1289946): if the hit set is
+ * ALREADY fully selected it is DESELECTED (`v5 >= size(a1)` →
+ * SetSelection(selection \ hits)), otherwise it is added (SetSelection(∪)).
+ */
+function applySelection(hits: LuaSceneUnit[], additive: boolean): string | null {
+  const current = luaUnits.filter((u) => u.selected).map((u) => u.id)
+  const next = new Set(mergeSelection(current, hits.map((u) => u.id), additive))
   const ids: number[] = []
+  let name: string | null = null
   for (const u of luaUnits) {
-    u.selected = hit != null && hit.mesh === u.mesh
+    u.selected = next.has(u.id)
     if (u.selected) {
-      name = u.name
       ids.push(u.id)
+      if (name === null) name = u.name
     }
   }
   gameUi?.select(ids)
-  return name ? `Ausgewählt: ${name}` : null
+  if (name === null) return null
+  return ids.length > 1 ? `selected: ${ids.length} units` : `selected: ${name}`
+}
+
+/**
+ * DRAG-BOX SELECTION — `Moho::SelectionDragger::DragRelease` (Cfile:863870).
+ * Only the two engine parts live here: the candidate filter (own focus army,
+ * alive — Cfile:1290158) and the PROJECTION of the selection box. WHICH of
+ * them ends up selected is decided by `src/ui/boxSelection.ts`, straight from
+ * the decompilation (hit test, priority buckets, Shift semantics).
+ *
+ * The box is the MESH bounding box whose half extents are multiplied by
+ * `SelectionMeshScaleX/Y/Z` (Cfile:1290063-1290071) — not the selection ring
+ * (`SelectionSizeX/Z`, a different field). The original's drag volume is the
+ * frustum slice of the rectangle; projected box against rectangle is the same
+ * test.
+ */
+function boxSelect(x0: number, y0: number, x1: number, y1: number, additive: boolean): string | null {
+  if (!luaSim) return null
+  const rect = {
+    minX: Math.min(x0, x1),
+    maxX: Math.max(x0, x1),
+    minY: Math.min(y0, y1),
+    maxY: Math.max(y0, y1),
+  }
+  const box = new THREE.Box3()
+  const corner = new THREE.Vector3()
+  const center = new THREE.Vector3()
+  const half = new THREE.Vector3()
+  const focusArmy = gameUi ? gameUi.focusArmy() : 1
+  const candidates: SelectionCandidate[] = []
+  const byId = new Map<number, LuaSceneUnit>()
+  for (const u of luaUnits) {
+    if (u.army !== focusArmy) continue
+    const s = luaSim.state(u.id)
+    if (!s || s.dead) continue
+    // Step 2: `IsMobile(u) || !IsUnitState(u, 37)` (Cfile:1290062) — the
+    // successor growing on a building is NOT box-selectable; the box keeps
+    // selecting the working original.
+    if (!u.select.mobile && s.beingUpgraded === true) continue
+    box.setFromObject(u.mesh)
+    if (box.isEmpty()) continue
+    box.getCenter(center)
+    box.getSize(half).multiplyScalar(0.5)
+    half.x *= u.select.meshScale.x
+    half.y *= u.select.meshScale.y
+    half.z *= u.select.meshScale.z
+    let minX = Infinity
+    let maxX = -Infinity
+    let minY = Infinity
+    let maxY = -Infinity
+    for (let i = 0; i < 8; i++) {
+      corner.set(
+        center.x + (i & 1 ? half.x : -half.x),
+        center.y + (i & 2 ? half.y : -half.y),
+        center.z + (i & 4 ? half.z : -half.z),
+      )
+      const p = viewer.worldToScreen(corner)
+      if (!p) continue
+      if (p.x < minX) minX = p.x
+      if (p.x > maxX) maxX = p.x
+      if (p.y < minY) minY = p.y
+      if (p.y > maxY) maxY = p.y
+    }
+    byId.set(u.id, u)
+    candidates.push({
+      id: u.id,
+      screen: minX > maxX ? null : { minX, maxX, minY, maxY },
+      priority: u.select.priority,
+      lowSelectPrio: u.select.lowSelectPrio,
+      beingBuilt: s.fraction < 1,
+    })
+  }
+  const ids = boxSelectIds(candidates, rect, additive)
+  const hits: LuaSceneUnit[] = []
+  for (const id of ids) {
+    const u = byId.get(id)
+    if (u) hits.push(u)
+  }
+  return applySelection(hits, additive)
 }
 
 /** Ob mindestens eine Lua-Unit selektiert ist. */
@@ -1992,6 +2492,10 @@ function luaSimUpdate(): void {
   // never collide with the UI-VM's sound handles.
   if (gameAudio) {
     for (const r of luaSim.drainAudioRequests()) {
+      // World sounds always play and keep their handles; DisableWorldSounds mutes
+      // the World bus in GameAudio (Cfile:1346188) — instantly silencing loops
+      // already playing and restoring them on EnableWorldSounds — instead of
+      // suppressing starts here (which would strand a loop started while muted).
       if (r.t === 2) gameAudio.stop(SIM_LOOP_HANDLE_BASE + r.h)
       else if (r.t === 1) gameAudio.play(r.bank, r.cue, SIM_LOOP_HANDLE_BASE + r.h)
       else gameAudio.play(r.bank, r.cue, nextSimOneShotHandle--)
@@ -2132,18 +2636,24 @@ function luaSimUpdate(): void {
     }
     u.ring.visible = u.selected
     if (u.selected) {
-      // Die Ellipse aus dem Blueprint (siehe ringExtents), am Heading gedreht,
-      // um den Selection-Offset versetzt, auf ren_SelectionHeightFudge angehoben.
-      const e = u.ringExtents
-      const cos = Math.cos(heading)
-      const sin = Math.sin(heading)
-      u.ring.position.set(
-        x + e.ox * cos + e.oz * sin,
-        y + selectParams.heightFudge,
-        z - e.ox * sin + e.oz * cos,
+      // Four bracket quads on the corners of the selection box. The thickness
+      // is world-sized but never thinner than ren_SelectBracketMinPixelSize
+      // pixels, so it needs the world width of ONE PIXEL at the unit's depth
+      // (the engine's dot(mViewport.d[2], pos), Cfile:1215269).
+      const halfEdge = bracketThickness(u.ringExtents, viewer.ogridsPerPixel(x, y, z), selectParams)
+      updateBracketGeometry(
+        u.ring.geometry,
+        x,
+        y,
+        z,
+        // The unit's full render orientation — yaw-only today (the sim sends
+        // heading), so the brackets stay flat; when the sim carries a full
+        // orientation the same call tilts them (Cfile:1215184).
+        u.mesh.quaternion,
+        u.ringExtents,
+        halfEdge,
+        selectParams,
       )
-      u.ring.rotation.set(0, heading, 0)
-      u.ring.scale.set(e.x, 1, e.z)
     }
 
     // TURRET AIMING: the sim's CAimManipulator state (yaw/pitch per aim
@@ -2303,10 +2813,8 @@ async function addLuaUnitToScene(
       }
     }
   }
-  const ring = new THREE.Mesh(
-    luaRingGeo,
-    new THREE.MeshBasicMaterial({ color: 0x44ff66, transparent: true, opacity: 0.9, depthTest: false }),
-  )
+  void loadBracketTexture()
+  const ring = new THREE.Mesh(createBracketGeometry(), bracketMaterial)
   ring.visible = false
   ring.renderOrder = 10
   viewer.addHelper(ring)
@@ -2330,6 +2838,8 @@ async function addLuaUnitToScene(
     scene,
     walking: false,
     ringExtents: ringExtents(assets.bp as BpObject),
+    select: selectionBpData(assets.bp as BpObject),
+    bars: barBpData(assets.bp as BpObject),
     build,
   })
 }

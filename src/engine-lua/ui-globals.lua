@@ -273,8 +273,8 @@ function UserUnitMeta:IsDead() return self.dead == true end
 -- Bau-Auftrag, keine Produktion) — nil ist hier ein Fehler, kein Idle.
 function UserUnitMeta:IsIdle() return self.idle == true end
 function UserUnitMeta:IsStunned() return false end
-function UserUnitMeta:IsAutoMode() return false end
-function UserUnitMeta:IsAutoSurfaceMode() return false end
+function UserUnitMeta:IsAutoMode() return self.autoMode == true end
+function UserUnitMeta:IsAutoSurfaceMode() return self.autoSurfaceMode == true end
 function UserUnitMeta:IsRepeatQueue() return false end
 function UserUnitMeta:IsOverchargePaused() return false end
 function UserUnitMeta:GetBuildRate() return self.buildRate or 0 end
@@ -289,8 +289,34 @@ function UserUnitMeta:GetGuardedEntity()
 end
 function UserUnitMeta:GetCreator() return nil end
 function UserUnitMeta:GetCommandQueue() return self.commandQueue or {} end
-function UserUnitMeta:GetSelectionSets() return {} end
-function UserUnitMeta:HasSelectionSet() return false end
+-- Selection sets (control groups) live ON THE UNIT in the engine:
+-- `UserUnit_base.mSelectionSets` is a std::set<string> at offset 972. The
+-- original selection.lua keeps the group's unit list and mirrors the name onto
+-- every member (selection.lua:59/68) so the avatars and the control-group bar
+-- can ask a unit which groups it is in.
+--   AddSelectionSet(string)     Cfile:1365907
+--   RemoveSelectionSet(string)  Cfile:1365969
+--   HasSelectionSet(string)     Cfile:1366031
+--   GetSelectionSets()          Cfile:1366101 (table of all names)
+-- They used to answer `{}` / false, which silently broke every control group.
+function UserUnitMeta:AddSelectionSet(name)
+  if name == nil then return end
+  self.selectionSets = self.selectionSets or {}
+  self.selectionSets[tostring(name)] = true
+end
+function UserUnitMeta:RemoveSelectionSet(name)
+  if name == nil or not self.selectionSets then return end
+  self.selectionSets[tostring(name)] = nil
+end
+function UserUnitMeta:HasSelectionSet(name)
+  if name == nil or not self.selectionSets then return false end
+  return self.selectionSets[tostring(name)] == true
+end
+function UserUnitMeta:GetSelectionSets()
+  local out = {}
+  for name in pairs(self.selectionSets or {}) do out[table.getn(out) + 1] = name end
+  return out
+end
 function UserUnitMeta:GetFootPrintSize()
   local bp = self:GetBlueprint()
   if not bp then return 1 end
@@ -323,7 +349,7 @@ function GetAttachedUnitsList(units)
 end
 
 -- Von der Engine pro Beat: der Zustand einer Unit aus der Sim.
-function __uiSetUnit(id, blueprintId, army, x, y, z, health, maxHealth, workProgress, idle, fireState, guardedId)
+function __uiSetUnit(id, blueprintId, army, x, y, z, health, maxHealth, workProgress, idle, fireState, guardedId, capMask, deadFlag, shieldRatio, fractionComplete, beingUpgraded, layer, scriptBits, toggleCapMask, autoMode, autoSurfaceMode)
   local u = __uiUnits[id]
   if not u then
     -- SUnitVarDat-Ctor (Cfile:772277): mFireState = FIRESTATE_ReturnFire (0).
@@ -337,14 +363,42 @@ function __uiSetUnit(id, blueprintId, army, x, y, z, health, maxHealth, workProg
   u.z = z
   u.health = health
   u.maxHealth = maxHealth
+  -- WorkProgress and FractionComplete are TWO fields, not one: mWorkProgress
+  -- is the progress of what the unit is WORKING ON (the build task writes it,
+  -- Cfile:815482; UserUnit:GetWorkProgress shows it, construction.lua:380),
+  -- mFractionComplete is the unit's OWN build state
+  -- (SSTIEntityVariableData+96). workProgress used to carry the unit's own
+  -- build state — so a factory never showed the progress of its unit.
   u.workProgress = workProgress
+  u.fractionComplete = fractionComplete or 1
+  -- UNITSTATE_BeingUpgraded (37): the successor growing on a structure. The
+  -- engine excludes it from every selection path (drag box Cfile:1290062,
+  -- UI_SelectByCategory Cfile:866692, UI_ExpandCurrentSelection Cfile:8661e6).
+  u.beingUpgraded = beingUpgraded == true
   u.idle = idle
   -- The sim is the authority (SUnitVarDat.mFireState mirrored per beat); the
   -- optimistic set in SetFireState only bridges the round-trip latency.
   if fireState ~= nil then u.fireState = fireState end
   -- Guarded unit id (0 = none) — GetGuardedEntity/GetAssistingUnitsList.
   if guardedId ~= nil then u.guardedId = guardedId ~= 0 and guardedId or false end
-  u.dead = false
+  -- Effective command-cap mask (UnitAttributes::commandCapsMask): the sim
+  -- is the authority — runtime Add/RemoveCommandCap arrives here per beat
+  -- (-1 = no value in this beat; keep the blueprint-derived mask).
+  if capMask ~= nil and capMask >= 0 then u.__commandCapMask = capMask end
+  if layer ~= nil then u.layer = layer end
+  if scriptBits ~= nil then u.scriptBits = scriptBits end
+  if toggleCapMask ~= nil and toggleCapMask >= 0 then u.__toggleCapMask = toggleCapMask end
+  if autoMode ~= nil then u.autoMode = autoMode == true end
+  if autoSurfaceMode ~= nil then u.autoSurfaceMode = autoSurfaceMode == true end
+  -- The sim marks a unit dead through its multi-beat death sequence (readRow
+  -- sends `dead` = __dead or __destroyQueued). A dying unit stays in __uiUnits
+  -- until it is flushed and __uiRemoveUnit runs, but is already excluded from
+  -- SelectUnits/avatars/ValidateUnitsList — the engine drops IsDead AND
+  -- DestroyQueued (Cfile:1361497-1361498).
+  u.dead = deadFlag == true
+  -- Shield strength (0..1) from shield.lua UpdateShieldRatio -> SetShieldRatio;
+  -- GetShieldRatio and the rollover shield bar read it.
+  u.shieldRatio = shieldRatio or 0
 end
 
 -- Die Bau-Warteschlange einer Fabrik aus der Sim spiegeln. Die Engine haelt sie
@@ -500,20 +554,50 @@ end
 -- `if GetSelectedUnits() then` (construction.lua:1891, orders.lua:1250,
 -- buildmode.lua:50). Ein leeres Table waere hier still falsch.
 __uiSelection = false
+--- Set by the 3D side: it draws the selection and must follow a selection the
+--- UI VM made itself.
+__uiSelectionSink = false
 
 function GetSelectedUnits()
   if not __uiSelection or table.getn(__uiSelection) == 0 then return nil end
-  return __uiSelection
+  -- Return a COPY, never the stored table: cfunc_GetSelectedUnitsL fills a
+  -- BRAND-NEW table each call (AssignNewTable + SetObject loop,
+  -- Cfile:1361355-1361388), so mutating the result cannot touch the selection.
+  -- Shift-add callers do sel=GetSelectedUnits(); table.insert(sel,u);
+  -- SelectUnits(sel) (avatars.lua:369-372, selection.lua:134-139) — aliasing
+  -- __uiSelection here would make SelectUnits see old==new, and gamemain.lua's
+  -- isOldSelection would then skip PlaySelectionSound and the rallypoint refresh.
+  local out = {}
+  for i, u in ipairs(__uiSelection) do out[i] = u end
+  return out
 end
 
 -- SelectUnits(nil) heisst "alles abwaehlen" (uiutil.lua:103) und ist legal.
 -- Rueckgabe: die akzeptierten Units (Cfile:1361553).
+--
+-- Reduced filter (documented gap): the engine drops IsDead AND DestroyQueued,
+-- keeps only IsSelectable() units, and substitutes a selectable transport/dock
+-- parent (category TRANSPORTATION) for a non-selectable unit
+-- (Cfile:1361497-1361534). Our UserUnit mirror carries none of those — no
+-- DestroyQueued/IsSelectable flag, no transports in the sim yet — so it filters
+-- IsDead only. No mirror field is invented on suspicion; this filter grows once
+-- the sim exposes selectable/attachment state.
 function SelectUnits(units)
   local old = __uiSelection or {}
   local new = {}
   if type(units) == 'table' then
+    -- The engine selection is a SET: WeakSet_UserEntity::Add (Cfile:1361502 ->
+    -- 1153912) keeps each entity at most once, and GetSelectionUnits enumerates
+    -- the unique std::map. Dedupe by id so a shift-add of an already-selected
+    -- unit (avatars.lua:369-372, selection.lua:136-139) does not appear twice in
+    -- __uiSelection and over-count every per-unit walk (table.getn,
+    -- PlaySelectionSound, GetUnitCommandData).
+    local seen = {}
     for _, u in ipairs(units) do
-      if not u:IsDead() then new[table.getn(new) + 1] = u end
+      if not u:IsDead() and not seen[u.id] then
+        seen[u.id] = true
+        new[table.getn(new) + 1] = u
+      end
     end
   end
   __uiSelection = new
@@ -522,6 +606,14 @@ function SelectUnits(units)
   -- (Moho::SelectionListener::Receive @0x869060, Cfile:1294170), der
   -- gamemain.OnSelectionChanged(old, new, added, removed) ruft.
   __uiNotifySelectionChanged(old, new)
+  -- The 3D side draws the selection brackets, so it has to learn about a
+  -- selection the UI made ITSELF (control groups, UI_SelectByCategory) — in the
+  -- engine both read the same CWldSession::mSelection (Cfile:1329207).
+  if __uiSelectionSink then
+    local ids = {}
+    for i, u in ipairs(new) do ids[i] = u.id end
+    __uiSelectionSink(table.concat(ids, ','))
+  end
   return new
 end
 
@@ -531,6 +623,137 @@ function AddSelectUnits(units)
   for _, u in ipairs(__uiSelection or {}) do cur[table.getn(cur) + 1] = u end
   for _, u in ipairs(units) do cur[table.getn(cur) + 1] = u end
   SelectUnits(cur)
+end
+
+-- === The two selection console commands the ENGINE runs itself ===
+--
+-- Both are CConFuncs that never enter the UI Lua in the original either: the
+-- selection is session state, so the engine walks its own unit list. The
+-- keymap drives them (keyactions.lua: UI_SelectByCategory for the "select all
+-- land units" style keys, UI_ExpandCurrentSelection for Ctrl+click-alike).
+--
+-- The cursor's world position — the engine keeps it in
+-- CWldSession::mCursorInfo.mMouseWorldPos and `+nearest` measures against it
+-- (Cfile:866617-866685). Fed from the 3D side, which owns the picking.
+__uiCursorWorld = false
+function __uiSetCursorWorld(x, y, z)
+  __uiCursorWorld = { x, y, z }
+end
+
+--- Is this unit inside the current view? The engine asks the camera
+--- (`GetArmyUnitsInFrustum`, Cfile:866323) — the 3D side answers here.
+__uiInViewSink = false
+local function unitInView(u)
+  if not __uiInViewSink then return true end
+  return __uiInViewSink(u.id) == true
+end
+
+--- The category expression of the CONSOLE has its own syntax (Cfile:1292319):
+--- "CAT1 CAT2, CAT3 CAT4" — a space means intersection, a comma union. Turn it
+--- into the form ParseEntityCategory takes ('CAT1 * CAT2 + CAT3 * CAT4').
+local function parseConsoleCategory(expr)
+  local terms = {}
+  for part in string.gmatch(expr, '[^,]+') do
+    local factors = {}
+    for tok in string.gmatch(part, '%S+') do
+      factors[table.getn(factors) + 1] = tok
+    end
+    if table.getn(factors) > 0 then
+      terms[table.getn(terms) + 1] = table.concat(factors, ' * ')
+    end
+  end
+  if table.getn(terms) == 0 then return nil end
+  return ParseEntityCategory(table.concat(terms, ' + '))
+end
+
+--- UI_SelectByCategory [+add] [+nearest] [+idle] [+inview] [+goto]
+--- [+excludeengineers] categoryExpression (Cfile:1292279 parses the modifiers,
+--- Cfile:8662B0 does the work). Per unit the engine requires: selectable, the
+--- FOCUS ARMY, the category, not UNITSTATE_BeingUpgraded (Cfile:866692); with
+--- `+idle` also not busy and without a queued order (Cfile:8664e9); with
+--- `+excludeengineers` neither ENGINEER nor COMMAND (Cfile:866546-866590).
+--- `+nearest` keeps only the unit closest to the cursor, `+add` merges the
+--- current selection in, `+goto` moves the camera onto the result
+--- (Cfile:866700-866760).
+function __uiSelectByCategory(argline)
+  local flags = {}
+  local expr = {}
+  for tok in string.gmatch(tostring(argline or ''), '%S+') do
+    local lower = string.lower(tok)
+    if string.sub(lower, 1, 1) == '+' then
+      if lower == '+add' or lower == '+nearest' or lower == '+idle' or lower == '+inview'
+        or lower == '+goto' or lower == '+excludeengineers' then
+        flags[string.sub(lower, 2)] = true
+      else
+        -- The engine prints "Unknown modifier %s" and carries on (Cfile:1292420).
+        LOG('Unknown modifier ' .. tok)
+      end
+    else
+      expr[table.getn(expr) + 1] = tok
+    end
+  end
+  local category = parseConsoleCategory(table.concat(expr, ' '))
+  if not category then
+    LOG('UI_SelectByCategory [+add] [+nearest] [+idle] [+inview] [+goto] categoryExpression')
+    return
+  end
+
+  local hits = {}
+  local nearest, nearestDist = nil, nil
+  for _, u in pairs(__uiUnits) do
+    local ok = u.army == __uiFocusArmy and not u:IsDead() and not u.beingUpgraded
+    if ok and flags.idle then ok = u.idle == true end
+    if ok and flags.inview then ok = unitInView(u) end
+    if ok then ok = EntityCategoryContains(category, u.blueprintId) end
+    if ok and flags.excludeengineers then
+      ok = not EntityCategoryContains(categories.ENGINEER, u.blueprintId)
+        and not EntityCategoryContains(categories.COMMAND, u.blueprintId)
+    end
+    if ok then
+      if flags.nearest then
+        local c = __uiCursorWorld or { u.x, u.y, u.z }
+        local dx, dy, dz = u.x - c[1], u.y - c[2], u.z - c[3]
+        local d = math.sqrt(dx * dx + dy * dy + dz * dz)
+        if not nearestDist or d < nearestDist then nearest, nearestDist = u, d end
+      else
+        hits[table.getn(hits) + 1] = u
+      end
+    end
+  end
+  if flags.nearest and nearest then hits = { nearest } end
+  if flags.add then
+    for _, u in ipairs(__uiSelection or {}) do hits[table.getn(hits) + 1] = u end
+  end
+  SelectUnits(hits)
+  -- `+goto`: one unit -> TargetEntityBox, several -> the box around all of them
+  -- (Cfile:866722-866760).
+  if flags['goto'] and table.getn(hits) > 0 then
+    if table.getn(hits) == 1 then
+      local u = hits[1]
+      __uiCameraTargetEntity('WorldCamera', u.id, u.x, u.y, u.z, 0)
+    else
+      UIZoomTo(hits, 0)
+    end
+  end
+end
+
+--- UI_ExpandCurrentSelection (Cfile:866020): every unit of the same BLUEPRINT
+--- as one already selected joins the selection — except walls (category WALL,
+--- Cfile:866110) and units being upgraded (Cfile:8661e6). The engine walks its
+--- whole unit list here, not the view frustum, despite what the help text says.
+function __uiExpandCurrentSelection()
+  local selected = __uiSelection or {}
+  if table.getn(selected) == 0 then return end
+  local wanted = {}
+  for _, u in ipairs(selected) do wanted[u.blueprintId] = true end
+  local hits = {}
+  for _, u in pairs(__uiUnits) do
+    if wanted[u.blueprintId] and not u:IsDead() and not u.beingUpgraded
+      and not EntityCategoryContains(categories.WALL, u.blueprintId) then
+      hits[table.getn(hits) + 1] = u
+    end
+  end
+  SelectUnits(hits)
 end
 
 -- added/removed berechnen und gamemain.OnSelectionChanged rufen — genau das,
@@ -575,17 +798,22 @@ function __uiSelectByIds(ids)
   return table.getn(units)
 end
 
--- === Oekonomie (Sim -> UI) ===
--- GetEconomyTotals() liefert genau die fuenf Tabellen, die economy.lua:271-275
--- liest, jeweils mit den Schluesseln MASS und ENERGY.
+-- === Economy (Sim -> UI) ===
+-- GetEconomyTotals() returns SIX tables (Cfile:1264359-1264364): stored, income,
+-- reclaimed, lastUseRequested, lastUseActual, maxStorage — each keyed MASS and
+-- ENERGY. The UI economy.lua:271-275 reads five of them (not reclaimed);
+-- reclaimed carries the real reclaim throughput and the engine's table shape.
 --
--- WICHTIG: die Werte sind PRO TICK, nicht pro Sekunde — economy.lua:277-279
--- multipliziert sie selbst mit GetSimTicksPerSecond(). Wer hier Werte pro
--- Sekunde einspeist, zeigt das Zehnfache an.
+-- IMPORTANT: the values are PER TICK, not per second — economy.lua:277-279
+-- multiplies them by GetSimTicksPerSecond() itself. Feeding per-second values
+-- here shows tenfold.
 __uiEcon = {
   maxStorage = { MASS = 0, ENERGY = 0 },
   stored = { MASS = 0, ENERGY = 0 },
   income = { MASS = 0, ENERGY = 0 },
+  -- reclaimed: separate from income (the engine writes reclaim to storage AND
+  -- this counter, Cfile:848614-848639) — per tick like income.
+  reclaimed = { MASS = 0, ENERGY = 0 },
   lastUseRequested = { MASS = 0, ENERGY = 0 },
   lastUseActual = { MASS = 0, ENERGY = 0 },
 }
@@ -599,7 +827,7 @@ function GetSimTicksPerSecond()
 end
 
 -- Von der Engine pro Sim-Beat gefuettert (der Worker schickt den Zustand).
-function __uiSetEconomy(maxM, maxE, storedM, storedE, incM, incE, reqM, reqE, useM, useE)
+function __uiSetEconomy(maxM, maxE, storedM, storedE, incM, incE, reqM, reqE, useM, useE, recM, recE)
   local e = __uiEcon
   e.maxStorage.MASS = maxM
   e.maxStorage.ENERGY = maxE
@@ -612,47 +840,146 @@ function __uiSetEconomy(maxM, maxE, storedM, storedE, incM, incE, reqM, reqE, us
   e.lastUseRequested.ENERGY = reqE * 0.1
   e.lastUseActual.MASS = useM * 0.1
   e.lastUseActual.ENERGY = useE * 0.1
+  -- reclaimed is per tick too (×0.1) — same round-trip as income (economy.lua
+  -- scales it back up with GetSimTicksPerSecond()). recM/recE are nil-tolerant
+  -- for old callers.
+  e.reclaimed.MASS = (recM or 0) * 0.1
+  e.reclaimed.ENERGY = (recE or 0) * 0.1
 end
 
 -- === Kommando-Daten der Selektion ===
 --
 -- GetUnitCommandData(unitSet) -> orders, toggles, buildableCategories
--- (Cfile:1264504-1264646). Die Engine verrechnet pro Unit die
--- CommandCaps/ToggleCaps und die vorkompilierte Bau-Kategorie aus dem
--- Blueprint (bp.Economy.BuildableCategory) und akkumuliert ueber die Selektion
--- als VEREINIGUNG (EntityCategory::Add).
+-- (Cfile:1264504-1264646). The engine folds each unit's CommandCaps/ToggleCaps
+-- and its precompiled buildable category (bp.Economy.BuildableCategory), and
+-- accumulates the buildable category across the selection as an INTERSECTION
+-- (BVIntSet::IntersectWith, Cfile:1264719): the first builder copies, every
+-- further one intersects — the build menu shows only what ALL selected units
+-- can build. (The original also intersects each unit's buildable with the army's
+-- build-restriction category (army->mVarDat.mCat, Cfile:1264632) so restricted
+-- units drop OUT of the build menu. The restrictions themselves live sim-side
+-- (globals.lua AddBuildRestriction/__armyBuildRestrictions, enforced by
+-- canBuildBlueprint) and are NOT yet mirrored into this UI VM — so the menu still
+-- shows a restricted unit, but the sim rejects the build (CanBuild). Wiring this
+-- subtraction needs the army restriction category synced to the UI; the sandbox
+-- sets no restrictions, so it is inert today.)
 --
--- orders/toggles sind ARRAYS von Cap-Strings — orders.lua:891 iteriert sie
--- mit `for index, availOrder in availableOrders do`.
+-- orders/toggles are ARRAYS of cap strings — orders.lua:891 iterates them with
+-- `for index, availOrder in availableOrders do`.
 --
--- Bei LEERER Auswahl liefert die Engine LEERE TABELLEN, nicht nil: die beiden
--- AssignNewTable-Aufrufe (Cfile:1264740, :1264765) stehen HINTER der Schleife
--- ueber die Units und laufen deshalb immer. Wer hier nil zurueckgibt, toetet
--- orders.lua:891 (`for index, availOrder in availableOrders do`) bei jeder
--- Abwahl — und damit die ganze UI-VM.
+-- For an EMPTY selection the engine returns EMPTY TABLES (the two AssignNewTable
+-- calls Cfile:1264740, :1264765 sit AFTER the unit loop and always run) AND an
+-- EMPTY category as the third value — NEVER nil (func_NewEntityCategory +
+-- return 3, Cfile:1264788-1264808). Returning nil here kills orders.lua:891 on
+-- every deselect and makes EntityCategoryContains(cats, ...) crash on nil.
+--
+-- Empty category (matches nothing): ALLUNITS minus ALLUNITS is the empty set in
+-- the expression tree (catTest 'sub' = `true and not true` = false for any unit).
+local EMPTY_CATEGORY = categories.ALLUNITS - categories.ALLUNITS
+
+-- UnitAttributes::mCommandCaps is a mutable runtime bitmask. Its bit layout is
+-- the RULEUCC registration order (Cfile:656671-656719), identical to the sim
+-- mask synchronized by readRow. GetUnitCommandData reads this current mask in
+-- the native engine; rebuilding it from the immutable blueprint made removed
+-- commands remain visible and newly added ones invisible. The native result
+-- loop is deliberately limited to bits 0..22 (Cfile:1264740-1264761), so the
+-- registered bit-23 RULEUCC_Script is not a GetUnitCommandData result.
+local COMMAND_CAP_BITS = {
+  RULEUCC_Move = 0x1,
+  RULEUCC_Stop = 0x2,
+  RULEUCC_Attack = 0x4,
+  RULEUCC_Guard = 0x8,
+  RULEUCC_Patrol = 0x10,
+  RULEUCC_RetaliateToggle = 0x20,
+  RULEUCC_Repair = 0x40,
+  RULEUCC_Capture = 0x80,
+  RULEUCC_Transport = 0x100,
+  RULEUCC_CallTransport = 0x200,
+  RULEUCC_Nuke = 0x400,
+  RULEUCC_Tactical = 0x800,
+  RULEUCC_Teleport = 0x1000,
+  RULEUCC_Ferry = 0x2000,
+  RULEUCC_SiloBuildTactical = 0x4000,
+  RULEUCC_SiloBuildNuke = 0x8000,
+  RULEUCC_Sacrifice = 0x10000,
+  RULEUCC_Pause = 0x20000,
+  RULEUCC_Overcharge = 0x40000,
+  RULEUCC_Dive = 0x80000,
+  RULEUCC_Reclaim = 0x100000,
+  RULEUCC_SpecialAction = 0x200000,
+  RULEUCC_Dock = 0x400000,
+}
+
+local TOGGLE_CAP_BITS = {
+  RULEUTC_ShieldToggle = 0x1,
+  RULEUTC_WeaponToggle = 0x2,
+  RULEUTC_JammingToggle = 0x4,
+  RULEUTC_IntelToggle = 0x8,
+  RULEUTC_ProductionToggle = 0x10,
+  RULEUTC_StealthToggle = 0x20,
+  RULEUTC_GenericToggle = 0x40,
+  RULEUTC_SpecialToggle = 0x80,
+  RULEUTC_CloakToggle = 0x100,
+}
+
+local function blueprintCommandCapMask(bp)
+  local mask = 0
+  local caps = bp and bp.General and bp.General.CommandCaps
+  for cap, bit in pairs(COMMAND_CAP_BITS) do
+    if caps and caps[cap] == true then mask = mask | bit end
+  end
+  return mask
+end
+
+local function blueprintToggleCapMask(bp)
+  local mask = 0
+  local caps = bp and bp.General and bp.General.ToggleCaps
+  for cap, bit in pairs(TOGGLE_CAP_BITS) do
+    if caps and caps[cap] == true then mask = mask | bit end
+  end
+  return mask
+end
+
 function GetUnitCommandData(units)
-  if type(units) ~= 'table' or table.getn(units) == 0 then return {}, {}, nil end
+  if type(units) ~= 'table' or table.getn(units) == 0 then
+    return {}, {}, EMPTY_CATEGORY
+  end
 
   local orderSet, toggleSet = {}, {}
   local cats = nil
 
   for _, u in ipairs(units) do
     local bp = u:GetBlueprint()
+    -- Buildable category per unit; EMPTY by default so a blueprint-less unit
+    -- still contributes to the cross-unit intersection — the engine's intersect
+    -- block sits OUTSIDE the blueprint guard (Cfile:1264717-1264727), while
+    -- orders/toggles stay guarded, matching the engine.
+    local unitCats = EMPTY_CATEGORY
     if bp then
-      for cap, on in pairs((bp.General and bp.General.CommandCaps) or {}) do
-        if on then orderSet[cap] = true end
+      local commandMask = u.__commandCapMask
+      if commandMask == nil then commandMask = blueprintCommandCapMask(bp) end
+      for cap, bit in pairs(COMMAND_CAP_BITS) do
+        if (commandMask & bit) == bit then orderSet[cap] = true end
       end
-      for cap, on in pairs((bp.General and bp.General.ToggleCaps) or {}) do
-        if on then toggleSet[cap] = true end
+      local toggleMask = u.__toggleCapMask
+      if toggleMask == nil then toggleMask = blueprintToggleCapMask(bp) end
+      for cap, bit in pairs(TOGGLE_CAP_BITS) do
+        if (toggleMask & bit) == bit then toggleSet[cap] = true end
       end
+      -- Within one unit the BuildableCategory terms are UNIONED (the unit builds
+      -- whatever matches ANY term); across units they are INTERSECTED
+      -- (Cfile:1264719). No BuildableCategory keeps the empty category, so the
+      -- intersection goes empty — a non-builder in the selection empties the
+      -- build menu, exactly like the original.
       local buildable = bp.Economy and bp.Economy.BuildableCategory
       if buildable then
         for _, expr in ipairs(buildable) do
-          local c = ParseEntityCategory(expr)
-          if cats then cats = cats + c else cats = c end
+          unitCats = unitCats + ParseEntityCategory(expr)
         end
       end
     end
+    -- Intersect for EVERY selected unit (blueprint-less -> EMPTY -> blanks it).
+    cats = cats == nil and unitCats or (cats * unitCats)
   end
 
   local orders, toggles = {}, {}
@@ -660,7 +987,7 @@ function GetUnitCommandData(units)
   for cap in pairs(toggleSet) do toggles[table.getn(toggles) + 1] = cap end
   table.sort(orders)
   table.sort(toggles)
-  return orders, toggles, cats
+  return orders, toggles, cats or EMPTY_CATEGORY
 end
 
 -- === Die Naht zur Sim ===
@@ -705,9 +1032,21 @@ __uiSimCallbackSink = false
 -- Lua-sicher), das die Sim-VM beim Empfang auswertet — eine Kopie, keine
 -- Referenz. Funktionen/Userdata knallen wie im Original ("Unable to marshal
 -- lua function", CMarshaller Cfile:999128).
+-- The original CMarshaller (SCR_ToByteStream) writes a number as an EXACT
+-- binary double. '%.9g' kept only 9 significant digits, so an integer past nine
+-- digits (an entity id, a combined key code with modifier bits like
+-- 0x80000000 = 2147483648) was silently corrupted and a float lost precision —
+-- the same rounding trap as the command-cap mask. Serialize integers exactly
+-- ('%d') and floats at full double round-trip precision ('%.17g'); the sim VM
+-- evaluates the literal, so both parse back cleanly.
+local function marshalNumber(v)
+  if math.type(v) == 'integer' then return string.format('%d', v) end
+  return string.format('%.17g', v)
+end
+
 local function marshalArgs(v, depth)
   local t = type(v)
-  if t == 'number' then return string.format('%.9g', v) end
+  if t == 'number' then return marshalNumber(v) end
   if t == 'string' then return string.format('%q', v) end
   if t == 'boolean' then return tostring(v) end
   if t == 'nil' then return 'nil' end
@@ -720,7 +1059,7 @@ local function marshalArgs(v, depth)
       if kt == 'string' then
         key = string.format('%q', k)
       elseif kt == 'number' then
-        key = string.format('%.9g', k)
+        key = marshalNumber(k)
       elseif kt == 'boolean' then
         key = tostring(k)
       else
@@ -1175,13 +1514,6 @@ function InternalCreateWldUIProvider(luaobj)
   __uiWldProvider = luaobj
 end
 
--- "FlushEvents() -- flush mouse/keyboard events" (Cfile:1274567): leert die
--- Eingabe-Queue des UI-Managers (sub_84DA80). gamemain.lua:297 ruft es am Ende
--- von StopLoadingDialog, damit waehrend des Ladens gepufferte Klicks nicht ins
--- frische Spiel durchschlagen. Unsere Events laufen SYNCHRON (__mauiMouse
--- verarbeitet sofort, es gibt keine Queue) — geleert wird eine leere Queue.
-function FlushEvents() end
-
 --- "Return true iff the active session is a replay session." — wir spielen live.
 function SessionIsReplay()
   if not __uiScenarioInfo then error('no active session.', 2) end
@@ -1260,12 +1592,11 @@ function GetUnitCommandFromCommandCap(cap)
     error('GetUnitCommandFromCommandCap: string erwartet', 2)
   end
   local key = string.gsub(string.lower(cap), '^ruleucc_', '')
-  local cmd = CAP_TO_COMMAND[key]
-  if not cmd then
-    -- SetLexical wirft bei unbekannten Enum-Namen (Cfile:1381940-1381946).
-    error('GetUnitCommandFromCommandCap: unbekannter Command-Cap "' .. cap .. '"', 2)
-  end
-  return cmd
+  -- An unknown cap is NOT an error: the original ignores SetLexical's return
+  -- value (Cfile:1264874), the enum stays RULEUCC_None, and
+  -- UnitCommandCapToCommandType yields 'None' (Cfile:1242230-1242328). Only a
+  -- non-string throws (TypeError), like the original.
+  return CAP_TO_COMMAND[key] or 'None'
 end
 
 function IssueCommand(command, data, clear)
@@ -1372,16 +1703,23 @@ local warnedNoAudio = false
 -- EnableWorldSounds()/DisableWorldSounds() (Cfile:1348520-1348545, 0 Argumente):
 -- der Schalter fuer die WELT-Gerausche (Waffen, Einheiten — nicht die UI-Cues).
 -- gamemain.OnFirstUpdate() schaltet sie beim Spielstart an (gamemain.lua:78),
--- splash/NIS schalten sie aus. Echter Zustand; die Audio-Ausgabe liest ihn,
--- sobald es sie gibt.
+-- splash/NIS/score.lua:220 schalten sie aus. Moho::CUserSoundManager stores the
+-- enable byte (Cfile:1346188) and the world-sound output reads it. Our world
+-- sounds are the SIM audio requests (weapon fire, unit ambient loops) drained in
+-- main.ts; the sink pushes the flag there so DisableWorldSounds actually mutes
+-- them (the UI cues run through __uiAudioSink, a separate path, and stay audible).
 __uiWorldSounds = false
+--- Set by the audio side: main.ts gates the sim world-sound playback on it.
+__uiWorldSoundsSink = false
 
 function EnableWorldSounds()
   __uiWorldSounds = true
+  if __uiWorldSoundsSink then __uiWorldSoundsSink(true) end
 end
 
 function DisableWorldSounds()
   __uiWorldSounds = false
+  if __uiWorldSoundsSink then __uiWorldSoundsSink(false) end
 end
 
 local function newHandle(params, kind)
@@ -1442,7 +1780,17 @@ function StopSound(handle, immediate)
 end
 
 function StopAllSounds()
+  -- Moho::CUserSoundManager::StopAllSounds (Cfile:1346492) actually TEARS DOWN
+  -- every live sound: SND_DestroyEntityLoop on each entity loop, then Stop+Destroy
+  -- on every IXACTCue in mSoundsLinkedList — nothing keeps playing afterwards.
+  -- Mirror StopSound: drop the flags AND reach the audio output for each handle
+  -- that is still sounding (score.lua:221 relies on this to silence the score
+  -- screen). Sim-side ambient loops live in a separate handle space (main.ts) and
+  -- are not reached from here.
   for _, h in ipairs(__uiSoundsRequested) do
+    if h.playing and not h.stopped and __uiAudioStopSink then
+      __uiAudioStopSink(h.id)
+    end
     h.playing = false
     h.stopped = true
   end
@@ -1458,33 +1806,17 @@ function PauseVoice(category, bPause)
   PauseSound(category, bPause)
 end
 
--- === Lautstaerken ===
+-- === Movie volume (SetMovieVolume/GetMovieVolume) ===
 --
---   float GetVolume(category)      Cfile:1348388
---   SetVolume(category, volume)    Cfile:1348320
 --   SetMovieVolume(volume): 0.0 - 2.0   Cfile:1302838
 --   GetMovieVolume()                    Cfile:1302900
 --
--- Die Kategorien stehen in der Original-Lua: options.lua:700/729/735/745 setzt
--- "Global", "World", "Interface" und "Music". Der Wertebereich ist 0..1 — die
--- Option ist ein Regler 0..100 und teilt selbst durch 100 (options.lua:710).
---
--- Der Startwert ist 1.0, weil genau das die Option vorgibt (default = 100,
--- options.lua:697) und `set` beim Start SetVolume(value/100) ruft. Es ist keine
--- erfundene Zahl, sondern die, die die Original-Lua eine Zeile spaeter selbst
--- setzt. Ausgabe gibt es noch keine (M12) — der Zustand wird nur gefuehrt.
-__uiVolumes = { Global = 1.0, World = 1.0, Interface = 1.0, Music = 1.0 }
+-- The CATEGORY volumes (SetVolume/GetVolume, category = 'Global'/'World'/
+-- 'Interface'/'Music') live further down under "Category volumes" — only there
+-- do they wire __uiVolumeSink to the audio output and match the AudioEngine
+-- insert-default semantics (Cfile:605038). The movie volume starts at 1.0
+-- (options.lua default 100, /100).
 __uiMovieVolume = 1.0
-
-function SetVolume(category, volume)
-  __uiVolumes[category] = volume
-end
-
-function GetVolume(category)
-  local v = __uiVolumes[category]
-  if v == nil then return 1.0 end
-  return v
-end
 
 function SetMovieVolume(volume)
   __uiMovieVolume = volume
@@ -1509,8 +1841,19 @@ __uiQueueCopy = {}
 
 function SetCurrentFactoryForQueueDisplay(unit)
   __uiQueueFactory = unit or false
-  if not unit then return {} end
+  -- Empty/missing queue -> nil, NEVER an empty table (AssignNil, Cfile:1257091).
+  -- construction.lua:1655 branches `if currentCommandQueue then SetQueueGrid(...)
+  -- else ClearQueueGrid()` — an empty table would be truthy here and leave the
+  -- empty grid standing.
+  if not unit then
+    __uiQueueCopy = {}
+    return nil
+  end
   local q = unit:GetBuildQueue()
+  if not q or table.getn(q) == 0 then
+    __uiQueueCopy = {}
+    return nil
+  end
   -- Die Engine kopiert die Queue SOFORT in sCurrentBuildQueue (Cfile:1257076,
   -- sub_837070) — sonst meldete der naechste Beat ein Geister-Update fuer die
   -- Anzeige, die construction.lua gerade selbst aufgebaut hat.
@@ -1610,8 +1953,10 @@ local function hasToggleCap(u, bit)
   local cap = TOGGLE_CAPS[bit]
   if not cap then return false end
   local bp = u:GetBlueprint()
-  local caps = bp and bp.General and bp.General.ToggleCaps
-  return caps ~= nil and caps[cap] == true
+  local mask = u.__toggleCapMask
+  if mask == nil then mask = blueprintToggleCapMask(bp) end
+  local capBit = TOGGLE_CAP_BITS[cap]
+  return capBit ~= nil and (mask & capBit) == capBit
 end
 
 local function bitSet(bits, bit)
@@ -1627,19 +1972,20 @@ function GetScriptBit(units, bit)
   return false
 end
 
--- ToggleScriptBit(units, bit, value) — die UI schickt den Wunsch an die Sim
--- (dort ruft er Unit:OnScriptBitSet/OnScriptBitClear, unit.lua:309/353).
-function ToggleScriptBit(units, bit, value)
-  local on = value == true
+-- ToggleScriptBit(units, bit, curState): parameter 3 is a FILTER, not the
+-- desired state (Cfile:1360244-1360330). Only live toggle-capable units whose
+-- authoritative mirrored bit still equals curState are sent to ProcessInfo;
+-- the sim then flips the bit. This matters for a mixed selection.
+function ToggleScriptBit(units, bit, curState)
+  local state = curState == true
+  local targets = {}
   for _, u in ipairs(units or {}) do
-    if hasToggleCap(u, bit) then
-      local bits = u.scriptBits or 0
-      if on ~= bitSet(bits, bit) then
-        u.scriptBits = on and (bits + 2 ^ bit) or (bits - 2 ^ bit)
-      end
+    if not u:IsDead() and hasToggleCap(u, bit)
+      and bitSet(u.scriptBits or 0, bit) == state then
+      targets[table.getn(targets) + 1] = u
     end
   end
-  sendSim('ToggleScriptBit', units, { bit = bit, value = on })
+  if table.getn(targets) > 0 then sendSim('ToggleScriptBit', targets, bit) end
 end
 
 -- === Pause (Produktion einer Fabrik/eines Bauers anhalten) ===
@@ -1661,6 +2007,64 @@ function SetPaused(units, paused)
   sendSim('SetPaused', units, paused == true)
 end
 
+-- === Silo auto-build / submarine dive toggles (orders.lua:225-303) ===
+--
+-- The engine holds a per-unit flag and the orders panel reads/sets it through
+-- these globals (they were throwing NOT_IMPLEMENTED whenever a nuke/TML silo or
+-- a submarine was selected, killing the whole orders panel for those units):
+--   GetIsAutoMode/SetAutoMode        RULEUCC_SiloBuildTactical/Nuke (auto-fill)
+--   GetIsAutoSurfaceMode/SetAutoSurfaceMode + GetIsSubmerged  RULEUCC_Dive
+--
+-- Both getters have ALL semantics and are vacuously true for an empty list
+-- (Cfile:1359413-1359467 / 1359660-1359714). Invalid/dead entries are skipped.
+local function allLiveFlag(units, method)
+  if type(units) ~= 'table' then return true end
+  for _, u in ipairs(units or {}) do
+    if type(u) == 'table' and not u:IsDead() and not method(u) then return false end
+  end
+  return true
+end
+
+local function sendLiveFlag(name, units, value)
+  if type(units) ~= 'table' then return end
+  local live = {}
+  for _, u in ipairs(units or {}) do
+    if type(u) == 'table' and not u:IsDead() then
+      live[table.getn(live) + 1] = u
+    end
+  end
+  if table.getn(live) > 0 then sendSim(name, live, value == true) end
+end
+
+function GetIsAutoMode(units)
+  return allLiveFlag(units, UserUnitMeta.IsAutoMode)
+end
+function SetAutoMode(units, mode)
+  sendLiveFlag('SetAutoMode', units, mode)
+end
+function GetIsAutoSurfaceMode(units)
+  return allLiveFlag(units, UserUnitMeta.IsAutoSurfaceMode)
+end
+function SetAutoSurfaceMode(units, mode)
+  sendLiveFlag('SetAutoSurfaceMode', units, mode)
+end
+-- Numeric tri-state, not a boolean (Cfile:1359583-1359631):
+--   -1 all Sub, +1 all surfaced, 0 mixed/empty.
+function GetIsSubmerged(units)
+  if type(units) ~= 'table' then return 0 end
+  local state = 0
+  local have = false
+  for _, u in ipairs(units or {}) do
+    local current = u.layer == 'Sub' and -1 or 1
+    if not have then
+      state, have = current, true
+    elseif state ~= current then
+      return 0
+    end
+  end
+  return have and state or 0
+end
+
 -- === Die Uhr der UI-VM ===
 --
 -- Die UI-VM hat KEINEN Tick-Scheduler. `userinit.lua:13-21` (die Engine laedt
@@ -1677,6 +2081,16 @@ end
 -- Deshalb ueberschreibt die UI-VM hier das Tick-basierte WaitSeconds aus
 -- threads.lua (das gilt nur in der Sim). __uiTime zaehlt __mauiFrame(delta) hoch.
 function CurrentTime()
+  return __uiTime
+end
+
+--- GetSystemTimeSeconds() — cfunc_GetSystemTimeSecondsL (Cfile:1266810):
+--- `gpg::time::Timer::ElapsedSeconds(GetSystemTimer())`, i.e. the REAL clock,
+--- not the game clock, and it takes no arguments (the engine errors otherwise).
+--- selection.lua:101/143 measures the double-tap on a control group with it,
+--- tooltip.lua and announcement.lua use it too. __uiTime is exactly that clock:
+--- __mauiFrame(delta) advances it by the real frame time.
+function GetSystemTimeSeconds()
   return __uiTime
 end
 
@@ -1786,6 +2200,13 @@ function GetRolloverInfo()
   return __uiRollover or nil
 end
 
+-- "GetUnitById(id)" (Cfile:1269630, UI variant): the UserUnit mirror by id.
+-- unittext.lua:19/30/68 (the floating unit-count/damage numbers) look units up
+-- with it.
+function GetUnitById(id)
+  return __uiUnits[tonumber(id)]
+end
+
 function __uiSetRollover(id)
   local u = id and __uiUnits[id]
   if not u then
@@ -1797,7 +2218,7 @@ function __uiSetRollover(id)
   -- Baustelle produziert nichts (Baustellen sind fuer die Oekonomie unsichtbar).
   local bp = __blueprints[u.blueprintId]
   local eco = (bp and bp.Economy) or {}
-  local fertig = (u.workProgress or 1) >= 1
+  local fertig = (u.fractionComplete or 1) >= 1
   __uiRollover = {
     userUnit = u,
     blueprintId = u.blueprintId,
@@ -1810,7 +2231,20 @@ function __uiSetRollover(id)
     shieldRatio = u.shieldRatio or 0,
     fuelRatio = u.fuelRatio or -1,
     workProgress = u.workProgress or 0,
-    kills = 0,
+    kills = u.kills or 0,
+    -- Silo ammo. unitview.lua:216 calls the silo stat function for EVERY
+    -- hovered unit, and unitview.lua:116 compares
+    -- `info.tacticalSiloMaxStorageCount > 0 or info.nukeSiloMaxStorageCount > 0`
+    -- unconditionally — leaving these nil threw "attempt to compare nil with
+    -- number" and silently killed the WHOLE rollover panel on every hover (the
+    -- error is swallowed by the frame pump's try, gameUi.ts). orders.lua:611-627
+    -- reads the same fields. The sim does not build silo missiles yet, so
+    -- nothing is stored and no capacity is reported; once silos are simulated
+    -- these come from GetTacticalSiloAmmoCount/GetNukeSiloAmmoCount.
+    tacticalSiloStorageCount = u.tacticalSiloAmmo or 0,
+    tacticalSiloMaxStorageCount = u.tacticalSiloMax or 0,
+    nukeSiloStorageCount = u.nukeSiloAmmo or 0,
+    nukeSiloMaxStorageCount = u.nukeSiloMax or 0,
     customName = u.customName,
     massProduced = fertig and (eco.ProductionPerSecondMass or 0) or 0,
     massRequested = fertig and (eco.MaintenanceConsumptionPerSecondMass or 0) or 0,
@@ -2122,14 +2556,8 @@ function __uiInitKeyMap()
 end
 
 -- === Session / Umgebung ===
--- GetVersion ist ein CORE-Global (Cfile:599401) und liefert die Version der
--- ENGINE, nicht die der Spieldaten: Moho::GetEngineVersion (@0x4D3D30) ist
--- schlicht `STR_Printf("%1.1f.%i", 1.5, 3764)` — einkompiliert. Die Engine hier
--- sind wir; also sagt der String, welche Engine laeuft. __engineVersion setzt
--- der Host aus der package.json (uiEngine.ts).
-function GetVersion()
-  return __engineVersion or 'unbekannt'
-end
+-- GetVersion lives in globals.lua (a CORE global, both VMs). Nothing to
+-- redefine here.
 function DebugFacilitiesEnabled() return false end
 -- SessionIsReplay/SessionIsMultiplayer/SessionIsActive sind WEITER OBEN
 -- definiert (bei den Session-Globals). Hier standen stille Zweitfassungen,

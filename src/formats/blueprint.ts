@@ -108,6 +108,39 @@ class Parser {
     this.error('unterminated string')
   }
 
+  /** The level of a Lua long bracket `[==[` at the cursor (0 for `[[`), or -1
+   *  if there is no long bracket. */
+  private longBracketLevel(): number {
+    if (this.src[this.pos] !== '[') return -1
+    let eq = 0
+    let q = this.pos + 1
+    while (this.src[q] === '=') {
+      eq++
+      q++
+    }
+    return this.src[q] === '[' ? eq : -1
+  }
+
+  /**
+   * A Lua long string `[[...]]` / `[==[...]==]` read VERBATIM (no escapes). The
+   * real effect/emitter blueprints use it for texture paths, e.g.
+   * `Texture = [[/textures/particles/glow_03.dds]]` (a3_end_nis_01_emit.bp:26) —
+   * without this the whole blueprint failed to parse. Lua drops a single leading
+   * newline right after the opening bracket.
+   */
+  private readLongString(): string {
+    const level = this.longBracketLevel()
+    this.pos += 2 + level // skip [==[
+    if (this.src[this.pos] === '\r') this.pos++
+    if (this.src[this.pos] === '\n') this.pos++
+    const close = `]${'='.repeat(level)}]`
+    const end = this.src.indexOf(close, this.pos)
+    if (end < 0) this.error('unterminated long string')
+    const s = this.src.slice(this.pos, end)
+    this.pos = end + close.length
+    return s
+  }
+
   // --- Expressions (numbers with + - * / and parentheses) -------------------
 
   private readNumberLiteral(): number {
@@ -176,6 +209,7 @@ class Parser {
   parseValue(): BpValue {
     const c = this.peek()
     if (c === "'" || c === '"') return this.readString()
+    if (c === '[' && this.longBracketLevel() >= 0) return this.readLongString()
     if (c === '{') return this.parseTable()
     if (c === '-' || c === '(' || c === '.' || (c >= '0' && c <= '9')) {
       return this.parseExpression()
@@ -308,8 +342,16 @@ export function parseBlueprint(source: string): BpObject {
 export function bpGet(bp: BpValue | undefined, path: string): BpValue | undefined {
   let cur: BpValue | undefined = bp
   for (const seg of path.split('.')) {
-    if (cur === null || typeof cur !== 'object' || Array.isArray(cur)) return undefined
-    cur = (cur as BpObject)[seg]
+    if (Array.isArray(cur)) {
+      // A positional table is a JS array; Lua indexes it 1-based, so
+      // Display.Mesh.LODs.1 -> cur[0] (matches how the game indexes it).
+      if (!/^\d+$/.test(seg)) return undefined
+      cur = cur[Number(seg) - 1]
+    } else if (cur === null || typeof cur !== 'object') {
+      return undefined
+    } else {
+      cur = (cur as BpObject)[seg]
+    }
   }
   return cur
 }

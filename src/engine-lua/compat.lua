@@ -2,27 +2,64 @@
 
 -- Generic-for dispatcher (see rewriteForIn): table -> pairs/next,
 -- pass iterator triples through unchanged.
+--
+-- NIL is a THIRD case: FA's LuaPlus 5.0 tolerates `for k,v in nil do` as a
+-- zero-iteration loop (the same nil-tolerance config.lua grants nil reads), and
+-- the shipped UI relies on it — e.g. construction.lua:889
+-- `for index, unitStack in currentCommandQueue do`, where currentCommandQueue is
+-- legitimately nil for a unit with no build queue (SetCurrentFactoryForQueueDisplay
+-- returns nil, AssignNil @Cfile:1257091). Standard Lua 5.4 would raise "attempt
+-- to call a nil value (for iterator)" and take the whole click handler down with
+-- it. Returning an empty iterator makes the loop a no-op, exactly as in FA.
 function __foriter(a, b, c)
+  if a == nil then
+    return function() return nil end
+  end
   if type(a) == 'table' then
     return next, a, nil
   end
   return a, b, c
 end
 
--- string.format: Lua 5.0 ignored nonsensical flags on %s, while Lua 5.4 throws
--- "invalid conversion specification". The original Lua uses this:
---   economy.lua:305   string.format("%+s", rateStr)
--- The '+', '#', and ' ' flags make no sense for %s and are removed; '-' (left
--- aligned) and width specifications remain, as they are also valid in 5.4.
+-- string.format — two differences between Lua 5.0 (FA) and 5.4 (here):
+--
+--  1. 5.0 ignored nonsensical flags on %s, 5.4 throws "invalid conversion
+--     specification". The original relies on that: economy.lua:305
+--     `string.format("%+s", rateStr)`. '+', '#' and ' ' are dropped; '-' (left
+--     aligned) and width specifications stay — 5.4 accepts those too.
+--
+--  2. 5.0 handed %d to C, which truncated the number; 5.4 THROWS on a
+--     fractional value: "bad argument #n to 'format' (number has no integer
+--     representation)". The original computes in floating point everywhere and
+--     still formats with %d: unitview.lua:269 `string.format("%d / %d",
+--     info.health, info.maxHealth)` — and health is rarely integral. Without
+--     this truncation the rollover panel dies for EVERY damaged unit.
+--     Truncation is toward zero, as in C — not floor.
 do
   local rawformat = string.format
+  local unpack = table.unpack or unpack
+  local function trunc(x)
+    if x >= 0 then return math.floor(x) end
+    return math.ceil(x)
+  end
   string.format = function(fmt, ...)
-    if type(fmt) == 'string' then
-      fmt = string.gsub(fmt, '%%([-+# 0]*[%d%.]*)s', function(flags)
-        return '%' .. string.gsub(flags, '[+# ]', '') .. 's'
-      end)
-    end
-    return rawformat(fmt, ...)
+    if type(fmt) ~= 'string' then return rawformat(fmt, ...) end
+    local n = select('#', ...)
+    local args = { ... }
+    local argi = 0
+    fmt = string.gsub(fmt, '%%[-+# 0]*%d*%.?%d*[%a%%]', function(spec)
+      local conv = string.sub(spec, -1)
+      if conv == '%' then return spec end
+      argi = argi + 1
+      if string.find(conv, '^[diouxXc]$') then
+        local v = args[argi]
+        if type(v) == 'number' then args[argi] = trunc(v) end
+      elseif conv == 's' then
+        return '%' .. string.gsub(string.sub(spec, 2, -2), '[+# ]', '') .. 's'
+      end
+      return spec
+    end)
+    return rawformat(fmt, unpack(args, 1, n))
   end
 end
 

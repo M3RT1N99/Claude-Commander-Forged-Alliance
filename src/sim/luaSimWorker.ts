@@ -64,6 +64,15 @@ type InMsg =
   // sSimDriver->ProcessInfo(entityId, "SetFireState", value)). EFireState
   // Cfile:702842-702850: ReturnFire=0, HoldFire=1, HoldGround=2.
   | { type: 'fireState'; id: number; state: number }
+  // ToggleScriptBit (cfunc_ToggleScriptBitL): ProcessInfo carries the bit only.
+  // The user-side binding filters by curState before asking the sim to flip it.
+  | { type: 'scriptBit'; id: number; bit: number }
+  | { type: 'autoMode'; id: number; enabled: boolean }
+  | { type: 'autoSurfaceMode'; id: number; enabled: boolean }
+  // Per-unit SetPaused (cfunc_SetPausedL "Pause builders in this list") —
+  // DISTINCT from the whole-world 'pause' above (that halts the beat).
+  | { type: 'unitPause'; id: number; paused: boolean }
+  | { type: 'upgrade'; id: number; blueprint: string }
   // Der Sammelpunkt einer Fabrik (IssueFactoryRallyPoint, Cfile:1008266) — KEIN
   // Bewegungsbefehl: die Fabrik bleibt stehen.
   | { type: 'rally'; id: number; x: number; y: number; z: number }
@@ -159,7 +168,7 @@ ctx.onmessage = async (e: MessageEvent<InMsg>): Promise<void> => {
     // Original-Lua lesen GetSurfaceHeight, und ohne Quelle knallt es jetzt (statt
     // still 0 zu liefern). Dieselbe bilineare Abfrage wie im Renderer.
     const hf = new Heightfield(msg.terrain)
-    setTerrainSource(h, (x, z) => hf.at(x, z))
+    setTerrainSource(h, (x, z) => hf.at(x, z), { width: msg.terrain.width, height: msg.terrain.height })
     // ALLE Projektil- und Prop-Blueprints, VOR dem ersten Schuss. Die Engine
     // lädt beim Start ebenfalls alles (Blueprints.lua über DiskFindFiles) —
     // mitten im Tick kann eine Waffe nichts nachladen.
@@ -259,6 +268,27 @@ ctx.onmessage = async (e: MessageEvent<InMsg>): Promise<void> => {
     // No task, no queue: fire state is unit state, not a command
     // (Unit::SetFireState — weapons read it every tick, weapons.lua:89/229).
     host.eval(`local u=__units[${msg.id}]; if u then u:SetFireState(${msg.state}) end`)
+  } else if (msg.type === 'scriptBit') {
+    // Unit::ToggleScriptBit performs the actual flip and fires
+    // OnScriptBitSet/OnScriptBitClear through SetScriptBit.
+    host.eval(`local u=__units[${msg.id}]; if u then u:ToggleScriptBit(${msg.bit}) end`)
+  } else if (msg.type === 'autoMode') {
+    host.eval(`local u=__units[${msg.id}]; if u then u:SetAutoMode(${msg.enabled ? 'true' : 'false'}) end`)
+  } else if (msg.type === 'autoSurfaceMode') {
+    // ProcessInfo invokes the native Unit setter; it is not a public sim-Lua
+    // binding, so keep the internal state write at this worker seam.
+    host.eval(`local u=__units[${msg.id}]; if u then u.__autoSurfaceMode=${msg.enabled ? 'true' : 'false'} end`)
+  } else if (msg.type === 'upgrade') {
+    // IssueUpgrade(units, blueprintId) — cfunc_IssueUpgradeL (Cfile:1011315):
+    // exactly two arguments, no queue clear. The sim turns it into the
+    // CUnitUpgradeTask (build.lua __issueUpgrade).
+    host.eval(
+      `local u=__units[${msg.id}]; if u then IssueUpgrade({ u }, ${JSON.stringify(msg.blueprint)}) end`,
+    )
+  } else if (msg.type === 'unitPause') {
+    // Per-unit SetPaused: halts this builder/factory's production only
+    // (build.lua gates __buildCollect/__factoryTick on u.__paused).
+    host.eval(`local u=__units[${msg.id}]; if u then u:SetPaused(${msg.paused ? 'true' : 'false'}) end`)
   }
 }
 
@@ -276,7 +306,7 @@ async function resetSession(files: Map<string, Uint8Array>, terrain: Heightfield
   const h = await LuaHost.create(files, (level, m) => ctx.postMessage({ type: 'log', level, msg: m }))
   engine = installEngine(h)
   const hf = new Heightfield(terrain)
-  setTerrainSource(h, (x, z) => hf.at(x, z))
+  setTerrainSource(h, (x, z) => hf.at(x, z), { width: terrain.width, height: terrain.height })
   loadBlueprintGroups(h, files)
   host = h
 }
@@ -355,6 +385,7 @@ function tickAndPost(): void {
       mass: a.mass, massStorage: a.maxMass, massIncome: a.incomeMass, massExpense: a.expenseMass,
       energy: a.energy, energyStorage: a.maxEnergy, energyIncome: a.incomeEnergy, energyExpense: a.expenseEnergy,
       massRequested: a.requestedMass, energyRequested: a.requestedEnergy,
+      reclaimMass: a.reclaimMass, reclaimEnergy: a.reclaimEnergy,
     },
   })
 }

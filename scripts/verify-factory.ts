@@ -80,8 +80,10 @@ check(
   'Er entsteht AN der Fabrik (120, 120)',
 )
 check(
-  Number(host.eval(`return table.getn(__units[${factory}].__buildQueue) > 0 and __units[${factory}].__buildQueue[1].count or 0`)) === 1,
-  'Die Warteschlange steht noch auf 1 (der zweite Panzer wartet)',
+  Number(host.eval(`return table.getn(__units[${factory}].__buildQueue) > 0 and __units[${factory}].__buildQueue[1].count or 0`)) === 2,
+  'Die Warteschlange steht noch auf 2 — die BAUENDE Einheit bleibt gezaehlt ' +
+    '(die Engine dekrementiert die BuildFactory-Command erst bei COMPLETION, ' +
+    'Cfile:838029), also zeigt die Anzeige die echte Reststueckzahl',
 )
 
 console.log('\n== Der Panzer wird gebaut und rollt vom Hof ==')
@@ -94,6 +96,12 @@ while (readLuaUnit(host, tank1)!.fraction < 1 && ticks < 3000) {
 const t1 = readLuaUnit(host, tank1)!
 check(t1.fraction >= 1, `Panzer fertig nach ${ticks} Beats (${(ticks / 10).toFixed(1)} s)`)
 check(t1.health === t1.maxHealth, `Volles Leben: ${t1.health}`)
+// COMPLETION decrements the queue (Cfile:838029: count>1 -> DecreaseCount(1)):
+// 2 -> 1 now that the first tank is done, so the second still waits at count 1.
+check(
+  Number(host.eval(`return table.getn(__units[${factory}].__buildQueue) > 0 and __units[${factory}].__buildQueue[1].count or 0`)) === 1,
+  'Nach der Fertigstellung steht die Warteschlange auf 1 (Dekrement bei COMPLETION)',
+)
 check(engine.economy.army(1).mass < massBefore, `Masse bezahlt: ${massBefore.toFixed(0)} → ${engine.economy.army(1).mass.toFixed(0)}`)
 
 // FactoryUnit.OnStopBuild → RollOffUnit → IssueMove: der Panzer bekommt ein Ziel.
@@ -104,18 +112,132 @@ check(
   'Er hat ein Bewegungsziel (FactoryUnit.RollOffUnit → IssueMove, defaultunits.lua:571)',
 )
 
-// Und die Fabrik nimmt sich den zweiten Panzer.
+// While the finished tank is still leaving the build pad the factory is BUSY
+// and its queue is BLOCKED: FinishBuildThread sets SetBusy(true) +
+// SetBlockCommandQueue(true) (defaultunits.lua:529-530), RolloffBody holds both
+// until IsCommandDone(MoveCommand) reports the unit is clear
+// (defaultunits.lua:643-649). Only then may the next unit come into being —
+// otherwise it would grow INSIDE the one rolling off.
+const countTanks = (): number =>
+  Number(
+    host.eval(`
+      local n = 0
+      for _, u in pairs(__units) do
+        if u.__bp and u.__bp.BlueprintId == 'uel0101' then n = n + 1 end
+      end
+      return n
+    `),
+  )
 for (let i = 0; i < 3; i++) beat(engine)
-const tanks = Number(
-  host.eval(`
+check(
+  host.eval(`return __units[${factory}].__busy == true`) === true,
+  'the factory is BUSY while the tank rolls off (SetBusy, defaultunits.lua:529)',
+)
+check(countTanks() === 1, 'and it starts NO second tank during that time')
+
+// Wait for the roll-off: RolloffBody checks every 0.5 s (WaitSeconds), then IdleState.
+let rollTicks = 0
+while (host.eval(`return __units[${factory}].__busy == true`) === true && rollTicks < 300) {
+  beat(engine)
+  rollTicks++
+}
+check(rollTicks < 300, `the tank is clear after ${rollTicks} beats (RolloffBody → IdleState)`)
+for (let i = 0; i < 3; i++) beat(engine)
+const tanks = countTanks()
+check(tanks === 2, `then the factory starts the second tank (${tanks} tanks)`)
+
+// === Rally point ===
+//
+// The finished unit INHERITS its factory's commands (sub_5FA340,
+// Cfile:818487-818600). The rally point is such a command:
+// IssueFactoryRallyPoint puts a UNITCOMMAND_Move into the factory's command
+// list (Cfile:1008346). Without that inheritance every unit stopped on the
+// roll-off point and piled up there.
+console.log('\n== Rally point: the new unit drives there ==')
+{
+  host.eval(`__units[${factory}]:SetRallyPoint({ 160, 20, 170 })`)
+  const tank2 = Number(
+    host.eval(`
+      local newest = 0
+      for id, u in pairs(__units) do
+        if u.__bp and u.__bp.BlueprintId == 'uel0101' and id > newest then newest = id end
+      end
+      return newest
+    `),
+  )
+  let t = 0
+  while (t < 3000 && readLuaUnit(host, tank2)!.fraction < 1) {
+    beat(engine)
+    t++
+  }
+  // One beat after completion: RollOffUnit issued the roll-off command, the
+  // rally point waits behind it in the queue.
+  beat(engine)
+  const queued = host.eval(`
     local n = 0
-    for _, u in pairs(__units) do
-      if u.__bp and u.__bp.BlueprintId == 'uel0101' then n = n + 1 end
+    for _, c in ipairs(__orders[${tank2}] or {}) do n = n + 1 end
+    return n .. '|' .. tostring(__orderActive[${tank2}] ~= nil)
+  `)
+  check(queued === '1|true', `roll-off running, rally point queued behind it (${queued})`)
+  let m = 0
+  while (m < 2000 && host.eval(`return __orderActive[${tank2}] ~= nil`) === true) {
+    beat(engine)
+    m++
+  }
+  const end = readLuaUnit(host, tank2)!
+  check(
+    Math.hypot(end.x - 160, end.z - 170) < 3,
+    `it stands on the rally point 160/170 (${end.x.toFixed(1)}/${end.z.toFixed(1)}, after ${m} beats)`,
+  )
+}
+
+// === Queue edited mid-build: completion drains the task's OWN command ===
+//
+// The engine decrements the specific command the CFactoryBuildTask was built
+// from (DecreaseCount(1, v18), Cfile:838029), NOT a positional head. Reorder the
+// queue while a unit builds and the completing unit must still drain ITS item.
+console.log('\n== Queue edited mid-build: the right item is drained ==')
+for (let i = 0; i < 40 && host.eval(`return __units[${factory}].__busy == true`) === true; i++) beat(engine)
+queueFactoryBuild(host, factory, 'uel0101', 2)
+beat(engine) // __factoryTick spawns the first tank from the (only) stack
+const midTank = Number(
+  host.eval(`
+    local newest = 0
+    for id, u in pairs(__units) do
+      if u.__bp and u.__bp.BlueprintId == 'uel0101' and (u.__fraction or 1) < 1 and id > newest then newest = id end
     end
-    return n
+    return newest
   `),
 )
-check(tanks === 2, `Die Fabrik hat den zweiten Panzer aufgesetzt (${tanks} Panzer)`)
+check(midTank > 0, `a tank is building from the stack (id ${midTank})`)
+// Slip a foreign stack in FRONT of the building one — now q[1] is NOT the item
+// the running task was built from.
+host.eval(`table.insert(__units[${factory}].__buildQueue, 1, { id = 'ZZFOREIGN', count = 5 })`)
+let mb = 0
+while (readLuaUnit(host, midTank)!.fraction < 1 && mb < 3000) {
+  beat(engine)
+  mb++
+}
+check(readLuaUnit(host, midTank)!.fraction >= 1, `the tank finished (${mb} beats)`)
+check(
+  Number(host.eval(`return __units[${factory}].__buildQueue[1].count`)) === 5,
+  'the foreign stack at q[1] is UNTOUCHED (completion drained its own item by identity, not q[1])',
+)
+check(
+  Number(
+    host.eval(`
+      for _, it in ipairs(__units[${factory}].__buildQueue) do
+        if it.id == 'uel0101' then return it.count end
+      end
+      return -1
+    `),
+  ) === 1,
+  'the tank stack it WAS building dropped 2 -> 1',
+)
+host.eval(`
+  local q = __units[${factory}].__buildQueue
+  for i = table.getn(q), 1, -1 do if q[i].id == 'ZZFOREIGN' then table.remove(q, i) end end
+`)
 
 const badWarnings = warnings.filter((w) => !/effectutilities|Emitter|Animator|Sound/i.test(w))
 if (badWarnings.length > 0) {

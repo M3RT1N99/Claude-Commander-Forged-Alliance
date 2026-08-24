@@ -34,3 +34,79 @@ function STR_Utf8SubString(s, start, count)
   if j then j = j - 1 else j = string.len(s) end
   return string.sub(s, i, j)
 end
+
+-- === Path helpers (Moho::FILE_*, scr_CoreInits => both VMs) ===
+
+-- "base = Dirname(fullPath)" (mHelp Cfile:599...) — Moho::FILE_DirPrefix
+-- (Cfile:444657-444750). Normalises '\' to '/', finds the LAST '/'. No slash ->
+-- "". If NO '.' follows that slash the whole path is returned (only a trailing
+-- slash is trimmed) — Dirname('/mods/foo') == '/mods/foo'; only when a dot
+-- follows the last slash is the path cut before the slash, with no trailing
+-- slash. mods.lua:228/242 (LoadModInfo) reads env.location = Dirname(filename).
+function Dirname(path)
+  local s = string.gsub(tostring(path), '\\', '/')
+  local slash = string.match(s, '^.*()/')
+  if not slash then return '' end
+  local dot = string.match(s, '^.*()%.')
+  if not dot or dot <= slash then
+    if slash == string.len(s) then return string.sub(s, 1, slash - 1) end
+    return s
+  end
+  return string.sub(s, 1, slash - 1)
+end
+
+-- "base = Basename(fullPath, stripExtension?)" (mHelp Cfile:503815) —
+-- Moho::FILE_Base (Cfile:444986-445066): everything after the last '/' or '\';
+-- with stripExtension it also cuts at the LAST '.' of that component. The
+-- binding demands EXACTLY 2 args despite the '?' (Cfile:503840). saveload.lua,
+-- replay.lua and helptext.lua use it.
+function Basename(path, stripExtension)
+  local base = string.match(tostring(path), '[^/\\]*$')
+  if stripExtension then
+    local cut = string.match(base, '^(.*)%.[^.]*$')
+    if cut then base = cut end
+  end
+  return base
+end
+
+-- "table STR_GetTokens(string, delimiter)" (Cfile:599203) — the delimiter is a
+-- SET of characters, empty tokens are dropped. The result table is 0-BASED:
+-- the engine writes SetString(t, i++, tok) starting at i = 0 (Cfile:599300,
+-- v5 = 0). maputil.lua:203 / aiattackutilities.lua:1062 pass it straight on, so
+-- consumers rely on that shape.
+function STR_GetTokens(s, delim)
+  s, delim = tostring(s), tostring(delim)
+  local out, i = {}, 0
+  if delim == '' then
+    if s ~= '' then out[0] = s end
+    return out
+  end
+  local set = string.gsub(delim, '(%W)', '%%%1')
+  for tok in string.gmatch(s, '[^' .. set .. ']+') do
+    out[i] = tok
+    i = i + 1
+  end
+  return out
+end
+
+-- "int STR_xtoi(string)" (Cfile:598960) — gpg::STR_Xtoi: reads hex digits from
+-- the START and stops at the first non-hex char (no '0x' handling), nil/empty
+-- -> 0. keymapper.lua:137 turns the key-name table into key codes with it.
+function STR_xtoi(s)
+  local r = 0
+  for c in string.gmatch(tostring(s or ''), '.') do
+    local d = tonumber(c, 16)
+    if d == nil then break end
+    r = (r * 16 + d) % 4294967296
+  end
+  return r
+end
+
+-- "string STR_itox(int)" (Cfile:599011) — STR_Printf("%X", (int)n): UPPERCASE
+-- hex, no prefix, no padding; a fractional value truncates and negatives wrap
+-- to two's complement.
+function STR_itox(n)
+  n = tonumber(n)
+  if n == nil then error('STR_itox: integer expected', 2) end
+  return string.format('%X', math.floor(n) % 4294967296)
+end

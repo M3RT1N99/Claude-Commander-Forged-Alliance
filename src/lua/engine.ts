@@ -70,6 +70,12 @@ export function installEngine(
   // Die UI-VM hatte es (uiEngine.ts), die Sim-VM nicht: gefunden, als der
   // SimCallback-Dispatcher statt "No callback named …" an `repr == nil` starb.
   host.loadGlobal('/lua/system/repr.lua')
+  // The buff system is original Lua: /lua/system/buffblueprints.lua declares
+  // the global `Buffs` table and the `BuffBlueprint{...}` constructor
+  // (buffblueprints.lua:11/30-60), and /lua/sim/buff.lua looks its definitions
+  // up in exactly that table. Nothing in lua.scd imports the file — the engine
+  // loads it into the sim state, so we do it here.
+  host.loadGlobal('/lua/system/buffblueprints.lua')
   installBlueprintPipeline(host)
   installUnitFactory(host)
   // Kampf: Schaden, Projektile, Props, Waffen-Tasks. Nach der UnitFactory, weil

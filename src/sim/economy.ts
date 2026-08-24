@@ -127,6 +127,19 @@ export class ArmyEconomy {
   /** Demand before throttling (brain:GetEconomyRequested). */
   requestedMass = 0
   requestedEnergy = 0
+  // Reclaim income this beat. The engine writes reclaim to THREE places: storage,
+  // the separate mTotals.mReclaimed counter (this pair, Cfile:1016010-1016024),
+  // AND mResources — which becomes mIncome (Cfile:848620/848632, 1106784-1106791).
+  // So reclaim IS folded into reported income (done in addReclaim, phase 4) and
+  // ALSO surfaced as its own breakdown counter here. Kept per second like income.
+  reclaimMass = 0
+  reclaimEnergy = 0
+  // Resources GIVEN this beat (GiveResource / reclaim). The engine adds them to
+  // the INCOME accumulator (mResources), NOT to storage (Cfile:735044-735053,
+  // 848620-848639), so active demand consumes them first and only the leftover
+  // clamps into storage. Folded into `available` in tick(), then reset.
+  private pendingMass = 0
+  private pendingEnergy = 0
 
   private readonly units = new Map<number, UnitEcon>()
   /** Transiente Bau-Requests (pro Tick vom Bau-System gesetzt). */
@@ -159,12 +172,31 @@ export class ArmyEconomy {
     const u = this.units.get(id)
     if (u) u.consActive = active
   }
+  /**
+   * Runtime per-second rate update (Set{Production,Consumption}PerSecond{Mass,
+   * Energy}). The engine reads the mutable UnitAttributes each tick
+   * (Cfile:976734-976735) and the original Lua drives the whole dynamic economy
+   * through these setters: mass-extractor scaling by the MASS marker
+   * (defaultunits.lua:785), adjacency modifiers + maintenance (unit.lua:745-759),
+   * upgrade throttling (defaultunits.lua:817-841). Only the named field changes;
+   * the others keep their spawn-registered value.
+   */
+  setRate(id: number, field: 'prodM' | 'prodE' | 'consM' | 'consE', value: number): void {
+    const u = this.units.get(id)
+    if (u) u[field] = value
+  }
   remove(id: number): void {
     this.units.delete(id)
   }
 
   /** Ein Wirtschafts-Tick (im Sim-Beat vor der Thread-Stage). */
   tick(): void {
+    // Reclaim is a per-beat counter (mReclaimed, ctor-init 0, Cfile:1016016):
+    // reset it each tick. The reclaim grants run in phase 4 (AFTER this tick()
+    // in phase 2, src/lua/engine.ts:106-136); the end-of-beat snapshot sees
+    // exactly this beat's reclaim.
+    this.reclaimMass = 0
+    this.reclaimEnergy = 0
     let prodM = 0
     let prodE = 0
     let maxM = 0
@@ -214,18 +246,36 @@ export class ArmyEconomy {
     this.requestedMass = f(reqM / DT)
     this.requestedEnergy = f(reqE / DT)
 
-    const availMass = f(this.mass + f(prodM * DT))
-    const availEnergy = f(this.energy + f(prodE * DT))
+    // Given/reclaimed resources are income this beat (Cfile:1106670-1106674):
+    // fold them into `available` so demand can consume them, then reset.
+    const givenMass = this.pendingMass
+    const givenEnergy = this.pendingEnergy
+    const availMass = f(this.mass + f(prodM * DT) + givenMass)
+    const availEnergy = f(this.energy + f(prodE * DT) + givenEnergy)
+    this.pendingMass = 0
+    this.pendingEnergy = 0
     const { spentMass, spentEnergy } = distribute(availMass, availEnergy, consumers)
     // Persist each unit's granted rate for next tick's production factor.
     for (const [u, c] of unitConsumers) u.lastRate = c.rate
 
     this.mass = f(Math.min(Math.max(availMass - spentMass, 0), maxM))
     this.energy = f(Math.min(Math.max(availEnergy - spentEnergy, 0), maxE))
-    this.incomeMass = prodM
-    this.incomeEnergy = prodE
+    // Reported income = production + given (+ reclaim, added in addReclaim during
+    // phase 4). The engine's mIncome is mResources = production + given + reclaim
+    // (Cfile:954020/735044/848620 -> 1106784-1106791). given is absolute per tick,
+    // so /DT to the per-second convention the getters use.
+    this.incomeMass = f(prodM + givenMass / DT)
+    this.incomeEnergy = f(prodE + givenEnergy / DT)
     this.expenseMass = f(spentMass / DT)
     this.expenseEnergy = f(spentEnergy / DT)
+    // Documented reductions (no impact at the 1-army default, deferred):
+    //  * Reported usage is the true per-consumer spend; the engine reports the
+    //    aggregate both.X*r1 + single.X*r2 (Cfile:1106779-1106788), which differs
+    //    only during a stall with single-resource-only consumers.
+    //  * Per-army handicap multiplies income by (1+handicap) before the ratios
+    //    (Cfile:1106655-1106664) — gated on handicap != 0, unused at default.
+    //  * mResourceSharing water-fills overflow to allies before the storage clamp
+    //    (Cfile:1106826-1106960); a lone army drops its overflow either way.
   }
 
   /**
@@ -235,8 +285,27 @@ export class ArmyEconomy {
    * läuft GiveInitialResources im Original erst nach WaitTicks(5).
    */
   give(res: Res, amount: number): void {
-    if (res === 'MASS') this.mass = f(Math.min(Math.max(this.mass + amount, 0), this.maxMass))
-    else this.energy = f(Math.min(Math.max(this.energy + amount, 0), this.maxEnergy))
+    // Add to this beat's income (unclamped), NOT straight to storage: the
+    // engine lets given/reclaimed resources feed current demand and only clamps
+    // the leftover into storage (Cfile:735044-735053), so a full store no
+    // longer silently drops a reclaim.
+    if (res === 'MASS') this.pendingMass += amount
+    else this.pendingEnergy += amount
+  }
+
+  /**
+   * This tick's reclaim grant (mass/energy per tick) — accumulated separately
+   * from income as a per-second rate (like income/expense, /DT). Storage is
+   * still filled by `give()`/GiveResource; this is ONLY the reclaimed display
+   * counter (the engine writes to both places, Cfile:848614-848639). Reset in tick().
+   */
+  addReclaim(massPerTick: number, energyPerTick: number): void {
+    // ONLY the separate mReclaimed display counter. Reclaim's income contribution
+    // already flows through __reclaimTick's GiveResource -> pendingMass ->
+    // incomeMass (the engine writes reclaim to mResources->mIncome exactly ONCE,
+    // Cfile:848620); adding it here too double-counted it in GetEconomyIncome/Trend.
+    this.reclaimMass = f(this.reclaimMass + massPerTick / DT)
+    this.reclaimEnergy = f(this.reclaimEnergy + energyPerTick / DT)
   }
 
   /** brain:GetEconomyUsage(res) — actual spend per second (after throttling). */
@@ -307,6 +376,13 @@ export function installEconomy(host: LuaHost, mgr: EconomyManager): void {
   host.setGlobal('__econSetConsumptionActive', (army: number, id: number, v: boolean) => {
     mgr.army(army).setConsumptionActive(id, v !== false)
   })
+  // Runtime rate change from Set*PerSecond* (moho.lua) — the dynamic economy.
+  host.setGlobal(
+    '__econUpdateRate',
+    (army: number, id: number, field: 'prodM' | 'prodE' | 'consM' | 'consE', value: number) => {
+      mgr.army(army).setRate(id, field, value)
+    },
+  )
   // Bau-Requests: das Bau-System meldet vor dem Tick den Bedarf an und liest
   // danach die gewährte LimitingRate zurück (CEconRequest::LimitingRate).
   host.setGlobal('__econSetBuildRequest', (army: number, taskId: number, mass: number, energy: number) => {
@@ -340,6 +416,13 @@ export function installEconomy(host: LuaHost, mgr: EconomyManager): void {
   // Startwerte — nicht aus einer TS-Konstante.
   host.setGlobal('__econGive', (army: number, res: string, amount: number) => {
     mgr.army(army).give(res.toUpperCase() === 'MASS' ? 'MASS' : 'ENERGY', amount)
+  })
+  // This tick's reclaim grant into the separate reclaimed counter (on top of
+  // the storage credit via __econGive) — the engine writes to both places
+  // (Cfile:848614-848639). Mass/energy per tick; addReclaim converts to the
+  // per-second rate.
+  host.setGlobal('__econReclaim', (army: number, mass: number, energy: number) => {
+    mgr.army(army).addReclaim(mass, energy)
   })
   host.setGlobal('__econStored', (army: number, res: string) => mgr.army(army).stored((res === 'MASS' ? 'MASS' : 'ENERGY')))
   host.setGlobal('__econStoredRatio', (army: number, res: string) => mgr.army(army).storedRatio(res === 'MASS' ? 'MASS' : 'ENERGY'))

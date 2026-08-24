@@ -97,8 +97,13 @@ console.log('\n== Fortschritt: delta = BuildRate/BuildTime · rate · 0.1 = 0.00
 beat()
 check(near(num(`__units[${site}].__fraction`), 0.008), `nach 1 Beat: fraction ${num(`__units[${site}].__fraction`).toFixed(4)} (erwartet 0.0080)`)
 check(num(`__units[${site}].__health`) > 0, `Health waechst mit dem Bau: ${num(`__units[${site}].__health`).toFixed(1)}`)
-// Kosten: BuildCostEnergy 750 · 0.008 = 6/Tick → 60/s
-check(near(army.expenseEnergy, 60, 1), `Energie-Ausgabe ${army.expenseEnergy.toFixed(1)}/s (750·0.008/Tick)`)
+// Kosten: BuildCostEnergy 750 · 0.008 = 6/Tick → 60/s build drain, PLUS the
+// builder's own build-time maintenance (~1/s) that the original Lua now sets
+// via SetConsumptionPerSecondEnergy (game.lua:41-48) — dynamic-rate fix; before,
+// the setter was a no-op and this maintenance was silently dropped. The build
+// fraction still advances at the full 0.008/beat, proving the 60/s is NOT
+// double-counted (the extra is the ACU's upkeep, not a second build drain).
+check(near(army.expenseEnergy, 61, 1), `Energie-Ausgabe ${army.expenseEnergy.toFixed(1)}/s (60 Bau + ~1 Maintenance)`)
 
 console.log('\n== Fertigstellung nach BuildTime/BuildRate = 12,5 s (125 Beats) ==')
 for (let i = 0; i < 130; i++) beat()

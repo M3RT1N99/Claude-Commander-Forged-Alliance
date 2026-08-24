@@ -70,6 +70,56 @@ function ArmyGetHandicap(army)
   return (__armyHandicap and __armyHandicap[army]) or 0
 end
 
+-- Active shields as a per-beat list (SIM_DoDamage walks a1->mShields,
+-- Cfile:1062762): each carries its owner's position and its collision radius
+-- (the shield entity Size = bp.Defense.Shield.ShieldSize, shield.lua:72).
+-- Rebuilt when the tick changes so a splash over many targets scans this small
+-- list, not every unit per hit.
+__shieldListTick = -1
+__shieldList = {}
+local function shieldOn(s)
+  return s and not s.__destroyed and not s.__destroyQueued
+    and s.IsOn and s:IsOn() and s.GetHealth and s:GetHealth() > 0
+end
+local function activeShieldList()
+  if __shieldListTick ~= (__gameTick or 0) then
+    __shieldListTick = __gameTick or 0
+    __shieldList = {}
+    for _, u in pairs(__units) do
+      local s = u.MyShield
+      if shieldOn(s) then
+        local p = u.__pos or { 0, 0, 0 }
+        local r = s.Size or 0
+        if r > 0 then
+          __shieldList[table.getn(__shieldList) + 1] =
+            { shield = s, owner = u, x = p[1], y = p[2], z = p[3], r2 = r * r }
+        end
+      end
+    end
+  end
+  return __shieldList
+end
+
+-- The shield that intercepts a hit on `target`: its OWN active shield, or a
+-- COVERING dome whose sphere geometrically contains the target but NOT the
+-- damage origin (sub_736E40 subtracts every containing shield's absorption,
+-- Cfile:1062711; a shell fired from inside the dome is not absorbed). This is
+-- how a shield generator protects the units standing under it.
+local function coveringShield(target, tp, origin)
+  local own = target.MyShield
+  if shieldOn(own) then return own end
+  for _, e in ipairs(activeShieldList()) do
+    if e.owner ~= target then
+      local dtx, dty, dtz = tp[1] - e.x, tp[2] - e.y, tp[3] - e.z
+      if dtx * dtx + dty * dty + dtz * dtz <= e.r2 then
+        local dox, doy, doz = origin[1] - e.x, origin[2] - e.y, origin[3] - e.z
+        if dox * dox + doy * doy + doz * doz > e.r2 then return e.shield end
+      end
+    end
+  end
+  return nil
+end
+
 -- ---------------------------------------------------------------------
 -- func_DoDamagePoint (Cfile:1062873) — EIN Ziel.
 -- ---------------------------------------------------------------------
@@ -86,22 +136,48 @@ local function damagePoint(instigator, origin, target, amount, damageType, damag
   if inst and inst.__isProj then inst = inst.__launcher or inst end
   if not damageSelf and inst == target then return end
 
-  local dealt = amount
-  if target.__bp and not target.__isProj then
-    dealt = dealt * __armorMult(target, damageType)
+  local tp = target.__pos or { 0, 0, 0 }
+  local vec = Vector(tp[1] - origin[1], tp[2] - origin[2], tp[3] - origin[3])
+
+  -- Shield: an active shield COVERING the target takes the hit first — its OWN
+  -- dome, or an ally shield-generator's dome the target stands under
+  -- (coveringShield -> sub_736E40, Cfile:1062695/1062711). shield.lua's OnDamage
+  -- applies the shield's OWN armor/handicap (OnGetDamageAbsorption) and passes
+  -- overkill to the SHIELD's owner, so a full absorb returns here and the
+  -- target's OnDamageBy never fires (Cfile:1063018). Reduction: we route a hit
+  -- through ONE covering shield (the engine subtracts each overlapping dome's
+  -- absorption in turn) — enough to model a base under a shield generator.
+  local shield = coveringShield(target, tp, origin)
+  if shield then
+    local ok, err = pcall(function() shield:OnDamage(inst, amount, vec, damageType) end)
+    if not ok then WARN('Shield OnDamage: ' .. tostring(err)) end
+    return
   end
-  dealt = dealt / (1 + ArmyGetHandicap(target.__army or 1))
+
+  -- Armor + handicap reduce the amount only for UNITS (Cfile:1063012-1063033);
+  -- props and projectiles take the raw amount.
+  local dealt = amount
+  if target.__isUnit then
+    dealt = dealt * __armorMult(target, damageType)
+    dealt = dealt / (1 + ArmyGetHandicap(target.__army or 1))
+  end
 
   if dealt <= 0 then return end
 
-  -- OnDamageBy(armyIndex) — die Lua zaehlt damit, wer geschossen hat
-  -- (Cfile:1063052; unit.lua nutzt es fuer die Vergeltung/Statistik).
-  if inst and inst.__army and target.OnDamageBy then
+  -- OnDamageBy(armyIndex) — who fired (Cfile:1063052; unit.lua uses it for
+  -- retaliation/stats). It fires only AFTER the reduction, on a UNIT that
+  -- actually takes damage (not on a full shield absorb, a prop or a projectile).
+  if inst and inst.__army and target.__isUnit and target.OnDamageBy then
     pcall(function() target:OnDamageBy(inst.__army) end)
   end
 
-  local tp = target.__pos or { 0, 0, 0 }
-  local vec = Vector(tp[1] - origin[1], tp[2] - origin[2], tp[3] - origin[3])
+  -- OnExtraDamageDealt(damageType): the engine fires it on a UNIT when armor
+  -- AMPLIFIED the hit to >= 2x the raw amount (func_DoDamagePoint, Cfile:1063057-
+  -- 1063059: ratio = dealt/rawAmount >= 2.0). dealt already includes the armor
+  -- multiplier and the handicap divisor.
+  if target.__isUnit and amount > 0 and (dealt / amount) >= 2.0 and target.OnExtraDamageDealt then
+    pcall(function() target:OnExtraDamageDealt(damageType) end)
+  end
 
   -- Und jetzt sagt es die Engine der Lua — sie zieht die HP selbst ab
   -- (RunScript_EntityOnDamage, Cfile:1063151).
@@ -119,55 +195,72 @@ function Damage(instigator, origin, target, amount, damageType)
   damagePoint(instigator, __vec3(origin), target, amount, damageType)
 end
 
+-- Area/ring splash eligibility (func_DoDamageArea, Cfile:1063243-1063261):
+--   * damageSelf gates the instigator itself;
+--   * the friendly filter uses IsAlly, NOT exact-army equality
+--     (Cfile:1063248-1063249) — allies of a DIFFERENT army are spared too unless
+--     damageFriendly (IsAlly(x,x) keeps the instigator's own army spared);
+--   * a target in category NOSPLASHDAMAGE is immune to splash
+--     (Cfile:1063254-1063256).
+local function splashEligible(u, inst, instArmy, damageFriendly, damageSelf)
+  if u.__destroyQueued then return false end
+  if not damageSelf and u == inst then return false end
+  if not damageFriendly and instArmy ~= nil and IsAlly(instArmy, u.__army) then return false end
+  if EntityCategoryContains(categories.NOSPLASHDAMAGE, u) then return false end
+  return true
+end
+
 --- "DamageArea(instigator, location, radius, amount, damageType, damageFriendly,
---- [damageSelf])" (Cfile:1064280).
----
---- KEIN Abstands-Falloff: jedes Ziel im Radius bekommt den vollen Betrag
---- (damage-binary.md). Schilde fehlen noch — der Abzug ueber die Schildkugeln
---- (Cfile:1062695) kommt mit dem Schild-System.
+--- [damageSelf])" (Cfile:1064280). No distance falloff: every target in the
+--- radius takes the full amount (damage-binary.md). Shields are not modelled yet
+--- (the shield-sphere subtraction, Cfile:1062695, arrives with the shield system).
+--- The engine ERRORS on degenerate input rather than silently no-oping
+--- (cfunc_DamageAreaL, Cfile:1064381/1064383).
+--- DOCUMENTED GAP: the engine iterates the OGrid for Unit|Prop|Projectile|Entity
+--- (func_DoDamageArea, Cfile:1063234) so splash also destroys trees/wrecks and
+--- in-flight projectiles. We iterate only __units — props and projectiles carry
+--- __health but no damage->destroy path (they are removed via the reclaim/
+--- renderer-instance path, globals.lua __dispatchReclaimMapProp, or projectile
+--- impact), so splashing them needs that removal wiring; deferred, not faked.
 function DamageArea(instigator, location, radius, amount, damageType, damageFriendly, damageSelf)
+  if amount == 0 then error('0 damage specified.', 2) end
+  if radius == 0 then error('0 radius specified.', 2) end
   local origin = __vec3(location)
   local inst = instigator
   if inst and inst.__isProj then inst = inst.__launcher or inst end
   local instArmy = inst and inst.__army
 
   for _, u in pairs(__units) do
-    if not u.__destroyQueued then
-      if damageSelf or u ~= inst then
-        local friendly = instArmy ~= nil and u.__army == instArmy
-        if damageFriendly or not friendly then
-          local p = u.__pos
-          local dx, dy, dz = p[1] - origin[1], p[2] - origin[2], p[3] - origin[3]
-          if dx * dx + dy * dy + dz * dz <= radius * radius then
-            damagePoint(instigator, origin, u, amount, damageType, damageSelf)
-          end
-        end
-      end
+    local p = u.__pos
+    local dx, dy, dz = p[1] - origin[1], p[2] - origin[2], p[3] - origin[3]
+    if dx * dx + dy * dy + dz * dz <= radius * radius
+      and splashEligible(u, inst, instArmy, damageFriendly, damageSelf) then
+      damagePoint(instigator, origin, u, amount, damageType, damageSelf)
     end
   end
 end
 
 --- "DamageRing(instigator, location, minRadius, maxRadius, amount, damageType,
---- damageFriendly, [damageSelf])" (Cfile:1064409).
+--- damageFriendly, [damageSelf])" (Cfile:1064409). Errors on 0 damage / 0 min /
+--- 0 max radius (cfunc_DamageRingL, Cfile:1064503-1064507).
 function DamageRing(instigator, location, minRadius, maxRadius, amount, damageType, damageFriendly, damageSelf)
+  if amount == 0 then error('0 damage specified.', 2) end
+  if minRadius == 0 then error('0 min radius specified.', 2) end
+  if maxRadius == 0 then error('0 max radius specified.', 2) end
+  -- cfunc_DamageRingL also rejects a degenerate ring (Cfile:1064508-1064509).
+  if minRadius >= maxRadius then error('Max radius must be greater than min radius.', 2) end
   local origin = __vec3(location)
   local inst = instigator
   if inst and inst.__isProj then inst = inst.__launcher or inst end
   local instArmy = inst and inst.__army
 
   for _, u in pairs(__units) do
-    if not u.__destroyQueued then
-      if damageSelf or u ~= inst then
-        local friendly = instArmy ~= nil and u.__army == instArmy
-        if damageFriendly or not friendly then
-          local p = u.__pos
-          local dx, dy, dz = p[1] - origin[1], p[2] - origin[2], p[3] - origin[3]
-          local d2 = dx * dx + dy * dy + dz * dz
-          if d2 >= minRadius * minRadius and d2 <= maxRadius * maxRadius then
-            damagePoint(instigator, origin, u, amount, damageType, damageSelf)
-          end
-        end
-      end
+    local p = u.__pos
+    local dx, dy, dz = p[1] - origin[1], p[2] - origin[2], p[3] - origin[3]
+    local d2 = dx * dx + dy * dy + dz * dz
+    if d2 >= minRadius * minRadius and d2 <= maxRadius * maxRadius
+      and splashEligible(u, inst, instArmy, damageFriendly, damageSelf) then
+      damagePoint(instigator, origin, u, amount, damageType, damageSelf)
     end
   end
 end
@@ -235,6 +328,15 @@ function __flushDeletions()
         end
         __props[e.__id] = nil
       else
+        -- OnDestroy strips this structure's adjacency buffs from its neighbours,
+        -- but ONLY when it was NOT killed (the Kill path already ran the teardown,
+        -- moho.lua:158) and only for a complete immobile structure
+        -- (Cfile:952388-952409; the `not e.__dead` guard mirrors the engine's
+        -- `!mIsDead` at 952388, __notifyNotAdjacent enforces the immobile /
+        -- not-being-built gate). Without this an upgrade or reclaim
+        -- (defaultunits.lua:267 self:Destroy()) leaks the old building's buffs
+        -- onto its neighbours and they stack across the upgrade chain.
+        if not e.__dead and __notifyNotAdjacent then __notifyNotAdjacent(e.__id) end
         __units[e.__id] = nil
         __econUnregister(e.__army or 1, e.__id)
       end

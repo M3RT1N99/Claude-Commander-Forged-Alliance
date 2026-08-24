@@ -74,9 +74,9 @@ interface RawLayout {
  * Expand an uncompressed mip to BGRA8 — the ordering expected by
  * `bgraToRgba`.
  *
- * The masks come from the header; the 5-bit channels of 16-bit formats are
- * expanded to 8 bits with `(v << 3) | (v >> 2)` (standard bit replication, so
- * that 31 → 255 rather than 248).
+ * The masks come from the header; an N-bit channel is expanded to 8 bits by
+ * uniform scale `round(v * 255 / (2^N - 1))` (0 → 0, max → 255), which — unlike
+ * bit replication — also holds for 1..3-bit channels (see `scale` below).
  */
 function expandToBgra(src: Uint8Array, count: number, layout: RawLayout): Uint8Array {
   const { bytesPerPixel, rMask, gMask, bMask, aMask } = layout
@@ -102,8 +102,12 @@ function expandToBgra(src: Uint8Array, count: number, layout: RawLayout): Uint8A
   const scale = (value: number, bits: number): number => {
     if (bits === 8) return value
     if (bits === 0) return 0
-    // Bit replication: repeat the high bits into the low bits.
-    return (value << (8 - bits)) | (value >> (2 * bits - 8))
+    // Expand an N-bit channel to 8-bit uniformly (0 -> 0, max -> 255). The old
+    // bit-replication `(v << (8-bits)) | (v >> (2*bits-8))` only holds for
+    // bits >= 4; for 1..3-bit channels the low-bit shift goes negative (JS mods
+    // it by 32), so A1R5G5B5's 1-bit alpha expanded to 128 instead of 255 and
+    // every strategic icon (A1R5G5B5, 1-bit alpha) rendered half-transparent.
+    return Math.round((value * 255) / ((1 << bits) - 1))
   }
 
   for (let i = 0; i < count; i++) {
@@ -111,9 +115,13 @@ function expandToBgra(src: Uint8Array, count: number, layout: RawLayout): Uint8A
     let px = 0
     for (let b = 0; b < bytesPerPixel; b++) px |= src[o + b]! << (8 * b) // little-endian
     const d = i * 4
-    out[d + 0] = bMask ? scale((px & bMask) >>> B.shift, B.bits) : 255
-    out[d + 1] = gMask ? scale((px & gMask) >>> G.shift, G.bits) : 255
-    out[d + 2] = rMask ? scale((px & rMask) >>> R.shift, R.bits) : 255
+    // A channel the source format does not carry: D3D UNORM sampling reads an
+    // absent COLOR channel as 0 and an absent ALPHA as 1.0 (255). So an A8
+    // texture presents RGB=0, not white (the old 255 default gave A8/L8 lookup
+    // textures a white instead of black RGB).
+    out[d + 0] = bMask ? scale((px & bMask) >>> B.shift, B.bits) : 0
+    out[d + 1] = gMask ? scale((px & gMask) >>> G.shift, G.bits) : 0
+    out[d + 2] = rMask ? scale((px & rMask) >>> R.shift, R.bits) : 0
     out[d + 3] = aMask ? scale((px >>> A.shift) & ((1 << A.bits) - 1), A.bits) : 255
   }
   return out

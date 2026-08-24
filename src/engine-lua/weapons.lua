@@ -123,9 +123,12 @@ end
 canTarget = function(w, u, target)
   if not u or not target then return false end
   if target.__destroyQueued or target.__dead then return false end
-  -- Commanded fire must reject allies, while a Neutral target remains valid.
-  -- Autonomous acquisition below separately limits itself to enemies.
-  if IsAlly(u.__army, target.__army) then return false end
+  -- No alliance test: CanAttackTarget -> func_PickTargetPoint checks only layer
+  -- caps, seabed above/below-water and the category masks, never IsAlly/IsEnemy
+  -- (Cfile:984750-984845 returns 1 with no alliance branch). A commanded/force-
+  -- fire order onto an allied or own entity therefore passes; friendly damage is
+  -- filtered separately. Autonomous acquisition below still limits itself to
+  -- enemies via IsEnemy, so this does not auto-target allies.
 
   local bp = w.__bp or {}
   if bp.IgnoreIfDisabled and w.__enabled == false then return false end
@@ -144,13 +147,20 @@ canTarget = function(w, u, target)
   return true
 end
 
-canTargetGround = function(w, _)
+canTargetGround = function(w, pos)
   local bp = w.__bp or {}
   if bp.CannotAttackGround then return false end
-  -- This simulation has no water-layer state for map positions yet. Its
-  -- current map model is therefore the native no-water branch, where every
-  -- valid ground target uses LAYER_Land (UnitWeapon.cpp:3391-3408).
-  return layerMaskContains(w.__fireTargetLayerCaps, 'Land')
+  if bp.IgnoreIfDisabled and w.__enabled == false then return false end
+  local x, z = (pos and pos[1]) or 0, (pos and pos[3]) or 0
+  local terrain = GetTerrainHeight(x, z)
+  local water = __mapWaterLevel or -10000
+  if terrain > water then
+    return layerMaskContains(w.__fireTargetLayerCaps, 'Land')
+  elseif water > terrain then
+    return layerMaskContains(w.__fireTargetLayerCaps, 'Water')
+  end
+  -- Exact equality is neither native branch and therefore cannot be targeted.
+  return false
 end
 
 local function acquireTarget(w, u)
@@ -197,13 +207,17 @@ local function acquireTarget(w, u)
     end
   end
 
-  -- Steht das alte Ziel noch und ist es in Reichweite, bleibt es (die Engine
-  -- prueft es ueber CanAttackTarget, Cfile:793034).
+  -- Retention matches the engine's sticky path: keep the current target only
+  -- while the full FIRE solution is available (TargetIsTooClose == TRS_Available,
+  -- Cfile:793070) — that uses MaxRadius (not the larger tracking radius) and
+  -- also enforces MinRadius, MaxHeightDiff and the heading arc via
+  -- __weaponTargetSolution. Weapons flagged AlwaysRecheckTarget skip retention
+  -- and re-run the free search every interval (Cfile:793070 gates the keep path
+  -- on !mAlwaysRecheckTarget), letting them switch to a better target.
   local cur = w.__target
-  if cur and canTarget(w, u, cur) then
-    local p, q = u.__pos, cur.__pos
-    local dx, dz = q[1] - p[1], q[3] - p[3]
-    if dx * dx + dz * dz <= radius * radius then return end
+  if cur and not bp.AlwaysRecheckTarget and canTarget(w, u, cur)
+    and __weaponTargetSolution(w, __unitCollision(cur) or cur.__pos) then
+    return
   end
 
   local best, bestDist = nil, radius * radius
@@ -255,6 +269,17 @@ local function aimAxis(current, wanted, center, range, slew)
   return normalizeAngle(current + step), normalizeAngle(current + step - wanted)
 end
 
+local function aimControlsWeapon(w, aim)
+  -- The aim manipulator drives exactly the weapon it was constructed for:
+  -- CreateAimController stores the back-pointer m.__weapon = weapon and mirrors
+  -- weapon.__aim = m (globals.lua:718/727), 1:1 like the engine's CAimManipulator
+  -- holding a direct pointer to its weapon and writing that weapon's mCanFire.
+  -- The aim's __label ('Default'/'Turret', passed by weapon.lua:63) is a lookup
+  -- name, NOT the weapon's blueprint Label ('maingun') — comparing the two never
+  -- matched, so on-target never reached mCanFire and turreted weapons never fired.
+  return aim.__weapon == w
+end
+
 local function aimTick(w, u)
   local aim = w.__aim
   if not aim or aim.__destroyed then return end
@@ -267,6 +292,7 @@ local function aimTick(w, u)
   end
   if not tp then
     aim.__onTarget = false
+    if aimControlsWeapon(w, aim) then w.__canFire = false end
     return
   end
   local bp = w.__bp or {}
@@ -289,6 +315,7 @@ local function aimTick(w, u)
     if not bp.YawOnlyOnTarget and math.abs(pitchErr) > tol then onTarget = false end
   end
   aim.__onTarget = onTarget
+  if aimControlsWeapon(w, aim) then w.__canFire = onTarget end
 end
 
 -- ---------------------------------------------------------------------
@@ -311,43 +338,26 @@ local function fireTick(w, u)
   if bp.ManualFire then return end
   if (w.__fireClock or 0) > 0 then return end
   if (u.__fireState or 0) == 1 then return end -- HoldFire
-  -- The fire gate (weapon->mCanFire, CAimManipulator::Track): a turreted
-  -- weapon only fires while its aim is within FiringTolerance.
-  if w.__aim and not w.__aim.__destroyed and not w.__aim.__onTarget then return end
   if not w.__target and not w.__targetGround then return end
   if u.__beingBuilt then return end
 
-  -- Reichweite: CanAttackTarget (Cfile:983938). MinRadius sperrt zu nahe Ziele
-  -- (TargetIsTooClose, Cfile:983942).
+  -- CFireWeaponTask::Dispatch gate order (Cfile:983938-983947):
+  -- CanAttackTarget, UnitWeapon::CanFire, CheckSilo, then the full
+  -- TargetIsTooClose solution status (despite that misleading function name).
+  -- On a failed gate CFireWeaponTask::Dispatch does NOTHING to the target and
+  -- returns (Cfile:983938-983958 has no else/SetTarget). Clearing it here fired
+  -- spurious OnLostTarget and restarted the salvo FSM inside one acquire
+  -- interval; leave the target for acquireTarget (the CAcquireTargetTask
+  -- equivalent) to re-evaluate and clear on its own interval.
   local t = w.__target
   if t then
-    if not canTarget(w, u, t) then
-      __weaponSetTarget(w, nil, nil)
-      return
-    end
-    local p, q = u.__pos, t.__pos
-    local dx, dz = q[1] - p[1], q[3] - p[3]
-    local d2 = dx * dx + dz * dz
-    local maxR = w.__maxRadius or bp.MaxRadius or 0
-    local minR = w.__minRadius or bp.MinRadius or 0
-    if d2 > maxR * maxR then return end
-    if minR > 0 and d2 < minR * minR then return end
+    if not canTarget(w, u, t) then return end
   elseif w.__targetGround then
-    -- The fire clock's ground gate (weapons.md:70): CannotAttackGround
-    -- weapons never fire at an AITARGET_Ground target; same range window
-    -- as entity targets otherwise.
-    if not canTargetGround(w, w.__targetGround) then
-      __weaponSetTarget(w, nil, nil)
-      return
-    end
-    local p, q = u.__pos, w.__targetGround
-    local dx, dz = q[1] - p[1], q[3] - p[3]
-    local d2 = dx * dx + dz * dz
-    local maxR = w.__maxRadius or bp.MaxRadius or 0
-    local minR = w.__minRadius or bp.MinRadius or 0
-    if d2 > maxR * maxR then return end
-    if minR > 0 and d2 < minR * minR then return end
+    if not canTargetGround(w, w.__targetGround) then return end
   end
+  if not __weaponUnitCanFire(w) or not __weaponCheckSilo(w) then return end
+  local targetPos = t and t.__pos or w.__targetGround
+  if not __weaponTargetSolution(w, targetPos) then return end
 
   -- Und jetzt die Lua: OnFire startet die Salven-Zustandsmaschine.
   if w.OnFire then
@@ -365,13 +375,12 @@ end
 -- CollisionBeam-Tick (Moho::CollisionBeamEntity::MotionTick @911386 +
 -- CheckCollision): pro Tick zaehlt der Intervall-Zaehler; erreicht er
 -- CollisionCheckInterval, castet die Engine den Strahl von der Muendung
--- entlang deren Blickrichtung und ruft bei WECHSEL des Getroffenen
--- OnImpact(type, entity) — den Schaden macht die Lua (CollisionBeam.lua:186).
--- Die maximale Strahllaenge ist die Waffenreichweite (bp.MaxRadius) —
--- ABGELEITET (CheckCollision ist nicht dekompilierbar); ein Beam schiesst
--- nie weiter, als seine Waffe reicht.
+-- entlang deren Blickrichtung und ruft bei JEDEM Check OnImpact(type, entity)
+-- auf — den Schaden macht die Lua (CollisionBeam.lua:186). Die maximale
+-- Strahllaenge ist MaximumBeamLength mit dem nativen MaxRadius-Fallback
+-- (CreateCollisionBeamHelper, Cfile:985931-985950).
 -- ---------------------------------------------------------------------
-local function beamCast(beam)
+function __beamCheckCollision(beam)
   local w = beam.Weapon
   local u = w and w.unit
   if not u or u.__destroyQueued or u.__dead then return end
@@ -391,32 +400,55 @@ local function beamCast(beam)
     if l > 0.001 then dir = { dx / l, dy / l, dz / l } end
   end
   dir = dir or __quatForward(rot)
-  local maxLen = (w.__bp and w.__bp.MaxRadius) or 30
+  local weaponBp = w.__bp or {}
+  local maxLen = weaponBp.MaximumBeamLength or 0
+  if maxLen <= 0 then
+    maxLen = w.__maxRadius
+    if maxLen == nil or maxLen < 0 then maxLen = weaponBp.MaxRadius or 0 end
+  end
   beam.__beamBones[1] = { start[1], start[2], start[3] }
   beam.__beamOrient = rot
 
-  -- Naechster Treffer entlang des Strahls: Ray-Kugel gegen alle Feind-Units
-  -- (dieselbe Koerperkugel wie die Projektil-Kollision, __unitCollision).
+  -- Naechster Treffer entlang des Strahls. GetClosestCollision first invokes
+  -- Entity:OnCollisionCheckWeapon and then applies the IgnoresAlly Air-layer
+  -- gate (Cfile:985827-985847); it does not blanket-filter every ally.
   local bestT = maxLen
   local bestUnit = nil
   for _, ziel in pairs(__units) do
-    if not ziel.__destroyed and not ziel.__destroyQueued and ziel ~= u
-      and not IsAlly(ziel.__army, beam.__army) then
-      local c, r = __unitCollision(ziel)
-      local ox = c[1] - start[1]
-      local oy = c[2] - start[2]
-      local oz = c[3] - start[3]
-      local t = ox * dir[1] + oy * dir[2] + oz * dir[3]
-      if t > 0 and t < bestT + r then
-        local px = start[1] + dir[1] * t
-        local py = start[2] + dir[2] * t
-        local pz = start[3] + dir[3] * t
-        local d2 = (px - c[1]) ^ 2 + (py - c[2]) ^ 2 + (pz - c[3]) ^ 2
-        if d2 <= r * r then
-          local hitT = t - math.sqrt(r * r - d2)
-          if hitT >= 0 and hitT < bestT then
-            bestT = hitT
-            bestUnit = ziel
+    if not ziel.__destroyed and not ziel.__destroyQueued and ziel ~= u then
+      local accepts = false
+      if ziel.OnCollisionCheckWeapon then
+        local ok, result = pcall(function()
+          return ziel:OnCollisionCheckWeapon(w)
+        end)
+        if ok then
+          accepts = result ~= false and result ~= nil
+        else
+          WARN('CollisionBeam OnCollisionCheckWeapon: ' .. tostring(result))
+        end
+      end
+      if accepts and weaponBp.IgnoresAlly ~= false
+        and ziel.__layer == 'Air' and IsAlly(ziel.__army, beam.__army) then
+        accepts = false
+      end
+
+      if accepts then
+        local c, r = __unitCollision(ziel)
+        local ox = c[1] - start[1]
+        local oy = c[2] - start[2]
+        local oz = c[3] - start[3]
+        local t = ox * dir[1] + oy * dir[2] + oz * dir[3]
+        if t > 0 and t < bestT + r then
+          local px = start[1] + dir[1] * t
+          local py = start[2] + dir[2] * t
+          local pz = start[3] + dir[3] * t
+          local d2 = (px - c[1]) ^ 2 + (py - c[2]) ^ 2 + (pz - c[3]) ^ 2
+          if d2 <= r * r then
+            local hitT = t - math.sqrt(r * r - d2)
+            if hitT >= 0 and hitT < bestT then
+              bestT = hitT
+              bestUnit = ziel
+            end
           end
         end
       end
@@ -450,15 +482,13 @@ local function beamCast(beam)
     start[3] + dir[3] * endT,
   }
 
-  -- OnImpact NUR bei Wechsel des Getroffenen (CollisionBeam.lua:182-185:
-  -- "only executes this function when the thing it is touching changes").
-  local kennung = impactType .. ':' .. tostring(impactEntity and impactEntity.__id or '')
-  if kennung ~= beam.__lastImpact then
-    beam.__lastImpact = kennung
-    if beam.OnImpact then
-      local ok, err = pcall(function() beam:OnImpact(impactType, impactEntity) end)
-      if not ok then WARN('CollisionBeam OnImpact: ' .. tostring(err)) end
-    end
+  -- CheckCollision calls RunScript("OnImpact", ...) for every nonzero impact
+  -- type on every check (Cfile:911339-911350). CollisionBeam.lua applies its
+  -- damage in that callback; suppressing identical hits made continuous beams
+  -- damage a stationary target only once.
+  if beam.OnImpact then
+    local ok, err = pcall(function() beam:OnImpact(impactType, impactEntity) end)
+    if not ok then WARN('CollisionBeam OnImpact: ' .. tostring(err)) end
   end
 end
 
@@ -470,11 +500,15 @@ function __beamTick()
       lebend[#lebend + 1] = beam
       if beam.__enabled then
         -- Bone 0 folgt der Muendung JEDEN Tick; der Kollisions-Check laeuft
-        -- im Intervall (MotionTick @911410: Zaehler, dann CheckCollision).
-        beam.__intervalCount = beam.__intervalCount + 1
-        if beam.__intervalCount >= beam.__interval then
+        -- im Intervall. MotionTick compares the old counter, increments it,
+        -- then checks (Cfile:911410-911416): after a reset that is precisely
+        -- CollisionCheckInterval + 1 ticks. Enable primes the counter to the
+        -- interval, so the first enabled tick still checks immediately.
+        local count = beam.__intervalCount
+        beam.__intervalCount = count + 1
+        if count >= beam.__interval then
           beam.__intervalCount = 0
-          local ok, err = pcall(function() beamCast(beam) end)
+          local ok, err = pcall(function() __beamCheckCollision(beam) end)
           if not ok then WARN('CollisionBeam: ' .. tostring(err)) end
         end
       end

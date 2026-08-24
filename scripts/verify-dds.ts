@@ -61,14 +61,20 @@ check(icon.format === 'BGRA8', `wird als BGRA8 geliefert (war 16-bit A1R5G5B5)`)
 const px = icon.mips[0]!.data
 let opaque = 0
 let maxChannel = 0
+let maxAlpha = 0
 for (let i = 0; i < px.length; i += 4) {
   if (px[i + 3]! > 0) opaque++
   maxChannel = Math.max(maxChannel, px[i]!, px[i + 1]!, px[i + 2]!)
+  maxAlpha = Math.max(maxAlpha, px[i + 3]!)
 }
 check(opaque > 0, `${opaque} von ${px.length / 4} Pixeln sind sichtbar (1-Bit-Alpha)`)
 // 5 Bit voll (31) MUSS 255 ergeben. Käme hier 248 heraus, wäre jedes Icon um
 // 3 % zu dunkel — die Sorte Fehler, die man nie sieht und nie wieder findet.
 check(maxChannel === 255, `hellster Kanal = ${maxChannel} (Bit-Replikation: 31 → 255, nicht 248)`)
+// The 1-bit alpha of an opaque pixel MUST expand to fully opaque 255, not 128:
+// a negative low-bit shift for bits < 4 made every strategic icon render at
+// half opacity. Uniform scale round(v*255/(2^bits-1)) fixes 1..3-bit channels.
+check(maxAlpha === 255, `1-bit alpha of an opaque pixel = ${maxAlpha} (must be 255, not 128)`)
 
 // --- Cubemaps (EnvCube_*/SkyCube_*): 6 faces, each with its mip chain ------
 // They back the mesh.fx environmentSampler (Moho::MeshEnvironment, default

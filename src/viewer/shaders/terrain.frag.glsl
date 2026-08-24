@@ -103,18 +103,20 @@
     vec2 world = vWorldPos.xz;
 
 #ifdef NORMALS_PASS
-    // --- TerrainNormalsPS/XP (:591/:613): blend the stratum normal maps
-    // with RAW masks and write the two tangent components into RG — the
-    // screen-space normal buffer the normals decals then blend into
-    // (TDecalsNormals, Write_RG).
-    vec4 mn0 = texture2D(maskA, vUvMap) * normalEnable0;
+    // --- TerrainNormalsPS/XP (:591/:613): blend the stratum normal maps with
+    // the SAME masks as the albedos (render-details.md:148) and write the two
+    // tangent components into RG — the screen-space normal buffer the normals
+    // decals then blend into (TDecalsNormals, Write_RG). The UtilityTexture
+    // masks are always decoded saturate(tex*2-1) (FORMATS.md:86); using the raw
+    // texel blended stratum normals in at ~50% everywhere (neutral level 0.5).
+    vec4 mn0 = clamp(texture2D(maskA, vUvMap) * 2.0 - 1.0, 0.0, 1.0) * normalEnable0;
     vec4 n = texture2D(lowerNormalMap, world / lowerNormalTile) * 2.0 - 1.0;
     n = mix(n, texture2D(stratum0Normal, world / stratumNormalTile[0]) * 2.0 - 1.0, mn0.x);
     n = mix(n, texture2D(stratum1Normal, world / stratumNormalTile[1]) * 2.0 - 1.0, mn0.y);
     n = mix(n, texture2D(stratum2Normal, world / stratumNormalTile[2]) * 2.0 - 1.0, mn0.z);
     n = mix(n, texture2D(stratum3Normal, world / stratumNormalTile[3]) * 2.0 - 1.0, mn0.w);
 #ifdef XP
-    vec4 mn1 = texture2D(maskB, vUvMap) * normalEnable1;
+    vec4 mn1 = clamp(texture2D(maskB, vUvMap) * 2.0 - 1.0, 0.0, 1.0) * normalEnable1;
     n = mix(n, texture2D(stratum4Normal, world / stratumNormalTile[4]) * 2.0 - 1.0, mn1.x);
     n = mix(n, texture2D(stratum5Normal, world / stratumNormalTile[5]) * 2.0 - 1.0, mn1.y);
     n = mix(n, texture2D(stratum6Normal, world / stratumNormalTile[6]) * 2.0 - 1.0, mn1.z);

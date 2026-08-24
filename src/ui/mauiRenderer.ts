@@ -125,11 +125,62 @@ export class MauiRenderer {
     this.root.style.cssText =
       'position:absolute;inset:0;overflow:hidden;pointer-events:none;user-select:none'
     document.body.appendChild(this.root)
+    // Command-mode cursor bridge (Cursor:SetNewTexture -> __uiSetCursorTexture,
+    // moho.lua:1300). Declared `false` until the engine (us) supplies it.
+    host.setGlobal('__uiSetCursorTexture', (path: string, hx: number, hy: number) =>
+      this.setCursorTexture(path, hx, hy),
+    )
+  }
+
+  /** The DDS key of the cursor frame currently being applied (guards stale async decodes). */
+  private cursorKey = ''
+
+  /**
+   * Apply a skin cursor to the mouse (the command-mode cursor: Move/Attack/Build,
+   * skins.lua:170-… via UIUtil.GetCursor). Decodes the DDS (cached like every
+   * bitmap) and sets it as the DOM cursor with its hotspot; the animated cursors
+   * arrive as a stream of `<name>-NN.dds` frames from the cursor thread. An empty
+   * path clears back to the default arrow. Applied to document.body because the
+   * maui overlay is pointer-events:none — the world/canvas under it shows it.
+   */
+  setCursorTexture(path: string, hotspotX: number, hotspotY: number): void {
+    if (!path) {
+      this.cursorKey = ''
+      document.body.style.cursor = ''
+      return
+    }
+    const key = path.replace(/^\/+/, '').toLowerCase()
+    this.cursorKey = key
+    const apply = (url: string): void => {
+      if (this.cursorKey !== key) return // a newer frame/mode superseded this decode
+      document.body.style.cursor = `url("${url}") ${Math.round(hotspotX)} ${Math.round(hotspotY)}, auto`
+    }
+    const hit = this.textures.get(key)
+    if (typeof hit === 'string' && hit !== 'pending' && hit !== 'failed') {
+      apply(hit)
+      return
+    }
+    if (hit === 'failed') return
+    this.textures.set(key, 'pending')
+    void (async () => {
+      try {
+        if (!this.vfs.exists(key)) {
+          this.textures.set(key, 'failed')
+          return
+        }
+        const url = ddsToDataUrl(key, await this.vfs.read(key))
+        this.textures.set(key, url ?? 'failed')
+        if (url) apply(url)
+      } catch {
+        this.textures.set(key, 'failed')
+      }
+    })()
   }
 
   dispose(): void {
     this.root.remove()
     this.els.clear()
+    document.body.style.cursor = ''
   }
 
   /** Zieht den Zustand aus der UI-VM und schreibt ihn ins DOM. */
@@ -256,24 +307,37 @@ export class MauiRenderer {
   }
 
   /**
-   * Der 9-Slice-Rahmen: vier Kanten + vier Ecken, die MITTE bleibt frei.
+   * Der 9-Slice-Rahmen: vier Ecken + vier Kanten, die MITTE bleibt frei.
    *
-   * So beschreibt es die Original-Lua selbst (border.lua:9-12: „Border textures
-   * assume a texture border of 1", „Adjacent corner textures must have matching
-   * widths and heights"). Die Kantenstärke kommt nicht aus einer Zahl im Skript,
-   * sondern aus den Texturmaßen: `BorderWidth` = Breite der vertical-Kachel,
-   * `BorderHeight` = Höhe der horizontal-Kachel (Cfile:1122728/1122748).
+   * Original-Lua (border.lua:9-12: „Border textures assume a texture border of
+   * 1", „Adjacent corner textures must have matching widths and heights"). Die
+   * Kantenstärke kommt aus den Texturmaßen: `BorderWidth` = Breite der
+   * vertical-Kachel, `BorderHeight` = Höhe der horizontal-Kachel
+   * (Cfile:1122728/1122748).
    *
-   * Der Rahmen liegt AUSSERHALB des Controls — deshalb sitzen die Kacheln bei
-   * negativen Offsets. Die Kanten kacheln (repeat), die Ecken nicht.
+   * `CMauiBorder::Draw` (Cfile:1122837-1123057) zeichnet alle neun Slices
+   * INNERHALB des Control-Rects [Left,Right]×[Top,Bottom] — der Border-Control
+   * hat SELBST die äußeren Maße, die Stärke frisst nach INNEN (border.lua setzt
+   * die Ränder auf die Außengrenzen). Die Ecken sitzen also bei [0,bw]/[0,bh]
+   * bzw. an der Innenkante, nicht bei negativen Offsets. bw/bh werden gerundet
+   * (func_round, Cfile:1122842/1122844).
+   *
+   * Kanten: die Engine STRECKT jede Kantentextur über ihre Spanne (UV 0..1,
+   * nicht kacheln), nur ZWISCHEN den Ecken ([Left+bw,Right-bw] / [Top+bh,B-bh])
+   * und nur, wenn die Spanne größer als die doppelte Stärke ist
+   * (Cfile:1122951/1123005). Die untere Kante ist vertikal gespiegelt (UV.y an
+   * der Außenkante 0), die rechte horizontal (Cfile:1122983/1123034).
    */
   private drawBorder(el: HTMLDivElement, c: MauiControl): void {
     const b = c.border
     if (!b) return
-    const bw = b.borderWidth || 0
-    const bh = b.borderHeight || 0
+    const bw = Math.round(b.borderWidth || 0)
+    const bh = Math.round(b.borderHeight || 0)
+    const w = c.width
+    const h = c.height
     el.style.background = 'none'
-    el.style.overflow = 'visible'
+    // Slices live INSIDE the rect now, so clip anything past the edges.
+    el.style.overflow = 'hidden'
 
     // Acht Kacheln als Kinder — sie folgen dem Control, also einmal anlegen.
     if (el.children.length !== 8) {
@@ -285,30 +349,52 @@ export class MauiRenderer {
       }
     }
     const tiles = [...el.children] as HTMLDivElement[]
-    const put = (
-      i: number,
-      tex: string | false,
-      css: Partial<CSSStyleDeclaration>,
-      repeat: string,
-    ): void => {
+    const put = (i: number, tex: string | false, css: Partial<CSSStyleDeclaration>): void => {
       const t = tiles[i]!
       const url = tex ? this.texture(tex) : null
+      // Reset any stale offset/flip from a previous layout before restyling.
+      t.style.left = t.style.right = t.style.top = t.style.bottom = ''
+      t.style.transform = ''
+      t.style.display = 'block'
       t.style.backgroundImage = url ? `url(${url})` : 'none'
-      t.style.backgroundRepeat = repeat
-      t.style.backgroundSize = repeat === 'no-repeat' ? '100% 100%' : 'auto'
+      t.style.backgroundRepeat = 'no-repeat'
+      t.style.backgroundSize = '100% 100%' // stretch (UV 0..1), never tile
       Object.assign(t.style, css)
     }
 
-    // Ecken (fest), dann Kanten (gekachelt) — genau die sechs Texturen, die
-    // SetNewTextures bekommt.
-    put(0, b.upperLeft, { left: `${-bw}px`, top: `${-bh}px`, width: `${bw}px`, height: `${bh}px` }, 'no-repeat')
-    put(1, b.upperRight, { right: `${-bw}px`, top: `${-bh}px`, width: `${bw}px`, height: `${bh}px` }, 'no-repeat')
-    put(2, b.lowerLeft, { left: `${-bw}px`, bottom: `${-bh}px`, width: `${bw}px`, height: `${bh}px` }, 'no-repeat')
-    put(3, b.lowerRight, { right: `${-bw}px`, bottom: `${-bh}px`, width: `${bw}px`, height: `${bh}px` }, 'no-repeat')
-    put(4, b.horizontal, { left: '0', top: `${-bh}px`, width: '100%', height: `${bh}px` }, 'repeat-x')
-    put(5, b.horizontal, { left: '0', bottom: `${-bh}px`, width: '100%', height: `${bh}px` }, 'repeat-x')
-    put(6, b.vertical, { left: `${-bw}px`, top: '0', width: `${bw}px`, height: '100%' }, 'repeat-y')
-    put(7, b.vertical, { right: `${-bw}px`, top: '0', width: `${bw}px`, height: '100%' }, 'repeat-y')
+    // Corners: always drawn, inside the rect (Cfile:1122850-1122950).
+    put(0, b.upperLeft, { left: '0', top: '0', width: `${bw}px`, height: `${bh}px` })
+    put(1, b.upperRight, { left: `${w - bw}px`, top: '0', width: `${bw}px`, height: `${bh}px` })
+    put(2, b.lowerLeft, { left: '0', top: `${h - bh}px`, width: `${bw}px`, height: `${bh}px` })
+    put(3, b.lowerRight, { left: `${w - bw}px`, top: `${h - bh}px`, width: `${bw}px`, height: `${bh}px` })
+    // Horizontal edges (top + bottom = mTexHorz): only between the corners, only
+    // when width > 2*bw; the bottom edge is flipped vertically (Cfile:1122951).
+    if (w > bw * 2) {
+      put(4, b.horizontal, { left: `${bw}px`, top: '0', width: `${w - 2 * bw}px`, height: `${bh}px` })
+      put(5, b.horizontal, {
+        left: `${bw}px`,
+        top: `${h - bh}px`,
+        width: `${w - 2 * bw}px`,
+        height: `${bh}px`,
+        transform: 'scaleY(-1)',
+      })
+    } else {
+      tiles[4]!.style.display = tiles[5]!.style.display = 'none'
+    }
+    // Vertical edges (left + right = mTex1): only between the corners, only when
+    // height > 2*bh; the right edge is flipped horizontally (Cfile:1123005).
+    if (h > bh * 2) {
+      put(6, b.vertical, { left: '0', top: `${bh}px`, width: `${bw}px`, height: `${h - 2 * bh}px` })
+      put(7, b.vertical, {
+        left: `${w - bw}px`,
+        top: `${bh}px`,
+        width: `${bw}px`,
+        height: `${h - 2 * bh}px`,
+        transform: 'scaleX(-1)',
+      })
+    } else {
+      tiles[6]!.style.display = tiles[7]!.style.display = 'none'
+    }
   }
 
   /**
@@ -464,17 +550,23 @@ export class MauiRenderer {
   private texture(path: string): string | null {
     const key = path.replace(/^\/+/, '').toLowerCase()
     const hit = this.textures.get(key)
-    if (hit && hit !== 'pending') return hit
-    if (hit === 'pending') return null
+    if (hit === 'pending' || hit === 'failed') return null
+    if (hit) return hit
     this.textures.set(key, 'pending')
     void (async () => {
-      if (!this.vfs.exists(key)) {
-        this.textures.delete(key)
-        return
+      try {
+        if (!this.vfs.exists(key)) {
+          this.textures.set(key, 'failed')
+          return
+        }
+        const url = ddsToDataUrl(key, await this.vfs.read(key))
+        this.textures.set(key, url ?? 'failed')
+      } catch {
+        // An unsupported/corrupt DDS must not leave the bitmap stuck on
+        // 'pending' (unhandled rejection). Mark it 'failed' so it renders
+        // nothing and is not retried every frame.
+        this.textures.set(key, 'failed')
       }
-      const url = ddsToDataUrl(key, await this.vfs.read(key))
-      if (url) this.textures.set(key, url)
-      else this.textures.delete(key)
     })()
     return null
   }
@@ -483,9 +575,17 @@ export class MauiRenderer {
 /** FA-Farben sind 'aarrggbb' (oder 'rrggbb'). */
 function argb(color: string): string {
   const c = String(color).replace(/^#/, '')
-  if (c.length === 8) {
+  // The engine's func_ParseColor (@574510) accepts an 8-digit AARRGGBB or a
+  // 6-digit RRGGBB hex string, OR a named colour it resolves via enum_colors.
+  if (/^[0-9a-fA-F]{8}$/.test(c)) {
     const a = parseInt(c.slice(0, 2), 16) / 255
     return `rgba(${parseInt(c.slice(2, 4), 16)},${parseInt(c.slice(4, 6), 16)},${parseInt(c.slice(6, 8), 16)},${a})`
   }
-  return `#${c}`
+  if (/^[0-9a-fA-F]{6}$/.test(c)) return `#${c}`
+  // Not hex -> a named colour. enum_colors is the full HTML/X11 name set (it
+  // starts "AliceBlue", Cfile:387861; func_ParseColor lowercases before the
+  // lookup, Cfile:574529-574551). CSS resolves the SAME names to the SAME
+  // values case-insensitively, so 'black'/'white'/... pass straight through
+  // (previously '#black' was emitted and silently dropped).
+  return c.toLowerCase()
 }

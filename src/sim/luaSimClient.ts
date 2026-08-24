@@ -42,6 +42,32 @@ export interface LuaUnitSnapshot {
   fireState?: number
   /** Guarded unit id (0 = none) — mUnit->mGuardedUnit mirrored per beat. */
   guard?: number
+  /** Effective command-cap mask (UnitAttributes::commandCapsMask) — the UI
+   *  mirror follows runtime Add/RemoveCommandCap through this sync. */
+  caps?: number
+  /** Effective toggle-cap mask, mutated by Add/RemoveToggleCap. */
+  toggleCaps?: number
+  /** Unit script-bit mask (mScriptBits), authoritative in the sim. */
+  scriptBits?: number
+  /** Current movement layer (Land/Water/Sub/Seabed/Air/Orbit). */
+  layer?: string
+  /** Automatic silo-build mode (mAutoMode). */
+  autoMode?: boolean
+  /** Automatic submarine surfacing mode (mAutoSurfaceMode). */
+  autoSurfaceMode?: boolean
+  /** Dead/DestroyQueued through the multi-beat death sequence — the UI mirror
+   *  excludes it from selection/avatars (IsDead + DestroyQueued, Cfile:1361497). */
+  dead?: boolean
+  /** Shield strength ratio 0..1 (shield.lua UpdateShieldRatio -> SetShieldRatio);
+   *  the UI shows it via GetShieldRatio. */
+  shieldRatio?: number
+  /** WorkProgress (mUnitVarDat.mWorkProgress): the progress of what this unit
+   *  is building/upgrading/enhancing, written by the build task every tick
+   *  (Cfile:815482). construction.lua:380 draws it. */
+  workProgress?: number
+  /** UNITSTATE_BeingUpgraded (37): the successor growing on a structure. The
+   *  drag box skips it (Cfile:1290062). */
+  beingUpgraded?: boolean
   /** Erstellungs-Tick — die Build-Shader zählen ihr Alter darüber (material.x). */
   born: number
   /** The unit's active order (command graph): type + target position. */
@@ -474,6 +500,28 @@ export class LuaSimClient {
   /** SetFireState (cfunc_SetFireStateL → sim driver ProcessInfo, ui-globals.lua:617). */
   setFireState(id: number, state: number): void {
     this.worker.postMessage({ type: 'fireState', id, state })
+  }
+  /** ToggleScriptBit (cfunc_ToggleScriptBitL): the UI has already filtered
+   *  units by their current state; ProcessInfo carries only the bit to flip. */
+  toggleScriptBit(id: number, bit: number): void {
+    this.worker.postMessage({ type: 'scriptBit', id, bit })
+  }
+  setAutoMode(id: number, enabled: boolean): void {
+    this.worker.postMessage({ type: 'autoMode', id, enabled })
+  }
+  setAutoSurfaceMode(id: number, enabled: boolean): void {
+    this.worker.postMessage({ type: 'autoSurfaceMode', id, enabled })
+  }
+  /** IssueUpgrade (cfunc_IssueUpgradeL, Cfile:1011315): upgrade this structure
+   *  to `blueprint` (General.UpgradesTo). The successor is built at the old
+   *  building's position with the old building as its builder. */
+  upgrade(id: number, blueprint: string): void {
+    this.worker.postMessage({ type: 'upgrade', id, blueprint })
+  }
+  /** Per-unit SetPaused (cfunc_SetPausedL): pause a builder/factory's
+   *  production — DISTINCT from the whole-world session pause (`setPaused`). */
+  setUnitPaused(id: number, paused: boolean): void {
+    this.worker.postMessage({ type: 'unitPause', id, paused })
   }
 
   /**

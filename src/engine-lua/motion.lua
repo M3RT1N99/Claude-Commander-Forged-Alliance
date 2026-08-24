@@ -6,7 +6,8 @@
 --
 --   turnRate    = bp.TurnRate       * turnMult  * 0.0017453292  (deg/s -> rad/tick)
 --   maxSpeed    = bp.MaxSpeed       * speedMult * 0.1           (units/tick)
---   maxReverse  = bp.MaxSpeedReverse* speedMult * 0.1
+--   maxReverse  = bp.MaxSpeedReverse* speedMult * 0.1  (NOT modelled — reverse
+--                 motion is a documented reduction, see motionParams)
 --   maxAccel    = bp.MaxAcceleration* accMult   * 0.01          (units/tick^2)
 --   maxBrake    = (bp.MaxBrake ~= 0      and bp.MaxBrake      or bp.MaxAcceleration) * accMult * 0.01
 --   maxSteer    = (bp.MaxSteerForce ~= 0 and bp.MaxSteerForce or bp.MaxAcceleration) * accMult * 0.01
@@ -45,7 +46,14 @@ function __getNavigator(id)
       local u = __units[id]
       return u and (u.__goal and { u.__goal[1], 0, u.__goal[2] })
     end,
-    SetSpeedThroughGoal = function() end,
+    -- SetSpeedThroughGoal(flag): "know whether to stop at final goal"
+    -- (Cfile:756703). flag=1 -> the unit flows through the current goal cell at
+    -- MaxSpeed (intermediate queued Move / any Patrol leg); flag=0 -> it brakes
+    -- to a stop (the final leg). Drives the arrival/stop-cap gates below.
+    SetSpeedThroughGoal = function(_, flag)
+      local u = __units[id]
+      if u then u.__speedThroughGoal = flag == 1 or flag == true end
+    end,
   }
 end
 
@@ -60,9 +68,16 @@ local function motionParams(u)
   local steerBp = phys.MaxSteerForce or 0
   local radiusBp = phys.TurnRadius or 0
 
+  -- Reverse motion (Physics.MaxSpeedReverse / BackUpDistance, Cfile:766097-
+  -- 766128, clamp mMaxReserveSpeed 942130-942133) is a DOCUMENTED REDUCTION: the
+  -- navigator only ever drives forward, so a unit ordered to a nearby point
+  -- behind it pivots and drives forward instead of backing up. Not modelled yet.
   return {
     turnRate = (phys.TurnRate or 0) * turnMult * DEG_PER_SEC_TO_RAD_PER_TICK,
     maxSpeed = (phys.MaxSpeed or 0) * speedMult * 0.1,
+    -- Raw blueprint MaxSpeed for the RotateOnSpot speed gate, which the engine
+    -- normalizes WITHOUT speedMult (Cfile:766083 |v|*10 / mMaxSpeed).
+    maxSpeedBp = phys.MaxSpeed or 0,
     accel = accel,
     brake = (brakeBp ~= 0 and brakeBp * accMult * 0.01) or accel,
     steer = (steerBp ~= 0 and steerBp * accMult * 0.01) or accel,
@@ -122,13 +137,19 @@ end
 -- Entity::AdvanceCoords — advance every unit with a goal by one tick.
 function __advanceMotion()
   for id, u in pairs(__units) do
+    -- Unit::MotionTick decrements positive stun durations before delegating to
+    -- CUnitMotion. A value of 1 therefore blocks the weapon stage of this beat
+    -- but reaches zero before movement; negative values never count down.
+    local stunTicks = u.__stunTicks or 0
+    if stunTicks > 0 then u.__stunTicks = stunTicks - 1 end
+    local stunned = (u.__stunTicks or 0) ~= 0
     local goal = u.__goal
     local p = u.__pos
 
     -- DREH-ZIEL ohne Fahr-Ziel: die Unit steht und dreht sich zum Ziel — mit
     -- ihrer `Physics.TurnRate` (Grad/Sekunde), nicht sofort. Der Bauer sieht sein
     -- Gebaeude an, bevor er anfaengt (build.lua setzt __faceGoal).
-    if not goal and u.__faceGoal and p then
+    if not stunned and not goal and u.__faceGoal and p then
       local f = u.__faceGoal
       local m = motionParams(u)
       local wanted = atan2(f[1] - p[1], f[2] - p[3])
@@ -144,7 +165,12 @@ function __advanceMotion()
       end
     end
 
-    if goal and p then
+    if goal and p and (u:IsUnitState('Immobile') or stunned) then
+      -- SetImmobile is a runtime UNITSTATE bit. The native motion task waits
+      -- while it or the stun counter is set and keeps its waypoint, so clearing
+      -- the gate resumes the same order instead of discarding it.
+      u.__speed = 0
+    elseif goal and p then
       local m = motionParams(u)
       local dx = goal[1] - p[1]
       local dz = goal[2] - p[3]
@@ -178,7 +204,10 @@ function __advanceMotion()
           p[3] = goal[2]
           p[2] = GetSurfaceHeight(p[1], p[3])
           u.__goal = false
-          u.__speed = 0
+          -- Keep the momentum through an intermediate/patrol goal (speed-through);
+          -- only a final goal brakes to 0 (the order system re-issues the next
+          -- leg, so the unit flows on without a full stop).
+          if not u.__speedThroughGoal then u.__speed = 0 end
         end
       else
         -- Heading/Forward VOM TICK-ANFANG: die Cap-Kaskade der Engine rechnet
@@ -186,7 +215,10 @@ function __advanceMotion()
         local h0 = u.__heading or 0
         local fwdX = math.sin(h0)
         local fwdZ = math.cos(h0)
-        local speedFrac = speed / m.maxSpeed -- Cfile:766083: |v|*10 / MaxSpeed
+        -- Cfile:766083: |v|*10 / MaxSpeed, normalized by the RAW blueprint
+        -- MaxSpeed (NOT the speedMult-scaled per-tick maxSpeed), so a speed-
+        -- buffed/debuffed RotateOnSpot unit trips the gate at the right fraction.
+        local speedFrac = (m.maxSpeedBp > 0) and (speed * 10 / m.maxSpeedBp) or 0
 
         -- Turn toward the goal. Effektive Drehrate = max(turnRate,
         -- v / turnRadius), auf PI geklemmt (Cfile:766161-766163 + 942169-942170):
@@ -239,9 +271,14 @@ function __advanceMotion()
         if cap > m.maxSpeed then cap = m.maxSpeed end
 
         -- Anhalte-Kinematik (Cfile:766249-766262): innerhalb eines
-        -- Brems-Ticks exakt die Restdistanz, sonst v = sqrt(2*brake*dist).
-        local stopCap = (dist <= m.brake) and dist or math.sqrt(2 * m.brake * dist)
-        if stopCap < cap then cap = stopCap end
+        -- Brems-Ticks exakt die Restdistanz, sonst v = sqrt(2*brake*dist). The
+        -- engine applies this only on a STOP path (PT_0, Cfile:766249); a
+        -- speed-through goal (intermediate Move / patrol leg) skips it and holds
+        -- MaxSpeed, so the unit does not brake at every queued waypoint.
+        if not u.__speedThroughGoal then
+          local stopCap = (dist <= m.brake) and dist or math.sqrt(2 * m.brake * dist)
+          if stopCap < cap then cap = stopCap end
+        end
 
         local dv = cap - speed
         if dv > m.accel then speed = speed + m.accel

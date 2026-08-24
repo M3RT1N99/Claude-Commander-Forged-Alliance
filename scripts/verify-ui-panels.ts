@@ -401,6 +401,49 @@ check(
   'Klick auf das Orders-Panel WIRD verbraucht (dort zeichnet ein Bitmap)',
 )
 
+// The order-button ICONS must actually reach the snapshot. They live under a
+// Grid the engine keeps hidden while showing each child individually (Grid:OnHide
+// veto, grid.lua:274-280) — an ancestor-walk visibility check pruned every icon,
+// leaving blank buttons. With the flat per-control hidden model they appear.
+const orderIcons = Number(
+  host.eval(`
+    local n = 0
+    for _, c in ipairs(__mauiSnapshot()) do
+      if type(c.texture) == 'string'
+        and string.find(c.texture, 'game/orders/', 1, true)
+        and string.find(c.texture, '_btn', 1, true) then
+        n = n + 1
+      end
+    end
+    return n
+  `),
+)
+check(orderIcons >= 3, `${orderIcons} Order-Button-Icons erscheinen im Snapshot (Grid-Kinder nicht mehr geprunt)`)
+
+console.log('\n== Command-Mode-Cursor (worldview.lua OnUpdateCursor -> skins.cursors) ==')
+// Capture what the cursor object pushes to the DOM bridge (__uiSetCursorTexture).
+host.eval(`
+  __t.cursorCalls = {}
+  __uiSetCursorTexture = function(f) __t.cursorCalls[table.getn(__t.cursorCalls) + 1] = f end
+`)
+check(host.eval('return GetCursor() ~= nil') === true, 'GetCursor() liefert das Cursor-Objekt (uimain.lua CreateCursor)')
+// Order mode (a Move order button pressed) -> the skin's move cursor.
+host.eval(`import('/lua/ui/game/commandmode.lua').StartCommandMode('order', { name = 'RULEUCC_Move' })`)
+host.eval('__uiCursorId = false; __uiUpdateCursor()')
+host.eval('__mauiFrame(0.05)') // let the cursor animation thread push its first frame
+const cursorFile = String(host.eval(`return __t.cursorCalls[table.getn(__t.cursorCalls)] or 'none'`))
+check(
+  cursorFile.toLowerCase().includes('cursor') && cursorFile.toLowerCase().includes('move'),
+  `Order-Modus setzt den Move-Cursor (${cursorFile})`,
+)
+// Ending the command mode clears the cursor back to the default arrow.
+host.eval(`import('/lua/ui/game/commandmode.lua').EndCommandMode(true)`)
+host.eval('__uiUpdateCursor()')
+check(
+  host.eval(`return __t.cursorCalls[table.getn(__t.cursorCalls)]`) === '',
+  'Ende des Command-Modus löscht den Cursor (leerer Pfad -> Default)',
+)
+
 console.log('\n== construction.lua: das Bau-Menü kommt aus dem Blueprint ==')
 // Die ACU baut, was ihre BuildableCategory hergibt (uel0001_unit.bp). Die Liste
 // zieht construction.lua über EntityCategoryGetUnitList — nicht über eine
@@ -528,6 +571,26 @@ const rollover = host.eval(`
   return info and info.blueprintId or false
 `)
 check(rollover === 'uel0001', 'GetRolloverInfo().blueprintId = uel0001')
+// unitview.lua:216 runs the silo stat function for EVERY hovered unit, and
+// unitview.lua:116 compares `tacticalSiloMaxStorageCount > 0 or
+// nukeSiloMaxStorageCount > 0` unconditionally. While those fields were nil this
+// threw "attempt to compare nil with number" and the frame pump swallowed it —
+// the whole rollover panel silently stopped updating on every hover.
+// orders.lua:611-627 reads the same fields.
+const siloStats = host.eval(`
+  local i = GetRolloverInfo()
+  local ok, err = pcall(function()
+    local shown = i.tacticalSiloMaxStorageCount > 0 or i.nukeSiloMaxStorageCount > 0
+    return string.format('%d/%d %d/%d %s', i.tacticalSiloStorageCount, i.tacticalSiloMaxStorageCount,
+      i.nukeSiloStorageCount, i.nukeSiloMaxStorageCount, tostring(shown))
+  end)
+  return ok and err or ('ERR: ' .. tostring(err))
+`) as string
+check(
+  siloStats === '0/0 0/0 false',
+  `the silo stat function runs on any hovered unit (${siloStats})`,
+)
+check(host.eval('return type(GetRolloverInfo().kills)') === 'number', 'kills is a number (veterancy stars)')
 
 console.log('\n== score.lua: das Punkte-Panel steht, die Uhr läuft aus dem Sim-Tick ==')
 // CreateScoreUI lief im One-Shot-OnFrame (gamemain.OnFirstUpdate,
@@ -589,6 +652,18 @@ check(
     return a and a.owner == 1 and a.units[1] == 4 and a.units[2] == 5
   `)
   check(argsOk === true, `SimCallback: Args-Snapshot als Lua-Literal auswertbar (${argsLua})`)
+
+  // Large integers must round-trip EXACTLY: the original CMarshaller writes a
+  // binary double, but '%.9g' rounded any integer past nine digits — an entity
+  // id, or a combined key code (0x40000000 = 1073741824, the Ctrl modifier bit)
+  // used as a table key. The same rounding trap that dropped the cap mask.
+  host.eval(`SimCallback({ Func = 'Big', Args = { id = 2147483648, mask = 1442559, [0x40000000] = true } })`)
+  const bigArgs = (sink ?? ['', '', null])[1]
+  const bigOk = host.eval(`
+    local a = ${bigArgs || 'nil'}
+    return a and a.id == 2147483648 and a.mask == 1442559 and a[0x40000000] == true
+  `)
+  check(bigOk === true, `SimCallback marshals large integers exactly (${bigArgs})`)
 }
 
 // GetSessionClients (Felder aus cfunc_GetSessionClientsL, Cfile:1321886-1321957).
@@ -762,6 +837,141 @@ console.log('\n== Alliances in the UI VM ==')
     `local ok, err = pcall(IsAlly, 99, 1) return (not ok) and tostring(err) or 'NO ERROR'`,
   ) as string
   check(String(bad).includes('Invalid army'), `invalid index errors loudly (${bad})`)
+}
+
+// The console commands the keymap fires. In the engine they are CConFuncs;
+// most of them call straight into the original UI Lua (CON_UI_MakeSelectionSet
+// -> selection.lua AddCurrentSelectionSet, Cfile:834b6d), the two selection
+// ones the engine runs itself (Cfile:866020 / 8662B0). Without them every key
+// bound in defaultkeymap.lua ended in "console command missing".
+console.log('\n== Console commands (keymap -> ConExecute) ==')
+{
+  // Three units of the focus army: an ACU, a bot, and a second bot.
+  host.eval(`
+    __uiSetUnit(1, 'uel0001', 1, 100, 20, 100, 12000, 12000, 0, true, 0, 0, -1, false, 0, 1, false)
+    __uiSetUnit(2, 'uel0101', 1, 110, 20, 100,   500,   500, 0, true, 0, 0, -1, false, 0, 1, false)
+    __uiSetUnit(3, 'uel0101', 1, 190, 20, 190,   500,   500, 0, false, 0, 0, -1, false, 0, 1, false)
+    __uiSelectByIds({ 2 })
+  `)
+
+  // Control groups: Ctrl+1 stores, 1 applies (keyactions.lua:26-46).
+  host.eval(`ConExecute('UI_MakeSelectionSet 1')`)
+  host.eval(`__uiSelectByIds({ 1 })`)
+  check(
+    Number(host.eval('return GetSelectedUnits()[1]:GetEntityId()')) === 1,
+    'the ACU is selected before the control group is applied',
+  )
+  host.eval(`ConExecute('UI_ApplySelectionSet 1')`)
+  check(
+    Number(host.eval('local s = GetSelectedUnits() return s and s[1]:GetEntityId() or 0')) === 2,
+    'UI_ApplySelectionSet 1 restores the stored bot (selection.lua ApplySelectionSet)',
+  )
+
+  // UI_SelectByCategory: space = intersection, comma = union (Cfile:1292319).
+  const selectedIds = (): string =>
+    String(
+      host.eval(`
+        local s = GetSelectedUnits() or {}
+        local ids = {}
+        for _, u in ipairs(s) do ids[#ids + 1] = u:GetEntityId() end
+        table.sort(ids)
+        return table.concat(ids, ',')
+      `),
+    )
+  host.eval(`ConExecute('UI_SelectByCategory LAND MOBILE')`)
+  check(
+    selectedIds() === '1,2,3',
+    `UI_SelectByCategory LAND MOBILE selects ACU and both bots (${selectedIds()})`,
+  )
+  host.eval(`ConExecute('UI_SelectByCategory +idle LAND MOBILE')`)
+  check(
+    selectedIds() === '1,2',
+    `+idle drops the busy bot (Cfile:8664e9) (${selectedIds()})`,
+  )
+  host.eval(`ConExecute('UI_SelectByCategory +excludeengineers ALLUNITS')`)
+  check(
+    Number(host.eval('local s = GetSelectedUnits() return s and table.getn(s) or 0')) === 2,
+    '+excludeengineers drops the ACU (COMMAND, Cfile:866546-866590)',
+  )
+  host.eval(`ConExecute('UI_SelectByCategory +nearest COMMAND')`)
+  check(
+    Number(host.eval('local s = GetSelectedUnits() return s and s[1]:GetEntityId() or 0')) === 1,
+    '+nearest COMMAND finds the ACU',
+  )
+
+  // UI_ExpandCurrentSelection: same blueprint joins in (Cfile:866020).
+  host.eval(`__uiSelectByIds({ 2 })`)
+  host.eval(`ConExecute('UI_ExpandCurrentSelection')`)
+  check(
+    Number(host.eval('local s = GetSelectedUnits() return s and table.getn(s) or 0')) === 2,
+    'UI_ExpandCurrentSelection adds the second unit of the same blueprint',
+  )
+
+  // A unit being upgraded is invisible to every selection path (Cfile:866692).
+  host.eval(`
+    __uiSetUnit(4, 'uel0101', 1, 120, 20, 100, 500, 500, 0, true, 0, 0, -1, false, 0, 0.5, true)
+    ConExecute('UI_SelectByCategory LAND MOBILE')
+  `)
+  check(
+    selectedIds() === '1,2,3',
+    `a unit in UNITSTATE_BeingUpgraded is not selected (${selectedIds()})`,
+  )
+
+  // No command may end in the "missing" warning any more.
+  const stillMissing = String(
+    host.eval(`
+      local parts = {}
+      for _, text in pairs(__conUnknown) do parts[#parts + 1] = text end
+      return table.concat(parts, ' | ')
+    `),
+  )
+  check(stillMissing === '', `no console command reported missing (${stillMissing})`)
+}
+
+// The 'IssueCommand <cmd>' console func (CON_IssueCommand, Cfile:1255032) drives
+// the Stop/Pause/Dive/Silo hotkeys. It maps the argument to a UNITCOMMAND_* and
+// issues it to the selection through the same sendSim seam the Stop button uses.
+console.log('\n== IssueCommand hotkey + bool ConVar toggle ==')
+{
+  // A recorder that keeps name and the `clear` flag (ISSUE_Command's third arg).
+  host.eval('__ic = { calls = {} }')
+  host.setGlobal('__uiSimCommand', (name: string, _ids: unknown, value: unknown) => {
+    const clear = (value as { clear?: boolean } | undefined)?.clear === true
+    host.eval(`table.insert(__ic.calls, { name = '${name}', clear = ${clear ? 'true' : 'false'} })`)
+  })
+  host.eval(`
+    __uiSetUnit(2, 'uel0101', 1, 110, 20, 100, 500, 500, 0, true, 0, 0, -1, false, 0, 1, false)
+    __uiSelectByIds({ 2 })
+    ConExecute('IssueCommand Stop')
+  `)
+  check(
+    String(host.eval(`return __ic.calls[1] and __ic.calls[1].name or ''`)) === 'UNITCOMMAND_Stop',
+    "ConExecute('IssueCommand Stop') sends UNITCOMMAND_Stop to the selection (Cfile:1255061)",
+  )
+  check(
+    host.eval(`return __ic.calls[1] and __ic.calls[1].clear`) === true,
+    'Stop clears the queue — ISSUE_Command(..., 1) (Cfile:1255061)',
+  )
+  host.eval(`ConExecute('IssueCommand SiloBuildTactical')`)
+  check(
+    host.eval(`return __ic.calls[2] and __ic.calls[2].clear`) === false,
+    'SiloBuildTactical appends — ISSUE_Command(..., 0) (Cfile:1255091)',
+  )
+
+  // A bool ConVar with no value TOGGLES (the TConVar<bool> path prints
+  // "toggled %s is now %s", Cfile:453672) — that is Alt+L 'UI_RenderUnitBars'.
+  const before = host.eval(`return __conGet('ui_RenderUnitBars')`)
+  host.eval(`ConExecute('UI_RenderUnitBars')`)
+  const after = host.eval(`return __conGet('ui_RenderUnitBars')`)
+  check(
+    before === true && after === false,
+    'UI_RenderUnitBars with no value toggles the bool ConVar (Cfile:453672)',
+  )
+  host.eval(`ConExecute('UI_RenderUnitBars')`)
+  check(
+    host.eval(`return __conGet('ui_RenderUnitBars')`) === true,
+    'toggling UI_RenderUnitBars again restores it',
+  )
 }
 
 host.close()

@@ -152,6 +152,12 @@ export class UnitViewer {
   }
   /** Glow/bloom chain (CBloomRenderer::DoBloom @0x7F5160). */
   private bloom: BloomPipeline | null = null
+  /**
+   * The loaded map's bloom amount (scmap `mBloom`) fed to DoBloom's GlowCopyAdd.
+   * 0.0 until a map is set, matching the engine's no-terrain fallback
+   * (Cfile:1212939).
+   */
+  private mapBloom = 0
   /** Shadow pass (H7): depth from the sun, ComputeShadowPCF receivers. */
   readonly shadow = new ShadowRenderer()
   /** Deferred normal pass (TerrainNormalsPS + TDecalsNormals into a
@@ -323,6 +329,8 @@ export class UnitViewer {
     this.renderer.setScissorTest(false)
     this.renderer.setRenderTarget(null)
     this.renderer.setViewport(0, 0, width, height)
+    // DoBloom's amt = the map's GetBloom() (Cfile:1212932/1212943).
+    this.bloom.setGlowCopyAdd(this.mapBloom)
     this.bloom.composite(this.renderer)
   }
 
@@ -826,6 +834,10 @@ export class UnitViewer {
     Object.entries({
       cam_ZoomAmount: 0.40000001, // Cfile:421825
       cam_NearZoom: 5.0, // Cfile: float Moho::cam_NearZoom = 5.0
+      cam_NearFOV: 65.0, // Cfile:421821 — vertical FOV (deg) at near zoom
+      cam_FarFOV: 60.0, // Cfile:421822 — vertical FOV (deg) at far zoom
+      cam_NearPitch: 40.0, // Cfile:421823 — camera pitch (deg) at near zoom
+      cam_FarPitch: 89.900002, // Cfile:421824 — pitch (deg) at far zoom (top-down)
       cam_PanSpeed: 1.0, // Cfile: float Moho::cam_PanSpeed = 1.0
       ui_KeyboardPanSpeed: 90.0, // Cfile:421739
       ui_KeyboardPanAccelerateMultiplier: 4.0, // Cfile:421740
@@ -875,11 +887,28 @@ export class UnitViewer {
     }
   }
 
-  private rtsPitch(dist: number): number {
-    // Original-Gefühl: oberhalb ~60 Einheiten Draufsicht, darunter kippen
-    const t = Math.min(Math.max((dist - 6) / 54, 0), 1)
-    const base = 0.6 + (1.45 - 0.6) * Math.sqrt(t)
-    return Math.min(Math.max(base + this.rts.pitchOffset, 0.35), 1.5)
+  /**
+   * Log-zoom lerp fraction (0 at cam_NearZoom, 1 at the map's max zoom) — the
+   * domain CalculateFarPitch / CalculateFOV use (Cfile:1151061-1151072):
+   * t = (clamp(log(zoom), log(near), log(max)) - log(near)) / (log(max) - log(near)).
+   */
+  private camZoomT(zoom: number): number {
+    const ln = Math.log(this.conVarNumber('cam_NearZoom'))
+    const lm = Math.log(this.rtsMaxZoom())
+    if (!(lm > ln)) return 0
+    const lz = Math.min(Math.max(Math.log(Math.max(zoom, 1e-6)), ln), lm)
+    return (lz - ln) / (lm - ln)
+  }
+
+  private rtsPitch(zoom: number): number {
+    // Camera pitch is a log-zoom lerp between cam_NearPitch (40 deg) and
+    // cam_FarPitch (89.9 deg) — CalculateFarPitch, Cfile:1151074-1151077 * DEG2RAD.
+    // The old sqrt curve (0.6..1.45 rad = 34..83 deg) was invented and never
+    // reached the near-top-down far view.
+    const deg =
+      this.camZoomT(zoom) * (this.conVarNumber('cam_FarPitch') - this.conVarNumber('cam_NearPitch')) +
+      this.conVarNumber('cam_NearPitch')
+    return Math.min(Math.max(deg * 0.017453292 + this.rts.pitchOffset, 0.1), 1.553)
   }
 
   private updateRtsCamera(dt: number): void {
@@ -900,7 +929,10 @@ export class UnitViewer {
     if (r.panX !== 0 || r.panZ !== 0) {
       let input = this.conVarNumber('ui_KeyboardPanSpeed')
       if (this.ctrlDown) input *= this.conVarNumber('ui_KeyboardPanAccelerateMultiplier')
-      const speed = (r.dist / this.canvas.clientHeight) * this.conVarNumber('cam_PanSpeed') * input
+      // Scale by the TARGET zoom (mTargetZoom), not the current animating dist,
+      // so a pan during a simultaneous zoom matches the engine (CameraPan,
+      // Cfile:1149107).
+      const speed = (r.goalDist / this.canvas.clientHeight) * this.conVarNumber('cam_PanSpeed') * input
       const cos = Math.cos(r.yaw)
       const sin = Math.sin(r.yaw)
       r.goalTarget.x += (r.panX * cos - r.panZ * sin) * speed
@@ -947,6 +979,13 @@ export class UnitViewer {
   private applyRtsCameraTransform(): void {
     const r = this.rts
     const pitch = this.rtsPitch(r.dist)
+    // Vertical FOV varies with zoom too: cam_NearFOV(65 deg) near, cam_FarFOV
+    // (60 deg) far (CalculateFOV, Cfile:1150863-1150866). The old fixed 45 deg
+    // was markedly more telephoto than the original at every zoom.
+    const fov =
+      this.camZoomT(r.dist) * (this.conVarNumber('cam_FarFOV') - this.conVarNumber('cam_NearFOV')) +
+      this.conVarNumber('cam_NearFOV')
+    if (Math.abs(this.camera.fov - fov) > 1e-3) this.camera.fov = fov
     const horiz = Math.cos(pitch) * r.dist
     this.camera.position.set(
       r.target.x + Math.sin(r.yaw) * horiz,
@@ -1067,6 +1106,18 @@ export class UnitViewer {
   }
 
   /** Aktuelle Kamera-Zoomdistanz (für Strategic-Icon-Schwellen). */
+  /**
+   * The engine's "zoom": `dot(cam.mViewport.d[1], (cameraTarget, 1))`, i.e. the
+   * world width the viewport spans at the depth of the camera TARGET
+   * (Cfile:1284418-1284425). ui_LifebarLOD (200) and IconFadeInZoom are
+   * compared against exactly this — not against the camera distance.
+   */
+  zoomOgrids(): number {
+    const target = this.rts.enabled ? this.rts.target : this.controls.target
+    const rect = this.canvas.getBoundingClientRect()
+    return this.ogridsPerPixel(target.x, target.y, target.z) * rect.width
+  }
+
   getRtsDistance(): number {
     return this.rts.enabled
       ? this.rts.dist
@@ -1204,6 +1255,24 @@ export class UnitViewer {
   }
 
   /** Weltposition → Canvas-Client-Koordinaten (null wenn hinter der Kamera). */
+  /**
+   * The world width ONE PIXEL spans at that world position — the engine's
+   * `dot(cam.mViewport.d[2], (pos, 1))`, where `d[2] = d[0] / viewportWidth`
+   * and `d[0]·pos` is the world width the viewport spans at that depth
+   * (Cfile:522779-522802). The selection brackets keep their minimum pixel
+   * size with it (Cfile:1215269), the life bars their size (Cfile:1285308).
+   */
+  ogridsPerPixel(x: number, y: number, z: number): number {
+    const cam = this.camera
+    const forward = cam.getWorldDirection(new THREE.Vector3())
+    const depth = new THREE.Vector3(x, y, z).sub(cam.position).dot(forward)
+    if (!(depth > 0)) return 0
+    const rect = this.canvas.getBoundingClientRect()
+    if (rect.width <= 0) return 0
+    const worldHeight = 2 * depth * Math.tan(((cam.fov * Math.PI) / 180) / 2)
+    return (worldHeight * cam.aspect) / rect.width
+  }
+
   worldToScreen(pos: THREE.Vector3): { x: number; y: number } | null {
     const p = pos.clone().project(this.camera)
     if (p.z > 1) return null
@@ -1227,6 +1296,8 @@ export class UnitViewer {
       shadowFillColor: new THREE.Color(...scmap.lighting.shadowFillColor),
       lightingMultiplier: scmap.lighting.lightingMultiplier,
     }
+    // The map's glow amount feeds DoBloom's GlowCopyAdd each frame (see render()).
+    this.mapBloom = scmap.lighting.bloom
     // Kein Distanznebel auf der Karte: der Fog gehört zum Unit-Viewer-Werkzeug
     // (Bodenraster-Optik). Im Original gibt es keinen solchen Nebel — er
     // tönte MeshBasic-Objekte (Projektile, Ringe) jenseits ~220 m dunkelblau.
@@ -1456,9 +1527,17 @@ export class UnitViewer {
         fresnelPower: scmap.water.fresnelPower,
         skyReflectionAmount: scmap.water.skyReflection,
         sunShininess: scmap.water.sunShininess,
-        // The water block carries its OWN sun (water2.fx SunDirection).
-        sunDirection: new THREE.Vector3(...scmap.water.sunDirection).normalize(),
-        sunColor: new THREE.Color(...scmap.water.sunColor),
+        // The water block carries its OWN sun (water2.fx SunDirection). The
+        // engine sends it RAW — water2 LoadShaderVars SetMem(SunDirection, 3,
+        // a5+100) with no normalize (Cfile:1229482); normalizing here shifts the
+        // glint whenever the map value is not unit-length.
+        sunDirection: new THREE.Vector3(...scmap.water.sunDirection),
+        // water2 pre-multiplies SunColor by SunReflectionAmount before handing
+        // it to the shader (Cfile:1229484-1229491: v30 = sunColor.y * a5+124),
+        // so the glint scales with the map's SunReflection (often ~5).
+        sunColor: new THREE.Color(...scmap.water.sunColor).multiplyScalar(
+          scmap.water.sunReflection,
+        ),
         waterMap: waterMapTex,
         waves,
         skyCube: skyCube ?? dummy,

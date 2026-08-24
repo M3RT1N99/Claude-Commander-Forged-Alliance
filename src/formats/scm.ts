@@ -29,8 +29,25 @@
  *     0x64  u8[8]    reserved
  *
  *   Vertex (68 Bytes):
- *     f32[3] position, f32[3] tangent, f32[3] normal, f32[3] binormal,
+ *     f32[3] position, f32[3] normal, f32[3] tangent, f32[3] binormal,
  *     f32[2] uv0, f32[2] uv1, u8[4] boneIndices
+ *
+ *   Note on the field order: the GPG mod SDK documents this as
+ *   position/tangent/normal/binormal, but that is wrong. The engine's own
+ *   vertex declaration, embedded verbatim in ForgedAlliance.exe, reads:
+ *
+ *     struct VS_MESHSOFTWAREINSTANCED{
+ *         float4 Pos : POSITION;
+ *         float3 Normal : NORMAL;
+ *         float3 Tangent : TANGENT;
+ *         float3 Binormal : BINORMAL;
+ *         ...
+ *
+ *   Confirmed against the data: taking the cross product of the triangle
+ *   edges and comparing it with the field at offset 12 agrees for 100% of
+ *   4400 triangles across UEL0201/UAL0201/UEB1101/XSL0401, while offsets 24
+ *   and 36 agree only ~50% of the time (as expected for vectors that are
+ *   perpendicular to the normal).
  */
 
 export interface ScmBone {
@@ -131,8 +148,8 @@ export function parseScm(data: Uint8Array): ScmModel {
     const p = vertexOffset + i * VERTEX_SIZE
     for (let j = 0; j < 3; j++) {
       positions[i * 3 + j] = view.getFloat32(p + j * 4, true)
-      tangents[i * 3 + j] = view.getFloat32(p + 12 + j * 4, true)
-      normals[i * 3 + j] = view.getFloat32(p + 24 + j * 4, true)
+      normals[i * 3 + j] = view.getFloat32(p + 12 + j * 4, true)
+      tangents[i * 3 + j] = view.getFloat32(p + 24 + j * 4, true)
       binormals[i * 3 + j] = view.getFloat32(p + 36 + j * 4, true)
     }
     uv0[i * 2] = view.getFloat32(p + 48, true)

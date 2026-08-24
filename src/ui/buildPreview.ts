@@ -3,6 +3,22 @@ import type { UnitViewer, SceneUnit } from '../viewer/unitViewer'
 import type { SandboxUnitAssets } from '../sandbox/sandbox'
 import { snapToGrid } from './worldCommands'
 import { bpGet } from '../formats/blueprint'
+import type { Validity } from '../sim/ogrid'
+
+/**
+ * Ghost tints. These colours are a UI affordance (like the translucency below),
+ * NOT engine values — but WHICH one is shown is the engine's verdict
+ * (canBuildStructureAt, src/sim/ogrid.ts): green = buildable here, red = blocked,
+ * blue = we cannot judge faithfully (mobile / deposit-restricted, no markers).
+ */
+const TINT_VALID = new THREE.Color(0x33ff66)
+const TINT_INVALID = new THREE.Color(0xff3333)
+const TINT_UNKNOWN = new THREE.Color(0x66ccff)
+const TINT: Record<Validity, THREE.Color> = {
+  valid: TINT_VALID,
+  invalid: TINT_INVALID,
+  unknown: TINT_UNKNOWN,
+}
 
 /**
  * Die Bau-Vorschau: das Geistergebäude am gerasterten Punkt unter dem Cursor.
@@ -15,8 +31,19 @@ import { bpGet } from '../formats/blueprint'
  * Die Daten kommen trotzdem alle aus dem Spiel: das MODELL ist das Modell des
  * Blueprints, und die POSITION ist exakt der Raster-Snap der Engine
  * (`COORDS_GridSnap` @0x50B1E0 — `cell = trunc(p − size/2)`, zurück `+ size/2`,
- * Höhe erst nach dem Snap). Erfunden ist hier nichts außer der Tatsache, dass ein
- * Geist durchscheinend gezeichnet wird.
+ * Höhe erst nach dem Snap; unter Wasser auf die Oberfläche geklemmt, s.
+ * snapToGrid). Erfunden ist hier nichts außer der Tatsache, dass ein Geist
+ * durchscheinend gezeichnet wird.
+ *
+ * DOKUMENTIERTE LÜCKE — Rot/Grün-Validität: die Engine färbt den Geist ungültig,
+ * wenn dort nicht gebaut werden darf. Der maßgebliche Test ist
+ * `CAiBrain::CanBuildStructureAt` (@0x57cbb0), und dessen Kern ist
+ * `func_LocationIsFree(bp, mOGrid, pos)` — eine Abfrage des OCCUPANCY-GRID
+ * (`COGrid`, pro Zelle Layer + Belegung), dazu Skirt-Overlap mit unbeweglichen
+ * Strukturen und reservierte Bau-Positionen. Der OGrid ist eine echte
+ * Engine-Struktur, die es hier noch nicht gibt; eine Teil-Näherung (Overlap +
+ * Wasser-Layer) würde bei Randfällen falsches Feedback geben. Deshalb bleibt der
+ * Geist bis zum OGrid einfarbig — kein erfundener Validitäts-Check.
  */
 export class BuildPreview {
   private mesh: THREE.Mesh | null = null
@@ -24,11 +51,23 @@ export class BuildPreview {
   private unit: SceneUnit | null = null
   private blueprintId = ''
   private loading = ''
+  private validity: Validity = 'unknown'
+  /**
+   * Answers "can this blueprint be built at the snapped centre (x, z)?" — the
+   * host wires it to canBuildStructureAt with the map's terrain/water/occupancy
+   * (src/main.ts). Absent -> the ghost stays neutral (the old behaviour).
+   */
+  private validityAt: ((blueprintId: string, x: number, z: number) => Validity) | null = null
 
   constructor(
     private readonly viewer: UnitViewer,
     private readonly loadAssets: (id: string) => Promise<SandboxUnitAssets | null>,
   ) {}
+
+  /** Wire the placement-validity query (canBuildStructureAt). */
+  setValidityProvider(fn: (blueprintId: string, x: number, z: number) => Validity): void {
+    this.validityAt = fn
+  }
 
   /** Kein Bau-Modus mehr (oder Cursor außerhalb der Karte): Geist verschwindet. */
   hide(): void {
@@ -46,9 +85,15 @@ export class BuildPreview {
     blueprintId: string,
     hit: { x: number; z: number },
     footprint: [number, number],
+    waterElevation?: number,
   ): Promise<void> {
-    const pos = snapToGrid(hit.x, hit.z, footprint[0], footprint[1], (x, z) =>
-      this.viewer.heightAt(x, z),
+    const pos = snapToGrid(
+      hit.x,
+      hit.z,
+      footprint[0],
+      footprint[1],
+      (x, z) => this.viewer.heightAt(x, z),
+      waterElevation,
     )
 
     if (this.blueprintId !== blueprintId) {
@@ -88,6 +133,13 @@ export class BuildPreview {
     if (this.mesh) {
       this.mesh.position.set(pos.x, pos.y, pos.z)
       this.mesh.visible = true
+      // Red/green feedback — recomputed every move, since the same ghost turns
+      // valid/invalid as it slides across cells and over other structures.
+      this.validity = this.validityAt ? this.validityAt(blueprintId, pos.x, pos.z) : 'unknown'
+      const mat = this.mesh.material as THREE.ShaderMaterial
+      if (mat.uniforms && mat.uniforms.teamColor) {
+        ;(mat.uniforms.teamColor.value as THREE.Color).copy(TINT[this.validity])
+      }
     }
   }
 
@@ -95,7 +147,7 @@ export class BuildPreview {
   debugPosition(): string | null {
     if (!this.mesh || !this.mesh.visible) return null
     const p = this.mesh.position
-    return `${this.blueprintId} @ ${p.x.toFixed(1)}, ${p.z.toFixed(1)}`
+    return `${this.blueprintId} @ ${p.x.toFixed(1)}, ${p.z.toFixed(1)} [${this.validity}]`
   }
 
   /**

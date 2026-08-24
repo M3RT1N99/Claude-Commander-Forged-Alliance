@@ -22,6 +22,7 @@ import {
   type WorldCommandSim,
 } from './worldCommands'
 import { translateKey } from './keys'
+import type { Validity } from '../sim/ogrid'
 import type { GameVfs } from '../vfs/vfs'
 import type { EcoSnapshot } from './hud'
 import type { LuaUnitSnapshot } from '../sim/luaSimClient'
@@ -37,6 +38,25 @@ import type { SessionInfo } from '../sim/session'
  */
 /** Wo die Einstellungen im Browser liegen (das Gegenstück zu Game.prefs). */
 const PREFS_KEY = 'ccfa.prefs'
+
+/**
+ * A number list from Lua as a real JS array. Depending on its contents wasmoon
+ * hands a Lua table over as an array OR as an object keyed "1", "2", … — code
+ * that relies on an array eventually gets an object and
+ * `map is not a function`.
+ */
+function toIdArray(value: unknown): number[] {
+  if (Array.isArray(value)) return value.map((n) => Math.floor(Number(n))).filter((n) => Number.isFinite(n))
+  if (value && typeof value === 'object') {
+    const out: number[] = []
+    for (const v of Object.values(value as Record<string, unknown>)) {
+      const n = Math.floor(Number(v))
+      if (Number.isFinite(n)) out.push(n)
+    }
+    return out
+  }
+  return []
+}
 
 export class GameUi {
   private knownUnits = new Set<number>()
@@ -266,8 +286,11 @@ export class GameUi {
       seen.add(u.id)
       lines.push(
         `__uiSetUnit(${u.id}, '${u.name}', ${u.army ?? 1}, ${u.x}, ${u.y}, ${u.z}, ` +
-          `${u.health}, ${u.maxHealth}, ${u.fraction ?? 1}, ${u.idle === true}, ` +
-          `${u.fireState ?? 0}, ${u.guard ?? 0})`,
+          `${u.health}, ${u.maxHealth}, ${u.workProgress ?? 0}, ${u.idle === true}, ` +
+          `${u.fireState ?? 0}, ${u.guard ?? 0}, ${u.caps ?? -1}, ${u.dead === true}, ` +
+          `${u.shieldRatio ?? 0}, ${u.fraction ?? 1}, ${u.beingUpgraded === true}, ` +
+          `${JSON.stringify(u.layer ?? 'Land')}, ${u.scriptBits ?? 0}, ${u.toggleCaps ?? -1}, ` +
+          `${u.autoMode === true}, ${u.autoSurfaceMode === true})`,
       )
       // Die Bau-Warteschlange einer Fabrik (construction.lua zeigt sie an).
       // IMMER senden, auch leer: sonst bleibt in der UI-Kopie die letzte Queue
@@ -286,7 +309,8 @@ export class GameUi {
       ${eco.mass}, ${eco.energy},
       ${eco.massIncome}, ${eco.energyIncome},
       ${eco.massRequested}, ${eco.energyRequested},
-      ${eco.massExpense}, ${eco.energyExpense})`)
+      ${eco.massExpense}, ${eco.energyExpense},
+      ${eco.reclaimMass}, ${eco.reclaimEnergy})`)
     // Die SPIELZEIT (score.lua zeigt sie als Uhr; sie steht bei Pause still).
     lines.push(`__uiSetGameTick(${gameTick})`)
     // Der BEAT-VERTEILER der Original-UI — nicht ein einzelnes Panel.
@@ -308,10 +332,16 @@ export class GameUi {
     lines.push(`import('/lua/ui/game/gamemain.lua').OnBeat()`)
     this.host.eval(lines.join('\n'))
 
-    // Der erste Beat MIT Units ist der Moment, in dem die Engine DoInitializing
-    // fährt (Cfile:1321067: StopLoadingDialog „nach dem ersten Beat mit
-    // Sync-Daten"). Erst jetzt sieht gamemain.OnFirstUpdate seine Avatare —
-    // vorher löschte dessen 3-s-Fork mit `SelectUnits(nil)` jede Auswahl.
+    // The engine runs DoInitializing on the FIRST sync beat, gated purely on
+    // HasSyncData() (mSyncdat is non-empty) with NO unit-count test
+    // (func_DoInitializing, Cfile:1321023/1066859). We DELIBERATELY keep the
+    // `units.length > 0` guard: our sandbox spawns the ACU with a fire-and-forget
+    // spawnViaLua AFTER startSandbox, so the first beat can arrive with zero
+    // units, and gamemain.OnFirstUpdate then forks a 3-s thread that reads
+    // avatars — nil at that point — and clears the selection (the "empty UI"
+    // bug). A real session's first sync beat always carries the ACU, so
+    // units>0 and HasSyncData coincide; the divergence only matters for a
+    // unit-less observer/replay start, which does not exist yet.
     if (this.worldInit && units.length > 0) {
       const init = this.worldInit
       this.worldInit = null
@@ -331,14 +361,76 @@ export class GameUi {
     return Number(this.host.eval(`return __uiSelectByIds({ ${list} })`))
   }
 
+  /**
+   * The selection the UI VM made ITSELF (control groups, UI_SelectByCategory,
+   * UI_ExpandCurrentSelection). The engine has one selection per session
+   * (CWldSession::mSelection, Cfile:1329207); here the 3D side has its own
+   * copy for the brackets, so it has to follow.
+   */
+  connectSelection(onSelected: (ids: number[]) => void): void {
+    this.host.setGlobal('__uiSelectionSink', (csv: string) => {
+      const ids = String(csv ?? '')
+        .split(',')
+        .map((s) => Number(s))
+        .filter((n) => Number.isFinite(n))
+      onSelected(ids)
+    })
+  }
+
+  /**
+   * The cursor's world position (CWldSession::mCursorInfo.mMouseWorldPos) and
+   * the "is this unit in view" test (RCamCamera::GetArmyUnitsInFrustum,
+   * Cfile:866323) — `UI_SelectByCategory +nearest` and `+inview` run on them.
+   */
+  connectCursorWorld(): (x: number, y: number, z: number) => void {
+    return (x, y, z) => {
+      this.host.eval(`__uiSetCursorWorld(${x}, ${y}, ${z})`)
+    }
+  }
+
+  connectInView(inView: (id: number) => boolean): void {
+    this.host.setGlobal('__uiInViewSink', inView)
+  }
+
   /** Wie viele Units gerade ausgewählt sind (GetSelectedUnits der UI-VM). */
   selectionCount(): number {
     return Number(this.host.eval('return table.getn(GetSelectedUnits() or {})'))
   }
 
+  /**
+   * Self-destruct the current selection (Ctrl+K). Fires the SAME SimCallback the
+   * original UI uses (confirmunitdestroy.lua:24 -> selfdestruct.lua): a 5-second
+   * countdown then Kill, toggled off if fired again while counting down. Runs in
+   * the UI VM so it goes through the real SimCallback -> sim path. Returns how
+   * many units it was sent for.
+   */
+  selfDestructSelection(): number {
+    return Number(
+      this.host.eval(`
+        local sel = GetSelectedUnits()
+        if not sel or table.getn(sel) == 0 then return 0 end
+        local ids = {}
+        for i, u in ipairs(sel) do ids[i] = u.id end
+        SimCallback({ Func = 'ToggleSelfDestruct', Args = { units = ids, owner = GetFocusArmy() } })
+        return table.getn(ids)
+      `),
+    )
+  }
+
   /** NUR Debug (CDP-Abnahmen): einen Lua-Ausdruck in der UI-VM auswerten. */
   debugEval(code: string): unknown {
     return this.host.eval(code)
+  }
+
+  /**
+   * The army the player is looking through — `GetFocusArmy()`
+   * (`__uiFocusArmy`, ui-globals.lua:927). Selection is limited to it: the
+   * drag box only collects units whose army equals the focus army
+   * (Cfile:1290158).
+   */
+  focusArmy(): number {
+    const v = this.host.pull<number>('tostring(GetFocusArmy())')
+    return typeof v === 'number' ? v : 1
   }
 
   /**
@@ -388,6 +480,9 @@ export class GameUi {
     // ein. Die Engine macht es genauso (CMauiControl::Frame → RunScript).
     try {
       this.renderer.update(delta)
+      // Drive the command-mode cursor (worldview.lua OnUpdateCursor equivalent);
+      // guarded so a pre-boot frame or a missing seam never stalls the pump.
+      this.host.eval('if __uiUpdateCursor then __uiUpdateCursor() end')
     } catch (err) {
       this.reportUiError(err)
     }
@@ -424,19 +519,29 @@ export class GameUi {
      *  Repair, own healthy → Guard (0x0F), prop → Reclaim (0x13). */
     ziel: {
       enemy?: number
+      /** The enemy is reclaimable (being built / category RECLAIMABLE) — a
+       *  non-attacking selection reclaims it instead. */
+      enemyReclaimable?: boolean
       repair?: number
       own?: number
       reclaimProp?: number
       reclaimMapProp?: number
     } = {},
+    /** The map's water surface height (undefined = no water) — clamps a build. */
+    waterElevation?: number,
+    /** Placement validity at the snapped cell — a red ghost blocks the order. */
+    buildValidity?: (blueprintId: string, x: number, z: number) => Validity,
   ): Promise<string | null> {
     return worldClick(this.host, sim, hit, elevation, {
       queue,
       enemyTargetId: ziel.enemy,
+      enemyReclaimable: ziel.enemyReclaimable,
       repairTargetId: ziel.repair,
       ownTargetId: ziel.own,
       reclaimPropId: ziel.reclaimProp,
       reclaimMapPropIndex: ziel.reclaimMapProp,
+      waterElevation,
+      buildValidity,
     })
   }
 
@@ -490,7 +595,14 @@ export class GameUi {
    * die Auswahl als Entity-IDs — die Sim baut daraus Unit-Objekte.
    */
   connectSimCallback(send: (func: string, argsJson: string, ids: number[]) => void): void {
-    this.host.setGlobal('__uiSimCallbackSink', send)
+    // The id list arrives as a LUA TABLE, and wasmoon hands that over as a JS
+    // OBJECT ({ "1": id, "2": id }), not as an array. Passed through unchecked
+    // the worker threw "msg.unitIds.map is not a function" on every
+    // SimCallback — the callback (control groups, Ctrl-K, diplomacy) never
+    // reached the sim.
+    this.host.setGlobal('__uiSimCallbackSink', (func: string, argsJson: string, ids: unknown) => {
+      send(func, argsJson, toIdArray(ids))
+    })
   }
 
   /**
@@ -600,9 +712,22 @@ export class GameUi {
    * id), StopSound __uiAudioStopSink(id) — ohne Sink protokolliert die UI-VM
    * die Cues nur (ui-globals.lua, __uiSoundsRequested).
    */
-  connectAudio(play: (bank: string, cue: string, id: number) => void, stop: (id: number) => void): void {
+  connectAudio(
+    play: (bank: string, cue: string, id: number) => void,
+    stop: (id: number) => void,
+    worldToggle?: (enabled: boolean) => void,
+  ): void {
     this.host.setGlobal('__uiAudioSink', (bank: string, cue: string, id: number) => play(bank, cue, id))
     this.host.setGlobal('__uiAudioStopSink', (id: number) => stop(id))
+    // EnableWorldSounds/DisableWorldSounds (ui-globals.lua) push the world-sound
+    // enable byte here so the sim audio requests can be muted (score screen/NIS).
+    if (worldToggle) {
+      this.host.setGlobal('__uiWorldSoundsSink', (enabled: boolean) => worldToggle(enabled))
+      // Re-sync the current enable byte: a Disable/Enable that ran before this
+      // wiring (init order) is otherwise lost. __uiWorldSounds defaults false
+      // (world sounds off until gamemain.OnFirstUpdate enables them).
+      worldToggle(this.host.eval('return __uiWorldSounds == true') === true)
+    }
   }
 
   /**
@@ -675,9 +800,11 @@ export class GameUi {
           this.host.eval(`return __mauiKey('KeyDown', ${k.wx}, ${k.vk}, ${m})`) === true
         let acted = consumed
         if (!consumed) {
-          // '~' erreicht die Konsole im Original über den Char-Code 126
-          // (Cfile:1262747) — die Taste selbst ist VK 0xC0.
-          const mauiCode = e.key === '~' ? 126 : k.wx
+          // The console toggle reaches the engine as maui code 126
+          // (Cfile:1262747). The backquote key (VK 0xC0) now maps to 126 in
+          // keys.ts (MAUI_KeycodeMSWToMaui case 192->126), so k.wx already
+          // carries it — no special-case needed.
+          const mauiCode = k.wx
           acted =
             this.host.eval(
               `return __uiKeyMapExecute(${k.vk}, ${e.shiftKey}, ${e.ctrlKey}, ${e.altKey}, ${e.repeat}, ${mauiCode})`,
