@@ -23,11 +23,11 @@ responsible for game logic: `Unit.lua`, `defaultunits.lua`, `aibrain.lua`, and
 
 - ❌ **Recreating game logic in TS.** If the answer is in `lua/sim/` or
   `lua/ui/`, execute that file — do not recreate it in TS or HTML.
-- ❌ **Inventing values.** Every value comes from a blueprint, the original Lua,
-  or the Decomp. No “that feels right.”
-- ❌ **Stubs in the production path.** Missing engine parts must **fail loudly**;
-  do not silently return nonsense. (The old stub trap made every passing test
-  worthless for months. It must not return.)
+- ❌ **Inventing values.** Every factual implementation value MUST have a
+  traceable source. Preferred sources are the original Lua, Blueprints, and
+  IDA decompilation. No “that feels right.”
+- ❌ **Stubs in the production path.** Missing engine behavior MUST fail loudly;
+  do not silently make an unimplemented behavior appear implemented.
 - ❌ **Partial engines.** Exactly one Sim boot: `installEngine()`
   ([src/lua/engine.ts](src/lua/engine.ts)); exactly one UI boot:
   `installUiEngine()` + `setupGameUi()` ([src/lua/uiEngine.ts](src/lua/uiEngine.ts),
@@ -37,23 +37,58 @@ responsible for game logic: `Unit.lua`, `defaultunits.lua`, `aibrain.lua`, and
   [src/engine-lua/](src/engine-lua/); the adjacent TS files are only loaders
   and bridges.
 
-Two **Auto-Vivifiers** are deliberately in the production path (they do not
-fail there): `moho.<x>` creates empty classes
-([moho.lua](src/engine-lua/moho.lua)), and `__getBrain(army)` silently creates
-Brains ([brain.lua](src/engine-lua/brain.lua)).
+Two **Auto-Vivifiers** are deliberately in the production path: `moho.<x>`
+creates empty classes ([moho.lua](src/engine-lua/moho.lua)), and
+`__getBrain(army)` creates Brains ([brain.lua](src/engine-lua/brain.lua)).
+These are explicit compatibility exceptions, not proof that the represented
+engine behavior exists. They MUST NOT silently make an unimplemented behavior
+appear implemented; the first semantically required operation MUST fail loudly
+or be otherwise explicitly verified.
 
-## Sources of truth — in this order
+### Source authority and evidence
 
-1. **IDA decompilation:** `Cfile/ForgedAlliance.exe.c` (~2 million lines, full
-   `Moho::` symbols, gitignored). MCP access is also available (`mcp__ida__*`).
-   For every “how does the engine do this?” question, search here first.
-2. **Original Lua + Blueprints:** `npx tsx scripts/peek-lua.ts <path> <from> <to>`
+There is no single global source order. The correct primary source depends on
+what is being established:
+
+**Gameplay / UI behavior**
+1. **Original Lua + Blueprints:** `npx tsx scripts/peek-lua.ts <path> <from> <to>`
    or `--grep <regex>` (searches lua.scd, mohodata.scd, and units.scd, including
    `.bp`).
-3. **faf-re / community / web** — only when 1 and 2 provide no answer.
+2. **IDA decompilation:** `Cfile/ForgedAlliance.exe.c` (~2 million lines, full
+   `Moho::` symbols, gitignored) and available MCP access (`mcp__ida__*`) for
+   native engine semantics behind the Lua behavior.
+3. **faf-re / community / web** — only when primary evidence does not answer the
+   question.
 
-Do not hallucinate. Research first, then implement, then verify against real
-data.
+**Native engine behavior**
+1. **IDA decompilation**
+2. **Original Lua call sites, bindings, and Blueprints**
+3. **faf-re / community / web** — only when primary evidence does not answer the
+   question.
+
+A lower-priority source MUST NOT silently override higher-priority evidence.
+If credible sources conflict, document the conflict and resolve it from
+primary evidence before implementation whenever possible.
+
+### Unknown / unverified behavior
+
+If the available evidence is insufficient:
+
+- do not infer missing behavior;
+- do not choose a merely plausible implementation;
+- do not create a placeholder that behaves as implemented;
+- mark the behavior **UNVERIFIED**;
+- record the missing evidence or required research;
+- stop implementation of that behavior until enough evidence exists.
+
+Words such as “likely”, “probably”, “should”, “typically”, or “I assume” are
+not implementation evidence.
+
+For research claims, record enough provenance to reproduce the finding: source,
+relevant file/function/line or address when available, the claim, and confidence.
+
+**Do not hallucinate. Research first, then implement, then verify against real
+data.**
 
 ## Architecture in one paragraph
 
@@ -123,6 +158,22 @@ MaxBrake, ...), **read
 [docs/research/verified-facts.md](docs/research/verified-facts.md) before
 working on the topic.**
 
+## Verification invariants
+
+The repository's tests are verification suites against real game data, not
+mocks. Verification is part of correctness, not optional cleanup.
+
+A failing verification test is a correctness finding, but it MUST NOT be left
+unresolved in a commit. The agent MUST identify whether the implementation, test,
+or underlying assumption is wrong; attach evidence; fix it or explicitly record
+a verified limitation; and leave the repository in a green verification state
+before committing, unless the repository explicitly documents a deliberate
+non-green checkpoint.
+
+If a change exposes that an earlier implementation was wrong, prefer correcting
+the implementation and the evidence trail over weakening the test merely to
+restore green status.
+
 ## Tools & workflow
 
 ```bash
@@ -135,8 +186,6 @@ npx tsx scripts/peek-lua.ts --grep <regex>  # search original Lua/Blueprints
 - **Every script that imports `src/lua/*` or `src/sim/*` needs
   `--import ./scripts/register-lua.mjs`**; otherwise it gets
   `ERR_UNKNOWN_FILE_EXTENSION ".lua"`. `npm test` sets it itself.
-- Tests are verification suites against real game data, not mocks. A failing
-  test after an honesty correction is a **finding**, not a regression.
 - Run the appropriate suite while working; before **every commit**, run
   `npx tsc --noEmit` and `npm test` (all suites).
 - Browser end-to-end: `?sandbox=<map>&selftest=<blueprint>` runs the tech demo
@@ -146,49 +195,54 @@ npx tsx scripts/peek-lua.ts --grep <regex>  # search original Lua/Blueprints
   lines for `ForkThread-Fehler:`.
 - Commit messages are in **English**: what and why, one milestone per commit.
 
+## Single semantic source
+
+There MUST be one authoritative semantic representation of each game data
+concept.
+
+Secondary parsers or projections may exist for rendering, indexing, file-format
+access, or other explicitly scoped purposes, but they MUST NOT independently
+redefine game semantics.
+
+The blueprint data is currently read both by the TS parser and by the real
+`LoadBlueprints()` pipeline. Treat the `LoadBlueprints()` representation as the
+authoritative semantic representation. Any TS-side representation MUST be a
+strict projection for its documented purpose.
+
+If two representations disagree on a semantic value, behavior MUST be treated
+as **UNVERIFIED** until the discrepancy is resolved and covered by verification.
+
 ## Working style by model
 
-Everything above applies to **every** model. This section changes only *how
-much* work you take on at a time and with what effort — **never what is
-correct**. Your active model is listed in your system prompt.
+All agents follow the same correctness, evidence, architecture, and verification
+rules. Agent autonomy and tool usage MAY vary by environment, but MUST NOT change
+what is considered correct.
 
-**Baseline** (Sonnet class, every model, and whenever uncertain): take small,
-verifiable steps; before major changes across multiple files, reconfirm with
-the user; for broad searches, use **one** research subagent instead of further
-fan-out. Effort: medium; high for difficult reasoning.
+**Baseline:** take small, verifiable steps; before major changes across multiple
+files, reconfirm the intended scope when required; for broad searches, use one
+research subagent instead of unnecessary fan-out. Effort: medium; high for
+difficult reasoning.
 
-**Opus 4.8 and the Claude-5 family (Fable 5):** work autonomously. Plan
-multi-step work from beginning to end, and complete long efforts (migrations or
-changes across many files) **without stopping** as long as the type check and
-suites remain green. Define the specification up front (task, intent,
-constraints, and acceptance criteria) in one pass, not piecemeal. Effort:
-start coding/agent work at `xhigh`, use at least `high` for reasoning, and use
-`max` only for genuine edge cases (reconsidering structured tasks). The user
-can increase this further with **ultracode** (xhigh + deterministic workflow
-fan-out).
+**Higher-capability models:** may work autonomously on larger changes when the
+verification gates remain green. Define the specification up front (task,
+intent, constraints, and acceptance criteria) before implementation when the
+change is non-trivial.
 
-**Fan out and check coverage (Opus 4.8 and newer):** these models do not spawn
-enough agents on their own. Explicitly fan out parallel subagents across
-independent topics — for example, one agent per research topic (front-end menu,
-WorldView, session start, combat, ...) or per engine subsystem. **Do not** fan
-out work that can be completed in one answer. Before declaring work “done,”
-have a fresh subagent inspect your own diff — their task is **coverage**
-(report every correctness or requirements gap, with confidence and severity),
-not filtering. This repo has no prebuilt reviewer agents yet; use
-`/code-review` or a `general-purpose` agent with a clear review mandate.
+**Fan out and check coverage:** when parallel research is useful, use independent
+agents across genuinely independent topics or subsystems. Before declaring a
+large change done, have a fresh agent inspect the diff for correctness and
+requirements coverage. The reviewer is not allowed to replace primary evidence
+or silently lower verification standards.
 
-**State the scope of a rule literally.** These models follow instructions
-literally and do not generalize a rule on their own. When an invariant applies
-to *every* case, write “every/all”: *every* value comes from a blueprint, Lua,
-or the Decomp; *every* missing engine part fails loudly; *all* game logic runs
-in the original Lua.
+**State the scope of a rule literally.** When an invariant applies to every case,
+write “every/all”: every value needs traceable evidence; every missing engine
+behavior fails loudly unless explicitly listed as a compatibility exception;
+all game logic runs in the original Lua.
 
-**Never** weaken the invariants (the core principle and “Prohibited”), the
-honesty rules, or correctness by making them dependent on the currently active
-model — the model list can be stale; when in doubt, use the baseline. Anchor
-every autonomous step to a check you can **actually run**
-(`npx tsc --noEmit`, the appropriate `verify-*` suite, `npm test`, or the
-browser self-test `?sandbox=…&selftest=…`) — never to “looks done.”
+**Never** weaken the invariants (the core principle and “Prohibited”), the honesty
+rules, or correctness because of the active model. Anchor autonomous work to a
+check that can actually be run (`npx tsc --noEmit`, the appropriate `verify-*`
+suite, `npm test`, or the browser self-test `?sandbox=…`) — never to “looks done.”
 
 ## Further documentation
 
@@ -216,7 +270,7 @@ browser self-test `?sandbox=…&selftest=…`) — never to “looks done.”
 | [research/net-replay-save.md](docs/research/net-replay-save.md) | Lockstep, replay, save |
 | [research/render-details.md](docs/research/render-details.md) | Renderer, remaining SCMAP structure |
 | [research/lua-gameplay.md](docs/research/lua-gameplay.md) | FA Lua dialect evidence (Lua 5.0.1) |
-| [research/engine-core.md](docs/research/engine-core.md) / [engine-architecture.md](docs/research/engine-architecture.md) | Engine core from the Decomp |
+| [research/engine-core.md](docs/research/engine-core.md) / [engine-architecture.md](docs/engine-architecture.md) | Engine core from the Decomp |
 
 ## Language
 
