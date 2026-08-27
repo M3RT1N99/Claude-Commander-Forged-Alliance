@@ -16,6 +16,9 @@
  *   npx tsx --import ./scripts/register-lua.mjs scripts/coverage-engine.ts --alle
  */
 import { readFile } from 'node:fs/promises'
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { LuaHost } from '../src/lua/host'
 import { installEngine } from '../src/lua/engine'
 import { setTerrainSource } from '../src/lua/engineGlobals'
@@ -297,5 +300,55 @@ for (const b of sortiert.slice(0, zeigeAlle ? sortiert.length : 8)) {
   if (noops.length) console.log(`   NO-OP: ${noops.join(', ')}`)
 }
 
+// --- Das Gate ---------------------------------------------------------------
+// Dieses Werkzeug hat DREI falsche Zahlen nacheinander geliefert:
+//   "398 / 86 %"  — die Klassen-Regex war `$`-verankert, CRLF-Checkout: KEINE
+//                   einzige Klassenzeile wurde geparst, NO-OP stand auf 0
+//   "1149 / 57 %" — `methodenStand` gab fuer jede Klasse ausserhalb einer
+//                   19-Eintraege-Karte `FEHLT` zurueck: 238 Methoden blind
+//   und beide wurden veroeffentlicht, die zweite einen Commit nach dem Fix der
+//   ersten.
+// Deshalb misst es sich ab jetzt selbst gegen eine eingecheckte Untergrenze.
+// Ein Messgeraet, dessen Ausfall niemand bemerkt, ist schlimmer als keins.
+const scriptsDir = dirname(fileURLToPath(import.meta.url))
+const baselinePath = join(scriptsDir, 'fixtures', 'coverage-baseline.json')
+interface Baseline { minKlassenZeilen: number; minEcht: number; minNoop: number; gesamt: number }
+const gesNoop = zeilen.filter((z) => z.stand === 'NO-OP').length
+const klassenZeilen = abschnitte.reduce((n, a) => n + a.klassen.length, 0)
+
+let gateFehler = 0
+const gate = (ok: boolean, text: string): void => {
+  console.log(`  ${ok ? 'OK  ' : 'FAIL'} ${text}`)
+  if (!ok) gateFehler++
+}
+
+console.log('\n== Bestandsaufnahme gegen die eingecheckte Untergrenze ==')
+if (!existsSync(baselinePath)) {
+  mkdirSync(dirname(baselinePath), { recursive: true })
+  const b: Baseline = {
+    minKlassenZeilen: klassenZeilen,
+    minEcht: gesEcht,
+    minNoop: gesNoop,
+    gesamt: gesGesamt,
+  }
+  writeFileSync(baselinePath, `${JSON.stringify(b, null, 2)}
+`)
+  console.log(`  Untergrenze angelegt: ${JSON.stringify(b)}`)
+} else {
+  const b = JSON.parse(readFileSync(baselinePath, 'utf-8')) as Baseline
+  // Der Blindflug-Fall: die Klassenzeilen verschwinden lautlos.
+  gate(
+    klassenZeilen >= b.minKlassenZeilen,
+    `${klassenZeilen} Klassenzeilen geparst (mindestens ${b.minKlassenZeilen}) — bei 0 ist das Werkzeug blind`,
+  )
+  gate(gesGesamt === b.gesamt, `${gesGesamt} Bindungen insgesamt (erwartet ${b.gesamt})`)
+  gate(gesEcht >= b.minEcht, `${gesEcht} ECHT (mindestens ${b.minEcht}) — eine Bindung ist verschwunden`)
+  // NO-OP darf FALLEN, aber nicht steigen: neue stille No-ops sind Rueckschritt.
+  gate(gesNoop <= b.minNoop, `${gesNoop} NO-OP (hoechstens ${b.minNoop}) — kein neuer stiller No-op`)
+  if (gesEcht > b.minEcht || gesNoop < b.minNoop) {
+    console.log(`  (Die Untergrenze darf auf echt=${gesEcht}, no-op=${gesNoop} nachgezogen werden.)`)
+  }
+}
+
 await game.close()
-process.exit(0)
+process.exit(gateFehler === 0 ? 0 : 1)
