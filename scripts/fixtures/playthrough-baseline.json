@@ -1,5 +1,14 @@
 {
   "findings": [
+    "SIM NO-OP aufgerufen: AddBuildRestriction",
+    "SIM NO-OP aufgerufen: AttachBoneTo",
+    "SIM NO-OP aufgerufen: AttachTo",
+    "SIM NO-OP aufgerufen: DetachAll",
+    "SIM NO-OP aufgerufen: DetachFrom",
+    "SIM NO-OP aufgerufen: GetFocusUnit",
+    "SIM NO-OP aufgerufen: HideBone",
+    "SIM NO-OP aufgerufen: ShakeCamera",
+    "SIM NO-OP aufgerufen: ShowBone",
     "SIM __emitterBpJson liefert kein brauchbares BP für Tarmacs/Tar8x_01_albedo",
     "UI ForkThread-Fehler: Error: UI camera bridge is unavailable for targetBox",
     "UI UI: minimap.lua NOCH NICHT — Error: UI camera bridge is unavailable for set",

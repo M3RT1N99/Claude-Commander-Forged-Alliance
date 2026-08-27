@@ -39,6 +39,28 @@ defect — then Sim-Globals (47), `CAiPersonality` (35), `Entity` (27),
 `CLobby` (18). Those four classes genuinely do not exist in `src/engine-lua/`
 (checked); `FEHLT` is correct for them.
 
+## Welche der stillen No-ops das Spiel wirklich aufruft
+
+`src/engine-lua/moho.lua` füllt **147** Bindungen mit einem stillen No-op. Bis
+jetzt war unbekannt, welche davon im laufenden Spiel überhaupt erreicht werden —
+die Priorisierung war Raten. `scripts/verify-playthrough.ts` schaltet dafür
+`__mohoNoopWarn` ein; jeder No-op meldet sich beim ersten Aufruf.
+
+Eine vollständige Partie (ACU → Bau → Fabrik → Kampf → Wrack) ruft **9 von 147**:
+
+| No-op | Wofür |
+| --- | --- |
+| `HideBone`, `ShowBone` | Knochen aus-/einblenden (Bau, Upgrade) |
+| `AttachTo`, `AttachBoneTo`, `DetachFrom`, `DetachAll` | Anhängen — Transporter, Bauarme |
+| `AddBuildRestriction` | Bau-Beschränkungen der Armee |
+| `GetFocusUnit` | die Fokus-Einheit |
+| `ShakeCamera` | Kamera-Erschütterung bei Einschlägen |
+
+Das ist die Arbeitsliste, nach Messung sortiert. Die übrigen 138 werden auf
+diesem Weg nicht erreicht — sie sind deshalb nicht harmlos, aber sie sind auch
+nicht dringend. Ein **zehnter** aufgerufener No-op lässt den Durchlauf
+fehlschlagen (eingecheckte Fund-Liste).
+
 ## Known gaps
 
 The path to the real UI: [PLAN-UI.md](PLAN-UI.md); the complete 1:1 roadmap:

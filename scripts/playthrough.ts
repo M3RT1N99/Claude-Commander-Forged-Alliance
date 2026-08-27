@@ -67,6 +67,12 @@ const sim = await LuaHost.create(game.luaFiles, (level, msg) => {
   if (level === 'WARN') melde('SIM', msg)
 })
 const engine = installEngine(sim)
+// WELCHE der 147 stillen No-ops ruft das echte Spiel wirklich auf? Ohne diese
+// Antwort ist jede Priorisierung geraten. Der Schalter laesst jeden No-op sich
+// beim ERSTEN Aufruf einmal melden (moho.lua `noopFor`); die Meldungen laufen
+// in dieselbe Fund-Liste und sind damit gedeckelt: ein NEU aufgerufener No-op
+// faellt auf.
+sim.eval('__mohoNoopWarn = true')
 setTerrainSource(sim, () => 20)
 const nProj = game.loadProjectiles(sim)
 const nProps = game.loadProps(sim)

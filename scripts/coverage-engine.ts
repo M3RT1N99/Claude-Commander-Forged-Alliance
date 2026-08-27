@@ -95,15 +95,12 @@ installUiEngine(ui, {
 createRootFrame(ui, 1920, 1080)
 setupUi(ui)
 
-// Die NO-OP-Funktion von moho.lua ist EIN Objekt — daran ist ein No-Op erkennbar.
+// No-Ops sind am REGISTER `__mohoNoopNames` erkennbar (moho.lua): dort steht zu
+// jeder No-Op-Funktion ihr Bindungsname. Vorher wurden sie an der Identitaet
+// EINER geteilten `noop`-Funktion erkannt — das zaehlte richtig, konnte aber
+// nicht sagen, WELCHER No-Op im Spiel tatsaechlich aufgerufen wird.
 for (const h of [sim, ui]) {
-  h.eval(`
-    __mohoNoop = false
-    -- entity_methods.AddLocalImpulse ist in moho.lua garantiert ein No-Op.
-    if moho and moho.entity_methods then
-      __mohoNoop = moho.entity_methods.AddLocalImpulse
-    end
-  `)
+  h.eval(`if rawget(_G, '__mohoNoopNames') == nil then __mohoNoopNames = {} end`)
 }
 // Und die Liste der bewusst NICHT implementierten UI-Globals (sie werfen).
 // Der strenge _G wirft beim Lesen unbekannter Globals — deshalb rawget.
@@ -203,7 +200,7 @@ const methodenStand = (h: LuaHost, klasse: string, methode: string): Stand => {
         if not t then return 'FEHLT' end
         local f = t['${methode}']
         if f == nil then return 'FEHLT' end
-        if __mohoNoop and f == __mohoNoop then return 'NO-OP' end
+        if __mohoNoopNames and __mohoNoopNames[f] then return 'NO-OP' end
         return 'ECHT'
       `),
     ) as Stand
@@ -216,7 +213,7 @@ const methodenStand = (h: LuaHost, klasse: string, methode: string): Stand => {
       if not c then return 'FEHLT' end
       local f = c['${methode}']
       if f == nil then return 'FEHLT' end
-      if __mohoNoop and f == __mohoNoop then return 'NO-OP' end
+      if __mohoNoopNames and __mohoNoopNames[f] then return 'NO-OP' end
       return 'ECHT'
     `),
   )

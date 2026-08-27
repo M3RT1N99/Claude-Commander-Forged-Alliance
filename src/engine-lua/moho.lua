@@ -18,7 +18,35 @@
 -- Instance state lives in self.__* fields, which the TS side reads and writes.
 -- =====================================================================
 
-local function noop() end
+-- REGISTER der No-ops: Funktion -> Bindungsname.
+--
+-- Es gab hier EINE geteilte `noop`-Funktion, und die Bestandsaufnahme erkannte
+-- No-ops an ihrer Identität. Das reichte zum Zählen, aber nicht für die einzige
+-- Frage, die wirklich zählt: WELCHE der 147 stillen No-ops ruft das echte Spiel
+-- überhaupt auf? Ohne diese Antwort ist jede Priorisierung geraten.
+--
+-- Jetzt bekommt jeder Name seine eigene Funktion, die sich beim ersten Aufruf
+-- meldet — aber nur, wenn `__mohoNoopWarn` gesetzt ist. Der Schalter wird zur
+-- LAUFZEIT geprüft, nicht beim Bauen der Tabelle, damit der Host ihn auch nach
+-- `installEngine()` noch umlegen kann.
+--
+-- Im Normalbetrieb kostet das einen Tabellenzugriff pro Aufruf einer ohnehin
+-- leeren Funktion. Die Bestandsaufnahme erkennt No-ops ab jetzt am Register,
+-- nicht mehr an der Identität.
+__mohoNoopNames = {}
+__mohoNoopWarn = false
+__mohoNoopCalled = {}
+
+local function noopFor(name)
+  local f = function()
+    if __mohoNoopWarn and not __mohoNoopCalled[name] then
+      __mohoNoopCalled[name] = true
+      WARN('NO-OP aufgerufen: ' .. name)
+    end
+  end
+  __mohoNoopNames[f] = name
+  return f
+end
 
 -- Fill in a no-op for every listed name that has no explicit body.
 --
@@ -30,7 +58,7 @@ local function noop() end
 local function withNoops(names, methods, parent)
   for _, name in ipairs(names) do
     if methods[name] == nil and not (parent and parent[name]) then
-      methods[name] = noop
+      methods[name] = noopFor(name)
     end
   end
   return methods
