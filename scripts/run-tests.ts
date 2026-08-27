@@ -15,6 +15,12 @@ const here = dirname(fileURLToPath(import.meta.url))
 const projectRoot = dirname(here)
 const filter = process.argv[2] ?? ''
 
+// NUR `verify*`. Die vier `check-*`-Skripte (unit-assets, watermap-holes,
+// orientation, convention) prüfen zwar Dinge, die keine verify-Suite abdeckt,
+// aber sie DRUCKEN nur: null `check()`-Aufrufe, null `exit(1)`-Pfade. Sie hier
+// aufzunehmen hätte die Suite-Zahl von 53 auf 58 gehoben, ohne ein einziges
+// Gate hinzuzufügen — genau das falsche Fortschrittssignal. Sie kommen rein,
+// sobald sie fehlschlagen können (specs/002 Close-out).
 const suites = readdirSync(here)
   .filter((f) => f.startsWith('verify') && f.endsWith('.ts'))
   .filter((f) => f.includes(filter))

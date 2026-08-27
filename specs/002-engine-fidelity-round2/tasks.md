@@ -31,6 +31,8 @@ Principles II and V).
       `__orders`/`__orderActive`) — a killed unit's running command is neither
       advanced nor completed nor popped, and its queue length is unchanged.
       *Verified by*: `scripts/verify-motion.ts`.
+      asserts: sie bewegt sich keinen Millimeter
+      asserts: die Warteschlange bleibt unveraendert
 
 ### US1, US3, US4 — open
 
@@ -121,9 +123,20 @@ Principles II and V).
 ## Close-out
 
 - [x] T020 Full gate after every landed change: `npx tsc --noEmit` and
-      `npm test` (53 suites) green.
+      `npm test` green.
+      check: none — this task IS the gate; `npm test` running green is its own
+      evidence, there is nothing further to assert about it.
 - [ ] T021 Update `docs/STATUS.md` and `docs/research/verified-facts.md` once
       the remaining stories land.
+- [ ] T023 **The four `check-*.ts` scripts cannot fail.** `check-unit-assets`,
+      `check-watermap-holes`, `check-orientation`, `check-convention` have zero
+      `check()` calls and zero `exit(1)` paths — they print diagnostics. They
+      cover things no verify suite does (do all unit meshes/textures resolve;
+      watermap/heightmap consistency; SCM row/column-major and quaternion
+      order), so they are worth having as gates. Give each an assertion and a
+      failure exit, THEN add `check-*` to the `run-tests.ts` glob.
+      Wiring them in as-is was tried and reverted: it raised the suite count
+      from 53 to 58 while adding no gate at all.
 - [ ] T022 One commit per verified fix, English message: what and why.
 
 ## Notes

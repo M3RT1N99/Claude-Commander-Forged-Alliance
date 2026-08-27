@@ -64,6 +64,8 @@ Order within the phase is free except where a dependency is named.
       a `GiveResource(TakeResource(...))` round-trip (the `simutils.lua:152-155`
       shape) conserves the total.
       *Verified by*: `scripts/verify-econ-lua.ts`, `scripts/verify-economy.ts`.
+      asserts: it RETURNS the taken amount
+      asserts: a request larger than storage takes only what is there
 
 ### US4 — shield absorption per damage event
 
@@ -88,6 +90,8 @@ Order within the phase is free except where a dependency is named.
       regression — `damagePoint` was still consulting `target.MyShield` on the
       area path and swallowing the remainder a second time).
       *Verified by*: `scripts/verify-shields.ts`.
+      asserts: the dome lost ONE absorption
+      asserts: the shield OWNER takes the remainder
       (`verify-splash-damage.ts` was named here originally but has no shield
       coverage at all and was never extended — corrected.)
 
@@ -104,6 +108,8 @@ Order within the phase is free except where a dependency is named.
       picks the far high-priority target over the near low-priority one, and
       falls back to nearest when the list is empty.
       *Verified by*: `scripts/verify-combat.ts`.
+      asserts: it takes the FAR tank over the near generator
+      asserts: without priorities the nearest wins again
 
 ### US6 — construction/decay adjust health
 
@@ -116,6 +122,8 @@ Order within the phase is free except where a dependency is named.
 - [x] T016 Extend `scripts/verify-build.ts`: damage a construction site, run a
       build tick, assert the damage is still there (today it is healed away).
       *Verified by*: `scripts/verify-build.ts`, `scripts/verify-combat.ts`.
+      asserts: the damage is still gone after the build tick
+      asserts: decay subtracted maxH*delta from the DAMAGED health
 
 ### US9 — a dying factory stops producing
 
@@ -127,6 +135,7 @@ Order within the phase is free except where a dependency is named.
 - [x] T019 Add to `scripts/verify-factory.ts`: a killed factory with a
       non-empty queue spawns nothing during its `DeathThread`.
       *Verified by*: `scripts/verify-factory.ts`, `scripts/verify-build.ts`.
+      asserts: it starts no unit while dying
 
 ### US8 — `Stop` clears the factory queue
 
@@ -152,6 +161,8 @@ Order within the phase is free except where a dependency is named.
 - [x] T022 Extend `scripts/verify-factory.ts`: Stop on a producing factory
       empties the queue and cancels the in-progress unit.
       *Verified by*: `scripts/verify-factory.ts`, `scripts/verify-command-chain.ts`.
+      asserts: Stop wipes the production queue
+      asserts: the control factory started a unit
 
 ### US12 — `GetResourceConsumed`
 
@@ -165,6 +176,8 @@ Order within the phase is free except where a dependency is named.
 - [x] T025 Extend `scripts/verify-econ-lua.ts`: during an energy stall a
       consumer reports a rate < 1; idle reports 0.
       *Verified by*: `scripts/verify-econ-lua.ts`, `scripts/verify-shields.ts`.
+      asserts: during a stall the rate is partial
+      asserts: consumption off reports 0
 
 ### US7 — water impacts (⚠ paired with the motion layer branch)
 
@@ -186,6 +199,8 @@ Order within the phase is free except where a dependency is named.
       projectile hitting water reports `Water`; a land unit crossing shallow
       water stays on the seabed while a hover unit rides the surface.
       *Verified by*: `scripts/verify-combat.ts`, `scripts/verify-motion.ts`,
+      asserts: over water the impact is Water
+      asserts: water below the ground (island/coast) still reports Terrain
       `scripts/verify-ogrid.ts`.
 
 ---
@@ -207,6 +222,8 @@ Order within the phase is free except where a dependency is named.
       (lowercase), fires whether or not a control was hit, and does not fire on
       `ButtonRelease`.
       *Verified by*: `scripts/verify-ui-panels.ts`.
+      asserts: der Haken feuert genau einmal
+      asserts: ein ButtonRelease loest ihn NICHT aus
       **Not proven**: that `combo.lua:289` closes its dropdown and
       `orders.lua:539` collapses the firestate popup — those are the real
       consumers, but the check exercises the fan-out through a synthetic
@@ -236,12 +253,20 @@ Order within the phase is free except where a dependency is named.
       `OnKeyboardFocusChange` on the OLD control only; and that re-acquiring on
       the already-focused control still notifies it.
       *Verified by*: `scripts/verify-maui.ts`.
+      asserts: Der Fokus bleibt dabei bestehen
+      asserts: das ALTE Control bekommt OnKeyboardFocusChange
 
 ---
 
 ## Phase 4: Close-out
 
 - [x] T035 Full gate: `npx tsc --noEmit` **and** `npm test` (all suites) green.
+      check: none — this task IS the gate; it is its own evidence.
+      T036-T038 are documentation corrections. They have no runnable check
+      today: nothing compares a claim in `docs/STATUS.md` against the code.
+      That gap is itself a planned item (a STATUS-claim checker); until it
+      exists, these are recorded here as unverified by construction rather
+      than counted as proven.
 - [x] T036 Update `docs/STATUS.md`: the suite count in the status paragraph
       says 29, the repo has 53; move what is now done out of "Known gaps" and
       add the newly exposed ones (the coverage figures, the `__setWaterLevel`
