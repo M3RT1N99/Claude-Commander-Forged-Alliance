@@ -153,6 +153,60 @@ Body: immediately afterwards the raw command stream as a result of `[u8 type][u1
 
 This corresponds exactly to the community parsers (`FAForever/faf-scfa-replay-parser` `replay.ksy` + `replay_parser/header.py`) - except that the two "ignored" strings are skipped as 3 and 4 raw bytes respectively.
 
+#### Verified against source 1, and implemented (2026-08-27)
+
+The layout above came from faf-re (source 3). It has now been re-derived from the
+decompilation and implemented, so it is no longer a borrowed claim:
+
+| Element | Cfile |
+| --- | --- |
+| Read order of the whole header | `Moho::VCR_SetupReplaySession` 1303988-1304227 |
+| Version line `"Supreme Commander v%1.2f.%4i"` | 1304067 |
+| `"Replay v1.9
+"`, 13 bytes, `strcmp` | 1304108 |
+| Map path → `sesInfo->mMapName` | 1304104, assigned 1304256 |
+| `u32`+bytes `mGameMods`, then `mScenarioInfo` | 1304125-1304148 |
+| `u8` sources, each `strz` + `u32` | 1304156-1304175 |
+| `u8` cheats, `u8` armies, per army `u32`+bytes then ids to `0xFF` | 1304182-1304222 |
+| `u32 mInitSeed`, then the body | 1304226 |
+| Frame `[u8 op][u16 total LE][payload total-3]` | `CDecoder::DecodeMessage` 996781-996800 |
+| 24 opcodes 0x00-0x17 | same `switch`, 996812-996905 |
+| `VerifyChecksum` = 16 B digest + `ReadInt` beat | `DecodeVerifyChecksum` 996938-996946 |
+
+Both "ignored" strings really are `ReadString` calls in the engine (1304100,
+1304105) — their 3 and 4 byte lengths in real files are an observation, not a
+fixed field. Reading them as strings is what makes the parse work.
+
+Note also that the header WRITER is in the decompilation even though faf-re did
+not reconstruct it: `Moho::VCR_CreateReplay` @1303425 writes the version line,
+`"
+"` and `"Replay v1.9
+"` (1303699-1303714).
+
+**Implementation:** [src/formats/scfareplay.ts](../../src/formats/scfareplay.ts),
+checked by [scripts/verify-replay.ts](../../scripts/verify-replay.ts) against the
+replays on this machine (`CFA_REPLAY_DIR`, default the profile's replay folder).
+Finding no replay is a FAILURE, not a skip.
+
+Result over 9 real replays from three engine builds (v1.50.3599, v1.50.3608,
+v1.60.6): **258,107 messages, 4,884 checksums, zero errors**. The decisive check
+is not "parses without throwing" but that the frame walk lands **exactly** on
+end-of-file in every single file — red probe: shifting the body start by one byte
+fails all nine immediately. A second, independent raw byte scan for `03 17 00`
+finds the same checksum records the walk does.
+
+#### The checksums arrive every 50 beats — measured, not a constant
+
+In all nine replays the `VerifyChecksum` records sit at beats 0, 50, 100, … with
+no gap: the largest holds 2,701 records ending at beat 135,000 (= 2,700 × 50 plus
+beat 0, exact).
+
+**50 is a measurement, not a Cfile fact.** The emitting site (1067922-1067937)
+sends whichever beat the sync-data request names, taken from the 128-entry ring
+`mSimHashes[beat & 0x7F]`; which cadence the requester picks was not traced.
+For the oracle the measurement is what matters: a recorded original run offers a
+comparison point every 5 seconds of game time.
+
 ### Aufnahme
 No separate writer! `CDecoder::ReceiveMessage` (`CDecoder.cpp:181`) copies the complete wire bytes of each dispatched message **before** decoding 1:1 into the `CSimDriver::mStream`. The replay body is therefore identical to what the sim ate (including `CMDST_Advance`, `CMDST_VerifyChecksum`, `CMDST_SetCommandSource`). Whoever writes the header and opens the file is **not reconstructed** in faf-re (Lua side `CopyCurrentReplay` copies `USER_GetReplayDir()/<profile>/LastGame.<ext>`).
 
@@ -209,7 +263,7 @@ Referenz-Implementierungen: `FAForever/faf-scfa-replay-parser` (Python + Kaitai 
 1. **Container unpacker:** Split JSON line; zstd (WASM, e.g. `fzstd`/`zstd-wasm`) or base64+`DecompressionStream('deflate')` for v1. Small and purely mechanical.
 2. **Header parser:** exactly the structure above; the two Lua bytestreams (GameMods, ScenarioInfo) and the PlayerOptions per Army need to be converted into JS objects using the 6-type Lua decoder (float/string/nil/bool/table/end). This includes the map, options, armies, factions, colors, seeds, command sources.
 3. **Command stream parser:** `[u8 type][u16 size][payload]` loop + decoder for the 24 opcodes (payload layouts can be copied exactly from `CDecoder.cpp` / `CMarshaller` writers). That's enough for pure *viewing* (timeline, APM, chat, build order).
-4. **Deterministic playback** also requires: identical sim physics/order, identical MT19937, identical blueprints **of the respective FAF game build** and loaded `sim_mods`. The ScenarioInfo string in the header names the map, the JSON header names the `featured_mod` and the mod UIDs. Without a 1:1 sim, real replay is not possible - but the checksums in the stream (`CMDST_VerifyChecksum` every N beats) are a **built-in verification tool**: you can check your own sim against the original MD5s per beat and know exactly where you diverge. Requirement: recreate the hash sequence from `Sim::UpdateChecksum` exactly (Economy → dirty entities → RNG state).
+4. **Deterministic playback** also requires: identical sim physics/order, identical MT19937, identical blueprints **of the respective FAF game build** and loaded `sim_mods`. The ScenarioInfo string in the header names the map, the JSON header names the `featured_mod` and the mod UIDs. Without a 1:1 sim, real replay is not possible - but the checksums in the stream (`CMDST_VerifyChecksum`, measured at every 50 beats — see above) are a **built-in verification tool**: you can check your own sim against the original MD5s per beat and know exactly where you diverge. Requirement: recreate the hash sequence from `Sim::UpdateChecksum` exactly (Economy → dirty entities → RNG state).
 5. **Practical intermediate step:** Read FAF replays as a *data source* (header + command stream) and only feed the commands into your own sim - desyncs are to be expected, but the stream is the best integration test available.
 
 ## 6. Chat & Diplomatie im Netz

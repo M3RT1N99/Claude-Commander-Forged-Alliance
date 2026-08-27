@@ -99,6 +99,86 @@ Aufrufer bekommt einfach nie eine Länge. Behoben in `compat.lua`, geprüft in
 `verify-lua.ts` über den Original-Ausdruck aus `utilities.lua:50` (3/4/12 → 13),
 Rot-Probe: Shim entfernt → FAIL + Exit 1.
 
+## Das Replay als Orakel: die Frage ist beantwortet
+
+Ein Golden Master schützt vor Änderung, aber er sagt nicht, ob der Zustand
+RICHTIG ist — er ist unser eigener Zustand. Die einzige Quelle, die das
+beantworten kann, ist die Originalengine. Sie hat auf diesem Rechner neun
+Partien aufgezeichnet.
+
+Offen war, ob der aufgezeichnete Körper die `VerifyChecksum`-Nachrichten
+wirklich Byte für Byte enthält. Die Architektur legte es nahe, bewiesen war es
+nicht. **Jetzt ist es bewiesen.**
+
+Der Weg dahin, vollständig aus dem Decompilat: `CDecoder::DecodeMessage`
+(Cfile:996781-996800) rahmt jede Nachricht als `[u8 Opcode][u16 Gesamtlänge
+LE][Nutzlast]`, `MSGOP_VerifyChecksum` ist Opcode 3 (`case 3u`), und
+`DecodeVerifyChecksum` (Cfile:996938-996946) liest 16 Byte Digest plus den Beat
+als `int` — ein Datensatz von genau 23 Byte. Das Kopfformat steht in
+`VCR_SetupReplaySession` (Cfile:1303988-1304227).
+
+`src/formats/scfareplay.ts` setzt das um, `scripts/verify-replay.ts` prüft es
+gegen die echten Aufzeichnungen: **9 Replays aus drei Engine-Ständen
+(v1.50.3599, v1.50.3608, v1.60.6), 258 107 Nachrichten, 4 884 Prüfsummen, kein
+Fehler.** Die tragende Prüfung ist nicht „parst ohne Ausnahme", sondern dass der
+Rahmenlauf in jeder Datei **exakt** auf dem Dateiende endet; ein unabhängiger
+roher Byte-Scan findet dieselben Prüfsummen.
+
+Rot-Proben: Körperbeginn um **ein** Byte verschoben → alle neun scheitern
+sofort. Kein Replay im Ordner → Exit 1 (ein Fehlschlag, kein Übersprung).
+
+Gemessen: die Prüfsummen liegen bei Beat 0, 50, 100, … ohne Lücke — die größte
+Datei hat 2701 Datensätze bis Beat 135 000 (= 2700 × 50 + Beat 0, exakt). **Die
+50 ist eine Messung, keine Cfile-Konstante:** die Sendestelle
+(Cfile:1067922-1067937) verschickt den Beat, den die Sync-Anfrage nennt, aus dem
+128er-Ring `mSimHashes[beat & 0x7F]`; welche Kadenz die Anfrage wählt, ist nicht
+nachverfolgt.
+
+Damit existiert alle 5 Sekunden Spielzeit ein Vergleichspunkt gegen die
+Originalengine. **Noch nicht gebaut** ist der Vergleich selbst: dafür muss
+`Sim::UpdateChecksum` (Cfile:1076701, faltet `SEconTotals` je Armee über 0x38
+Byte) nachgebildet werden, und der eingespeiste Befehlsstrom muss bei uns
+überhaupt laufen. Das nächste ehrliche Fortschrittsmaß ist deshalb keine
+Prozentzahl, sondern: **bis zu welchem Beat kommen wir?**
+
+## Offener Befund: der Typecheck sieht die Skripte nicht
+
+`npx tsc --noEmit` prüft `tsconfig.json`, und dessen `include` ist `["src"]`.
+Die **58 Dateien in `scripts/`** — also jedes einzelne Verifikationsgate, der
+Playthrough, der Coverage-Zähler, der Selftest-Treiber — laufen damit
+**ungeprüft**. „Typecheck grün" hieß bisher: grün für 65 % des Codes, den
+`npm test` ausführt.
+
+Aufgefallen beim Bau des Replay-Lesers. Gemessen, nicht geschätzt:
+
+* `@types/node` war **gar nicht installiert** (jetzt als devDependency da) —
+  ohne Node-Typen kann `scripts/` gar nicht geprüft werden;
+* `scripts/verify-selection.ts:73` war **syntaktisch ungültig für `tsc`**: nach
+  dem semikolonlosen `const cand = … => ({…})` liest der Parser den folgenden
+  alleinstehenden Block `{` als Fortsetzung. `tsx`/esbuild verzeiht das, `tsc`
+  nicht. Behoben (`;{`);
+* danach bleiben **155 Fehler in 18 Dateien**:
+
+| Datei | Fehler |
+| --- | --- |
+| `verify-emitter-curves.ts` | 53 |
+| `shot-click.ts` | 24 |
+| `shot.ts` | 16 |
+| `selftest-gate.ts` | 12 |
+| `verify-factory.ts` | 7 |
+| `verify-command-chain.ts` | 5 |
+| `verify-build-effects.ts` | 4 |
+| `src/main.ts`, `verify-user-unit-state.ts`, `verify-upgrade.ts`, `verify-combat.ts` | je 3 |
+| `verify-shields.ts`, `verify-playthrough.ts`, `verify-coverage.ts`, `playthrough.ts` | je 2 |
+| `verify-restrictions.ts`, `verify-core-globals.ts`, `verify-army-victory.ts` | je 1 |
+
+`tsconfig.scripts.json` und `npm run typecheck:scripts` machen das messbar.
+**Das ist noch kein Gate** — es ist rot, und es wird als Befund geführt statt
+still zu bleiben. Erst wenn die 155 abgearbeitet sind, gehört der Lauf in
+`npm test` und in den pre-push-Hook. Die neuen Dateien dieser Sitzung
+(`scfareplay.ts`, `verify-replay.ts`, `verify-goldenmaster.ts`) sind bereits
+sauber.
+
 ## Known gaps
 
 The path to the real UI: [PLAN-UI.md](PLAN-UI.md); the complete 1:1 roadmap:

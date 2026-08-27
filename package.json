@@ -9,6 +9,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
+    "typecheck:scripts": "tsc --noEmit -p tsconfig.scripts.json",
     "test": "tsx scripts/run-tests.ts"
   },
   "dependencies": {
@@ -18,6 +19,7 @@
   },
   "devDependencies": {
     "@types/luaparse": "^0.2.13",
+    "@types/node": "^26.4.0",
     "@types/three": "^0.166.0",
     "luaparse": "^0.3.1",
     "tsx": "^4.23.0",

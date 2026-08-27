@@ -71,7 +71,10 @@ const cand = (id: number, d: { priority: number; lowSelectPrio: boolean }, scree
   lowSelectPrio: d.lowSelectPrio,
   beingBuilt: false,
 })
-{
+// Semikolon: ohne es liest der Parser das nachfolgende `{` als Fortsetzung des
+// Ausdrucks und die Datei wird syntaktisch ungueltig. tsx/esbuild verzeiht das,
+// `tsc` nicht — aufgefallen, als `scripts/` in den Typecheck aufgenommen wurde.
+;{
   const ids = boxSelectIds([cand(1, tank), cand(2, engineer), cand(3, factory)], box, false)
   check(ids.length === 1 && ids[0] === 1, `bot(1) + engineer(3) + factory(5) -> only the bot (${ids})`)
 }
