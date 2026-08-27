@@ -179,6 +179,46 @@ still zu bleiben. Erst wenn die 155 abgearbeitet sind, gehört der Lauf in
 (`scfareplay.ts`, `verify-replay.ts`, `verify-goldenmaster.ts`) sind bereits
 sauber.
 
+## Die vier `check-*`-Skripte sind jetzt Gates (Runde-2 T023)
+
+`scripts/run-tests.ts` globte nur `verify*`. Die vier `check-*`-Skripte liefen
+deshalb **nie** — und das war zu Recht so: sie DRUCKTEN nur. Null
+`check()`-Aufrufe, null `exit(1)`-Pfade. Sie damals in den Glob zu nehmen hätte
+die Suite-Zahl von 53 auf 58 gehoben, ohne ein einziges Gate hinzuzufügen.
+
+Der Grund für ihre Existenz war ein anderer: jedes hat einmal eine **Konvention
+ermittelt**, auf der der Renderer seitdem stillschweigend steht. Ein Mensch hat
+die Zahlen gelesen und entschieden; die Entscheidung wurde Code; geprüft wurde
+sie nie wieder. Genau das sind sie jetzt — Wächter über ihre eigene Antwort:
+
+| Skript | Die stillschweigende Annahme | Gemessen |
+| --- | --- | --- |
+| `check-convention` | `scm.ts:24-26`: `restPoseInverse` spaltenweise, Rotation `w,x,y,z`; `animator.ts:61` transponiert nicht | Über 5 Modelle: Einheitsmatrix-Fehler `1e-7`, die drei falschen Kombinationen `7e+0` bis `5e+2` |
+| `check-orientation` | `fitDepthToG` bildet die Watermap-Zeile direkt auf die Heightmap-Zeile ab, ohne Spiegelung | 40 auswertbare Karten, `corr(normal) ≥ 0.9` überall, 29 davon trennen die Lesungen um ≥ 0.3 |
+| `check-unit-assets` | `resolveUnitPaths` findet die Modelle | 555 von 568 lösen auf, 553 mit Albedo, 3 bewusst `<none>`, 10 ohne Fund |
+| `check-watermap-holes` | `FALLBACK = 1/15` im Renderer, und die lineare Ersetzung ist zulässig | Median-Steigung **0.0665** gegen 1/15 = 0.0667; R² ≥ 0.9 ausser SCMP_016 (0.530); 36 DXT-Löcher gesamt |
+
+Zwei Dinge daran sind mehr als Aufräumen:
+
+* **`check-unit-assets` hatte eine eigene Kopie der Auflösungslogik** (`<id>_lod0.scm`,
+  `<id>_albedo.dds` von Hand). Sie konnte grün melden, während der echte Lader
+  danebenlag. Jetzt ruft es `resolveUnitPaths` selbst — die eine massgebliche
+  Darstellung, wie CLAUDE.md es verlangt.
+* **`check-watermap-holes` prüft eine Konstante, die sonst nur als Literal
+  dasteht.** Die 41 Karten sagen 0.0665, der Renderer sagt 1/15 = 0.0667.
+
+Rot-Proben, jede einzeln gesehen: Rotationsreihenfolge in `scm.ts` vertauscht →
+alle 5 Modelle rot mit Nennung der Ursache · Zeilenlesung gespiegelt → alle 40
+Karten rot, „0 Karten unterscheiden" · `resolveUnitPaths` lahmgelegt → 555 → 496,
+Sperrklinke rot · Grünkanal im DXT-Decoder um 12 gedämpft → 36 → 219 Löcher.
+
+Ein Detail, das die Prüfung selbst korrigiert hat: die erste Fassung von
+`check-orientation` verlangte auf JEDER Karte eine niedrige Korrelation der
+gespiegelten Lesung — und wurde auf 16 Karten rot. Der Grund war kein Fehler im
+Code, sondern in meinem Kriterium: auf **vertikal symmetrischen** Karten
+korreliert die gespiegelte Lesung genauso gut (SCMP_002: 1.000 gegen 0.984).
+Unterscheidbarkeit ist eine Eigenschaft der Suite, nicht jeder Karte.
+
 ## Known gaps
 
 The path to the real UI: [PLAN-UI.md](PLAN-UI.md); the complete 1:1 roadmap:

@@ -128,15 +128,27 @@ Principles II and V).
       evidence, there is nothing further to assert about it.
 - [ ] T021 Update `docs/STATUS.md` and `docs/research/verified-facts.md` once
       the remaining stories land.
-- [ ] T023 **The four `check-*.ts` scripts cannot fail.** `check-unit-assets`,
-      `check-watermap-holes`, `check-orientation`, `check-convention` have zero
-      `check()` calls and zero `exit(1)` paths — they print diagnostics. They
-      cover things no verify suite does (do all unit meshes/textures resolve;
-      watermap/heightmap consistency; SCM row/column-major and quaternion
-      order), so they are worth having as gates. Give each an assertion and a
-      failure exit, THEN add `check-*` to the `run-tests.ts` glob.
-      Wiring them in as-is was tried and reverted: it raised the suite count
-      from 53 to 58 while adding no gate at all.
+### T023 — the four `check-*.ts` scripts are gates ✅ DONE
+
+- [x] T023 **The four `check-*.ts` scripts could not fail.** `check-unit-assets`,
+      `check-watermap-holes`, `check-orientation`, `check-convention` had zero
+      `check()` calls and zero `exit(1)` paths — they printed diagnostics. Each
+      had once ESTABLISHED a convention the renderer has silently relied on ever
+      since; nobody re-checked it. Each now asserts its own answer and exits
+      non-zero, and `run-tests.ts` globs `check-*` alongside `verify*`.
+      Wiring them in as-is was tried and reverted first: it raised the suite
+      count from 53 to 58 while adding no gate at all.
+      check: scripts/check-convention.ts, scripts/check-orientation.ts,
+      scripts/check-unit-assets.ts, scripts/check-watermap-holes.ts
+      asserts: die Messung unterscheidet wirklich
+      asserts: die Annahme in scm.ts:24-26
+      Red probes, each seen individually: rotation order swapped in `scm.ts` ->
+      all 5 models red naming the cause; row reading mirrored -> all 40 maps red
+      plus "0 maps discriminate"; `resolveUnitPaths` disabled -> 555 -> 496,
+      ratchet red; DXT decoder green channel dimmed by 12 -> 36 -> 219 holes.
+
+### Close-out (continued)
+
 - [ ] T022 One commit per verified fix, English message: what and why.
 
 ## Notes

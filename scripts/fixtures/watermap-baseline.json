@@ -1,0 +1,8 @@
+{
+  "maps": 41,
+  "holes": 36,
+  "weakR2": [
+    "SCMP_016"
+  ],
+  "note": "Die Spieldaten ändern sich nicht, also sind diese Zahlen konstant. Weicht etwas ab, hat sich der DXT-Decoder, der SCMAP-Leser oder die Installation geändert — nicht die Karten."
+}

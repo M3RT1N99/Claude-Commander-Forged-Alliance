@@ -1,0 +1,6 @@
+{
+  "resolved": 555,
+  "withAlbedo": 553,
+  "total": 568,
+  "note": "Sperrklinke über den ECHTEN Lader (resolveUnitPaths). Die Zahlen dürfen steigen, nie fallen. Steigen sie, mit --update und im selben Commit nachziehen, der die Verbesserung bringt."
+}

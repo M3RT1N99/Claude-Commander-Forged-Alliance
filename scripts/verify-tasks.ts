@@ -82,7 +82,9 @@ function parseTasks(specName: string, text: string): Story[] {
     }
     // Suiten-Nennungen: `*Verified by*: ...` oder `check: ...`
     if (/\*Verified by\*|(^|\s)check:/i.test(line)) {
-      for (const m of line.matchAll(/(?:scripts\/)?(verify-[A-Za-z0-9-]+\.ts)/g)) {
+      // `check-*.ts` zählt seit T023 mit: die vier waren Diagnosen, jetzt sind
+      // sie Gates und laufen in `npm test`.
+      for (const m of line.matchAll(/(?:scripts\/)?((?:verify|check)-[A-Za-z0-9-]+\.ts)/g)) {
         if (!cur.suites.includes(m[1]!)) cur.suites.push(m[1]!)
       }
     }
@@ -132,36 +134,52 @@ for (const s of doneStories) {
 }
 
 // ── 3: die genannten Marken müssen in der Suite-Ausgabe wirklich vorkommen ──
-const bySuite = new Map<string, { story: Story; label: string }[]>()
-for (const s of doneStories) {
-  for (const label of s.asserts) {
-    const suite = s.suites[0]
-    if (!suite) continue
-    const list = bySuite.get(suite) ?? []
-    list.push({ story: s, label })
-    bySuite.set(suite, list)
+//
+// Eine Story darf mehrere Suiten nennen; die Marke muss in IRGENDEINER davon
+// als bestandener Check auftauchen. Früher zählte nur `suites[0]`, was eine
+// Story mit vier Gates stillschweigend auf das erste reduzierte.
+//
+// Die Suiten laufen LAZY und werden zwischengespeichert: steht die schnelle
+// vorn, werden die langsamen gar nicht erst gestartet.
+const ausgabe = new Map<string, string>()
+const laufen = (suite: string): string => {
+  const da = ausgabe.get(suite)
+  if (da !== undefined) return da
+  let out = ''
+  try {
+    out = execFileSync(
+      'npx',
+      ['tsx', '--import', './scripts/register-lua.mjs', `scripts/${suite}`],
+      { cwd: root, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'], shell: true },
+    )
+  } catch (e) {
+    const err = e as { stdout?: string; stderr?: string }
+    out = `${err.stdout ?? ''}${err.stderr ?? ''}`
+    check(false, `${suite}: Suite läuft nicht durch — eine abgehakte Story stützt sich darauf`)
   }
+  ausgabe.set(suite, out)
+  return out
 }
 
-if (bySuite.size > 0) {
+const mitMarken = doneStories.filter((s) => s.asserts.length > 0 && s.suites.length > 0)
+if (mitMarken.length > 0) {
   console.log(`\n== Die behaupteten Prüfungen kommen in der Suite wirklich vor ==`)
-  for (const [suite, wants] of bySuite) {
-    let out = ''
-    try {
-      out = execFileSync(
-        'npx',
-        ['tsx', '--import', './scripts/register-lua.mjs', `scripts/${suite}`],
-        { cwd: root, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'], shell: true },
-      )
-    } catch (e) {
-      const err = e as { stdout?: string; stderr?: string }
-      out = `${err.stdout ?? ''}${err.stderr ?? ''}`
-      check(false, `${suite}: Suite läuft nicht durch — eine abgehakte Story stützt sich darauf`)
-    }
-    for (const { story, label } of wants) {
+  for (const story of mitMarken) {
+    for (const label of story.asserts) {
       // Die Marke muss als BESTANDENER Check auftauchen, nicht irgendwo im Text.
-      const ok = out.split('\n').some((l) => l.includes('OK') && l.includes(label))
-      check(ok, `${suite} enthält „${label}" (${story.title})`)
+      let treffer: string | null = null
+      for (const suite of story.suites) {
+        if (laufen(suite).split('\n').some((l) => l.includes('OK') && l.includes(label))) {
+          treffer = suite
+          break
+        }
+      }
+      check(
+        treffer !== null,
+        treffer !== null
+          ? `${treffer} enthält „${label}" (${story.title})`
+          : `KEINE der Suiten ${story.suites.join(', ')} enthält „${label}" (${story.title})`,
+      )
     }
   }
 }
