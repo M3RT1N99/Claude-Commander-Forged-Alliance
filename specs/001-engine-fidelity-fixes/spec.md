@@ -52,8 +52,13 @@ trailing `\r`. The section test also still read the pre-translation heading
 `### Klassen` instead of `### Classes`.
 
 **Verification**: `npx tsx --import ./scripts/register-lua.mjs scripts/coverage-engine.ts`
-now reports 1149 bindings / 57 %, with 147 NO-OP and 342 FEHLT (the round's own
-`SetTargetingPriorities` fix moved one binding from NO-OP to real).
+now reports **1149 bindings / 61 %, 698 real / 147 NO-OP / 304 FEHLT**.
+
+Two figures before it were wrong. "86 %" was measured with the class-line regex
+parsing nothing. "57 %" was measured with a 19-entry class map that scored 238
+methods across 32 classes blind (`methodenStand`: `if (!key) return 'FEHLT'`);
+completing the map moved **38 methods** from FEHLT to ECHT. SC-004 is only met
+with the map complete — otherwise the instrument produces the next wrong number.
 
 ### US2 (P1) — The two blueprint readers cannot drift apart ✅ DONE
 

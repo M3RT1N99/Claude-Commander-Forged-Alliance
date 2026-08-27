@@ -308,9 +308,10 @@ Economics, threads.
 - **`moho.projectile_methods` does not exist** → the Auto-Vivifier in
   [moho.lua:530-536](../../src/engine-lua/moho.lua) returns an **empty class**. `Projectile.lua`
   So loads, and every method call is a silent `nil` access.
-- **`Kill` is a no-op** (ENTITY_NAMES in moho.lua:53). `DoTakeDamage` is calling - nothing dies.
-- **`GetArmorMult` is a no-op** (UNIT_NAMES, moho.lua:138) → returns `nil` → `shield.lua:101`
-  rechnet `amount * nil`.
+- ~~`Kill` is a no-op~~ — **false since `ffdc879` (2026-07-15)**: `moho.lua:175`
+  runs the real CheckCanBeKilled → SetDead → OnKilled chain.
+- ~~`GetArmorMult` is a no-op~~ — **false since `ffdc879`**: `moho.lua:443`
+  delegates to `__armorMult` (armordefinition.lua, damage.lua:56).
 - Projectile blueprints never load: `loadUnitBlueprint`
   ([unitFactory.ts:50](../../src/lua/unitFactory.ts)) only knows `units/<id>/<id>_unit.bp`.
 - `__bpDefaults` ([blueprints.lua:16-73](../../src/engine-lua/blueprints.lua)) has **none

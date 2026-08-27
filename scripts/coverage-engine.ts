@@ -142,6 +142,33 @@ const klassenKarte: Record<string, string> = {
   CMauiMovie: 'movie_methods',
   CUIWorldView: 'UIWorldView',
   CameraImpl: 'camera_methods',
+  CollisionBeamEntity: 'CollisionBeamEntity',
+  CMauiLuaDragger: 'dragger_methods',
+}
+
+/**
+ * Klassen, deren Methoden NICHT unter `moho.<x>` liegen, sondern unter einem
+ * Engine-Global. Die Manipulatoren teilen sich bei uns EINE Metatable
+ * (`ManipMeta`, globals.lua) statt je Art eine C++-Klasse zu haben — eine
+ * benannte Reduktion, die hier eine Methode als ECHT meldet, sobald die
+ * gemeinsame Implementierung sie hat.
+ *
+ * Ohne diese zweite Tabelle zaehlte `methodenStand` jede nicht kartierte Klasse
+ * pauschal als FEHLT (`if (!key) return 'FEHLT'`). Das betraf 238 Methoden aus
+ * 32 Klassen und machte die veroeffentlichte Gesamtzahl falsch.
+ */
+const globalKarte: Record<string, string> = {
+  CAimManipulator: '__manipulatorMethods',
+  CAnimationManipulator: '__manipulatorMethods',
+  CRotateManipulator: '__manipulatorMethods',
+  CSlideManipulator: '__manipulatorMethods',
+  CThrustManipulator: '__manipulatorMethods',
+  CSlaveManipulator: '__manipulatorMethods',
+  CBoneEntityManipulator: '__manipulatorMethods',
+  CBuilderArmManipulator: '__manipulatorMethods',
+  CCollisionManipulator: '__manipulatorMethods',
+  IAniManipulator: '__manipulatorMethods',
+  MotorFallDown: '__manipulatorMethods',
 }
 
 /**
@@ -165,6 +192,19 @@ const userUnitStand = (methode: string): Stand => {
 
 const methodenStand = (h: LuaHost, klasse: string, methode: string): Stand => {
   if (klasse === 'UserUnit') return userUnitStand(methode)
+  const glob = globalKarte[klasse]
+  if (glob) {
+    return String(
+      h.eval(`
+        local t = rawget(_G, '${glob}')
+        if not t then return 'FEHLT' end
+        local f = t['${methode}']
+        if f == nil then return 'FEHLT' end
+        if __mohoNoop and f == __mohoNoop then return 'NO-OP' end
+        return 'ECHT'
+      `),
+    ) as Stand
+  }
   const key = klassenKarte[klasse]
   if (!key) return 'FEHLT'
   const r = String(

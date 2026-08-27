@@ -60,7 +60,7 @@ themselves**. All of the following were corrected before the gate:
 | **Round-2 T016/T017 were marked done with no check at all.** Now covered in `verify-toggle-pause.ts`. | medium |
 | **Three "*Verified by*" lines named suites that were never extended** (T010 splash-damage, T031 combo/orders, T034 maui-control-state) — corrected to what is actually proven, with the un-proven part named. | low |
 | **`spec.md` US11 and tasks T032/T033 stated the two maui focus callbacks INVERTED** relative to the decomp and the (correct) implementation. A later reader following the spec would have "fixed" working code into a regression. Corrected, with the vtable offsets in a table. | low |
-| **Published coverage figures were already stale** (659/148 → 660/147; the round's own `SetTargetingPriorities` fix moved one binding). Refreshed. | low |
+| **Published coverage figures were already stale** (659/148 → 660/147). Refreshed — and then found wrong AGAIN: the class map scored 238 methods from 32 classes blind, so even 660/147/342 was false. Final measured figure after completing the map: **698/147/304 = 61 %**. Three wrong numbers in a row from the same instrument is the argument for gating it in `npm test`. | low |
 
 The lesson worth keeping: **every one of the high-severity findings was in code
 the 53 suites passed on.** Adversarial review of one's own diff is not

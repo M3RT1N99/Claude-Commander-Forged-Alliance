@@ -233,9 +233,11 @@ We already have that (maui.lua:519).
 - `_c_CreateCursor` / `SetCursor` (ui-globals.lua:38-46) — create the object,
   merken es in `__cursor`; `moho.cursor_methods` (moho.lua:332-350) hat
   `SetDefaultTexture`/`ResetToDefault` genuine and extends to `SetNewTexture`
-  TS-Hook `__uiSetCursorTexture` continues - **which is not set anywhere**
-  (`= false`, ui-globals.lua:24; no hit in `src/ui/`). So the cursor is
-  an object with no effect. `Hide`/`Show` are no-ops.
+  TS-Hook `__uiSetCursorTexture`. **This is wired**: `src/ui/mauiRenderer.ts:128`
+  sets it (the command-mode cursor bridge), and `moho.lua:1425-1426` gives
+  `Show`/`Hide` real bodies. `verify-ui-boot.ts:127` asserts the cursor
+  receives a real texture. (This paragraph claimed the opposite — corrected
+  2026-08-27.)
 - Maus-Events komplett: `__mauiMouse` / `__mauiWheel` (maui.lua:433-490), Hit-Test +
   Parent bubbling (maui.lua:383-410), modifiers table from the browser event
   (gameUi.ts:260-276), `PostDragger` (maui.lua:519).

@@ -646,6 +646,17 @@ function ManipMeta:GetGoal() return self.__goal end
 -- once bones animate, this reports real progress instead.
 function ManipMeta:IsDone() return true end
 
+-- Die Manipulator-Methoden fuer die Bestandsaufnahme erreichbar machen.
+-- Die Engine hat je Manipulator-Art eine eigene C++-Klasse (CAimManipulator,
+-- CRotateManipulator, CAnimationManipulator, ... - engine-api.md); wir teilen
+-- uns EINE gemeinsame Metatable. Das ist eine BENANNTE REDUKTION: die
+-- Bestandsaufnahme meldet eine Methode als ECHT, sobald unsere gemeinsame
+-- Implementierung sie hat, ohne nach Manipulator-Art zu trennen.
+-- Ohne diesen Zugriff zaehlte sie alle 50 Manipulator-Methoden pauschal als
+-- FEHLT, weil ManipMeta ein Local ist - und genau daher kam die falsche Zahl
+-- in STATUS.md. Eigener `__`-Namensraum: die Original-Lua stoesst nicht darauf.
+__manipulatorMethods = ManipMeta
+
 local function newManipulator(kind, unit, bone)
   return setmetatable({ __kind = kind, __unit = unit, __bone = bone, __enabled = true }, ManipMeta)
 end

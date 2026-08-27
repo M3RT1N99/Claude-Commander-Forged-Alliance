@@ -89,12 +89,22 @@ weaker VM than the UI one.
 
 ## What the un-blinded coverage report now says
 
-After the US1 fix, `scripts/coverage-engine.ts` reports **1149 bindings / 57 %**
-(previously 398 / 86 %, with the NO-OP column stuck at 0):
+`scripts/coverage-engine.ts` reports **1149 bindings / 61 %**:
 
 | | ECHT | NO-OP | FEHLT |
 | --- | ---: | ---: | ---: |
-| total | 659 | 148 | 342 |
+| total | 698 | 147 | 304 |
+
+**Two earlier figures in this file were wrong and are superseded.** "398 / 86 %"
+was measured while the class-line regex parsed no class binding at all. The
+replacement "1149 / 57 %, 659/148/342" was *also* wrong twice over: the NO-OP
+count was read off a stale run (147, not 148), and `methodenStand` returned
+`FEHLT` for every class outside a 19-entry map — 238 methods across 32 classes
+scored blind. Completing the map (manipulators via one shared `ManipMeta`,
+`CollisionBeamEntity`, `CMauiLuaDragger`) moved **38 methods** to ECHT.
+`CPlatoon`, `CAiPersonality`, `CLobby`, `CUIWorldMesh`, `ReconBlip`, `IEffect`
+and `CDamage` were checked individually and genuinely do not exist — `FEHLT` is
+correct for them.
 
 Largest gaps: `Unit` (54 open), `CPlatoon` (49, AI phase), `CAiBrain` (48, AI
 phase), Sim-Globals (47), `CAiPersonality` (35), `Entity` (27), `CLobby` (18).

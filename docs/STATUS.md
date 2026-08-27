@@ -22,16 +22,22 @@ UI_Lua). Verified in **53 suites** (`npm test`) and in the browser through
 
 `npx tsx --import ./scripts/register-lua.mjs scripts/coverage-engine.ts` measures
 every binding in [research/engine-api.md](research/engine-api.md) against what
-our engine made of it: **1149 bindings, 660 real / 147 no-op / 342 missing =
-57 %**.
+our engine made of it: **1149 bindings, 698 real / 147 no-op / 304 missing =
+61 %**.
 
-Take the earlier "86 %" as void. The report's class-line regex is `$`-anchored
-and the repo checks out CRLF, so **751 class bindings were never parsed at all**
-and the NO-OP column read 0 regardless of reality. The number above is the first
-honest one. Largest remaining gaps: `Unit` (54), `CPlatoon` (49) and `CAiBrain`
-(48) — the two AI classes are a scheduled phase in
-[MASTERPLAN.md](MASTERPLAN.md), not a defect — then Sim-Globals (47),
-`CAiPersonality` (35), `Entity` (27), `CLobby` (18).
+Two earlier figures are void. "86 %" was measured while the class-line regex
+(`$`-anchored, CRLF checkout) parsed **no class binding at all** and pinned the
+NO-OP column to 0. The replacement "57 %" was **also wrong**: `methodenStand`
+returned `FEHLT` for every class not in a 19-entry map, so **238 methods across
+32 classes were scored blind**. The map now covers the manipulators (one shared
+`ManipMeta` — a named reduction), `CollisionBeamEntity` and `CMauiLuaDragger`;
+**38 methods moved from "missing" to "real"** on re-measurement.
+
+Largest remaining gaps: `Unit` (54), `CPlatoon` (49) and `CAiBrain` (48) — the
+two AI classes are a scheduled phase in [MASTERPLAN.md](MASTERPLAN.md), not a
+defect — then Sim-Globals (47), `CAiPersonality` (35), `Entity` (27),
+`CLobby` (18). Those four classes genuinely do not exist in `src/engine-lua/`
+(checked); `FEHLT` is correct for them.
 
 ## Known gaps
 
@@ -42,9 +48,11 @@ The path to the real UI: [PLAN-UI.md](PLAN-UI.md); the complete 1:1 roadmap:
   (verify-frontend), but the sandbox starts through the web launcher;
   `LaunchSinglePlayerSession`/Lobby are missing.
 - **Rendering inventory (H/M list), still open:** the water's
-  refraction/reflection RT (a named approximation), planet glow pass
-  (Write_A), Bloating Props (2 BPs static), and construction-site depth
-  (SeraphimBuildDepth). **COMPLETED since the inventory:** normals decals
+  refraction/reflection RT (a named approximation), Bloating Props (2 BPs
+  static), and construction-site depth
+  (SeraphimBuildDepth). **COMPLETED since the inventory:** the planet glow
+  pass (Write_A) — `skyPlanetGlow.frag.glsl`, wired at `skyDome.ts:10`, built
+  in `4d42592` and listed as open here for 36 days; normals decals
   through the screen-space normal prepass (46c3e8b), shadows (H7) with
   ComputeShadowPCF + depth pass, Aeon/Insect unit shader (M5), undulating
   tree sway, SCMAP tail fully parsed (ad3c8e4), map props as instance LOD
@@ -55,9 +63,12 @@ The path to the real UI: [PLAN-UI.md](PLAN-UI.md); the complete 1:1 roadmap:
   (c370942), glow/bloom pass after CBloomRenderer (H2, ef1f088),
   construction-site appearance (H3), beat interpolation (M6), icon
   tint (M1).
-- **Sound settings do not change anything** (user finding): SetVolume/GetVolume
-  are missing; GameAudio has no xgs category gains (research report exists:
-  audio loops/variations/instance limits — implementation pending).
+- **Sound settings work.** `SetVolume`/`GetVolume` are real
+  (`ui-globals.lua:2378`/`:2383`), `SupCom.xgs` is parsed
+  (`src/formats/xgs.ts`) and GameAudio builds one GainNode per category;
+  covered by `scripts/verify-audio.ts`. (This entry claimed the opposite for
+  41 days after `5ba81e5` fixed it — corrected 2026-08-27.)
+  Still open in audio: loops/variations/instance limits.
 - **Text input works** (CMauiEdit vtable-override port: typing, selection,
   MaxChars, OnTextChanged/OnEnterPressed/OnEscPressed/OnCharPressed,
   caret rendering); StartCommandMode console command and UI IsAlly exist.
@@ -86,7 +97,10 @@ The path to the real UI: [PLAN-UI.md](PLAN-UI.md); the complete 1:1 roadmap:
   (UICommandGraph — order lines exist). Click picking is ONE
   depth-sorted raycast across units, wrecks and instanced map props
   (the closest entity of any kind wins — engine semantics).
-- **Sim findings:** units stack up at roll-off (no separation).
+- **Sim findings:** occupancy at arrival works — two units sent to the same
+  point stop 1.41 m apart instead of stacking (`verify-motion.ts`, since
+  `7df07bf`). Still open is *predictive* avoidance **during** travel: units do
+  not steer around each other on the way, only refuse an occupied arrival cell.
 - **Fixed in the August 2026 fidelity round** (spec
   [001-engine-fidelity-fixes](../specs/001-engine-fidelity-fixes/spec.md), each
   with its decomp evidence and a suite): `AIBrain:TakeResource` drains storage
@@ -116,9 +130,10 @@ The path to the real UI: [PLAN-UI.md](PLAN-UI.md); the complete 1:1 roadmap:
   building as 1×1. Both now derive from the engine rule, and
   `verify-ogrid.ts` compares all 374 structures against the pipeline — a future
   drift is a test failure, not a surprise.
-- **Assist works** (multi-builder placement plus Guard on a builder/factory);
-  a Guard on a reclaiming builder does not assist yet (guard's
-  assist-reclaim branch, sub_612E80).
+- **Assist works** (multi-builder placement, Guard on a builder/factory, and
+  a Guard with category RECLAIM joining a reclaiming builder — sub_612E80,
+  asserted in `verify-combat.ts`). Still open: Capture, point guard,
+  capture-on-enemy.
 - ~~**Economy Lua API is partly a no-op**~~ — no longer true, and the entry was
   stale: `SetProductionPerSecond*` and `SetConsumptionPerSecond*` write through
   `__econUpdateRate` into the army economy (moho.lua:793-808), and

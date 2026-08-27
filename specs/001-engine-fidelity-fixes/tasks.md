@@ -25,7 +25,9 @@ gaps.
       `core.autocrlf=true` checkout, so 751 class bindings were silently
       dropped and the NO-OP column read 0.
       *Verified by*: `scripts/coverage-engine.ts` now reports 1149 bindings /
-      57 % with NO-OP 147 (was 398 / 86 % / NO-OP 0).
+      61 % (698/147/304) — after ALSO completing the class map, which scored
+      238 methods from 32 classes blind. Both earlier figures (398 / 86 % and
+      1149 / 57 %) are void.
 - [x] T002 Derive `Footprint.SizeX/SizeZ` as `ceil(SizeX/SizeZ)` and default
       `BuildOnLayerCaps` to `LAYER_Land` in `src/sim/ogrid.ts`
       `blueprintPlacement()` — evidence Cfile:647164-647177 (struct field
