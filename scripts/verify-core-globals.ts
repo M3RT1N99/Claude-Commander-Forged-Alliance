@@ -199,7 +199,7 @@ console.log('\n== The UI VM has them too (scr_CoreInits) ==')
     find: (dir: string, pattern: string) => findFiles(allPaths, dir, pattern),
     textureSize: () => null,
     stringAdvance: () => 0,
-    fontMetrics: () => [0, 0, 0],
+    fontMetrics: () => [0, 0],
   })
   for (const name of [
     'Dirname',

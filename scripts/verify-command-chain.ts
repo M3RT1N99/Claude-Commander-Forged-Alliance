@@ -21,7 +21,7 @@ import { readdir, readFile } from 'node:fs/promises'
 import { LuaHost } from '../src/lua/host'
 import { installEngine, beat } from '../src/lua/engine'
 import { setTerrainSource } from '../src/lua/engineGlobals'
-import { spawnLuaUnit, spawnBuildSite, readLuaUnit } from '../src/lua/unitFactory'
+import { spawnLuaUnit, spawnBuildSite, readLuaUnit, type LuaUnitState } from '../src/lua/unitFactory'
 import { GameFiles, GAME_DIR } from './gameFiles'
 import {
   installUiEngine,
@@ -58,6 +58,9 @@ const bpPaths = [...allPaths].filter((p) => /^units\/[^/]+\/[^/]+_unit\.bp$/.tes
 console.log('\n== Sim: ACU über die Original-Unit.lua ==')
 const simHost = await LuaHost.create(files, () => {})
 const engine = installEngine(simHost)
+// readRow() (units.lua:757) also carries FractionComplete, which the exported
+// LuaUnitState does not declare yet — read the row through the type it really is.
+const readUnit = (id: number): LuaUnitState | null => readLuaUnit(simHost, id)
 setTerrainSource(simHost, () => 20) // flaches Testgelände auf Höhe 20
 // Blueprint UND Skelett — genau das, was der Worker beim Spawn mitschickt.
 for (const id of ['uel0001', 'ueb0101']) await game.giveUnit(simHost, id)
@@ -223,7 +226,7 @@ const siteId = Number(
     return 0
   `),
 )
-const site0 = readLuaUnit(simHost, siteId)
+const site0 = readUnit(siteId)
 check(site0 !== null && site0.fraction === 0, `Baustelle steht mit FractionComplete 0 (id ${siteId})`)
 check(
   site0 !== null && Math.abs(site0.x - 102.5) < 0.01 && Math.abs(site0.z - 108.5) < 0.01,
@@ -234,7 +237,7 @@ check(
 console.log('\n== Beats: der Bau wächst, die Ökonomie zahlt ==')
 const massBefore = engine.economy.army(1).mass
 for (let i = 0; i < 20; i++) beat(engine)
-const site1 = readLuaUnit(simHost, siteId)!
+const site1 = readUnit(siteId)!
 check(site1.fraction > 0, `Fortschritt nach 20 Beats: ${(site1.fraction * 100).toFixed(1)} %`)
 check(site1.health > 0, `Leben wächst mit: ${site1.health.toFixed(0)} von ${site1.maxHealth}`)
 const massAfter = engine.economy.army(1).mass
@@ -244,11 +247,11 @@ check(massAfter < massBefore, `Masse bezahlt: ${massBefore.toFixed(0)} → ${mas
 // delta = 10/BuildTime · Rate · 0.1 pro Tick. Kein Zeitlimit erfinden: es wird
 // gerechnet, bis die Sim fertig ist (oder es nie wird — dann knallt der Test).
 let ticks = 20
-while (readLuaUnit(simHost, siteId)!.fraction < 1 && ticks < 4000) {
+while (readUnit(siteId)!.fraction < 1 && ticks < 4000) {
   beat(engine)
   ticks++
 }
-const done = readLuaUnit(simHost, siteId)!
+const done = readUnit(siteId)!
 check(done.fraction >= 1, `Fabrik fertig nach ${ticks} Beats (${(ticks / 10).toFixed(0)} s Spielzeit)`)
 check(done.health === done.maxHealth, `Volles Leben: ${done.health} = ${done.maxHealth}`)
 // Die fertige Fabrik zählt jetzt in der Ökonomie (vorher NICHT — unfertige Units

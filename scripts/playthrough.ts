@@ -36,7 +36,7 @@ import {
   loadUiBlueprints,
   applySession,
 } from '../src/lua/uiEngine'
-import { worldClick, getCommandMode } from '../src/ui/worldCommands'
+import { worldClick, getCommandMode, type WorldCommandSim } from '../src/ui/worldCommands'
 import { findFiles } from '../src/vfs/glob'
 import { GameFiles } from './gameFiles'
 import { SANDBOX_SESSION } from '../src/sim/session'
@@ -236,7 +236,21 @@ console.log(`   Command-Mode: ${JSON.stringify(cm)}`)
 if (cm.mode === false) melde('UI', 'Der Klick aufs Bau-Icon startet KEINEN Bau-Modus')
 
 tue('Gebäude setzen (worldClick → Baustelle + Bau-Auftrag)')
-const simFassade = {
+// The playthrough only ever clicks in the BUILD mode and in the plain/rally
+// mode, so only move/setRallyPoint/build are exercised. The other commands of
+// the interface are not silently faked here: they fail loudly, exactly as the
+// untyped facade did before (it hit `sim.attack is not a function`).
+const ungenutzterBefehl = (name: string) => (): never => {
+  throw new Error(`playthrough: ${name} is not exercised by this run`)
+}
+const simFassade: WorldCommandSim = {
+  attack: ungenutzterBefehl('attack'),
+  attackGround: ungenutzterBefehl('attackGround'),
+  repair: ungenutzterBefehl('repair'),
+  guard: ungenutzterBefehl('guard'),
+  patrol: ungenutzterBefehl('patrol'),
+  reclaim: ungenutzterBefehl('reclaim'),
+  reclaimMapProp: ungenutzterBefehl('reclaimMapProp'),
   move: (id: number, x: number, z: number): void => {
     sim.eval(`local u=__units[${id}] if u then u:GetNavigator():SetGoal({ ${x}, 0, ${z} }) end`)
   },

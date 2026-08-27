@@ -1,7 +1,14 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "types": ["node"]
+    "types": [
+      "node",
+      "vite/client"
+    ],
+    "allowImportingTsExtensions": true
   },
-  "include": ["scripts", "src"]
+  "include": [
+    "scripts",
+    "src"
+  ]
 }

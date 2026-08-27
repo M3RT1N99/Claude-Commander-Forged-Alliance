@@ -36,7 +36,9 @@ const ratio = (): number => host.eval(`return __units[${u}].__shieldRatio or -1`
 const shieldOn = (): boolean => host.eval(`local s=__units[${u}].MyShield; return (s and s:IsOn()) == true`) as boolean
 const uiRatio = (): number =>
   host.eval(`for _,r in ipairs(__readAllUnits()) do if r.id==${u} then return r.shieldRatio end end return -1`) as number
-const damage = (amt: number): void => host.eval(`Damage(nil, {100,20,100}, __units[${u}], ${amt}, 'Normal')`)
+const damage = (amt: number): void => {
+  host.eval(`Damage(nil, {100,20,100}, __units[${u}], ${amt}, 'Normal')`)
+}
 
 // Create a shield on the unit — the original Unit:CreateShield path (normally
 // read from bp.Defense.Shield; here an explicit spec).
@@ -164,7 +166,8 @@ console.log('\n== Splash: the dome absorbs ONCE per damage event, not once per u
   host.eval(`DamageArea(nil, { 115, 20, 100 }, 30, ${over}, 'Normal', true)`)
   beat(engine)
   under.forEach((id, i) => {
-    check(hpOf(id) < hpBefore2[i], `covered unit ${i + 1} takes the remainder once the dome is exceeded (${hpBefore2[i]} -> ${hpOf(id)})`)
+    const was = hpBefore2[i]! // i indexes the map() of `under` itself
+    check(hpOf(id) < was, `covered unit ${i + 1} takes the remainder once the dome is exceeded (${was} -> ${hpOf(id)})`)
   })
 }
 

@@ -201,7 +201,7 @@ function curveErrors(raw: RawCurve): string[] {
 
   // makeEfxCurve sortiert aufsteigend (sub_5151B0, Cfile:649185-649191)
   for (let i = 1; i < keys.length; i++) {
-    if (keys[i - 1].x > keys[i].x) errs.push(`Keys unsortiert bei i=${i}`)
+    if (keys[i - 1]!.x > keys[i]!.x) errs.push(`Keys unsortiert bei i=${i}`)
   }
 
   const xCount = new Map<number, number>()
@@ -221,8 +221,8 @@ function curveErrors(raw: RawCurve): string[] {
 
   // Clamp vor dem ersten / hinter dem letzten Key (Randkey eindeutig, sonst
   // greift der Duplikat-Check)
-  const first = keys[0]
-  const last = keys[keys.length - 1]
+  const first = keys[0]!
+  const last = keys[keys.length - 1]!
   if (xCount.get(first.x) === 1) {
     if (sampleCurve(curve, first.x - 7, R05) !== first.y) errs.push('kein Clamp vor dem ersten Key')
     if (sampleCurve(curve, first.x - 1e6, R05) !== first.y) errs.push('kein Clamp weit vor dem ersten Key')
@@ -237,8 +237,8 @@ function curveErrors(raw: RawCurve): string[] {
 
   // Linear zwischen benachbarten Keys (Mittel- und Viertelpunkt); z ebenso
   for (let i = 1; i < keys.length; i++) {
-    const a = keys[i - 1]
-    const b = keys[i]
+    const a = keys[i - 1]!
+    const b = keys[i]!
     if (!(a.x < b.x)) continue
     const tMid = (a.x + b.x) / 2
     if (tMid > a.x && tMid < b.x) {
@@ -310,12 +310,14 @@ if (cloak) {
 // liefert die Werte über die GANZE Zeitachse.
 const adis = emitters['/effects/emitters/adisruptor_cannon_munition_01_emit.bp']
 if (adis) {
-  const lt = makeEfxCurve({ XRange: adis.curves.LifetimeCurve.XRange, Keys: toKeys(adis.curves.LifetimeCurve) })
+  const ltRaw = adis.curves.LifetimeCurve!
+  const lt = makeEfxCurve({ XRange: ltRaw.XRange, Keys: toKeys(ltRaw) })
   check(
     sampleCurve(lt, 0, R05) === 2 && sampleCurve(lt, 25, R05) === 2 && sampleCurve(lt, 50, R05) === 2,
     'adisruptor: LifetimeCurve konstant 2 über [0,50] (Ein-Key-Clamp beidseitig)',
   )
-  const ss = makeEfxCurve({ XRange: adis.curves.StartSizeCurve.XRange, Keys: toKeys(adis.curves.StartSizeCurve) })
+  const ssRaw = adis.curves.StartSizeCurve!
+  const ss = makeEfxCurve({ XRange: ssRaw.XRange, Keys: toKeys(ssRaw) })
   check(sampleCurve(ss, 10, R05) === 0.162, 'adisruptor: StartSizeCurve = 0.162 (Wert aus der .bp)')
   // Zyklus über Repeattime = 50 (adisruptor_cannon_munition_01_emit.bp:4):
   // Aufrufer-Formel fmod + Vorzeichen-Korrektur (Cfile:894655-894661)
@@ -346,7 +348,7 @@ for (const [id, e] of Object.entries(emitters)) {
   for (const [name, raw] of Object.entries(e.curves)) {
     massCurves++
     const rk = toKeys(raw)
-    for (let i = 1; i < rk.length; i++) if (rk[i - 1].x > rk[i].x) { unsortedRaw++; break }
+    for (let i = 1; i < rk.length; i++) if (rk[i - 1]!.x > rk[i]!.x) { unsortedRaw++; break }
     const xs = new Set(rk.map((k) => k.x))
     if (xs.size !== rk.length) dupCurves++
     for (const err of curveErrors(raw)) {
@@ -371,8 +373,8 @@ outer: for (const e of Object.values(emitters)) {
     const rk = toKeys(raw)
     const curve = makeEfxCurve({ XRange: raw.XRange, Keys: rk })
     for (let i = 1; i < curve.Keys.length; i++) {
-      if (curve.Keys[i - 1].x === curve.Keys[i].x) {
-        const x = curve.Keys[i].x
+      if (curve.Keys[i - 1]!.x === curve.Keys[i]!.x) {
+        const x = curve.Keys[i]!.x
         const lastDup = [...curve.Keys].reverse().find((k) => k.x === x)!
         check(
           sampleCurve(curve, x, R05) === lastDup.y,
@@ -391,7 +393,7 @@ if (dupChecked === 0) console.log('  (kein doppeltes x in den Daten — Duplikat
 console.log('\n== Default-Kurve (func_MakeEmitterCurve, Cfile:649264-649271) ==')
 const def = makeEfxCurve(undefined)
 check(
-  def.XRange === 10 && def.Keys.length === 1 && def.Keys[0].x === 5 && def.Keys[0].y === 0 && def.Keys[0].z === 0,
+  def.XRange === 10 && def.Keys.length === 1 && def.Keys[0]!.x === 5 && def.Keys[0]!.y === 0 && def.Keys[0]!.z === 0,
   'Fehlende Kurve → XRange=10, ein Key {5,0,0}',
 )
 check(

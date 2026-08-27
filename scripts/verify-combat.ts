@@ -27,6 +27,12 @@ import { setTerrainSource } from '../src/lua/engineGlobals'
 import { spawnLuaUnit } from '../src/lua/unitFactory'
 import { GameFiles } from './gameFiles'
 
+/**
+ * One entry of the sim->user audio queue: type, bank, cue and loop handle —
+ * every request carries all four (weapons.lua:88, __drainAudioRequestsJson).
+ */
+type AudioRequest = { t: number; bank: string; cue: string; h: number }
+
 let failures = 0
 const check = (ok: boolean, label: string): void => {
   console.log(`  ${ok ? 'OK  ' : 'FAIL'} ${label}`)
@@ -770,9 +776,7 @@ console.log('\n== Befehls-Dispatch: Stop, Move-bricht-Bau, Attack ==')
     // combat above fired weapons — their Weapon:PlaySound calls must have
     // landed as one-shot requests; ambient loops run over the entity's
     // SINGLE ambient slot (Cfile:932577-932591) and stop with the unit.
-    const backlog = host.pull<{ t: number; bank: string; cue: string; h: number }[]>(
-      '__drainAudioRequestsJson()',
-    )
+    const backlog = host.pull<AudioRequest[]>('__drainAudioRequestsJson()')
     check(
       backlog.some((r) => r.t === 0 && r.cue.length > 0),
       `weapon fire lands as EntitySound requests (${backlog.filter((r) => r.t === 0).length} one-shots queued)`,
@@ -787,22 +791,20 @@ console.log('\n== Befehls-Dispatch: Stop, Move-bricht-Bau, Attack ==')
       `uel0201 has bp.Audio.AmbientMove (${ambient.Bank}:${ambient.Cue})`,
     )
     host.eval(`__units[${hummer}]:PlayUnitAmbientSound('AmbientMove')`)
-    let evs = host.pull<{ t: number; bank: string; cue: string; h: number }[]>(
-      '__drainAudioRequestsJson()',
-    )
+    let evs = host.pull<AudioRequest[]>('__drainAudioRequestsJson()')
     check(
       evs.length === 1 && evs[0]!.t === 1 && evs[0]!.cue === ambient.Cue && evs[0]!.h > 0,
       `PlayUnitAmbientSound starts the loop (${JSON.stringify(evs)})`,
     )
     const loopHandle = evs[0]!.h
     host.eval(`__units[${hummer}]:PlayUnitAmbientSound('AmbientMove')`)
-    evs = host.pull<{ t: number; h: number }[]>('__drainAudioRequestsJson()')
+    evs = host.pull<AudioRequest[]>('__drainAudioRequestsJson()')
     check(
       evs.length === 2 && evs[0]!.t === 2 && evs[0]!.h === loopHandle && evs[1]!.t === 1,
       'replacing the ambient stops the previous loop first (single slot, Cfile:932577)',
     )
     host.eval(`__units[${hummer}]:StopUnitAmbientSound('AmbientMove')`)
-    evs = host.pull<{ t: number; h: number }[]>('__drainAudioRequestsJson()')
+    evs = host.pull<AudioRequest[]>('__drainAudioRequestsJson()')
     check(evs.length === 1 && evs[0]!.t === 2, 'StopUnitAmbientSound stops the loop')
     host.eval(`__units[${hummer}]:PlayUnitAmbientSound('AmbientMove')`)
     host.pull('__drainAudioRequestsJson()')
@@ -812,7 +814,7 @@ console.log('\n== Befehls-Dispatch: Stop, Move-bricht-Bau, Attack ==')
     // deletion flush — its stop request lands one beat later.
     beat(engine)
     beat(engine)
-    evs = host.pull<{ t: number }[]>('__drainAudioRequestsJson()')
+    evs = host.pull<AudioRequest[]>('__drainAudioRequestsJson()')
     check(
       evs.some((r) => r.t === 2),
       'a dying unit stops its ambient loop (TrashBag -> helper entity flush)',

@@ -18,3 +18,7 @@
  *   npx tsx --import ./scripts/register-lua.mjs scripts/verify-coverage.ts
  */
 await import('./coverage-engine.ts')
+
+// Top-level `await` needs this file to BE a module (TS1375). The only import
+// above is a dynamic one, so the module marker has to be explicit.
+export {}

@@ -23,8 +23,13 @@
 import { LuaHost } from '../src/lua/host'
 import { installEngine, beat } from '../src/lua/engine'
 import { setTerrainSource } from '../src/lua/engineGlobals'
-import { spawnLuaUnit, readLuaUnit } from '../src/lua/unitFactory'
+import { spawnLuaUnit, readLuaUnit, type LuaUnitState } from '../src/lua/unitFactory'
 import { GameFiles } from './gameFiles'
+
+// `__readUnit` returns the full row from readRow (units.lua:747-757), which
+// includes the construction `fraction` (`u.__fraction or 1`); the exported
+// LuaUnitState interface only names the fields its other consumers read.
+const readRow = (id: number): LuaUnitState | null => readLuaUnit(host, id)
 
 let failures = 0
 const check = (ok: boolean, label: string): void => {
@@ -73,7 +78,7 @@ const successor = Number(
   `),
 )
 check(successor > 0, `The successor exists (id ${successor})`)
-const s0 = readLuaUnit(host, successor)
+const s0 = readRow(successor)
 check(
   s0 !== null && Math.abs(s0.x - 120) < 0.01 && Math.abs(s0.z - 130) < 0.01,
   `It stands exactly where the mex stands (${s0?.x}/${s0?.z}) — SUnitConstructionParams(GetPosition())`,
@@ -141,7 +146,7 @@ check(
   host.eval(`return __units[${mex}] == nil or __units[${mex}].__destroyQueued == true or __units[${mex}].__dead == true`) === true,
   'The old mex destroyed itself (defaultunits.lua:267 self:Destroy())',
 )
-const done = readLuaUnit(host, successor)
+const done = readRow(successor)
 check(done !== null && done.fraction >= 1, 'The successor is finished')
 check(
   done !== null && Math.abs(done.health / done.maxHealth - 0.5) < 0.02,

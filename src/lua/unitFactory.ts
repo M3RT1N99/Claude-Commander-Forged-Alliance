@@ -25,6 +25,15 @@ export interface LuaUnitState {
   heading: number
   health: number
   maxHealth: number
+  /**
+   * Baufortschritt 0..1 (`readRow`, units.lua:757 `fraction = u.__fraction or 1`).
+   *
+   * Fehlte hier, obwohl `__readUnit` es seit jeher liefert. Aufgefallen erst,
+   * als `scripts/` überhaupt typgeprüft wurde: drei Suiten lasen `.fraction`
+   * und bekamen TS2339. Sie hatten sich je eine eigene lokale Deklaration
+   * gebaut — dieselbe Aussage dreimal, an der falschen Stelle.
+   */
+  fraction: number
   /** Mesh-Blueprint-ID, falls das Skript SetMesh gerufen hat */
   mesh: string | null
 }

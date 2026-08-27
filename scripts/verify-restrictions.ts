@@ -29,7 +29,9 @@ const factory = spawnLuaUnit(host, 'ueb0101', { x: 100, y: 20, z: 100 }, 1)
 for (let i = 0; i < 8; i++) beat(engine)
 
 const TANK = 'uel0201'
-const queueTank = (): void => host.eval(`__units[${factory}].__buildQueue = { { id = '${TANK}', count = 1 } }`)
+const queueTank = (): void => {
+  host.eval(`__units[${factory}].__buildQueue = { { id = '${TANK}', count = 1 } }`)
+}
 const queueEmpty = (): boolean => host.eval(`return __units[${factory}].__buildQueue[1] == nil`) as boolean
 const tankSiteExists = (): boolean =>
   host.eval(

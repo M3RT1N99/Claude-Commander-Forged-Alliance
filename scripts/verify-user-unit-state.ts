@@ -205,9 +205,9 @@ ui.eval(`SetAutoMode({ __uiUnits[1], __uiUnits[2] }, false)`)
 ui.eval(`SetAutoSurfaceMode({ __uiUnits[1], __uiUnits[2] }, true)`)
 check(
   calls.length >= 2 &&
-    calls[0].name === 'ToggleScriptBit' &&
-    calls[0].ids.join(',') === '1' &&
-    calls[0].value === 0,
+    calls[0]?.name === 'ToggleScriptBit' &&
+    calls[0]?.ids.join(',') === '1' &&
+    calls[0]?.value === 0,
   'curState=true sends only the unit whose mirrored bit is currently set',
 )
 check(

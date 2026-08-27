@@ -172,12 +172,33 @@ Aufgefallen beim Bau des Replay-Lesers. Gemessen, nicht geschätzt:
 | `verify-shields.ts`, `verify-playthrough.ts`, `verify-coverage.ts`, `playthrough.ts` | je 2 |
 | `verify-restrictions.ts`, `verify-core-globals.ts`, `verify-army-victory.ts` | je 1 |
 
-`tsconfig.scripts.json` und `npm run typecheck:scripts` machen das messbar.
-**Das ist noch kein Gate** — es ist rot, und es wird als Befund geführt statt
-still zu bleiben. Erst wenn die 155 abgearbeitet sind, gehört der Lauf in
-`npm test` und in den pre-push-Hook. Die neuen Dateien dieser Sitzung
-(`scfareplay.ts`, `verify-replay.ts`, `verify-goldenmaster.ts`) sind bereits
-sauber.
+### Erledigt: 155 → 0, und es ist jetzt ein Gate
+
+Die 155 sind abgearbeitet, `npm run typecheck:scripts` ist grün und steht im
+pre-push-Hook neben `npx tsc --noEmit`.
+
+Zwei Drittel hatten eine gemeinsame, langweilige Ursache: Dateien ohne `import`
+oder `export` sind für `tsc` keine Module, also war `await` auf oberster Ebene
+ein Fehler (TS1375) und gleichnamige Konstanten verschiedener Skripte
+kollidierten (TS2451). Ein `export {}` je Datei. Dazu `allowImportingTsExtensions`
+(`verify-coverage.ts` importiert `./coverage-engine.ts`) und
+`types: ["node", "vite/client"]` — ohne das zweite verlor `src/main.ts` sein
+`import.meta.env`.
+
+Der Rest war `noUncheckedIndexedAccess`. Die Auflage bei jeder einzelnen Datei
+war, dass die AUSGABE der Suite vorher und nachher identisch sein muss — ein
+Typfehler „behoben", indem eine Zusicherung weicher wird, wäre schlimmer als der
+Typfehler. Zwei Suiten haben dabei etwas über sich verraten: `verify-combat` und
+`verify-emitter-curves` sind von sich aus **nicht deterministisch** (Entity-Ids
+bzw. `pairs()`-Reihenfolge in einer Stichprobe). Nachgewiesen, indem die
+unveränderte Fassung aus HEAD zweimal lief und sich ebenso unterschied. Nach
+Maskieren genau dieser Zeilen sind alle Läufe byteweise gleich.
+
+Ein echter Fund nebenbei: **`LuaUnitState` deklarierte `fraction` nicht**, obwohl
+`__readUnit` es seit jeher liefert (`units.lua:757`). Drei Suiten lasen das Feld
+und hatten sich je eine eigene lokale Deklaration gebaut — dieselbe Aussage
+dreimal, an der falschen Stelle. Jetzt steht sie einmal in
+`src/lua/unitFactory.ts`.
 
 ## Die vier `check-*`-Skripte sind jetzt Gates (Runde-2 T023)
 

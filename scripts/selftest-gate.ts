@@ -106,3 +106,10 @@ console.log(`\n${ergebnis.status}`)
 for (const f of ergebnis.findings) console.log(`  FUND ${f}`)
 if (ergebnis.failures === 0) console.log('  kein Fund — die Kette läuft durch')
 process.exit(ergebnis.failures === 0 ? 0 : 1)
+
+// `export {}` macht diese Datei fuer tsc zu einem MODUL. Ohne das gilt sie als
+// globales Skript: `await` auf oberster Ebene ist dann ein Fehler (TS1375) und
+// gleichnamige Konstanten anderer Skripte kollidieren (TS2451). tsx laedt sie
+// ohnehin als ESM — die Zeile aendert nichts am Verhalten, nur an der Sicht des
+// Typecheckers.
+export {}

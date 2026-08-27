@@ -22,3 +22,7 @@
  *   npx tsx --import ./scripts/register-lua.mjs scripts/verify-playthrough.ts
  */
 await import('./playthrough.ts')
+
+// Top-level `await` needs this file to BE a module (TS1375). The only import
+// above is a dynamic one, so the module marker has to be explicit.
+export {}

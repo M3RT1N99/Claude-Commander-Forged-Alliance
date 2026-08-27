@@ -73,3 +73,10 @@ const { writeFile } = await import('node:fs/promises')
 await writeFile(outFile, Buffer.from(shot.data, 'base64'))
 console.log('Screenshot geschrieben')
 ws.close()
+
+// `export {}` macht diese Datei fuer tsc zu einem MODUL. Ohne das gilt sie als
+// globales Skript: `await` auf oberster Ebene ist dann ein Fehler (TS1375) und
+// gleichnamige Konstanten anderer Skripte kollidieren (TS2451). tsx laedt sie
+// ohnehin als ESM — die Zeile aendert nichts am Verhalten, nur an der Sicht des
+// Typecheckers.
+export {}

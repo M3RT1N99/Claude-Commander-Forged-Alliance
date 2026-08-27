@@ -96,7 +96,13 @@ console.log('\n== UEF: build cube + beams (effectutilities.lua:99 CreateBuildCub
   check(r.projectiles > 0, `${r.projectiles} effect projectiles (the build cube and its slices)`)
   // effectutilities.lua:100 -> proj:SetScale(x * 1.05, y * 0.2, z * 1.05): the
   // axes MUST differ, otherwise the cube has lost the building's footprint.
-  const anisotropic = r.scales.some((s) => Math.abs(s[0] - s[1]) > 1e-3 || Math.abs(s[2] - s[1]) > 1e-3)
+  const anisotropic = r.scales.some((s) => {
+    // The Lua above formats every scale as three numbers; a row that is not
+    // three numbers is no evidence of a per-axis scale, so it does not count.
+    const [x, y, z] = s
+    if (x === undefined || y === undefined || z === undefined) return false
+    return Math.abs(x - y) > 1e-3 || Math.abs(z - y) > 1e-3
+  })
   check(anisotropic, `The build cube keeps its per-axis scale (${JSON.stringify(r.scales.slice(0, 2))})`)
   check(relevant(r.warn).length === 0, `No effect errors (${relevant(r.warn).slice(0, 1)})`)
 }

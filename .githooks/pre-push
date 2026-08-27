@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# Das echte Gate. Es läuft LOKAL, weil es hier laufen muss: 49 der 56 Suiten
+# Das echte Gate. Es läuft LOKAL, weil es hier laufen muss: 49 der 62 Suiten
 # lesen die Original-Spieldateien aus der FA-Installation, und die gibt es auf
 # keinem CI-Runner. Ein GitHub-Workflow kann hier nur typechecken.
 #
@@ -14,8 +14,15 @@
 # Umgehen (nur bewusst):   git push --no-verify
 set -e
 
-echo "── pre-push: Typecheck"
+echo "── pre-push: Typecheck (src)"
 npx tsc --noEmit
+
+# Und die Skripte. `tsconfig.json` schliesst `scripts/` aus (include: ["src"]),
+# also lief JEDES Verifikationsgate jahrelang ungeprüft durch den Typechecker —
+# "Typecheck grün" hiess: grün für den Teil, den `npm test` gar nicht ausführt.
+# Seit dem Aufräumen ist es sauber und darf deshalb ein Gate sein.
+echo "── pre-push: Typecheck (scripts)"
+npm run --silent typecheck:scripts
 
 echo "── pre-push: alle Suiten"
 npm test

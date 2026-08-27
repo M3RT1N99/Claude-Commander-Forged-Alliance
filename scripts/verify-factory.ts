@@ -21,8 +21,16 @@ import { LuaHost } from '../src/lua/host'
 import { installEngine, beat } from '../src/lua/engine'
 import { setTerrainSource } from '../src/lua/engineGlobals'
 import { spawnLuaUnit, readLuaUnit } from '../src/lua/unitFactory'
+import type { LuaUnitState } from '../src/lua/unitFactory'
 import { GameFiles } from './gameFiles'
 import { queueFactoryBuild } from '../src/sim/build'
+
+/**
+ * `__readUnit` hands back the FULL row that `readRow` builds (units.lua:744-814),
+ * build fraction included; the exported `LuaUnitState` only declares the subset
+ * the renderer consumes. Read the row through the shape the Sim actually sends.
+ */
+
 
 
 let failures = 0
@@ -39,6 +47,7 @@ const host = await LuaHost.create(files, (level, msg) => {
   if (level === 'WARN') warnings.push(msg)
 })
 const engine = installEngine(host)
+const readUnit = (id: number): LuaUnitState | null => readLuaUnit(host, id)
 setTerrainSource(host, () => 20)
 // Blueprint UND Skelett — beides braucht die Sim, bevor die erste Unit entsteht.
 for (const id of ['uel0001', 'ueb0101', 'uel0101']) await game.giveUnit(host, id)
@@ -73,7 +82,7 @@ const tank1 = Number(
   `),
 )
 check(tank1 > 0, `Die Fabrik hat den ersten Panzer aufgesetzt (id ${tank1})`)
-const t0 = readLuaUnit(host, tank1)
+const t0 = readUnit(tank1)
 check(t0 !== null && t0.fraction < 1, `Er ist eine Baustelle (${((t0?.fraction ?? 0) * 100).toFixed(0)} %)`)
 check(
   Math.abs((t0?.x ?? 0) - 120) < 0.01 && Math.abs((t0?.z ?? 0) - 120) < 0.01,
@@ -89,11 +98,11 @@ check(
 console.log('\n== Der Panzer wird gebaut und rollt vom Hof ==')
 const massBefore = engine.economy.army(1).mass
 let ticks = 0
-while (readLuaUnit(host, tank1)!.fraction < 1 && ticks < 3000) {
+while (readUnit(tank1)!.fraction < 1 && ticks < 3000) {
   beat(engine)
   ticks++
 }
-const t1 = readLuaUnit(host, tank1)!
+const t1 = readUnit(tank1)!
 check(t1.fraction >= 1, `Panzer fertig nach ${ticks} Beats (${(ticks / 10).toFixed(1)} s)`)
 check(t1.health === t1.maxHealth, `Volles Leben: ${t1.health}`)
 // COMPLETION decrements the queue (Cfile:838029: count>1 -> DecreaseCount(1)):
@@ -166,7 +175,7 @@ console.log('\n== Rally point: the new unit drives there ==')
     `),
   )
   let t = 0
-  while (t < 3000 && readLuaUnit(host, tank2)!.fraction < 1) {
+  while (t < 3000 && readUnit(tank2)!.fraction < 1) {
     beat(engine)
     t++
   }
@@ -214,11 +223,11 @@ check(midTank > 0, `a tank is building from the stack (id ${midTank})`)
 // the running task was built from.
 host.eval(`table.insert(__units[${factory}].__buildQueue, 1, { id = 'ZZFOREIGN', count = 5 })`)
 let mb = 0
-while (readLuaUnit(host, midTank)!.fraction < 1 && mb < 3000) {
+while (readUnit(midTank)!.fraction < 1 && mb < 3000) {
   beat(engine)
   mb++
 }
-check(readLuaUnit(host, midTank)!.fraction >= 1, `the tank finished (${mb} beats)`)
+check(readUnit(midTank)!.fraction >= 1, `the tank finished (${mb} beats)`)
 check(
   Number(host.eval(`return __units[${factory}].__buildQueue[1].count`)) === 5,
   'the foreign stack at q[1] is UNTOUCHED (completion drained its own item by identity, not q[1])',

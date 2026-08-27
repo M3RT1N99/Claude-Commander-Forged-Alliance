@@ -96,7 +96,7 @@ console.log('\n== These are SIM-ONLY: the UI VM must not have them ==')
     find: (dir: string, pattern: string) => findFiles(allPaths, dir, pattern),
     textureSize: () => null,
     stringAdvance: () => 0,
-    fontMetrics: () => [0, 0, 0],
+    fontMetrics: () => [0, 0],
   })
   for (const name of ['EndGame', 'ArmyIsOutOfGame', 'SetArmyUnitCap', 'GetArmyUnitCostTotal', 'ListArmies']) {
     check(
