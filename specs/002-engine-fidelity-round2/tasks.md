@@ -1,0 +1,133 @@
+---
+description: "Tasks — engine-fidelity fixes (audit round 2)"
+---
+
+# Tasks: Engine-fidelity fixes (audit round 2)
+
+**Input**: [spec.md](spec.md), [research.md](research.md)
+
+Every task names its evidence and the check that proves it (constitution
+Principles II and V).
+
+---
+
+## Phase 1: P1 — visibly wrong
+
+### US2 — a killed unit stops moving and stops taking orders ✅ DONE
+
+- [x] T001 Dead-gate the drive in `src/engine-lua/motion.lua`: treat
+      `__dead`/`__destroyQueued` like `Immobile` — speed 0, goal kept.
+      `CUnitMotion::CalcMoveLand` (Cfile:971696-971704), `::CalcMoveWater`
+      (Cfile:971825-971826) and `::CalcMoveHover` (Cfile:971533-971534) each
+      open with `if (IsDead) { result = 0; }`.
+- [x] T002 Skip a dead unit in `__ordersTick`
+      (`src/engine-lua/globals.lua:1804`) without clearing its queue — dispatch
+      runs only while `!IsDead` (Cfile:746583-746586), and `__destroyed` already
+      does the cleanup.
+- [x] T003 `scripts/verify-motion.ts`: a killed unit with a live goal does not
+      move a millimetre over 10 beats, with a **living control** proving the
+      same goal does move it. Separately — and through the real dispatch path
+      (`__dispatchMove`, NOT `SetGoal`, which never populates
+      `__orders`/`__orderActive`) — a killed unit's running command is neither
+      advanced nor completed nor popped, and its queue length is unchanged.
+      *Verified by*: `scripts/verify-motion.ts`.
+
+### US1, US3, US4 — open
+
+- [ ] T004 **US1** De-duplicate sim one-shot sounds per drain in
+      `src/main.ts:2493-2503`, keyed `cueId | bankId<<16` like the engine's
+      per-call vector (Cfile:1347280/1347398/1347407-1347413). Loops must keep
+      bypassing it (Cfile:1347379).
+      *Check to add*: a volley of N identical shots queues one Play.
+- [ ] T005 **US3** Feed `mesh.fx time` / `material.x` SIM TICKS, not seconds:
+      `fmod(sCurGameTick + sDeltaFrame, 36000)` (Cfile:1194896-1194904).
+      `src/viewer/skyDome.ts:253-255` already does this — extract that into one
+      shared helper and use it in `src/viewer/unitViewer.ts:233` and
+      `src/viewer/mapProps.ts:327-329`.
+      *Check to add*: all shader `time` feeds come from the one helper.
+- [ ] T006 **US4** Replace the invented max-zoom shape in
+      `src/viewer/unitViewer.ts:1103-1106` with the engine formula
+      (Cfile:1149241-1149290) and move the 1.4 into `maxZoomMult` as the
+      `CameraImpl` ctor default (Cfile:1149693), so `SetMaxZoom` can override it.
+
+---
+
+## Phase 2: P2
+
+- [ ] T007 **US5** Thread `StopSound(immediate)` through
+      `src/engine-lua/ui-globals.lua:1774-1793` (Cfile:1348263-1348288;
+      `StopAllSounds` passes true, Cfile:1346492ff).
+- [ ] T008 **US6 + US13 together** Gate `gameUi.beat` on a sim beat sequence
+      instead of the render frame (`src/main.ts:2478-2484`, new `beatSeq` in
+      `src/sim/luaSimClient.ts`), and make the worker post while paused with the
+      tick frozen — the engine beats under pause
+      (Cfile:1328786-1328790 gates only the tick advance).
+- [ ] T009 **US7** Key sound banks by file base name and scan `sounds/`
+      non-recursively, one engine per directory
+      (Cfile:604127/604238→516077). `src/ui/audio.ts:106-118`.
+- [x] T010 **US8** Gate production (Cfile:953968) and consumption
+      (Cfile:953945) on a new `dead` flag in `src/sim/economy.ts`, set from
+      `Entity::Kill` (Cfile:916084) through `__econSetDead`.
+      The storage branch is left ungated and marked `UNVERIFIED` in place — the
+      engine has it inside the same gate, but that branch was not traced far
+      enough to change it on a guess.
+      *Verified by*: `scripts/verify-econ-lua.ts` — a killed ACU's production
+      drops to 0 in the same beat while it is still un-destroyed.
+- [ ] T011 **US9** Gate `SetScriptBit`/`ToggleScriptBit` on the RUNTIME
+      toggle-cap mask (never `TestToggleCaps` — enhancements add caps at
+      runtime, `ual0001_script.lua:261`). `moho.lua:525`,
+      `Moho::Unit::ToggleScriptBit` Cfile:951384-951441.
+- [ ] T012 **US10** Model the "has this intel type" bit that `InitIntel`
+      creates (Cfile:1103903-1103913 / 1103745+); `EnableIntel`/`IsIntelEnabled`
+      must answer against it. `moho.lua:77-107`.
+- [ ] T013 **US11** Ship `speed / MaxSpeed` from the sim and scale the walk
+      animation with it (`CAnimationManipulator::MoveManipulator` Cfile:873406,
+      ratio 873557-873559). `src/main.ts:2716`.
+- [ ] T014 **US12** Decode `DDPF_LUMINANCE` (0x20000) as luminance replicated
+      to RGB, leaving the `DDPF_ALPHA` path alone. `src/formats/dds.ts:122/155`.
+
+---
+
+## Phase 3: P3
+
+- [ ] T015 **US13** — see T008, they share the worker plumbing.
+- [x] T016 **US14** Run `ResetSyncTable()` at the end of `beat()`
+      (`src/lua/engine.ts`), mirroring `Sim::Sync`
+      (Cfile:1074261, 1074772-1074773).
+      *Verified by*: `scripts/verify-toggle-pause.ts` — a `Sync` write is
+      readable inside the beat, gone at the start of the next, and the table
+      itself survives the reset.
+      ⚠ **Ordering constraint for whoever lands the Sim→UI sync bridge**: no TS
+      code reads the Lua `Sync` table yet, so the reset currently discards
+      whatever the sim Lua wrote. The reader must be inserted **before** this
+      line in `beat()`, exactly as `Sim::Sync` serialises to the user layer
+      before running `ResetSyncTable()` (Cfile:1074772-1074773).
+- [x] T017 **US15** Drain the deletion queue until EMPTY, not one generation
+      per beat (`while (mDeletionQueue._Mysize)`, Cfile:1076638-1076657), so a
+      cascading destroy completes in the same beat.
+      `src/engine-lua/damage.lua:405`.
+      *Verified by*: `scripts/verify-toggle-pause.ts` — an entity destroyed
+      from inside another's `OnDestroy` is fully destroyed in the same flush.
+- [ ] T018 **US16** Carry the parsed per-cell terrain-type layer into the sim
+      (`src/formats/scmap.ts:130/411` → `setTerrainSource` → `__terrainTypeAt`)
+      so `GetTerrainType` stops answering Default everywhere
+      (`STIMap::GetTerrainType`, Cfile:1087694-1087707).
+- [ ] T019 **US17** Split the SCMAP `>= 60` gate into the engine's two:
+      skybox from 58 (Cfile:1339158), cartographic decal-batch count from 59.
+      `src/formats/scmap.ts:415/443`.
+
+---
+
+## Close-out
+
+- [x] T020 Full gate after every landed change: `npx tsc --noEmit` and
+      `npm test` (53 suites) green.
+- [ ] T021 Update `docs/STATUS.md` and `docs/research/verified-facts.md` once
+      the remaining stories land.
+- [ ] T022 One commit per verified fix, English message: what and why.
+
+## Notes
+
+T004-T006 (US1/US3/US4) are P1 and still open — they are renderer/audio work
+that needs its own checks; the sim-side P1 (US2) is done. Nothing in this list
+may be closed on inspection.
