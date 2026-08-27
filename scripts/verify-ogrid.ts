@@ -9,6 +9,10 @@
  */
 import { parseBlueprint } from '../src/formats/blueprint'
 import { GameFiles } from './gameFiles'
+import { LuaHost } from '../src/lua/host'
+import { installEngine } from '../src/lua/engine'
+import { setTerrainSource } from '../src/lua/engineGlobals'
+import { FLAT_TEST_TERRAIN } from '../src/sim/terrain'
 import {
   blueprintPlacement,
   canBuildStructureAt,
@@ -149,6 +153,80 @@ check(
   ) === 'unknown',
   'deposit-restricted building -> unknown (no markers loaded)',
 )
+
+// --- The two blueprint readers must agree -----------------------------------
+//
+// docs/STATUS.md records that the blueprint is read twice: by the TS parser and
+// by the real LoadBlueprints() pipeline. That is only safe while the TS side
+// stays a pure projection. `blueprintPlacement` is the one place where it does
+// derive engine semantics (Footprint defaults, BuildOnLayerCaps), so the two
+// derivations are compared here over EVERY structure blueprint in the game.
+//
+// The snap in worldCommands.ts:352 reads the Lua footprint while the ghost's
+// validity in main.ts:622 reads the TS one — a disagreement decides whether a
+// build order is issued at all, so it has to be a test failure, not a surprise.
+console.log('\n== TS placement vs. the real LoadBlueprints() pipeline (all structures) ==')
+{
+  const host = await LuaHost.create(game.luaFiles, () => {})
+  installEngine(host)
+  setTerrainSource(host, FLAT_TEST_TERRAIN)
+
+  const bpPaths = [...game.luaFiles.keys()].filter(
+    (p) => p.startsWith('units/') && p.endsWith('_unit.bp'),
+  )
+  const list = bpPaths.map((p) => `'/${p}'`).join(',')
+  host.eval(`__bpFiles = { ${list} }; LoadBlueprints()`)
+
+  // One row per registered unit: id|SizeX|SizeZ|caps|isStructure. Integers go
+  // through %d — %g would round the bitmask (see the caps-mask regression).
+  const rows = String(
+    host.eval(`
+      local out = {}
+      for id, bp in pairs(__registered.Unit) do
+        local c, caps = bp.Physics.BuildOnLayerCaps, 0
+        if c.LAYER_Land then caps = caps + 1 end
+        if c.LAYER_Seabed then caps = caps + 2 end
+        if c.LAYER_Sub then caps = caps + 4 end
+        if c.LAYER_Water then caps = caps + 8 end
+        if c.LAYER_Air then caps = caps + 16 end
+        out[#out + 1] = string.format('%s|%d|%d|%d|%s', id,
+          bp.Footprint.SizeX, bp.Footprint.SizeZ, caps,
+          tostring(bp.Physics.MotionType == 'RULEUMT_None'))
+      end
+      return table.concat(out, ';')
+    `),
+  )
+
+  const dec = new TextDecoder('utf-8')
+  let compared = 0
+  const mismatches: string[] = []
+  for (const row of rows.split(';')) {
+    if (!row) continue
+    const [id, sx, sz, caps, structure] = row.split('|')
+    if (structure !== 'true') continue // placement only applies to structures
+    const raw = game.luaFiles.get(`units/${id}/${id}_unit.bp`)
+    if (!raw) continue
+    const ts = blueprintPlacement(parseBlueprint(dec.decode(raw)))
+    compared++
+    if (ts.sizeX !== Number(sx) || ts.sizeZ !== Number(sz)) {
+      mismatches.push(
+        `${id}: footprint TS ${ts.sizeX}x${ts.sizeZ} vs. Lua ${sx}x${sz}`,
+      )
+    } else if (ts.buildOnLayerCaps !== Number(caps)) {
+      mismatches.push(
+        `${id}: BuildOnLayerCaps TS 0x${ts.buildOnLayerCaps.toString(16)} vs. Lua 0x${Number(caps).toString(16)}`,
+      )
+    }
+  }
+  check(compared > 300, `${compared} structure blueprints compared (expected > 300)`)
+  check(
+    mismatches.length === 0,
+    mismatches.length === 0
+      ? 'every structure: TS placement == Lua pipeline (Footprint + BuildOnLayerCaps)'
+      : `${mismatches.length} blueprint(s) disagree: ${mismatches.slice(0, 5).join(', ')}`,
+  )
+  host.close()
+}
 
 await game.close()
 console.log(failures === 0 ? '\nOGRID BESTANDEN' : `\nOGRID FEHLGESCHLAGEN (${failures})`)

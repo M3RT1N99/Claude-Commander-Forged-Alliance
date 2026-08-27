@@ -86,9 +86,15 @@ export interface BuildContext {
 
 export type Validity = 'valid' | 'invalid' | 'unknown'
 
-/** Physics.BuildOnLayerCaps table -> packed OC_* bitmask (Cfile:709300 consumer). */
+/**
+ * Physics.BuildOnLayerCaps table -> packed OC_* bitmask (Cfile:709300 consumer).
+ * A .bp that omits the field still exposes it: the RUnitBlueprintPhysics ctor
+ * sets the LAYER_Land bit (Cfile:656146-656172, mirrored blueprints.lua:112).
+ * Defaulting to 0 instead would read as "buildable on no layer at all".
+ */
 export function packBuildOnLayerCaps(caps: unknown): number {
-  const t = (caps ?? {}) as Record<string, unknown>
+  if (caps === undefined || caps === null) return OC_LAND
+  const t = caps as Record<string, unknown>
   let bits = 0
   if (t['LAYER_Land']) bits |= OC_LAND
   if (t['LAYER_Seabed']) bits |= OC_SEABED
@@ -106,9 +112,18 @@ export function blueprintPlacement(bp: BpValue | undefined): Placement {
   }
   const restriction = bpGet(bp, 'Physics.BuildRestriction')
   const motion = bpGet(bp, 'Physics.MotionType')
+  // Footprint.SizeX/SizeZ are uchar struct fields defaulting to 0
+  // (AddField_uchar, Cfile:642465); RUnitBlueprint::OnInitBlueprint then raises
+  // a 0 to ceil(SizeX/SizeZ) (Cfile:647164-647177). 72 retail structures ship
+  // no Footprint section at all, so the derivation — not a flat 1 — is what the
+  // engine and the Lua pipeline (blueprints.lua:243-247) both see.
+  const footprint = (fp: string, size: string): number => {
+    const v = num(fp, 0)
+    return v !== 0 ? v : Math.ceil(num(size, 0))
+  }
   return {
-    sizeX: num('Footprint.SizeX', 1),
-    sizeZ: num('Footprint.SizeZ', 1),
+    sizeX: footprint('Footprint.SizeX', 'SizeX'),
+    sizeZ: footprint('Footprint.SizeZ', 'SizeZ'),
     skirtSizeX: num('Physics.SkirtSizeX', 0),
     skirtSizeZ: num('Physics.SkirtSizeZ', 0),
     skirtOffsetX: num('Physics.SkirtOffsetX', 0),
