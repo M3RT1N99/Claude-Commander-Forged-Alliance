@@ -98,7 +98,33 @@ const lua = await new LuaFactory().createEngine()
 await lua.doString(COMPAT_LUA)
 const compatOk = await lua.doString(
   'return type(table.getn) == "function" and type(unpack) == "function" ' +
-    'and type(setfenv) == "function" and type(math.mod) == "function"',
+    'and type(setfenv) == "function" and type(math.mod) == "function" ' +
+    'and type(math.pow) == "function"',
+)
+
+// math.pow is not a type check — it is `GetVectorLength`. FA's Lua 5.0.1 had the
+// function, 5.4 dropped it, and the original still calls it at
+// utilities.lua:50 (`math.sqrt(math.pow(v.x,2)+math.pow(v.y,2)+math.pow(v.z,2))`)
+// and platoon.lua:983. Reached from a ForkThread the failure is only LOGGED, so
+// the length silently never arrives. This runs the original expression.
+// Der Aufruf WIRFT, wenn der Shim fehlt (in der Rot-Probe genau so gesehen).
+// Ungefangen reißt das den ganzen Lauf mit und der Rest der Suite wird nie
+// geprüft — ein fehlender Shim soll eine FAIL-ZEILE sein, kein Absturz.
+let powOk = false
+let powMsg = ''
+try {
+  powOk =
+    Number(
+      await lua.doString(
+        'local v = { x = 3, y = 4, z = 12 } ' +
+          'return math.sqrt( math.pow( v.x, 2 ) + math.pow( v.y, 2 ) + math.pow( v.z, 2 ))',
+      ),
+    ) === 13
+} catch (err) {
+  powMsg = ` — ${(err as Error).message.slice(0, 80)}`
+}
+console.log(
+  `  ${powOk ? 'OK  ' : 'FAIL'} GetVectorLength (utilities.lua:50) über math.pow → 13${powMsg}`,
 )
 
 // string.format the way FA uses it (Lua 5.0 → C, here Lua 5.4):
@@ -156,4 +182,4 @@ for (const f of openFiles) await f.close()
 // check had already passed — turning a green run red at random. Setting
 // exitCode and returning lets the event loop finish that close cleanly.
 lua.global.close()
-process.exitCode = failures.length === 0 && compatOk && formatOk && forInOk ? 0 : 1
+process.exitCode = failures.length === 0 && compatOk && powOk && formatOk && forInOk ? 0 : 1

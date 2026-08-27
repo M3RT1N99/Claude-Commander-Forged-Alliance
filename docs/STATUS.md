@@ -61,6 +61,44 @@ diesem Weg nicht erreicht — sie sind deshalb nicht harmlos, aber sie sind auch
 nicht dringend. Ein **zehnter** aufgerufener No-op lässt den Durchlauf
 fehlschlagen (eingecheckte Fund-Liste).
 
+## Golden Master: ein Orakel, das keine Frage stellt
+
+Jede der 57 Suiten prüft eine Sache, die jemand vorher bedacht hat. Genau daran
+sind zwei Regressionen dieser Woche vorbeigelaufen (beschildete Einheiten nahmen
+null Flächenschaden; Schüsse an einer Küste meldeten `Water`), und die aus
+`4a37b2f` überlebte so einen ganzen Monat.
+
+`scripts/verify-goldenmaster.ts` fährt einen festen Ablauf — Ökonomie, Bau,
+Fabrik, Bewegung, Kampf, Flächenschaden, Schildkuppel — und hasht den Endzustand.
+Das Material ist nicht ausgedacht: es ist `__readAllUnitsJson()`
+(`units.lua:846`), also exakt der Block, den die Sim zehnmal pro Sekunde an die
+UI schickt, plus die acht Ökonomie-Summen je Armee. Der Hash liegt in
+`scripts/fixtures/goldenmaster.json`.
+
+Der Test weiß nicht, was RICHTIG ist — nur was ANDERS ist. Jede
+Verhaltensänderung wird rot, auch eine, an die niemand gedacht hat. War sie
+Absicht, wird der Hash mit `--update` in demselben Commit nachgezogen, der sie
+erklärt; `--dump` schreibt das gehashte Material heraus, damit ein roter Lauf
+zeigt **was** sich geändert hat statt nur **dass**.
+
+Rot-Probe: die Schild-Regression wieder eingebaut (`damage.lua:223`
+`if not fromArea` → `if true`) → Hash weicht ab, Exit 1; zurückgenommen → grün.
+
+### Was die Rot-Probe nebenbei gefunden hat: `math.pow`
+
+Der rote Lauf meldete `ForkThread-Fehler: /mod/lua/utilities.lua:50: attempt to
+call a nil value (field 'pow')`. FAs Lua 5.0.1 hatte `math.pow`, Lua 5.4
+(wasmoon) hat es nicht mehr, und `compat.lua` shimmte es nicht. Betroffen ist
+`GetVectorLength` (`utilities.lua:50`) und `platoon.lua:983` — mehr Stellen gibt
+es in der Original-Lua nicht (alle 1316 Dateien durchsucht; `math.log10`,
+`frexp`, `ldexp`, `cosh/sinh/tanh`, `atan2`, `fmod` kommen nicht vor,
+`math.mod` war bereits geshimmt).
+
+Der Fehler war doppelt still: aus einem ForkThread wird er nur geloggt, der
+Aufrufer bekommt einfach nie eine Länge. Behoben in `compat.lua`, geprüft in
+`verify-lua.ts` über den Original-Ausdruck aus `utilities.lua:50` (3/4/12 → 13),
+Rot-Probe: Shim entfernt → FAIL + Exit 1.
+
 ## Known gaps
 
 The path to the real UI: [PLAN-UI.md](PLAN-UI.md); the complete 1:1 roadmap:

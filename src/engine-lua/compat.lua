@@ -77,6 +77,20 @@ table.foreachi = table.foreachi or function(t, f)
   for i, v in ipairs(t) do local r = f(i, v); if r ~= nil then return r end end
 end
 math.mod = math.mod or function(a, b) return a % b end
+-- math.pow was a real function in FA's Lua 5.0.1; 5.4 dropped it in favour of
+-- the `^` operator. The original Lua still calls it in two places, and the first
+-- one is not obscure:
+--
+--   lua/utilities.lua:50   GetVectorLength — math.sqrt(pow(x,2)+pow(y,2)+pow(z,2))
+--   lua/platoon.lua:983    local dir = math.pow(-1, Random(1,2))
+--
+-- Without the shim GetVectorLength raises "attempt to call a nil value (field
+-- 'pow')". Since it is almost always reached from a ForkThread, the error is
+-- only LOGGED and the thread dies silently — the caller just never gets a
+-- result. Found by the golden master: reintroducing the shield regression sent
+-- the damage effects down a path that calls it, and the run reported
+-- "ForkThread-Fehler: /mod/lua/utilities.lua:50".
+math.pow = math.pow or function(a, b) return a ^ b end
 unpack = unpack or table.unpack
 loadstring = loadstring or load
 if not setfenv then
