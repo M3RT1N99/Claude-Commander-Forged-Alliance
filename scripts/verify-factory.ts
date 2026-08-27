@@ -239,6 +239,82 @@ host.eval(`
   for i = table.getn(q), 1, -1 do if q[i].id == 'ZZFOREIGN' then table.remove(q, i) end end
 `)
 
+/**
+ * Units a factory produced, counted by position: the engine spawns them AT the
+ * factory (__factoryTick uses f.__pos), which this suite already relies on
+ * above ("Er entsteht AN der Fabrik"). Counting by position rather than by some
+ * builder back-reference keeps the check falsifiable — there is no
+ * builder id on a spawned unit, so a field-based count would silently be 0.
+ */
+const producedNear = (x: number, z: number): number =>
+  Number(
+    host.eval(`
+      local n = 0
+      for _, u in pairs(__units) do
+        if u.__bp and u.__bp.BlueprintId == 'uel0101' then
+          local p = u.__pos or { 0, 0, 0 }
+          local dx, dz = p[1] - ${x}, p[3] - ${z}
+          if dx * dx + dz * dz < 400 then n = n + 1 end
+        end
+      end
+      return n
+    `),
+  )
+
+console.log('\n== Control: an untouched factory DOES produce (the counter works) ==')
+{
+  const okFactory = spawnLuaUnit(host, 'ueb0101', { x: 260, y: 0, z: 260 }, 1)
+  queueFactoryBuild(host, okFactory, 'uel0101', 3)
+  check(producedNear(260, 260) === 0, 'nothing there before the first beat')
+  beat(engine)
+  check(producedNear(260, 260) === 1, `the control factory started a unit (${producedNear(260, 260)})`)
+}
+
+console.log('\n== Stop clears the production queue (it IS the command queue) ==')
+// The queue entries are UNITCOMMAND_BuildFactory commands inside
+// mUnit->mCommandQueue (Cfile:838000-838062); ClearCommandQueue removes every
+// command without exception (Cfile:1005371-1005399), and the UI's Stop button
+// arrives as ISSUE_Command(..., clear = 1) (Cfile:1255059-1255063).
+{
+  const stopFactory = spawnLuaUnit(host, 'ueb0101', { x: 300, y: 0, z: 300 }, 1)
+  queueFactoryBuild(host, stopFactory, 'uel0101', 3)
+  check(
+    Number(host.eval(`return table.getn(__units[${stopFactory}].__buildQueue or {})`)) === 1,
+    'the factory has a queued stack before Stop',
+  )
+  host.eval(`__dispatchStop(${stopFactory})`)
+  check(
+    host.eval(`return __units[${stopFactory}].__buildQueue == nil`) === true,
+    'Stop wipes the production queue',
+  )
+  for (let i = 0; i < 3; i++) beat(engine)
+  check(producedNear(300, 300) === 0, `and no unit is started afterwards (${producedNear(300, 300)})`)
+}
+
+console.log('\n== A killed factory produces nothing during its DeathThread ==')
+// The engine's dispatch gate is !IsBeingBuilt && !IsDead && !Attached &&
+// !BlockCommandQueue (IAiCommandDispatchImpl::TaskTick, Cfile:746583-746586).
+// Death is not instant: DeathThread runs for several beats (unit.lua:1200-1241)
+// before Destroy(), and the original destroys what the factory was building
+// (defaultunits.lua:683-688, unit.lua:1259-1263).
+{
+  const deadFactory = spawnLuaUnit(host, 'ueb0101', { x: 340, y: 0, z: 340 }, 1)
+  queueFactoryBuild(host, deadFactory, 'uel0101', 3)
+  host.eval(`__units[${deadFactory}]:Kill()`)
+  check(host.eval(`return __units[${deadFactory}].__dead == true`) === true, 'the factory is dead')
+  // It still HAS its queue — the engine does not wipe it on death, it simply
+  // stops dispatching from it (the DeathThread then destroys the unit).
+  check(
+    Number(host.eval(`return table.getn(__units[${deadFactory}].__buildQueue or {})`)) > 0,
+    'its queue is still there (death does not clear it, it stops dispatch)',
+  )
+  for (let i = 0; i < 5; i++) beat(engine)
+  check(
+    producedNear(340, 340) === 0,
+    `it starts no unit while dying (${producedNear(340, 340)})`,
+  )
+}
+
 const badWarnings = warnings.filter((w) => !/effectutilities|Emitter|Animator|Sound/i.test(w))
 if (badWarnings.length > 0) {
   console.log(`\n  (${badWarnings.length} WARN aus der Sim, erste 3:)`)

@@ -275,14 +275,37 @@ local function checkCollision(p, from, to)
     end
   end
 
-  -- 2. Boden/Wasser. Terrain kommt aus dem Heightfield, Wasser aus der Ebene.
+  -- 2. Boden/Wasser — ZWEI getrennte Tests, in dieser Reihenfolge.
+  --
+  -- CheckCollision fragt die Wasser-EBENE (CColHitResult::PlaneIntersection,
+  -- Cfile:722370) und das HEIGHTFIELD (CHeightField::Intersection) getrennt ab
+  -- (combat-projectiles.md §3c). Die Wasserebene liegt auf einer fallenden
+  -- Flugbahn ÜBER dem Seeboden, wird also zuerst durchstossen.
+  --
+  -- Der Bodentest muss die ROHE Gelaendehoehe nehmen: GetSurfaceHeight ist
+  -- bereits max(GetElevation, mWaterElevation) (cfunc_GetSurfaceHeightL,
+  -- Cfile:1089855-1089876). Damit meldete ueber Wasser IMMER der Terrain-Zweig
+  -- zuerst, und der Wasser-Zweig war unerreichbar — jeder Wassereinschlag kam
+  -- als 'Terrain' an (IMPACT_Terrain=1 vs IMPACT_Water=2, Cfile:640489-640525;
+  -- ENT_GetImpactTypeString Cfile:917362-917405).
+  --
+  -- Das Gate ist mWaterEnabled, nicht "Wasserspiegel > 0": eine Karte mit einem
+  -- Wasserspiegel <= 0 hat trotzdem Wasser. Ohne Wasser steht exakt -10000
+  -- (Entity::GetStartingLayer, Cfile:857506-857510).
+  -- Welche der beiden Flaechen zuerst getroffen wird, entscheidet die HOEHE:
+  -- die Engine nimmt den tatsaechlichen (naechsten) Schnittpunkt, und auf einer
+  -- fallenden Bahn wird die HOEHER liegende Flaeche zuerst durchstossen. Ueber
+  -- offenem Wasser ist das die Wasserebene, an einer Kueste oder auf einer Insel
+  -- (Gelaende ueber dem Wasserspiegel) das Gelaende. Ohne diesen Vergleich
+  -- meldete jeder Schuss, der irgendwo die Wasserhoehe kreuzt, 'Water' — das
+  -- Spiegelbild des behobenen Fehlers.
   if p.__collideSurface then
-    local ground = GetSurfaceHeight(to[1], to[3])
-    if to[2] <= ground then return IMPACT_TERRAIN, nil end
     local water = __waterLevel()
-    if water > 0 and from[2] > water and to[2] <= water then
+    local ground = GetTerrainHeight(to[1], to[3])
+    if water > -10000 and water > ground and from[2] > water and to[2] <= water then
       return IMPACT_WATER, nil
     end
+    if to[2] <= ground then return IMPACT_TERRAIN, nil end
   end
   return nil, nil
 end

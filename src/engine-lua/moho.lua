@@ -182,6 +182,13 @@ local entity = withNoops(ENTITY_NAMES, {
     if self.__beingBuilt and (self.__fraction or 1) < 0.5 then overkill = 10.0 end
 
     self.__dead = true
+    -- mIsDead stops the unit's economy from THIS beat on, not at OnDestroy:
+    -- HandleResourceManagement gates consumption (Cfile:953945) and production
+    -- (Cfile:953968) on IsDead, and the DeathThread runs for several beats
+    -- (unit.lua:1200-1241). Without it a dead mex kept producing while burning.
+    if self.__isUnit and self.__id and __econSetDead then
+      __econSetDead(self.__army or 1, self.__id)
+    end
     if self.SetDead then pcall(function() self:SetDead() end) end
 
     -- OnKilled ZUERST, KILLS DANACH — die Reihenfolge in cfunc_EntityKillL:
@@ -824,14 +831,20 @@ local unit = withNoops(UNIT_NAMES, {
       if cb then pcall(function() cb(self) end) end
     end
   end,
-  -- The granted share of the requested resources this tick
-  -- (CEconRequest::LimitingRate). The engine inits mResourceConsumed to 0 and
-  -- sets it each tick to the granted LimitingRate only while consumption is
-  -- active (idle=0, full supply=1, stall=partial). DOCUMENTED APPROXIMATION: we
-  -- return 1 (assume full supply) — no per-unit granted rate is wired here yet,
-  -- so shield regen / mass-fab scaling do NOT throttle during an energy stall.
-  -- Returning 0 without that driver would stop them entirely, which is worse.
-  GetResourceConsumed = function(self) return self.__resourceConsumed or 1 end,
+  -- The granted share of the requested resources this tick. The engine pushes
+  -- mResourceConsumed (Cfile:976943); HandleResourceManagement resets it to 0
+  -- every tick (Cfile:953937) and sets it to CEconRequest::LimitingRate only
+  -- while the unit is alive AND consumption is active AND it has a request
+  -- (Cfile:953945-953948). LimitingRate is 1.0 for an empty request and
+  -- min(granted/requested) otherwise (Cfile:1107891-1107909).
+  --
+  -- This used to return a flat 1 ("assume full supply"), so shield regen, intel
+  -- upkeep and upgrade throttling never noticed an energy stall.
+  GetResourceConsumed = function(self)
+    -- IsDead is the engine's own first condition (Cfile:953945).
+    if self.__dead or self.__destroyQueued then return 0 end
+    return __econResourceConsumed(self.__army or 1, self.__id)
+  end,
 
   -- Motion.
   GetNavigator = function(self) return self.__navigator end,
@@ -1085,6 +1098,18 @@ function __weaponUnitCanFire(w)
 end
 
 local weapon = withNoops(WEAPON_NAMES, {
+  -- The ONLY writer of mTargetPriorities
+  -- (cfunc_UnitWeaponSetTargetingPrioritiesL, Cfile:988316-988366); the weapon
+  -- ctor leaves the vector empty (Cfile:984183-984185). weapon.lua:364-385
+  -- builds the table from bp.TargetPriorities through ParseEntityCategory, so
+  -- the entries are exactly the category objects EntityCategoryContains takes.
+  -- Until now this was a withNoops no-op, so every priority list was dropped
+  -- and FindBestEnemy had nothing to rank by.
+  SetTargetingPriorities = function(self, priTable)
+    local list = {}
+    for i, c in ipairs(priTable or {}) do list[i] = c end
+    self.__targetPriorities = list
+  end,
   GetBlueprint = function(self) return self.__bp end,
   GetParent = function(self) return self.__unit end,
   BeenDestroyed = function(self) return self.__destroyed == true end,
@@ -1346,7 +1371,15 @@ local aibrain = withNoops(AIBRAIN_NAMES, {
   GetEconomyRequested = function(self, res) return __econRequested(self.__army or 1, res) end,
   GetEconomyTrend = function(self, res) return __econTrend(self.__army or 1, res) end,
   GiveResource = function(self, res, amount) __econGive(self.__army or 1, res, amount) end,
-  TakeResource = function(self, res, amount) __econGive(self.__army or 1, res, -amount) end,
+  -- NOT a negative GiveResource. GiveResource accumulates into mResources (the
+  -- income accumulator, Cfile:735044-735053) and returns nothing (Cfile:735054);
+  -- TakeResource drains mTotals.mStored by min(requested, stored), writes back
+  -- max(0, stored - taken) and RETURNS the amount taken
+  -- (cfunc_CAiBrainTakeResourceL, Cfile:735173-735270; help string
+  -- "taken = TakeResource(type,amount)", Cfile:735162).
+  -- The return value is load-bearing: simutils.lua:152-155 pipes it straight
+  -- into GiveResource on the receiving brain.
+  TakeResource = function(self, res, amount) return __econTake(self.__army or 1, res, amount) end,
 
   GetListOfUnits = function(self, cat) return __armyUnits(self.__army or 1, cat) end,
   GetCurrentUnits = function(self, cat) return table.getn(__armyUnits(self.__army or 1, cat)) end,
@@ -1501,12 +1534,20 @@ local control = withNoops(CONTROL_NAMES, {
   -- bekommt NUR es die Tasten — und die Keymap schweigt (M3: IsKeyDown liefert
   -- dann false, Cfile:1141557). Genau deshalb loest ein Hotkey nicht aus,
   -- waehrend jemand im Chat tippt.
+  -- MAUI_SetKeyboardFocus (Cfile:1141557-1141596) is the ONLY writer of
+  -- Maui_CurrentFocusControl. Order and target both matter: the NEW focus is
+  -- assigned first (Cfile:1141575), and only then is the OLD control notified
+  -- through vtable offset 68 = slot 17 = OnKeyboardFocusChange
+  -- (`mPrev[-1].mNext[8].mNext`, Cfile:1141582; vtable layout
+  -- Cfile:396337-396366; the binding runs RunScript "OnKeyboardFocusChange",
+  -- Cfile:1124573-1124578). Nothing is called on the control that GAINS focus,
+  -- and there is no `old ~= self` guard — re-acquiring on the focused control
+  -- notifies it (mapselect.lua:233/251/254 does exactly that).
   AcquireKeyboardFocus = function(self, exclusive)
     local old = __mauiFocus
-    if old and old ~= self and old.OnLoseKeyboardFocus then old:OnLoseKeyboardFocus() end
     __mauiFocus = self
     self.__focusExclusive = exclusive == true
-    if self.OnKeyboardFocusChange then self:OnKeyboardFocusChange() end
+    if old and old.OnKeyboardFocusChange then old:OnKeyboardFocusChange() end
   end,
   AbandonKeyboardFocus = function(self)
     if __mauiFocus == self then

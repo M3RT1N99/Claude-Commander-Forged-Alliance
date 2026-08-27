@@ -1804,6 +1804,15 @@ function __ordersTick()
     if not u or u.__destroyed then
       __orders[unitId] = nil
       __orderActive[unitId] = nil
+    elseif u.__dead or u.__destroyQueued then
+      -- Nothing. Dispatch runs only while !IsDead
+      -- (IAiCommandDispatchImpl::TaskTick, Cfile:746583-746586), so a dying
+      -- unit's command simply is not ticked: it is neither advanced nor
+      -- completed nor popped. The queue is deliberately NOT cleared either —
+      -- the unit is inside its multi-beat DeathThread (unit.lua:1200-1241) and
+      -- the `__destroyed` branch above does the cleanup when it ends.
+      -- Doing anything else here (stopping the navigator, clearing the goal)
+      -- would be an invented action: the engine takes no such step.
     else
       local done = false
       if cmd.type == 'Move' then
@@ -1877,6 +1886,14 @@ function __dispatchStop(unitId)
   if not u then return end
   __orders[unitId] = nil
   __orderActive[unitId] = nil
+  -- A factory's production queue IS part of the CUnitCommandQueue: the entries
+  -- are UNITCOMMAND_BuildFactory commands read out of mUnit->mCommandQueue
+  -- (Cfile:838000-838062), and ClearCommandQueue removes EVERY command without
+  -- exception (Cfile:1005371-1005399). The UI's Stop button reaches us through
+  -- ISSUE_Command(mSelection, UNITCOMMAND_Stop, clear = 1) (Cfile:1255059-1255063),
+  -- so the queue goes with it — leaving it behind meant Stop visibly did
+  -- nothing to a producing factory.
+  u.__buildQueue = nil
   __abortBuildTasks(unitId)
   __attackOrders[unitId] = nil
   __guardOrders[unitId] = nil

@@ -210,11 +210,65 @@ check(
   Number(host.eval('return gotA')) === 1 && Number(host.eval('return gotB')) === 0,
   'Das KeyDown geht NUR an das Fokus-Control',
 )
-// Ein ButtonPress woanders entzieht den Fokus (Cfile:1147523-1147531).
+// Ein ButtonPress woanders MELDET das dem Fokus-Control, entzieht ihm den Fokus
+// aber NICHT: der Aufruf geht ueber vtable-Offset 64 = Slot 16 =
+// LosingKeyboardFocus -> RunScript "OnLoseKeyboardFocus" (Cfile:1147524-1147531,
+// Vtable-Layout Cfile:396337-396366, Binding Cfile:1124565-1124570), und
+// Maui_CurrentFocusControl wird dort nicht geschrieben — einziger Schreiber ist
+// MAUI_SetKeyboardFocus (Cfile:1141557-1141596). Deshalb bleibt die Chat-Zeile
+// beim Klick daneben aktiv, bis sie den Fokus selbst zurueckgibt.
+// lostA muss VOR dem Lesen existieren — der strikte _G aus config.lua:51-56
+// wirft beim Zugriff auf ein nicht angelegtes Global.
+host.eval(`lostA = 0`)
+host.eval(`focusA.OnLoseKeyboardFocus = function(self) lostA = lostA + 1 end`)
 host.eval(`__mauiMouse('ButtonPress', 900, 900, { Left = true }, 1)`)
 check(
+  Number(host.eval('return lostA')) === 1,
+  'Ein Klick daneben meldet OnLoseKeyboardFocus an das Fokus-Control',
+)
+check(
+  host.eval('return GetCurrentFocusControl() == focusA') === true,
+  'Der Fokus bleibt dabei bestehen (nur MAUI_SetKeyboardFocus schreibt ihn)',
+)
+// MAUI_SetKeyboardFocus (Cfile:1141557-1141596) ist der EINZIGE Schreiber und
+// nimmt den ANDEREN Callback: vtable-Offset 68 = Slot 17 = OnKeyboardFocusChange
+// (`mPrev[-1].mNext[8].mNext`, Cfile:1141582), gerufen auf dem ALTEN Control
+// NACHDEM der neue Fokus steht (Cfile:1141575). Auf dem Control, das den Fokus
+// BEKOMMT, ruft die Engine nichts.
+host.eval(`changeA = 0 changeB = 0 lostB = 0`)
+host.eval(`
+  focusA.OnKeyboardFocusChange = function(self) changeA = changeA + 1 end
+  focusB.OnKeyboardFocusChange = function(self) changeB = changeB + 1 end
+  focusB.OnLoseKeyboardFocus = function(self) lostB = lostB + 1 end
+`)
+const lostABefore = Number(host.eval('return lostA'))
+host.eval(`focusB:AcquireKeyboardFocus(false)`)
+check(host.eval('return GetCurrentFocusControl() == focusB') === true, 'AcquireKeyboardFocus setzt den neuen Fokus')
+check(
+  Number(host.eval('return changeA')) === 1,
+  `das ALTE Control bekommt OnKeyboardFocusChange (${host.eval('return changeA')})`,
+)
+check(
+  Number(host.eval('return lostA')) === lostABefore,
+  'und NICHT OnLoseKeyboardFocus — das ist der andere vtable-Slot',
+)
+check(
+  Number(host.eval('return changeB')) === 0 && Number(host.eval('return lostB')) === 0,
+  'auf dem Control, das den Fokus BEKOMMT, ruft die Engine nichts',
+)
+// Kein `old ~= self`-Schutz: ein erneutes Acquire auf dem bereits fokussierten
+// Control meldet es sich selbst (mapselect.lua:233/251/254 macht genau das).
+host.eval(`focusB:AcquireKeyboardFocus(false)`)
+check(
+  Number(host.eval('return changeB')) === 1,
+  `erneutes Acquire auf dem Fokus-Control meldet es SICH SELBST (${host.eval('return changeB')})`,
+)
+
+// AbandonKeyboardFocus ist der Weg zurueck (chat.lua nutzt ihn bei Escape/Enter).
+host.eval(`focusB:AbandonKeyboardFocus()`)
+check(
   host.eval('return GetCurrentFocusControl() == nil') === true,
-  'Ein Klick daneben entzieht den Tastatur-Fokus',
+  'AbandonKeyboardFocus gibt den Fokus frei',
 )
 
 console.log('\n== M1: InputCapture — so wird ein Dialog modal ==')

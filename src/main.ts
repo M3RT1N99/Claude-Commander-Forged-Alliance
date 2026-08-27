@@ -1023,6 +1023,7 @@ async function startSandbox(mapFolder: string): Promise<void> {
           scale: currentScmap.heightScale,
         },
         mapPropSpawns(),
+        mapWaterElevation(),
       )
       log('Lua-Sim zurückgesetzt (neue Karte)')
     }
@@ -2095,6 +2096,7 @@ async function getLuaSim(): Promise<LuaSimClient> {
         // The engine logs its prop-creation count too (Cfile:1072082).
         else if (msg.startsWith('NUM PROPS')) log(msg)
       },
+      mapWaterElevation(),
       mapPropSpawns(),
     ).then((sim) => {
       luaSim = sim

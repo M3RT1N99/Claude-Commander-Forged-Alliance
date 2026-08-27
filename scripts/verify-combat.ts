@@ -958,6 +958,109 @@ console.log('\n== Befehls-Dispatch: Stop, Move-bricht-Bau, Attack ==')
   }
 }
 
+console.log('\n== A projectile hitting water reports Water, not Terrain ==')
+// CheckCollision tests the water PLANE (CColHitResult::PlaneIntersection,
+// Cfile:722370) separately from the heightfield (CHeightField::Intersection);
+// see combat-projectiles.md §3c. The terrain test must use the RAW elevation:
+// GetSurfaceHeight is already max(elevation, water) (Cfile:1089855-1089876), so
+// testing terrain first made every water impact report 'Terrain'
+// (IMPACT_Terrain=1 vs IMPACT_Water=2, Cfile:640489-640525; the string comes
+// from ENT_GetImpactTypeString, Cfile:917362-917405).
+{
+  const shooter = spawnLuaUnit(host, 'uel0201', { x: 1100, y: 20, z: 300 }, 1)
+  const flyDown = (): string =>
+    host.eval(`
+      local p = __projCreate(
+        __units[${shooter}], '/projectiles/tdfgauss01/tdfgauss01_proj.bp',
+        { 1100, 40, 300 }, __orientFromDir({ 0, -1, 0 }), 20, 10, 0, 'Normal', nil, true
+      )
+      local result = 'no impact'
+      for _ = 1, 200 do
+        __projectileTick()
+        if p.__impactType then result = tostring(p.__impactType) end
+        __flushDeletions()
+        if p.__destroyed then break end
+      end
+      return result
+    `) as string
+
+  // Terrain is at 20 here (setTerrainSource in this suite); put water at 30 so
+  // the shot from y=40 crosses the water plane on the way down.
+  host.eval(`__setWaterLevel(30)`)
+  const overWater = flyDown()
+  check(overWater === 'Water', `over water the impact is Water (${overWater})`)
+
+  // Without water the very same shot must report Terrain — proving the water
+  // branch is the thing that changed, not the geometry.
+  host.eval(`__setWaterLevel(nil)`)
+  const dryLand = flyDown()
+  check(dryLand === 'Terrain', `on dry land the same shot is Terrain (${dryLand})`)
+
+  // Coast/island: the map HAS water, but the ground where the shot lands is
+  // ABOVE the water level. On a descending path the higher surface is reached
+  // first, so this is a Terrain hit — the engine takes the nearer of the two
+  // intersections, it does not let the water plane win unconditionally.
+  host.eval(`__setWaterLevel(10)`)
+  const island = flyDown()
+  check(island === 'Terrain', `water below the ground (island/coast) still reports Terrain (${island})`)
+  host.eval(`__setWaterLevel(nil)`)
+}
+
+console.log('\n== Target priorities beat distance (FindBestEnemy) ==')
+// FindBestEnemy (Cfile:791970-792233) ranks by the LOWEST matching entry in the
+// weapon's mTargetPriorities (HasBlueprint gate at Cfile:792183, better category
+// wins outright at Cfile:792190-792191); distance only breaks ties inside a
+// category (Cfile:792203). uel0201_unit.bp:245-253 lists
+// SPECIALHIGHPRI, TECH1 MOBILE, TECH2 MOBILE, TECH3 MOBILE, STRUCTURE DEFENSE,
+// SPECIALLOWPRI, ALLUNITS — so a T1 tank (entry 2) outranks a power generator,
+// which only matches the ALLUNITS catch-all (entry 7), even from further away.
+{
+  for (const id of ['uel0101', 'ueb1101']) await game.giveUnit(host, id)
+  const gunner = spawnLuaUnit(host, 'uel0201', { x: 1000, y: 20, z: 300 }, 1)
+  const nearGen = spawnLuaUnit(host, 'ueb1101', { x: 1004, y: 20, z: 300 }, 2) // 4 m
+  const farTank = spawnLuaUnit(host, 'uel0101', { x: 1014, y: 20, z: 300 }, 2) // 14 m
+  check(gunner > 0 && nearGen > 0 && farTank > 0, `gunner ${gunner}, near generator ${nearGen} (4 m), far tank ${farTank} (14 m)`)
+
+  const currentTarget = (): number =>
+    Number(
+      host.eval(`
+        local t = __units[${gunner}]:GetWeapon(1):GetCurrentTarget()
+        return (t and t.__id) or 0
+      `),
+    )
+  // The weapon really did receive its blueprint list (weapon.lua:364-385 ->
+  // SetTargetingPriorities). Without this the next check could pass by accident.
+  check(
+    Number(host.eval(`return #(__units[${gunner}]:GetWeapon(1).__targetPriorities or {})`)) === 7,
+    `the weapon carries its 7 blueprint priorities (${host.eval(`return #(__units[${gunner}]:GetWeapon(1).__targetPriorities or {})`)})`,
+  )
+
+  let picked = 0
+  for (let t = 0; t < 12 && picked === 0; t++) {
+    beat(engine)
+    picked = currentTarget()
+  }
+  check(picked === farTank, `it takes the FAR tank over the near generator (picked ${picked}, tank ${farTank}, generator ${nearGen})`)
+
+  // Control: with the priority list emptied, the nearest wins again — proving
+  // the choice above came from the ranking, not from geometry.
+  const gunner2 = spawnLuaUnit(host, 'uel0201', { x: 1000, y: 20, z: 360 }, 1)
+  spawnLuaUnit(host, 'ueb1101', { x: 1004, y: 20, z: 360 }, 2)
+  const farTank2 = spawnLuaUnit(host, 'uel0101', { x: 1014, y: 20, z: 360 }, 2)
+  host.eval(`__units[${gunner2}]:GetWeapon(1).__targetPriorities = {}`)
+  let picked2 = 0
+  for (let t = 0; t < 12 && picked2 === 0; t++) {
+    beat(engine)
+    picked2 = Number(
+      host.eval(`
+        local t = __units[${gunner2}]:GetWeapon(1):GetCurrentTarget()
+        return (t and t.__id) or 0
+      `),
+    )
+  }
+  check(picked2 !== 0 && picked2 !== farTank2, `without priorities the nearest wins again (picked ${picked2}, far tank ${farTank2})`)
+}
+
 console.log('\n== Was die Sim dabei gemeldet hat ==')
 const uniq = [...new Set(warnings.map((w) => w.split('\n')[0]?.slice(0, 110)))]
 for (const w of uniq.slice(0, 12)) console.log(`  · ${w}`)

@@ -31,6 +31,23 @@ function __createBrain(army, planName)
   return b
 end
 
+-- A LOOKUP, never a creator. `__createBrain` is called once per DECLARED army
+-- by setupSession (session.ts:86) — the engine's SimInit step 5a. Every retail
+-- binding that takes an army index validates it against `mArmiesList` and
+-- errors instead of inventing a player: `CreateUnit` at Cfile:980706-980713 and
+-- the position/threat bindings at Cfile:980344-980352 both raise
+-- "Invalid army index; must be >= 1 and < %d but got %d.".
+--
+-- Auto-vivifying here would hand out a brain with faction 1, name ARMY_<n> and
+-- a fresh economy, register it in the global `ArmyBrains` that unit.lua:1429
+-- walks on EVERY unit death, and look entirely valid — the exact "silently
+-- behaves as a valid engine object" case the fail-loudly rule forbids.
 function __getBrain(army)
-  return __brains[army] or __createBrain(army)
+  local b = __brains[army]
+  if b then return b end
+  local maxArmy = 0
+  for _ in pairs(__brains) do maxArmy = maxArmy + 1 end
+  -- The message is the engine's, off-by-one wording included.
+  error(string.format('Invalid army index; must be >= 1 and < %d but got %s',
+    maxArmy, tostring(army)), 2)
 end

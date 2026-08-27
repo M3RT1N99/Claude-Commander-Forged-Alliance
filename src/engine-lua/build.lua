@@ -93,10 +93,17 @@ function __decayTick()
       local e = (u.__bp and u.__bp.Economy) or {}
       local maxVal = math.max(e.BuildCostEnergy or 0, e.BuildCostMass or 0, e.BuildTime or 0)
       if maxVal > 0 then
-        local f = (u.__fraction or 0) - 0.1 / maxVal
+        -- Materialize(-0.1 / mBuildTime) (Cfile:952836). For a NEGATIVE delta the
+        -- fraction is clamped into [0,1] (Cfile:953450-953456) and health is
+        -- ADJUSTED by maxHealth * delta (Cfile:953468) — never assigned, or the
+        -- damage a site took would be undone every tick.
+        local delta = -0.1 / maxVal
+        local f = (u.__fraction or 0) + delta
+        if f > 1 then f = 1 end
+        if f < 0 then f = 0 end
         u.__fraction = f
-        u.__health = u:GetMaxHealth() * f
-        if u.__health <= 0 then
+        u:AdjustHealth(nil, u:GetMaxHealth() * delta)
+        if (u.__health or 0) <= 0 then
           local ok, err = pcall(function() u:OnDecayed() end)
           if not ok then WARN('OnDecayed: ' .. tostring(err)) end
         end
@@ -343,8 +350,15 @@ function __factoryTick()
     -- and RolloffBody): while the finished unit is still leaving the build pad
     -- the factory is busy and its queue is blocked — the next unit must NOT
     -- start on top of the one rolling off.
+    -- !IsDead is the second of the four conditions in the engine's dispatch gate
+    -- (IAiCommandDispatchImpl::TaskTick, Cfile:746583-746586: !IsBeingBuilt &&
+    -- !IsDead && !Attached && !BlockCommandQueue). Without it a killed factory
+    -- keeps starting queued units throughout its multi-beat DeathThread
+    -- (unit.lua:1200-1241), while the original destroys what it was building
+    -- (defaultunits.lua:683-688, unit.lua:1259-1263).
     if q and table.getn(q) > 0 and not f.__beingBuilt and not isBuilding(id) and not f.__paused
-      and not f.__busy and not f.__blockCommandQueue then
+      and not f.__busy and not f.__blockCommandQueue
+      and not f.__dead and not f.__destroyQueued then
       local item = q[1]
       if __isBuildRestricted(f, item.id) then
         -- A build-restricted unit is never produced (Unit::CanBuild, the army
@@ -415,9 +429,12 @@ function __buildCollect()
     local army = (b and b.__army) or 1
     task.step = 0
     task.blocked = false
-    if not aktiv[tid] or (b and b.__paused == true) then
-      -- Still waiting in the queue OR the builder is paused (SetPaused,
-      -- cfunc_SetPausedL): costs nothing, does nothing.
+    if not aktiv[tid] or (b and (b.__paused == true or b.__dead or b.__destroyQueued)) then
+      -- Still waiting in the queue, the builder is paused (SetPaused,
+      -- cfunc_SetPausedL), or the builder is DEAD and running its DeathThread —
+      -- same dispatch gate as the factory above (!IsDead, Cfile:746584). Costs
+      -- nothing, does nothing; the task itself is dropped once the unit leaves
+      -- __units.
       task.blocked = true
       __econClearBuildRequest(army, tid)
     elseif b and t
@@ -516,10 +533,24 @@ function __buildApply()
     elseif b and t and task.step > 0 then
       local rate = __econBuildRate(army, tid)
       local oldFrac = t.__fraction or 0
-      local f = oldFrac + task.step * rate
+      local maxH = t:GetMaxHealth()
+      local delta = task.step * rate
+      local f = oldFrac + delta
       if f > 1 then f = 1 end
+      if f < 0 then f = 0 end
+      -- Moho::Unit::Materialize, positive-delta branch (Cfile:953458-953466):
+      -- the fraction is raised to health/maxHealth when that is higher — the
+      -- fraction FOLLOWS the health, never the other way round. Health is read
+      -- BEFORE this tick's adjustment.
+      if delta > 0 and maxH > 0 then
+        local hr = (t.__health or 0) / maxH
+        if hr > f then f = hr end
+      end
       t.__fraction = f
-      t.__health = t:GetMaxHealth() * f
+      -- Cfile:953468: AdjustHealth(0, maxHealth * delta) — ADJUSTED by the
+      -- delta, not assigned to maxHealth * fraction. Assigning healed away any
+      -- damage the construction site had taken since the last tick.
+      t:AdjustHealth(nil, maxH * delta)
       -- Construction: the builder's WorkProgress IS the site's fraction
       -- (Cfile:815480-815482) — that is the value the UI shows
       -- (construction.lua:380 GetWorkProgress).

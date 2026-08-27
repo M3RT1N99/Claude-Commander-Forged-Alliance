@@ -30,11 +30,18 @@ export function installEngineGlobals(host: LuaHost): void {
 export function setTerrainSource(
   host: LuaHost,
   heightAt: (x: number, z: number) => number,
-  size?: { width: number; height: number },
+  size?: { width: number; height: number; waterElevation?: number },
 ): void {
   host.setGlobal('__terrainHeight', heightAt)
   if (size) {
     host.setGlobal('__mapSizeX', size.width)
     host.setGlobal('__mapSizeZ', size.height)
+    // The map's water surface, from the same STIMap step that loads the
+    // heightfield. Absent water is exactly -10000 (Entity::GetStartingLayer,
+    // Cfile:857506-857510), which is what `__setWaterLevel(nil)` stores — so a
+    // caller with no water (every synthetic test terrain) keeps the
+    // mWaterEnabled = false behaviour and GetSurfaceHeight stays the raw
+    // elevation.
+    host.eval(`__setWaterLevel(${size.waterElevation ?? 'nil'})`)
   }
 }

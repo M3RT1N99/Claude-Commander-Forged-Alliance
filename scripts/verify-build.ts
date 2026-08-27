@@ -131,6 +131,135 @@ beat()
 check(num(`__units[${far}].__fraction`) === fFar0, 'ausser Reichweite: kein Baufortschritt')
 check(host.eval(`return __units[${acu}]:IsMoving()`) === true, 'Bauer laeuft zum Ziel (Approach)')
 
+console.log('\n== Damage to a construction site SURVIVES the next build tick ==')
+// Moho::Unit::Materialize (Cfile:953468) ADJUSTS health by maxHealth * delta;
+// it does not assign maxHealth * fraction. Assigning healed away every hit a
+// site took between ticks, so a construction site was effectively invulnerable
+// while a builder worked on it. The positive-delta branch also raises the
+// fraction to health/maxHealth (Cfile:953464-953465) — the fraction follows the
+// health, never the reverse.
+{
+  // Own builder: the range test above walked `acu` off to x = 200.
+  const acu2 = spawnLuaUnit(host, 'uel0001', { x: 300, y: 0, z: 300 }, 1)
+  const site3 = spawnBuildSite(host, 'ueb1101', { x: 304, y: 0, z: 300 }, 1)
+  army.mass = 100000
+  army.energy = 100000
+  issueBuildTask(host, acu2, site3)
+  beat()
+  const maxH = num(`__units[${site3}]:GetMaxHealth()`)
+  const hBefore = num(`__units[${site3}].__health`)
+  const fBefore = num(`__units[${site3}].__fraction`)
+  check(hBefore > 0, `the site has health after one build beat (${hBefore.toFixed(1)})`)
+
+  // Take a bite out of it, then let exactly one more build tick run.
+  const bite = hBefore * 0.5
+  host.eval(`__units[${site3}]:AdjustHealth(nil, ${-bite})`)
+  const hDamaged = num(`__units[${site3}].__health`)
+  check(near(hDamaged, hBefore - bite, 0.01), `damage lands (${hDamaged.toFixed(1)})`)
+  beat()
+  const hAfter = num(`__units[${site3}].__health`)
+  const fAfter = num(`__units[${site3}].__fraction`)
+  // One tick adds maxHealth * delta; the damage must still be missing. The
+  // reference is an UNDAMAGED site at the same fraction — that is exactly what
+  // the old `health = maxHealth * fraction` assignment produced.
+  const expected = hDamaged + maxH * (fAfter - fBefore)
+  check(
+    hAfter < maxH * fAfter - 0.01,
+    `the damage is still gone after the build tick (${hAfter.toFixed(1)} < undamaged ${(maxH * fAfter).toFixed(1)} at the same fraction)`,
+  )
+  check(
+    near(hAfter, expected, Math.max(1, maxH * 0.001)),
+    `health moved by the fraction delta, not to maxHealth*fraction (${hAfter.toFixed(1)}, want ~${expected.toFixed(1)})`,
+  )
+}
+
+console.log('\n== Materialize raises the fraction to health/maxHealth, not the reverse ==')
+// The positive-delta branch of Moho::Unit::Materialize (Cfile:953458-953466):
+//   v4 = min(fraction + delta, 1); if (health / maxHealth > v4) v4 = health / maxHealth
+// The health is read BEFORE this tick's AdjustHealth, so an OVER-healed site
+// (health/maxH above fraction+delta) pulls the fraction UP to match. Note this
+// makes "fraction >= health/maxHealth" NOT an engine invariant: the same tick
+// then adds maxH*delta on top, ending with health/maxH = fAfter + delta.
+{
+  const acu3 = spawnLuaUnit(host, 'uel0001', { x: 340, y: 0, z: 300 }, 1)
+  const site4 = spawnBuildSite(host, 'ueb1101', { x: 344, y: 0, z: 300 }, 1)
+  army.mass = 100000
+  army.energy = 100000
+  issueBuildTask(host, acu3, site4)
+  beat()
+  const maxH4 = num(`__units[${site4}]:GetMaxHealth()`)
+  const fPre = num(`__units[${site4}].__fraction`)
+
+  // Heal it well ABOVE maxH * fraction — that is what drives the branch.
+  const target = maxH4 * (fPre + 0.20)
+  host.eval(`__units[${site4}]:AdjustHealth(nil, ${target - num(`__units[${site4}].__health`)})`)
+  const hPre = num(`__units[${site4}].__health`)
+  const ratioPre = hPre / maxH4
+  check(ratioPre > fPre + 0.1, `site healed above its fraction (${ratioPre.toFixed(4)} vs ${fPre.toFixed(4)})`)
+
+  beat()
+  const fPost = num(`__units[${site4}].__fraction`)
+  // Without the branch the fraction would be fPre + delta (~fPre + 0.008).
+  check(
+    fPost > fPre + 0.1,
+    `the fraction jumped to the pre-tick health ratio, not fPre+delta (${fPost.toFixed(4)}, fPre+delta ~ ${(fPre + 0.008).toFixed(4)})`,
+  )
+  check(
+    near(fPost, ratioPre, 0.02),
+    `and it equals health/maxHealth read BEFORE the tick (${fPost.toFixed(4)} vs ${ratioPre.toFixed(4)})`,
+  )
+}
+
+console.log('\n== Decay ADJUSTS health too — damage on an abandoned site survives ==')
+// __decayTick mirrors Materialize(-0.1 / maxVal) (Cfile:952836) and must ADJUST
+// by maxHealth * delta (Cfile:953468), not assign maxHealth * fraction. With the
+// assign form a decaying site healed its damage away on every decay tick.
+{
+  const orphan = spawnBuildSite(host, 'ueb1101', { x: 380, y: 0, z: 300 }, 1)
+  // Give it a start: build it up a bit, then abandon it (no build task at all).
+  const acu4 = spawnLuaUnit(host, 'uel0001', { x: 376, y: 0, z: 300 }, 1)
+  army.mass = 100000
+  army.energy = 100000
+  const tidO = issueBuildTask(host, acu4, orphan)
+  for (let i = 0; i < 20; i++) beat()
+  host.eval(`__abortBuildTasks(${acu4})`)
+  void tidO
+  const maxHO = num(`__units[${orphan}]:GetMaxHealth()`)
+  const e = `(__units[${orphan}].__bp.Economy or {})`
+  const maxVal = num(`math.max(${e}.BuildCostEnergy or 0, ${e}.BuildCostMass or 0, ${e}.BuildTime or 0)`)
+  const step = maxHO * (0.1 / maxVal)
+
+  // Decay only starts once the site has NOT been materialized for more than one
+  // tick (build.lua: the engine resets mCreationTick on every Materialize,
+  // Cfile:953443). Let that gate open first, so the beat we measure really is a
+  // decay beat.
+  // This suite's local beat() does not run the decay phase (the engine runs it
+  // inside Unit::OnTick, Cfile:952824-952840); call it explicitly.
+  const decayBeat = (): void => {
+    beat()
+    host.eval('__decayTick()')
+  }
+  const fBeforeDecay = num(`__units[${orphan}].__fraction`)
+  for (let i = 0; i < 3; i++) decayBeat()
+  check(
+    num(`__units[${orphan}].__fraction`) < fBeforeDecay,
+    `the abandoned site is decaying (${fBeforeDecay.toFixed(4)} -> ${num(`__units[${orphan}].__fraction`).toFixed(4)})`,
+  )
+
+  // Damage it, then let exactly one decay tick run.
+  host.eval(`__units[${orphan}]:AdjustHealth(nil, ${-num(`__units[${orphan}].__health`) * 0.5})`)
+  const hDam = num(`__units[${orphan}].__health`)
+  const fDam = num(`__units[${orphan}].__fraction`)
+  check(hDam < maxHO * fDam - 0.01, `abandoned site is damaged below maxH*fraction (${hDam.toFixed(2)} < ${(maxHO * fDam).toFixed(2)})`)
+
+  decayBeat()
+  const hDec = num(`__units[${orphan}].__health`)
+  check(
+    near(hDec, hDam - step, Math.max(0.05, step * 0.05)),
+    `decay subtracted maxH*delta from the DAMAGED health (${hDec.toFixed(2)}, want ~${(hDam - step).toFixed(2)}) — not maxH*fraction (${(maxHO * num(`__units[${orphan}].__fraction`)).toFixed(2)})`,
+  )
+}
+
 host.close()
 for (const f of openFiles) await f.close()
 console.log(failures === 0 ? '\nBUILD BESTANDEN' : `\n${failures} CHECK(S) FEHLGESCHLAGEN`)

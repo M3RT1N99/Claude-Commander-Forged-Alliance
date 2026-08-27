@@ -101,6 +101,30 @@ local function footprintRadius(u)
   return s * 0.5
 end
 
+-- The height a moving unit sits at. CAiPathSpline::Update (Cfile:765808-765823)
+-- and ::Generate (Cfile:766391) branch on the blueprint's MotionType: ONLY
+-- Water, AmphibiousFloating and Hover clamp UP to the water surface
+-- (max(GetElevation, mWaterElevation) while mWaterEnabled); every other type —
+-- Land, Biped, Amphibious, SurfacingSub, Air, Special — takes the RAW
+-- heightfield elevation. An amphibious unit therefore WALKS THE SEABED, which
+-- CUnitMotion::IsOnValidLayer confirms by accepting LAYER_Seabed for
+-- RULEUMT_Amphibious only (Cfile:965960-965975).
+-- Enum values: Cfile:656550-656583.
+--
+-- Using GetSurfaceHeight for everything was harmless only while the Sim never
+-- learned the map's water level (__setWaterLevel had no caller, so the max()
+-- was a no-op). It stopped being harmless the moment the water level arrived.
+local FLOATS_ON_WATER = {
+  RULEUMT_Water = true,
+  RULEUMT_AmphibiousFloating = true,
+  RULEUMT_Hover = true,
+}
+local function surfaceY(u, x, z)
+  local mt = u.__bp and u.__bp.Physics and u.__bp.Physics.MotionType
+  if FLOATS_ON_WATER[mt] then return GetSurfaceHeight(x, z) end
+  return GetTerrainHeight(x, z)
+end
+
 local function blockedAt(u, x, z)
   local myR = footprintRadius(u)
   for _, other in pairs(__units) do
@@ -165,10 +189,19 @@ function __advanceMotion()
       end
     end
 
-    if goal and p and (u:IsUnitState('Immobile') or stunned) then
+    if goal and p and (u.__dead or u.__destroyQueued or u:IsUnitState('Immobile') or stunned) then
+      -- A DEAD unit computes no movement at all: CUnitMotion::CalcMoveLand
+      -- (Cfile:971696-971704), ::CalcMoveWater (Cfile:971825-971826) and
+      -- ::CalcMoveHover (Cfile:971533-971534) each open with
+      -- `if (IsDead(mUnit)) { result = 0; }` and skip CalcMoveCommon entirely.
+      -- Death is not instant here either — DeathThread runs for several beats
+      -- (unit.lua:1200-1241) — so without this a killed unit kept driving to its
+      -- goal for the whole death sequence.
+      --
       -- SetImmobile is a runtime UNITSTATE bit. The native motion task waits
       -- while it or the stun counter is set and keeps its waypoint, so clearing
-      -- the gate resumes the same order instead of discarding it.
+      -- the gate resumes the same order instead of discarding it. The same
+      -- shape is right for death: the goal stays, the unit simply stops.
       u.__speed = 0
     elseif goal and p then
       local m = motionParams(u)
@@ -202,7 +235,7 @@ function __advanceMotion()
         else
           p[1] = goal[1]
           p[3] = goal[2]
-          p[2] = GetSurfaceHeight(p[1], p[3])
+          p[2] = surfaceY(u, p[1], p[3])
           u.__goal = false
           -- Keep the momentum through an intermediate/patrol goal (speed-through);
           -- only a final goal brakes to 0 (the order system re-issues the next
@@ -292,7 +325,7 @@ function __advanceMotion()
         -- A land unit follows the ground. Without this the sim drives at height
         -- 0 through the hills while the renderer paints something else — the
         -- two positions drift apart in Y forever.
-        p[2] = GetSurfaceHeight(p[1], p[3])
+        p[2] = surfaceY(u, p[1], p[3])
       end
     end
   end

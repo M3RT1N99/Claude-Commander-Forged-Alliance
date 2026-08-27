@@ -285,6 +285,52 @@ const worldHit = String(
   host.eval(`local c = __mauiHitTest(960, 500) if not c then return 'NICHTS' end return c.__kind`),
 )
 check(worldHit === 'worldview', `der Klick in die freie Fläche trifft die WorldView (${worldHit})`)
+
+console.log('\n== Der globale Klick-Haken erreicht uimain.OnMouseButtonPress ==')
+// Cfile:1147534-1147558: bei JEDEM ButtonPress/ButtonDClick ruft die Engine
+// SCR_Import('/lua/ui/uimain.lua').OnMouseButtonPress(event) — VOR der
+// Zustellung an das getroffene Control (PostEvent erst Cfile:1147582). Das
+// Event ist eine FRISCHE Tabelle mit nur Type/x/y (Cfile:1147543-1147545).
+// uimain.lua:167-177 faechert an alle AddOnMouseClickedFunc-Registrierungen
+// auf; combo.lua:289 und orders.lua:539 haengen daran. Ohne den Aufruf war
+// jede dieser Registrierungen tot.
+host.eval(`
+  __clickHookCalls = 0
+  __clickHookType = ''
+  __clickHookX = -1
+  __clickHookY = -1
+  __clickHookExtra = ''
+  __clickHookFn = function(event)
+    __clickHookCalls = __clickHookCalls + 1
+    __clickHookType = tostring(event.Type)
+    __clickHookX = event.x or -1
+    __clickHookY = event.y or -1
+    for k in pairs(event) do
+      if k ~= 'Type' and k ~= 'x' and k ~= 'y' then
+        __clickHookExtra = __clickHookExtra .. tostring(k) .. ','
+      end
+    end
+  end
+  import('/lua/ui/uimain.lua').AddOnMouseClickedFunc(__clickHookFn)
+`)
+host.eval(`__mauiMouse('ButtonPress', 960, 500, { Left = true }, 1)`)
+check(Number(host.eval('return __clickHookCalls')) === 1, `der Haken feuert genau einmal (${host.eval('return __clickHookCalls')})`)
+check(String(host.eval('return __clickHookType')) === 'ButtonPress', `Type = ButtonPress (${host.eval('return __clickHookType')})`)
+check(
+  Number(host.eval('return __clickHookX')) === 960 && Number(host.eval('return __clickHookY')) === 500,
+  `x/y sind KLEIN geschrieben und tragen die Mausposition (${host.eval('return __clickHookX')}/${host.eval('return __clickHookY')})`,
+)
+check(
+  String(host.eval('return __clickHookExtra')) === '',
+  `die Tabelle traegt NUR Type/x/y — keine Modifiers, kein KeyCode (extra: '${host.eval('return __clickHookExtra')}')`,
+)
+// Auch ein Klick AUF ein Control loest ihn aus — er haengt nicht am Treffer.
+host.eval(`__mauiMouse('ButtonPress', 615, 992, { Left = true }, 1)`)
+check(Number(host.eval('return __clickHookCalls')) === 2, 'auch ein Klick auf ein Control loest ihn aus (nicht an `hit` gebunden)')
+// Ein ButtonRelease darf ihn NICHT ausloesen (nur Press/DClick, Cfile:1147539-1147542).
+host.eval(`__mauiMouse('ButtonRelease', 615, 992, { Left = true }, 1)`)
+check(Number(host.eval('return __clickHookCalls')) === 2, 'ein ButtonRelease loest ihn NICHT aus')
+host.eval(`import('/lua/ui/uimain.lua').RemoveOnMouseClickedFunc(__clickHookFn)`)
 check(
   host.eval(`return __mauiMouse('ButtonPress', 960, 500, { Left = true })`) === false,
   'und die UI verbraucht ihn NICHT — er gehört der Welt',

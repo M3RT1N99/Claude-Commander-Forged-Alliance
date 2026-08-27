@@ -100,30 +100,91 @@ local function activeShieldList()
   return __shieldList
 end
 
--- The shield that intercepts a hit on `target`: its OWN active shield, or a
--- COVERING dome whose sphere geometrically contains the target but NOT the
--- damage origin (sub_736E40 subtracts every containing shield's absorption,
--- Cfile:1062711; a shell fired from inside the dome is not absorbed). This is
--- how a shield generator protects the units standing under it.
-local function coveringShield(target, tp, origin)
-  local own = target.MyShield
-  if shieldOn(own) then return own end
+-- SIM_DoDamage (Cfile:1062730-1062869) — run ONCE per damage event, before any
+-- unit is touched (func_DoDamageArea calls it at Cfile:1063221). It walks the
+-- sim's shield list a single time and records, per eligible dome, how much it
+-- would absorb. A dome is eligible when:
+--   * it has a collision shape (Cfile:1062773-1062775),
+--   * `damageFriendly` is set OR the instigator is not its ally
+--     (Cfile:1062776-1062795),
+--   * the damage ORIGIN is NOT inside its sphere, tested at radius - 0.1
+--     (Cfile:1062796-1062802) — a shell fired from under the dome is not
+--     absorbed by it,
+--   * its sphere intersects the damage sphere (radius; for a ring the engine
+--     retries with maxRadius, Cfile:1062804-1062851),
+--   * and OnGetDamageAbsorption returns > 0 (Cfile:1062828-1062836).
+-- shield.lua:96-99 states the contract in the original's own words: "damage
+-- logic will subtract this value from any damage it does to units under the
+-- shield".
+local function collectAbsorption(origin, radius, amount, damageType, inst, damageFriendly)
+  local out = {}
+  local instArmy = inst and inst.__army
   for _, e in ipairs(activeShieldList()) do
-    if e.owner ~= target then
-      local dtx, dty, dtz = tp[1] - e.x, tp[2] - e.y, tp[3] - e.z
-      if dtx * dtx + dty * dty + dtz * dtz <= e.r2 then
-        local dox, doy, doz = origin[1] - e.x, origin[2] - e.y, origin[3] - e.z
-        if dox * dox + doy * doy + doz * doz > e.r2 then return e.shield end
+    local eligible = true
+    if not damageFriendly and instArmy and e.owner.__army then
+      if IsAlly(instArmy, e.owner.__army) then eligible = false end
+    end
+    if eligible then
+      -- Origin inside the dome (radius - 0.1): not absorbed.
+      local r = math.sqrt(e.r2)
+      local inner = r - 0.1
+      local dox, doy, doz = origin[1] - e.x, origin[2] - e.y, origin[3] - e.z
+      if dox * dox + doy * doy + doz * doz <= inner * inner then eligible = false end
+    end
+    if eligible then
+      -- Sphere-vs-sphere: |centres| <= shieldRadius + damageRadius.
+      local r = math.sqrt(e.r2)
+      local sum = r + radius
+      local dox, doy, doz = origin[1] - e.x, origin[2] - e.y, origin[3] - e.z
+      if dox * dox + doy * doy + doz * doz > sum * sum then eligible = false end
+    end
+    if eligible then
+      local ok, absorbed = pcall(function()
+        return e.shield:OnGetDamageAbsorption(inst, amount, damageType)
+      end)
+      if not ok then
+        WARN('OnGetDamageAbsorption: ' .. tostring(absorbed))
+      elseif type(absorbed) == 'number' and absorbed > 0 then
+        out[table.getn(out) + 1] =
+          { shield = e.shield, x = e.x, y = e.y, z = e.z, r2 = e.r2, absorbed = absorbed }
       end
     end
   end
-  return nil
+  return out
+end
+
+-- sub_736E40 (Cfile:1062694-1062727): subtract the absorption of EVERY recorded
+-- dome whose sphere contains this entity's position (PointIsInside at
+-- Cfile:1062711, subtraction at Cfile:1062715).
+local function reduceByShields(absorbers, p, amount)
+  for _, a in ipairs(absorbers) do
+    local dx, dy, dz = p[1] - a.x, p[2] - a.y, p[3] - a.z
+    if dx * dx + dy * dy + dz * dz <= a.r2 then amount = amount - a.absorbed end
+  end
+  return amount
+end
+
+-- The second loop of func_DoDamageArea (Cfile:1063310-1063386): each recorded
+-- dome is damaged EXACTLY ONCE, with the amount it absorbed
+-- (mAmount = v17[3], Cfile:1063319). Previously every covered unit drove its own
+-- OnDamage call into the same dome, draining it N-fold.
+local function damageAbsorbers(absorbers, inst, origin, damageType)
+  for _, a in ipairs(absorbers) do
+    local vec = Vector(a.x - origin[1], a.y - origin[2], a.z - origin[3])
+    local ok, err = pcall(function()
+      a.shield:OnDamage(inst, a.absorbed, vec, damageType)
+    end)
+    if not ok then WARN('Shield OnDamage: ' .. tostring(err)) end
+  end
 end
 
 -- ---------------------------------------------------------------------
 -- func_DoDamagePoint (Cfile:1062873) — EIN Ziel.
 -- ---------------------------------------------------------------------
-local function damagePoint(instigator, origin, target, amount, damageType, damageSelf)
+-- `fromArea` marks the calls made by DamageArea/DamageRing: those already had
+-- every covering dome's absorption subtracted by the caller, so this function
+-- must not consult covering domes again (that double-count was the N-fold drain).
+local function damagePoint(instigator, origin, target, amount, damageType, damageSelf, fromArea)
   if not target or target.__destroyQueued then return end
   if amount == 0 then return end
 
@@ -139,19 +200,48 @@ local function damagePoint(instigator, origin, target, amount, damageType, damag
   local tp = target.__pos or { 0, 0, 0 }
   local vec = Vector(tp[1] - origin[1], tp[2] - origin[2], tp[3] - origin[3])
 
-  -- Shield: an active shield COVERING the target takes the hit first — its OWN
-  -- dome, or an ally shield-generator's dome the target stands under
-  -- (coveringShield -> sub_736E40, Cfile:1062695/1062711). shield.lua's OnDamage
-  -- applies the shield's OWN armor/handicap (OnGetDamageAbsorption) and passes
-  -- overkill to the SHIELD's owner, so a full absorb returns here and the
-  -- target's OnDamageBy never fires (Cfile:1063018). Reduction: we route a hit
-  -- through ONE covering shield (the engine subtracts each overlapping dome's
-  -- absorption in turn) — enough to model a base under a shield generator.
-  local shield = coveringShield(target, tp, origin)
-  if shield then
-    local ok, err = pcall(function() shield:OnDamage(inst, amount, vec, damageType) end)
-    if not ok then WARN('Shield OnDamage: ' .. tostring(err)) end
-    return
+  -- Only the target's OWN dome is consulted here. func_DoDamagePoint
+  -- (Cfile:1062873-1063170) contains NO shield code at all: in the engine a
+  -- projectile physically collides with the shield entity, so a direct hit
+  -- never reaches the unit underneath. We do not model projectile-vs-shield
+  -- collision, so the own-shield branch is our stand-in for that — a DOCUMENTED
+  -- approximation, not a guess.
+  --
+  -- `fromArea` skips the WHOLE shield block, own dome included. For area damage
+  -- `collectAbsorption` walks activeShieldList(), which contains every unit's
+  -- own dome as well, and the caller has already subtracted each covering dome
+  -- from `amount` (reduceByShields = sub_736E40, Cfile:1063263). Re-consulting
+  -- ANY dome here — including the target's own — would swallow the remainder
+  -- the engine explicitly passes to the entity (it skips the entity only when
+  -- the remainder is <= 0, Cfile:1063264) and charge that dome a second time on
+  -- top of `damageAbsorbers` (Cfile:1063310-1063386).
+  --
+  -- For a DIRECT point hit both branches stay: the engine's dome stops the
+  -- PROJECTILE by collision and we do not model projectile-vs-shield collision,
+  -- so this is the stand-in for it. Documented in
+  -- specs/001-engine-fidelity-fixes/research.md.
+  if not fromArea then
+    local shield = target.MyShield
+    if not shieldOn(shield) then
+      for _, e in ipairs(activeShieldList()) do
+        if e.owner ~= target then
+          local dtx, dty, dtz = tp[1] - e.x, tp[2] - e.y, tp[3] - e.z
+          if dtx * dtx + dty * dty + dtz * dtz <= e.r2 then
+            local dox, doy, doz = origin[1] - e.x, origin[2] - e.y, origin[3] - e.z
+            -- A shell fired from inside the dome is not absorbed (Cfile:1062801).
+            if dox * dox + doy * doy + doz * doz > e.r2 then
+              shield = e.shield
+              break
+            end
+          end
+        end
+      end
+    end
+    if shieldOn(shield) then
+      local ok, err = pcall(function() shield:OnDamage(inst, amount, vec, damageType) end)
+      if not ok then WARN('Shield OnDamage: ' .. tostring(err)) end
+      return
+    end
   end
 
   -- Armor + handicap reduce the amount only for UNITS (Cfile:1063012-1063033);
@@ -230,14 +320,25 @@ function DamageArea(instigator, location, radius, amount, damageType, damageFrie
   if inst and inst.__isProj then inst = inst.__launcher or inst end
   local instArmy = inst and inst.__army
 
+  -- ONE shield pass for the whole event (Cfile:1063221), before any unit.
+  local absorbers = collectAbsorption(origin, radius, amount, damageType, inst, damageFriendly)
+
   for _, u in pairs(__units) do
     local p = u.__pos
     local dx, dy, dz = p[1] - origin[1], p[2] - origin[2], p[3] - origin[3]
     if dx * dx + dy * dy + dz * dz <= radius * radius
       and splashEligible(u, inst, instArmy, damageFriendly, damageSelf) then
-      damagePoint(instigator, origin, u, amount, damageType, damageSelf)
+      -- Per entity: amount minus every containing dome's absorption; <= 0 means
+      -- fully covered and the unit is skipped entirely (Cfile:1063263-1063264).
+      local reduced = reduceByShields(absorbers, p, amount)
+      if reduced > 0 then
+        damagePoint(instigator, origin, u, reduced, damageType, damageSelf, true)
+      end
     end
   end
+
+  -- Then each dome once, with what it absorbed (Cfile:1063310-1063386).
+  damageAbsorbers(absorbers, inst, origin, damageType)
 end
 
 --- "DamageRing(instigator, location, minRadius, maxRadius, amount, damageType,
@@ -254,15 +355,24 @@ function DamageRing(instigator, location, minRadius, maxRadius, amount, damageTy
   if inst and inst.__isProj then inst = inst.__launcher or inst end
   local instArmy = inst and inst.__army
 
+  -- A ring tests the shields against maxRadius (the RING_EFFECT retry at
+  -- Cfile:1062812-1062851 uses mMaxRadius).
+  local absorbers = collectAbsorption(origin, maxRadius, amount, damageType, inst, damageFriendly)
+
   for _, u in pairs(__units) do
     local p = u.__pos
     local dx, dy, dz = p[1] - origin[1], p[2] - origin[2], p[3] - origin[3]
     local d2 = dx * dx + dy * dy + dz * dz
     if d2 >= minRadius * minRadius and d2 <= maxRadius * maxRadius
       and splashEligible(u, inst, instArmy, damageFriendly, damageSelf) then
-      damagePoint(instigator, origin, u, amount, damageType, damageSelf)
+      local reduced = reduceByShields(absorbers, p, amount)
+      if reduced > 0 then
+        damagePoint(instigator, origin, u, reduced, damageType, damageSelf, true)
+      end
     end
   end
+
+  damageAbsorbers(absorbers, inst, origin, damageType)
 end
 
 --- MetaImpact(instigator, location, radius, amount) — der IMPULS eines
@@ -300,8 +410,17 @@ function __queueDeletion(e)
 end
 
 function __flushDeletions()
+  -- Sim::AdvanceBeat drains until EMPTY, not one generation per beat:
+  -- `while (mDeletionQueue._Mysize) { pop_front; dtor(); }`
+  -- (Cfile:1076638-1076657). An OnDestroy that destroys something else — a
+  -- factory taking its half-built unit with it (unit.lua:1259-1263), a
+  -- TrashBag flush — therefore completes in the SAME beat. Taking one snapshot
+  -- deferred each such cascade by a beat.
+  -- Termination is not in question: Entity::Destroy refuses to queue an entity
+  -- twice (`if self.__destroyQueued then return end`, moho.lua), so every
+  -- entity enters this queue at most once.
+  while table.getn(__deletionQueue) > 0 do
   local queue = __deletionQueue
-  if table.getn(queue) == 0 then return end
   __deletionQueue = {}
   for _, e in ipairs(queue) do
     if not e.__destroyed then
@@ -341,5 +460,6 @@ function __flushDeletions()
         __econUnregister(e.__army or 1, e.__id)
       end
     end
+  end
   end
 end

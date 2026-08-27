@@ -139,4 +139,11 @@ export function beat(engine: Engine): void {
   // Phase 7 — die Löschwarteschlange (Sim::AdvanceBeat, Cfile:1076638): erst
   // hier laufen die OnDestroy-Callbacks. Entity:Destroy() löscht NICHT sofort.
   flushDeletions(h)
+  // Phase 8 — close the beat like Sim::Sync does (Cfile:1074261, driven from
+  // CSimDriver::Sync): serialise the Sync table to the user layer and then run
+  // `ResetSyncTable()` (Cfile:1074772-1074773). Without the reset the table
+  // grows for the whole session and every consumer sees stale entries from
+  // earlier beats as if they had just happened — SimSync.lua's own header says
+  // the table is per-beat.
+  h.eval('ResetSyncTable()')
 }

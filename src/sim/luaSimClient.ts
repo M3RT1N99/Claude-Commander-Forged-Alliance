@@ -248,6 +248,14 @@ export class LuaSimClient {
     vfs: GameVfs,
     terrain: HeightfieldData,
     log: (level: string, msg: string) => void,
+    /**
+     * The map's water surface, or undefined when the map has no water. The Sim
+     * needs it for GetSurfaceHeight, the motion layer rule (only Water /
+     * AmphibiousFloating / Hover float, Cfile:765809) and projectile water
+     * impacts. Until this was wired the Sim ran with -10000 forever, so every
+     * water-dependent decision silently resolved to "no water".
+     */
+    waterElevation?: number,
     /** scmap map props — spawned in the sim before any unit (Sim::Setup 7). */
     props: MapPropSpawn[] = [],
   ): Promise<LuaSimClient> {
@@ -296,7 +304,7 @@ export class LuaSimClient {
       client.bootResolve = res
     })
     worker.onmessage = (e: MessageEvent<OutMsg>) => client.onMessage(e.data, log)
-    worker.postMessage({ type: 'boot', files, terrain, props })
+    worker.postMessage({ type: 'boot', files, terrain, waterElevation, props })
     await booted
     return client
   }
@@ -459,7 +467,11 @@ export class LuaSimClient {
    * Ohne das stapeln sich beim zweiten Sandbox-Start ACUs — und mit ihnen der
    * doppelte Startvorrat aus GiveInitialResources.
    */
-  async reset(terrain: HeightfieldData, props: MapPropSpawn[] = []): Promise<void> {
+  async reset(
+    terrain: HeightfieldData,
+    props: MapPropSpawn[] = [],
+    waterElevation?: number,
+  ): Promise<void> {
     const done = new Promise<void>((res) => {
       this.resetResolve = res
     })
@@ -467,7 +479,7 @@ export class LuaSimClient {
     this.economy = null
     this.removedMapProps.length = 0
     this.audioRequests.length = 0
-    this.worker.postMessage({ type: 'reset', terrain, props })
+    this.worker.postMessage({ type: 'reset', terrain, waterElevation, props })
     await done
   }
 

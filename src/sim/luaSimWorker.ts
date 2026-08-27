@@ -43,7 +43,11 @@ interface Vec3 {
   z: number
 }
 type InMsg =
-  | { type: 'boot'; files: Map<string, Uint8Array>; terrain: HeightfieldData; props?: MapPropSpawn[] }
+  // `waterElevation` is the map's water surface, or undefined when the map has
+  // no water — the Sim needs it for GetSurfaceHeight, the motion layer rule and
+  // projectile water impacts. Absent water means -10000, matching
+  // Entity::GetStartingLayer (Cfile:857506-857510).
+  | { type: 'boot'; files: Map<string, Uint8Array>; terrain: HeightfieldData; waterElevation?: number; props?: MapPropSpawn[] }
   | { type: 'spawn'; reqId: number; id: string; scriptPath: string; scriptBytes: Uint8Array | null; bpBytes: Uint8Array | null; bones: SimBone[]; pos: Vec3; army: number }
   | { type: 'move'; id: number; x: number; z: number; queue?: boolean }
   | { type: 'stop'; id: number }
@@ -76,7 +80,7 @@ type InMsg =
   // Der Sammelpunkt einer Fabrik (IssueFactoryRallyPoint, Cfile:1008266) — KEIN
   // Bewegungsbefehl: die Fabrik bleibt stehen.
   | { type: 'rally'; id: number; x: number; y: number; z: number }
-  | { type: 'reset'; terrain: HeightfieldData; props?: MapPropSpawn[] }
+  | { type: 'reset'; terrain: HeightfieldData; waterElevation?: number; props?: MapPropSpawn[] }
   // Reclaim (dispatch 0x13, CUnitReclaimTask): drain the prop target —
   // either a sim prop id (wrecks) or a map-prop instance index.
   | { type: 'reclaim'; id: number; targetId?: number; mapIndex?: number; queue?: boolean }
@@ -168,7 +172,11 @@ ctx.onmessage = async (e: MessageEvent<InMsg>): Promise<void> => {
     // Original-Lua lesen GetSurfaceHeight, und ohne Quelle knallt es jetzt (statt
     // still 0 zu liefern). Dieselbe bilineare Abfrage wie im Renderer.
     const hf = new Heightfield(msg.terrain)
-    setTerrainSource(h, (x, z) => hf.at(x, z), { width: msg.terrain.width, height: msg.terrain.height })
+    setTerrainSource(h, (x, z) => hf.at(x, z), {
+      width: msg.terrain.width,
+      height: msg.terrain.height,
+      waterElevation: msg.waterElevation,
+    })
     // ALLE Projektil- und Prop-Blueprints, VOR dem ersten Schuss. Die Engine
     // lädt beim Start ebenfalls alles (Blueprints.lua über DiskFindFiles) —
     // mitten im Tick kann eine Waffe nichts nachladen.
@@ -184,7 +192,7 @@ ctx.onmessage = async (e: MessageEvent<InMsg>): Promise<void> => {
   }
   if (msg.type === 'reset') {
     if (!bootFiles) return
-    await resetSession(bootFiles, msg.terrain)
+    await resetSession(bootFiles, msg.terrain, msg.waterElevation)
     if (host) spawnMapProps(host, msg.props ?? [])
     ctx.postMessage({ type: 'reset-done' })
     return
@@ -301,12 +309,20 @@ ctx.onmessage = async (e: MessageEvent<InMsg>): Promise<void> => {
  * doppelte Startkapital da. Also: frischer LuaHost, frischer Engine-Boot —
  * derselbe Weg wie beim ersten Mal.
  */
-async function resetSession(files: Map<string, Uint8Array>, terrain: HeightfieldData): Promise<void> {
+async function resetSession(
+  files: Map<string, Uint8Array>,
+  terrain: HeightfieldData,
+  waterElevation?: number,
+): Promise<void> {
   host?.close()
   const h = await LuaHost.create(files, (level, m) => ctx.postMessage({ type: 'log', level, msg: m }))
   engine = installEngine(h)
   const hf = new Heightfield(terrain)
-  setTerrainSource(h, (x, z) => hf.at(x, z), { width: terrain.width, height: terrain.height })
+  setTerrainSource(h, (x, z) => hf.at(x, z), {
+    width: terrain.width,
+    height: terrain.height,
+    waterElevation,
+  })
   loadBlueprintGroups(h, files)
   host = h
 }

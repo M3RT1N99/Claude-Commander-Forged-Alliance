@@ -40,11 +40,28 @@ const damage = (amt: number): void => host.eval(`Damage(nil, {100,20,100}, __uni
 
 // Create a shield on the unit — the original Unit:CreateShield path (normally
 // read from bp.Defense.Shield; here an explicit spec).
+//
+// The three calls together are the ACU's real ShieldGeneratorField enhancement
+// (uel0001_script.lua:325-327): CreateShield, then the maintenance drain, then
+// SetMaintenanceConsumptionActive. The drain is NOT decoration — shield.lua
+// drives its recharge off `Owner:GetResourceConsumed()` (shield.lua:288
+// ChargingUp advances by fraction/10 per tick, shield.lua:335 drops the shield
+// when the fraction is not 1 and storage is empty). A unit with no consumption
+// reports 0 there (mResourceConsumed is only set while mConsumptionIsActive,
+// Cfile:953945; unit.lua:748-752 turns consumption off exactly when the rates
+// are zero), so a shield on a drain-less owner would never come back up.
+// MaintenanceConsumptionPerSecondEnergy 500 is the blueprint's own value
+// (uel0001_unit.bp:563).
 host.eval(`__units[${u}]:CreateShield({
   ShieldMaxHealth = 250, ShieldRechargeTime = 2, ShieldEnergyDrainRechargeTime = 2,
   ShieldRegenRate = 20, ShieldRegenStartTime = 1, ShieldSize = 10,
   ShieldVerticalOffset = 0, PassOverkillDamage = false,
+  MaintenanceConsumptionPerSecondEnergy = 500,
 })`)
+host.eval(`__units[${u}]:SetEnergyMaintenanceConsumptionOverride(500)`)
+host.eval(`__units[${u}]:SetMaintenanceConsumptionActive()`)
+// Enough energy that the drain is always fully granted (fraction == 1).
+engine.economy.army(1).energy = 1e6
 beat(engine)
 
 console.log('\n== The shield comes up at full strength ==')
@@ -103,6 +120,99 @@ check(shieldHp() < domeHp0, `the covering dome lost health instead (${domeHp0} -
 // A unit OUTSIDE the dome takes the hit directly.
 host.eval(`Damage(nil, { 200, 20, 100 }, __units[${outside}], 60, 'Normal')`)
 check(hpOf(outside) < outsideHp0, `a unit outside the dome takes the hit (${outsideHp0} -> ${hpOf(outside)})`)
+
+console.log('\n== Splash: the dome absorbs ONCE per damage event, not once per unit ==')
+// func_DoDamageArea collects the absorption a single time via SIM_DoDamage
+// (Cfile:1063221), subtracts it per entity with sub_736E40 (Cfile:1063263) and
+// damages each dome exactly once with what it absorbed (Cfile:1063310-1063386).
+// Consulting the dome per covered unit drained it N-fold and left every unit
+// untouched — that was the bug.
+{
+  // Let it regenerate a bit; the exact level does not matter, only that the
+  // dome is up and has more health than one absorption.
+  for (let i = 0; i < 40; i++) beat(engine)
+  const domeBefore = shieldHp()
+  check(shieldOn() && domeBefore > 60, `dome is up with room to absorb (${domeBefore})`)
+
+  // Three more units under the dome (u itself is the generator at 100/100).
+  const under: number[] = []
+  for (const dz of [3, 4, 5]) {
+    under.push(spawnLuaUnit(host, 'uel0001', { x: 100, y: 20, z: 100 + dz }, 1))
+  }
+  beat(engine)
+  const hpBefore = under.map((id) => hpOf(id))
+
+  // One splash from OUTSIDE the dome. Amount 60 < dome health, so the dome
+  // absorbs the whole 60 exactly once and every covered unit takes nothing.
+  host.eval(`DamageArea(nil, { 115, 20, 100 }, 30, 60, 'Normal', true)`)
+  beat(engine)
+
+  const drained = domeBefore - shieldHp()
+  check(
+    Math.abs(drained - 60) < 0.51,
+    `the dome lost ONE absorption (${drained.toFixed(1)}, want ~60 — not ${60 * under.length} for ${under.length} units)`,
+  )
+  under.forEach((id, i) => {
+    check(hpOf(id) === hpBefore[i], `covered unit ${i + 1} took nothing (${hpBefore[i]} -> ${hpOf(id)})`)
+  })
+
+  // And when the splash exceeds what the dome can absorb, the remainder reaches
+  // the units: reduced = amount - absorbed (Cfile:1063263-1063264).
+  const domeHp = shieldHp()
+  const over = domeHp + 100
+  const hpBefore2 = under.map((id) => hpOf(id))
+  host.eval(`DamageArea(nil, { 115, 20, 100 }, 30, ${over}, 'Normal', true)`)
+  beat(engine)
+  under.forEach((id, i) => {
+    check(hpOf(id) < hpBefore2[i], `covered unit ${i + 1} takes the remainder once the dome is exceeded (${hpBefore2[i]} -> ${hpOf(id)})`)
+  })
+}
+
+console.log('\n== Splash on a unit that owns the shield: it takes the remainder too ==')
+// The absorbing dome belongs to the VICTIM here. func_DoDamageArea subtracts the
+// recorded absorption once (sub_736E40, Cfile:1063263) and only skips the entity
+// when the remainder is <= 0 (Cfile:1063264); the dome itself is damaged exactly
+// once, in the separate second loop (Cfile:1063310-1063386).
+// Consulting `target.MyShield` again inside the per-entity damage would swallow
+// that remainder a second time AND charge the dome twice — func_DoDamagePoint
+// (Cfile:1062873-1063170) contains no shield code at all.
+{
+  // Fresh generator + shield, so this block does not depend on what is left above.
+  const owner = spawnLuaUnit(host, 'uel0001', { x: 400, y: 20, z: 400 }, 1)
+  for (let i = 0; i < 8; i++) beat(engine)
+  host.eval(`__units[${owner}]:CreateShield({
+    ShieldMaxHealth = 200, ShieldRechargeTime = 2, ShieldEnergyDrainRechargeTime = 2,
+    ShieldRegenRate = 0, ShieldRegenStartTime = 1, ShieldSize = 10,
+    ShieldVerticalOffset = 0, PassOverkillDamage = false,
+    MaintenanceConsumptionPerSecondEnergy = 500,
+  })`)
+  host.eval(`__units[${owner}]:SetEnergyMaintenanceConsumptionOverride(500)`)
+  host.eval(`__units[${owner}]:SetMaintenanceConsumptionActive()`)
+  engine.economy.army(1).energy = 1e6
+  beat(engine)
+
+  const domeHp = Number(host.eval(`local s=__units[${owner}].MyShield; return s and s:GetHealth() or -1`))
+  check(domeHp === 200, `the owner's dome is up at 200 (${domeHp})`)
+  // ShieldRegenRate 0 above: the dome cannot move on its own, so the drop we
+  // measure is exactly the absorption.
+  const hp0 = hpOf(owner)
+  const splash = domeHp + 150
+
+  // Origin OUTSIDE the dome (dist 15 > 10) but inside the splash radius.
+  host.eval(`DamageArea(nil, { 415, 20, 400 }, 30, ${splash}, 'Normal', true)`)
+  beat(engine)
+
+  const domeAfter = Number(host.eval(`local s=__units[${owner}].MyShield; return s and s:GetHealth() or -1`))
+  check(domeAfter === 0, `the dome is drained exactly once, to 0 (${domeAfter})`)
+  check(
+    hpOf(owner) < hp0,
+    `the shield OWNER takes the remainder (${hp0} -> ${hpOf(owner)}, splash ${splash} vs dome 200)`,
+  )
+  check(
+    Math.abs((hp0 - hpOf(owner)) - 150) < 0.01,
+    `and it is exactly amount - absorbed = 150 (${(hp0 - hpOf(owner)).toFixed(2)})`,
+  )
+}
 
 console.log(failures === 0 ? '\nSHIELDS PASSED' : `\nSHIELDS FAILED (${failures})`)
 process.exit(failures === 0 ? 0 : 1)

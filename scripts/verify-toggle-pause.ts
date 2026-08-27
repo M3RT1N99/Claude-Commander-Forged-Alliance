@@ -92,5 +92,62 @@ console.log('\n== SetPaused halts a builder, unpause resumes it ==')
   check(f3 > f2 + 1e-4, `progress resumes after unpause (${f2.toFixed(3)} -> ${f3.toFixed(3)})`)
 }
 
+console.log('\n== The beat closes with ResetSyncTable() ==')
+// Sim::Sync serialises the Sync table to the user layer and then runs
+// `SCR_LuaDoString("ResetSyncTable()")` (Cfile:1074261, 1074772-1074773), driven
+// from CSimDriver::Sync. The table is therefore PER BEAT: whatever the sim Lua
+// writes during a beat is readable inside that beat and gone at the start of the
+// next one. Without the reset it grew for the whole session and every consumer
+// saw stale entries from earlier beats as if they had just happened.
+{
+  simHost.eval(`Sync.__probe = 'written during the beat'`)
+  check(
+    String(simHost.eval(`return tostring(Sync.__probe)`)) === 'written during the beat',
+    'a Sync write is visible right after it happens',
+  )
+  beat(engine)
+  check(
+    simHost.eval(`return Sync.__probe == nil`) === true,
+    'and it is gone once the beat has closed',
+  )
+  // The table itself must still be there — ResetSyncTable REPLACES it, it does
+  // not delete the global (simsync.lua).
+  check(
+    simHost.eval(`return type(Sync) == 'table'`) === true,
+    'Sync itself survives the reset (the table is replaced, not removed)',
+  )
+}
+
+console.log('\n== The deletion queue drains until EMPTY, not one generation per beat ==')
+// Sim::AdvanceBeat: `while (mDeletionQueue._Mysize) { pop_front; dtor(); }`
+// (Cfile:1076638-1076657). An OnDestroy that destroys something else — a factory
+// taking its half-built unit with it (unit.lua:1259-1263) — therefore completes
+// in the SAME beat. Draining one snapshot deferred every such cascade by a beat.
+{
+  // Marked as projectiles so the flush takes the harmless __projectiles branch;
+  // ids are required — the flush indexes the per-kind table by __id.
+  simHost.eval(`
+    __cascadeDone = false
+    __cascadeA = { __id = 900001, __isProj = true,
+                   OnDestroy = function(self) __cascadeB:Destroy() end }
+    __cascadeB = { __id = 900002, __isProj = true,
+                   OnDestroy = function(self) __cascadeDone = true end }
+    setmetatable(__cascadeA, { __index = moho.entity_methods })
+    setmetatable(__cascadeB, { __index = moho.entity_methods })
+  `)
+  // B is destroyed from INSIDE A's OnDestroy, i.e. it enters the queue while the
+  // queue is already being drained — the second generation.
+  simHost.eval(`__cascadeA:Destroy()`)
+  simHost.eval(`__flushDeletions()`)
+  check(
+    simHost.eval(`return __cascadeDone == true`) === true,
+    'a second-generation destroy runs in the SAME flush, not the next beat',
+  )
+  check(
+    simHost.eval(`return __cascadeB.__destroyed == true`) === true,
+    'and the cascaded entity is fully destroyed',
+  )
+}
+
 console.log(failures === 0 ? '\nTOGGLE/PAUSE PASSED' : `\nTOGGLE/PAUSE FAILED (${failures})`)
 process.exit(failures === 0 ? 0 : 1)

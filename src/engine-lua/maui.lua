@@ -1164,15 +1164,39 @@ function __mauiMouse(evType, x, y, mods, keyCode)
     end
   end
 
-  -- Ein ButtonPress ODER ButtonDClick auf ein ANDERES Control entzieht den
-  -- Tastatur-Fokus (Cfile:1147523-1147531) — NACH dem Hover-Update, wie in der
-  -- Engine (der Fokus-Verlust folgt der Enter/Exit-Ausgabe). Sonst tippt man
-  -- weiter in ein Eingabefeld, das man laengst verlassen hat.
+  -- Ein ButtonPress ODER ButtonDClick auf ein ANDERES Control MELDET das dem
+  -- Fokus-Control — es entzieht ihm den Fokus aber NICHT (Cfile:1147524-1147531).
+  -- Der Aufruf geht ueber vtable-Offset 64 = Slot 16 = LosingKeyboardFocus
+  -- (`(*v29)[8].mPrev`, Vtable-Layout Cfile:396337-396366) und damit auf
+  -- RunScript "OnLoseKeyboardFocus" (Cfile:1124565-1124570).
+  -- `Maui_CurrentFocusControl` wird dort NICHT geschrieben; einziger Schreiber
+  -- ist MAUI_SetKeyboardFocus (Cfile:1141557-1141596). Ein Klick daneben
+  -- beendet die Texteingabe also nicht — chat.lua gibt den Fokus selbst per
+  -- AbandonKeyboardFocus zurueck (Escape/Enter).
   if (evType == 'ButtonPress' or evType == 'ButtonDClick')
     and __mauiFocus and hit ~= __mauiFocus then
-    local old = __mauiFocus
-    __mauiFocus = false
-    if old.OnLoseKeyboardFocus then old:OnLoseKeyboardFocus() end
+    if __mauiFocus.OnLoseKeyboardFocus then __mauiFocus:OnLoseKeyboardFocus() end
+  end
+
+  -- Vor der Zustellung an das getroffene Control ruft die Engine bei jedem
+  -- ButtonPress/ButtonDClick den globalen Haken in der UI-Lua auf
+  -- (Cfile:1147534-1147558, einziger xref auf "OnMouseButtonPress" ist
+  -- Cfile:1147549). Sie baut dafuer eine FRISCHE Tabelle mit genau drei
+  -- Feldern: Type und die KLEIN geschriebenen x/y (SetString/SetNumber
+  -- Cfile:1147543-1147545) — keine Modifiers, kein KeyCode.
+  -- uimain.lua:165-192 faechert das an jede AddOnMouseClickedFunc-Registrierung
+  -- auf: combo.lua:289/511 schliesst ein offenes Dropdown, orders.lua:539
+  -- klappt das Feuermodus-Popup zu. Ohne diesen Aufruf war jede davon tot.
+  -- Ungefiltert: nicht an `hit` gebunden, nicht an `handled`, und der Dragger
+  -- wird erst im ButtonRelease-Zweig befragt.
+  if evType == 'ButtonPress' or evType == 'ButtonDClick' then
+    local okClick, errClick = pcall(function()
+      local m = import('/lua/ui/uimain.lua')
+      if m and m.OnMouseButtonPress then
+        m.OnMouseButtonPress({ Type = evType, x = x, y = y })
+      end
+    end)
+    if not okClick then WARN('OnMouseButtonPress: ' .. tostring(errClick)) end
   end
 
   -- KeyCode gehoert ins Event (func_CreateLuaEvent setzt ihn, Cfile:1136341):

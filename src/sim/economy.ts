@@ -41,6 +41,16 @@ export interface UnitEcon {
    * mConsumptionData in the engine.
    */
   lastRate?: number
+  /**
+   * `Moho::Entity::Kill` sets `mIsDead` (Cfile:916084), and
+   * `Unit::HandleResourceManagement` gates BOTH halves on it: consumption at
+   * Cfile:953945 (`!IsDead && mConsumptionIsActive && mConsumptionData`) and
+   * production at Cfile:953968 (`!mIsBeingBuilt && !IsDead &&
+   * mProductionActive`). Death is not instant — `DeathThread` runs for several
+   * beats (unit.lua:1200-1241) — so relying on `remove()` at OnDestroy let a
+   * dead mex keep producing and a dead radar keep drawing power the whole time.
+   */
+  dead?: boolean
 }
 
 interface Consumer {
@@ -185,8 +195,37 @@ export class ArmyEconomy {
     const u = this.units.get(id)
     if (u) u[field] = value
   }
+  /** Entity::Kill -> mIsDead (Cfile:916084). Not the same as removal: the unit
+   *  stays registered until OnDestroy, it just stops contributing. */
+  setDead(id: number): void {
+    const u = this.units.get(id)
+    if (u) u.dead = true
+  }
   remove(id: number): void {
     this.units.delete(id)
+  }
+
+  /**
+   * `Unit:GetResourceConsumed()` — the engine's `mResourceConsumed`
+   * (pushed at Cfile:976943). `Unit::HandleResourceManagement` resets it to 0
+   * every tick (Cfile:953937) and only sets it while the unit is alive AND
+   * consumption is active AND it has a request (Cfile:953945-953948):
+   *
+   *   mResourceConsumed = CEconRequest::LimitingRate(mConsumptionData)
+   *
+   * `LimitingRate` is 1.0 for a request with nothing requested and otherwise
+   * `min(granted / requested)` over the two slots (Cfile:1107891-1107909) —
+   * which is exactly the per-consumer `rate` that `tick()` already persists as
+   * `lastRate`. So: idle -> 0, full supply -> 1, stall -> the granted share.
+   *
+   * A unit the economy does not know reports 0, not 1: an unregistered unit is
+   * not "fully supplied", it has no request at all.
+   */
+  resourceConsumed(id: number): number {
+    const u = this.units.get(id)
+    if (!u || !u.consActive || u.dead) return 0
+    if (!(u.consM > 0 || u.consE > 0)) return 1
+    return u.lastRate ?? 1
   }
 
   /** Ein Wirtschafts-Tick (im Sim-Beat vor der Thread-Stage). */
@@ -207,7 +246,15 @@ export class ArmyEconomy {
       if (!u.complete) continue // Baustellen tragen weder Produktion noch Lager bei
       maxM = f(maxM + u.storeM)
       maxE = f(maxE + u.storeE)
-      if (u.prodActive) {
+      // UNVERIFIED: in the engine the storage handling (mExtraStorage,
+      // Cfile:953970-953977) sits INSIDE the same
+      // `!mIsBeingBuilt && !IsDead && mProductionActive` gate as production, so
+      // a dying — or merely production-disabled — unit may also stop
+      // contributing storage. That branch was not traced far enough to say what
+      // it writes, so storage is left ungated here rather than changed on a
+      // guess. Only the two halves the audit actually established are gated:
+      // production (Cfile:953968) and consumption (Cfile:953945).
+      if (u.prodActive && !u.dead) {
         // The mex stall (Unit::HandleResourceManagement,
         // Cfile:953936-953944 + 954011-954012): non-NaturalProducers scale
         // their production by the LimitingRate of their OWN consumption
@@ -221,7 +268,8 @@ export class ArmyEconomy {
         prodM = f(prodM + f(u.prodM * factor))
         prodE = f(prodE + f(u.prodE * factor))
       }
-      if (u.consActive) {
+      // Consumption is gated on IsDead exactly like production (Cfile:953945).
+      if (u.consActive && !u.dead) {
         const cm = f(u.consM * DT)
         const ce = f(u.consE * DT)
         if (cm > 0 || ce > 0) {
@@ -291,6 +339,35 @@ export class ArmyEconomy {
     // longer silently drops a reclaim.
     if (res === 'MASS') this.pendingMass += amount
     else this.pendingEnergy += amount
+  }
+
+  /**
+   * `taken = brain:TakeResource(type, amount)` — cfunc_CAiBrainTakeResourceL
+   * (Cfile:735173-735270). A DIFFERENT function from GiveResource, not its
+   * mirror image:
+   *  - it works on `mTotals.mStored` (Cfile:735238-735252), NOT on `mResources`,
+   *    which is the per-beat income accumulator `give()` feeds (Cfile:735044-735053);
+   *  - it takes `min(requested, stored)` — the `isUnder` select at
+   *    Cfile:735239/735247 picks the stored value when the request exceeds it;
+   *  - it writes back `max(0, stored - taken)` (Cfile:735253-735263), so storage
+   *    never goes negative;
+   *  - it RETURNS the amount actually taken (Cfile:735264-735269; the binding's
+   *    own help string is "taken = TakeResource(type,amount)", Cfile:735162).
+   * The effect is immediate, not deferred to the next beat.
+   *
+   * simutils.lua:152-155 feeds this return straight into GiveResource, so the
+   * return value is load-bearing, not decoration.
+   *
+   * No max-storage clamp and no `amount >= 0` guard: the engine has neither,
+   * and inventing one would be a second divergence.
+   */
+  take(res: Res, amount: number): number {
+    const stored = res === 'MASS' ? this.mass : this.energy
+    const taken = amount <= stored ? amount : stored
+    const left = stored - taken > 0 ? f(stored - taken) : 0
+    if (res === 'MASS') this.mass = left
+    else this.energy = left
+    return taken
   }
 
   /**
@@ -392,8 +469,20 @@ export function installEconomy(host: LuaHost, mgr: EconomyManager): void {
     mgr.army(army).clearBuildRequest(taskId)
   })
   host.setGlobal('__econBuildRate', (army: number, taskId: number) => mgr.army(army).buildRate(taskId))
+  // Unit:GetResourceConsumed — the per-unit granted rate (mResourceConsumed,
+  // Cfile:953937/953945-953948). The value already exists as the consumer's
+  // `rate`; it was simply never bridged into Lua.
+  host.setGlobal('__econResourceConsumed', (army: number, id: number) =>
+    mgr.army(army).resourceConsumed(id),
+  )
   host.setGlobal('__econUnregister', (army: number, id: number) => {
     mgr.army(army).remove(id)
+  })
+  // Entity::Kill -> mIsDead (Cfile:916084). The unit stays registered until
+  // OnDestroy; it simply stops producing and consuming from this beat on
+  // (Cfile:953945 / 953968).
+  host.setGlobal('__econSetDead', (army: number, id: number) => {
+    mgr.army(army).setDead(id)
   })
 
   // Echtes Engine-Global: SetArmyEconomy(army, mass, energy) setzt den
@@ -417,6 +506,11 @@ export function installEconomy(host: LuaHost, mgr: EconomyManager): void {
   host.setGlobal('__econGive', (army: number, res: string, amount: number) => {
     mgr.army(army).give(res.toUpperCase() === 'MASS' ? 'MASS' : 'ENERGY', amount)
   })
+  // TakeResource is NOT a negative GiveResource — it drains storage, clamps to
+  // what is there and returns the amount taken (Cfile:735173-735270).
+  host.setGlobal('__econTake', (army: number, res: string, amount: number) =>
+    mgr.army(army).take(res.toUpperCase() === 'MASS' ? 'MASS' : 'ENERGY', amount),
+  )
   // This tick's reclaim grant into the separate reclaimed counter (on top of
   // the storage credit via __econGive) — the engine writes to both places
   // (Cfile:848614-848639). Mass/energy per tick; addReclaim converts to the

@@ -161,6 +161,141 @@ console.log('\n== Belegte Ankunftszelle: keine Stapel ==')
   )
 }
 
+console.log('\n== Wasser: nur Water/AmphibiousFloating/Hover schwimmen oben ==')
+// CAiPathSpline::Update (Cfile:765808-765823) / ::Generate (Cfile:766391):
+// genau diese drei MotionTypes klemmen die Hoehe auf max(Gelaende, Wasser);
+// alle anderen — Land, Biped, Amphibious, SurfacingSub — nehmen die ROHE
+// Gelaendehoehe. Ein Amphibium LAEUFT deshalb auf dem Seeboden, was
+// CUnitMotion::IsOnValidLayer bestaetigt (LAYER_Seabed nur fuer Amphibious,
+// Cfile:965960-965975). Enum: Cfile:656550-656583.
+{
+  // ZUERST die BRUECKE selbst: der Wasserspiegel der Karte erreicht die Sim ueber
+  // setTerrainSource (main.ts -> LuaSimClient -> Worker-Boot/Reset ->
+  // engineGlobals). Vorher hatte `__setWaterLevel` GAR KEINEN Aufrufer, und
+  // genau das war die Luecke — nicht nur die Lua-Regel dahinter. Ohne Wasser
+  // steht exakt -10000 (Entity::GetStartingLayer, Cfile:857506-857510).
+  setTerrainSource(host, FLAT_TEST_TERRAIN, { width: 256, height: 256 })
+  check(
+    num(host, '__waterLevel()') === -10000,
+    `ohne waterElevation bleibt der Sim-Wasserspiegel -10000 (${num(host, '__waterLevel()')})`,
+  )
+  setTerrainSource(host, FLAT_TEST_TERRAIN, { width: 256, height: 256, waterElevation: 30 })
+  check(
+    num(host, '__waterLevel()') === 30,
+    `setTerrainSource reicht den Wasserspiegel der Karte durch (${num(host, '__waterLevel()')})`,
+  )
+
+  // FLAT_TEST_TERRAIN liefert 0; Wasser darueber auf 30. Die Trennung ist damit
+  // eindeutig: Seeboden 0, Wasseroberflaeche 30.
+  host.eval(`__setWaterLevel(30)`)
+  await (async (): Promise<void> => {
+    // Script UND Blueprint UND Skelett — eine Unit braucht alle drei.
+    host.addFile(
+      'units/ual0101/ual0101_script.lua',
+      await unitsZip.read(unitsZip.get('units/ual0101/ual0101_script.lua')!),
+    )
+    const hoverBp = await unitsZip.read(unitsZip.get('units/ual0101/ual0101_unit.bp')!)
+    loadUnitBlueprint(host, 'ual0101', hoverBp)
+    setUnitBones(host, 'ual0101', await bonesFromBlueprint('ual0101', hoverBp, readAsset, assetExists))
+  })()
+
+  const yOf = (uid: number): number => Number(host.eval(`return __units[${uid}].__pos[2]`))
+  const drive = (uid: number, x: number, z: number): void => {
+    host.eval(`__units[${uid}]:GetNavigator():SetGoal({ ${x}, 0, ${z} })`)
+    for (let i = 0; i < 12; i++) {
+      simTick(host)
+      motionTick(host)
+    }
+  }
+
+  // uel0001 ist RULEUMT_Amphibious (uel0001_unit.bp:851) -> Seeboden.
+  const walker = spawnLuaUnit(host, 'uel0001', { x: 400, y: 20, z: 400 }, 1)
+  drive(walker, 406, 400)
+  check(
+    Math.abs(yOf(walker)) < 0.01,
+    `ein Amphibium bleibt auf dem Seeboden (y=${yOf(walker).toFixed(2)}, Gelaende 0, Wasser 30)`,
+  )
+
+  // ual0101 ist RULEUMT_Hover (ual0101_unit.bp:216) -> Wasseroberflaeche.
+  const hover = spawnLuaUnit(host, 'ual0101', { x: 440, y: 20, z: 400 }, 1)
+  drive(hover, 446, 400)
+  check(
+    Math.abs(yOf(hover) - 30) < 0.01,
+    `ein Hover faehrt auf der Wasseroberflaeche (y=${yOf(hover).toFixed(2)}, Wasser 30)`,
+  )
+
+  // Ohne Wasser (-10000) faellt beides auf die Gelaendehoehe zurueck.
+  host.eval(`__setWaterLevel(nil)`)
+  drive(hover, 452, 400)
+  check(
+    Math.abs(yOf(hover)) < 0.01,
+    `ohne Wasser faehrt auch der Hover auf dem Gelaende (y=${yOf(hover).toFixed(2)})`,
+  )
+}
+
+console.log('\n== Eine getoetete Einheit faehrt nicht weiter ==')
+// CUnitMotion::CalcMoveLand (Cfile:971696-971704), ::CalcMoveWater
+// (Cfile:971825-971826) und ::CalcMoveHover (Cfile:971533-971534) beginnen alle
+// mit `if (IsDead(mUnit)) { result = 0; }` — eine tote Einheit rechnet GAR keine
+// Bewegung. Der Tod ist dabei nicht sofort: DeathThread laeuft ueber mehrere
+// Beats (unit.lua:1200-1241).
+{
+  const posOf = (uid: number): [number, number] => [
+    num(host, `__units[${uid}].__pos[1]`),
+    num(host, `__units[${uid}].__pos[3]`),
+  ]
+
+  // Kontrolle: eine LEBENDE Einheit mit demselben Ziel faehrt wirklich los.
+  const alive = spawnLuaUnit(host, 'uel0001', { x: 500, y: 20, z: 500 }, 1)
+  host.eval(`__units[${alive}]:GetNavigator():SetGoal({ 520, 0, 500 })`)
+  const [ax0] = posOf(alive)
+  for (let i = 0; i < 10; i++) beat()
+  const [ax1] = posOf(alive)
+  check(ax1 > ax0 + 0.1, `Kontrolle: die lebende Einheit faehrt los (${ax0.toFixed(2)} -> ${ax1.toFixed(2)})`)
+
+  const doomed = spawnLuaUnit(host, 'uel0001', { x: 540, y: 20, z: 500 }, 1)
+  host.eval(`__units[${doomed}]:GetNavigator():SetGoal({ 560, 0, 500 })`)
+  host.eval(`__units[${doomed}]:Kill()`)
+  check(host.eval(`return __units[${doomed}].__dead == true`) === true, 'die Einheit ist tot')
+  check(host.eval(`return __units[${doomed}].__goal ~= false`) === true, 'ihr Ziel steht noch (die Engine verwirft es nicht)')
+  const [dx0, dz0] = posOf(doomed)
+  for (let i = 0; i < 10; i++) beat()
+  const [dx1, dz1] = posOf(doomed)
+  check(
+    Math.abs(dx1 - dx0) < 1e-6 && Math.abs(dz1 - dz0) < 1e-6,
+    `sie bewegt sich keinen Millimeter (${dx0.toFixed(3)}/${dz0.toFixed(3)} -> ${dx1.toFixed(3)}/${dz1.toFixed(3)})`,
+  )
+  check(num(host, `__units[${doomed}].__speed or 0`) === 0, 'und ihre Geschwindigkeit ist 0')
+
+  // Und der BEFEHLS-Pfad: dispatch laeuft nur solange !IsDead
+  // (IAiCommandDispatchImpl::TaskTick, Cfile:746583-746586). Der laufende
+  // Befehl wird also weder vorangetrieben noch abgeschlossen noch entfernt —
+  // die Warteschlange bleibt unangetastet, bis __destroyed sie aufraeumt.
+  // SetGoal allein reicht dafuer NICHT: es schreibt nur u.__goal und fuellt
+  // __orders/__orderActive nie, der Zweig waere also nie betreten worden.
+  const queued = spawnLuaUnit(host, 'uel0001', { x: 580, y: 20, z: 500 }, 1)
+  host.eval(`__dispatchMove(${queued}, 600, 500, true)`)
+  host.eval(`__dispatchMove(${queued}, 620, 500, false)`)
+  check(
+    host.eval(`return __orderActive[${queued}] ~= nil`) === true,
+    'Kontrolle: der Move-Befehl ist ueber den Dispatch-Pfad aktiv',
+  )
+  const queuedLen = (): number => num(host, `table.getn(__orders[${queued}] or {})`)
+  const activeCmd = (): string => String(host.eval(`return tostring(__orderActive[${queued}])`))
+  const lenBefore = queuedLen()
+  const cmdBefore = activeCmd()
+  host.eval(`__units[${queued}]:Kill()`)
+  for (let i = 0; i < 15; i++) beat()
+  check(
+    activeCmd() === cmdBefore,
+    'der laufende Befehl wird nicht abgeschlossen und nicht ersetzt',
+  )
+  check(
+    queuedLen() === lenBefore,
+    `die Warteschlange bleibt unveraendert (${lenBefore} -> ${queuedLen()})`,
+  )
+}
+
 if (warnings.length > 0) {
   console.log(`\n${warnings.length} WARN (erste 3):`)
   for (const w of warnings.slice(0, 3)) console.log(`  ${w.slice(0, 110)}`)

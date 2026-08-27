@@ -220,14 +220,47 @@ local function acquireTarget(w, u)
     return
   end
 
-  local best, bestDist = nil, radius * radius
+  -- FindBestEnemy (Cfile:791970-792233) does NOT pick the nearest enemy. It
+  -- walks the weapon's mTargetPriorities and, for each candidate, finds the
+  -- LOWEST category index the candidate's blueprint matches
+  -- (HasBlueprint at Cfile:792183). A better (lower) category wins outright
+  -- (`bestCat > closestSeen` -> SET_BEST, Cfile:792190-792191); distance only
+  -- breaks ties INSIDE a category (`bestDist > usedDist`, Cfile:792203).
+  -- The whole selection sits inside `if Size(mTargetPriorities)`
+  -- (Cfile:792176): a candidate matching no listed category is not a target at
+  -- all. Most FA weapons end their list with 'ALLUNITS' (e.g.
+  -- uel0201_unit.bp:245-253), which is what makes that catch everything.
+  local prios = w.__targetPriorities
+  local nPrio = prios and #prios or 0
+  local maxD2 = radius * radius
+  local best, bestDist, bestCat = nil, maxD2, nil
   for _, other in pairs(__units) do
     if IsEnemy(u.__army, other.__army) and canTarget(w, u, other) then
       local p, q = u.__pos, other.__pos
       local dx, dz = q[1] - p[1], q[3] - p[3]
       local d2 = dx * dx + dz * dz
-      if d2 <= bestDist then
-        best, bestDist = other, d2
+      if d2 <= maxD2 then
+        local cat = nil
+        for i = 1, nPrio do
+          if EntityCategoryContains(prios[i], other) then
+            cat = i
+            break
+          end
+        end
+        if nPrio == 0 then
+          -- No priority list: the engine would select nothing here. We keep the
+          -- nearest-enemy fallback because our weapon set-up path may not have
+          -- run SetWeaponPriorities for every unit yet; a silent "never shoots"
+          -- would be worse than a documented approximation. DEVIATION, recorded
+          -- in specs/001-engine-fidelity-fixes/research.md.
+          if d2 <= bestDist then best, bestDist = other, d2 end
+        elseif cat ~= nil then
+          if bestCat == nil or cat < bestCat then
+            best, bestDist, bestCat = other, d2, cat
+          elseif cat == bestCat and d2 < bestDist then
+            best, bestDist = other, d2
+          end
+        end
       end
     end
   end

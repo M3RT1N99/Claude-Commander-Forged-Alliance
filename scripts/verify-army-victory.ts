@@ -107,6 +107,37 @@ console.log('\n== These are SIM-ONLY: the UI VM must not have them ==')
   ui.close()
 }
 
+console.log('\n== __getBrain is a LOOKUP, never a creator ==')
+// The sanctioned auto-vivifier list in CLAUDE.md / the constitution requires an
+// auto-vivified object to fail on the first semantically required operation.
+// __getBrain used to mint a brain (faction 1, name ARMY_<n>, fresh economy) for
+// ANY index and register it in the global ArmyBrains that unit.lua:1429 walks on
+// every unit death. The retail engine rejects an undeclared army outright:
+// "Invalid army index; must be >= 1 and < %d but got %d." (CreateUnit
+// Cfile:980706-980713, the position bindings Cfile:980344-980352).
+{
+  // The declared armies still resolve — setupSession created them (session.ts).
+  for (const army of [1, 2]) {
+    check(
+      host.eval(`return GetArmyBrain(${army}) ~= nil`) === true,
+      `army ${army} was declared by setupSession and resolves`,
+    )
+  }
+  // An undeclared one raises instead of inventing a player.
+  const err = String(
+    host.eval(`
+      local ok, e = pcall(function() return GetArmyBrain(99) end)
+      if ok then return 'NO ERROR' end
+      return tostring(e)
+    `),
+  )
+  check(/Invalid army index/.test(err), `an undeclared army index raises (${err.slice(0, 80)})`)
+  check(
+    host.eval(`return rawget(_G, 'ArmyBrains')[99] == nil`) === true,
+    'and no brain was registered in ArmyBrains as a side effect',
+  )
+}
+
 await game.close()
 console.log(failures === 0 ? '\nARMY VICTORY PASSED' : `\nARMY VICTORY FAILED (${failures})`)
 process.exit(failures === 0 ? 0 : 1)
