@@ -1373,7 +1373,7 @@ local AIBRAIN_NAMES = {
   'CheckBlockingTerrain', 'CreateResourceBuildingNearest', 'CreateUnitNearSpot',
   'DecideWhatToBuild', 'DisbandPlatoon', 'DisbandPlatoonUniquelyNamed',
   'FindClosestArmyWithBase', 'FindPlaceToBuild', 'FindUnit', 'FindUnitToUpgrade',
-  'FindUpgradeBP', 'GetArmyIndex', 'GetArmyStartPos', 'GetArmyStat',
+  'FindUpgradeBP', 'GetArmyIndex', 'GetArmyStat',
   'GetAttackVectors', 'GetAvailableFactories', 'GetBlueprintStat', 'GetCurrentEnemy',
   'GetCurrentUnits', 'GetEconomyIncome', 'GetEconomyRequested', 'GetEconomyStored',
   'GetEconomyStoredRatio', 'GetEconomyTrend', 'GetEconomyUsage', 'GetFactionIndex',
@@ -1390,6 +1390,21 @@ local AIBRAIN_NAMES = {
 
 local aibrain = withNoops(AIBRAIN_NAMES, {
   GetArmyIndex = function(self) return self.__army or 1 end,
+  -- `brain:GetArmyStartPos()` gibt ZWEI Zahlen zurueck, x und z
+  -- (cfunc_CAiBrainGetArmyStartPosL, Cfile:735971-735976: zweimal
+  -- `lua_pushnumber`, `return 2`). Die Quelle ist der 2D-Vektor, den
+  -- `SetArmyStart` abgelegt hat (Cfile:1024524) — keine Hoehe.
+  --
+  -- Stand bis hierher in der stillen No-op-Liste: `scenarioutilities.lua:1030`
+  -- und `CreateInitialArmyUnit` fragen danach, und beide bekamen nil.
+  GetArmyStartPos = function(self)
+    local v = __armyVar(self.__army or 1)
+    if not v.start then
+      error('GetArmyStartPos: Armee ' .. tostring(self.__army)
+        .. ' hat keine Startposition (SetArmyStart/GenerateArmyStart fehlt)', 2)
+    end
+    return v.start[1], v.start[2]
+  end,
   GetFactionIndex = function(self) return self.__faction or 1 end,
 
   GetEconomyStored = function(self, res) return __econStored(self.__army or 1, res) end,

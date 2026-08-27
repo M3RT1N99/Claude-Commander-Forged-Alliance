@@ -8,6 +8,7 @@ import { installMotion, motionTick } from '../sim/motion'
 import { installBuild, buildCollect, buildApply, factoryTick } from '../sim/build'
 import { setupSession, SANDBOX_SESSION, type SessionInfo } from '../sim/session'
 import { installCombat, weaponTick, projectileTick, flushDeletions } from './combat'
+import { installSession } from './session'
 import { simTick } from './simThreads'
 
 /**
@@ -96,6 +97,8 @@ export function installEngine(
   // Original Lua: the global TerrainTypes list that GetTerrainType() serves
   // (terraintypes.lua:126; unit.lua:2420 indexes the result unchecked).
   host.loadGlobal('/lua/terrainTypes.lua')
+  // The session-start steps as original Lua (src/engine-lua/session.lua).
+  installSession(host)
   // Step 3a/5a of the SimInit.lua boot: publish ScenarioInfo, create the brains.
   setupSession(host, session)
   return { host, economy }

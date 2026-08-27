@@ -9,7 +9,7 @@
  * Jede Suite, die eine Unit spawnt, geht deshalb hierdurch — sonst prüft sie
  * eine Unit, die es so im Spiel nicht gibt.
  */
-import { open, readdir, type FileHandle } from 'node:fs/promises'
+import { open, readdir, readFile, type FileHandle } from 'node:fs/promises'
 import { ZipArchive } from '../src/vfs/zipArchive'
 import type { RandomAccessFile } from '../src/vfs/randomAccess'
 import type { LuaHost } from '../src/lua/host'
@@ -109,6 +109,28 @@ export class GameFiles {
         }
       }
     }
+    // Die losen KARTENDATEIEN. Sie liegen nicht in den .scd-Archiven, sondern
+    // als Ordner unter `maps/`, und die Sim braucht sie: `SetupSession()` faehrt
+    // `doscript(ScenarioInfo.save, ...)` und `doscript(ScenarioInfo.script, ...)`
+    // (siminit.lua:93/98) — ohne die Dateien im VFS gibt es kein `Scenario`,
+    // keine Marker und keine Startpositionen.
+    try {
+      for (const dir of await readdir(`${GAME_DIR}/maps`, { withFileTypes: true })) {
+        if (!dir.isDirectory()) continue
+        for (const name of await readdir(`${GAME_DIR}/maps/${dir.name}`)) {
+          if (!name.toLowerCase().endsWith('.lua')) continue
+          const key = `maps/${dir.name}/${name}`.toLowerCase()
+          paths.add(key)
+          if (!luaFiles.has(key)) {
+            luaFiles.set(key, new Uint8Array(await readFile(`${GAME_DIR}/maps/${dir.name}/${name}`)))
+          }
+        }
+      }
+    } catch {
+      // Keine Karten installiert: die Sitzung ohne Szenario laeuft weiter, die
+      // Szenario-Suite meldet den Fehlschlag selbst.
+    }
+
     return new GameFiles(luaFiles, paths, zips, handles)
   }
 

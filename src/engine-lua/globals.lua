@@ -356,12 +356,50 @@ local function __allianceRow(a)
   return row
 end
 
-local function __resolveArmy(x)
+--- `Moho::ARMY_FromLuaState` (Cfile:1024163-1024225) — die EINE Stelle, an der
+--- aus einem Lua-Argument eine Armee wird. Zahl ODER Name.
+---
+--- Die Original-Lua reicht ueberall den NAMEN durch: `SetArmyEconomy(strArmy,
+--- ...)` (scenarioutilities.lua:456), `GetArmyBrain(strArmy)` (:460),
+--- `CreateUnitHPR(..., strArmy, ...)` (:206). Ohne Namensaufloesung laeuft von
+--- `InitializeArmies()` keine einzige Zeile.
+---
+--- Die drei Fehlertexte sind die der Engine, samt ihrer Eigenheit: bei einer
+--- Zahl ausserhalb des Bereichs druckt sie `index - 1`, also den 0-basierten
+--- Wert (Cfile:1024184: `v4 = Integer - 1`, dann `"Invalid army %d", v4`).
+--- Bei einer negativen Zahl den Ausgangswert plus den Hinweis auf die
+--- 1-Basierung (Cfile:1024191).
+---
+--- NICHT fuer `CreateUnit`: das ist im Original zahl-only (`cfunc_CreateUnitL`
+--- prueft `lua_type(...) != LUA_TNUMBER` und wirft `TypeError "integer"`,
+--- Cfile:980336-980352), waehrend `cfunc_CreateUnitHPRL` genau hier
+--- durchgeht (Cfile:980538).
+function __resolveArmy(x)
   if type(x) == 'number' then
-    if x <= 0 then error(string.format('Invalid army %d. (Use a 1-based index)', x)) end
+    local zero = x - 1
+    local n = 0
+    if ScenarioInfo and ScenarioInfo.ArmySetup then
+      for _ in pairs(ScenarioInfo.ArmySetup) do n = n + 1 end
+    end
+    -- Ohne ArmySetup kann die Zahl nicht geprueft werden; dann gilt nur die
+    -- 1-Basierung. (Die Sandbox-Suiten spawnen vor `setupSession`.)
+    if zero < 0 then
+      error(string.format('Invalid army %d. (Use a 1-based index)', x), 2)
+    end
+    if n > 0 and zero >= n then
+      error(string.format('Invalid army %d', zero), 2)
+    end
     return x
   end
-  error('Unexpected type for army object')
+  if type(x) == 'string' then
+    if ScenarioInfo and ScenarioInfo.ArmySetup then
+      for name, a in pairs(ScenarioInfo.ArmySetup) do
+        if name == x or a.ArmyName == x then return a.ArmyIndex end
+      end
+    end
+    error(string.format('Unknown army: %s', x), 2)
+  end
+  error('Unexpected type for army object', 2)
 end
 
 local function __setAllianceOneWay(a, b, state)
@@ -773,7 +811,11 @@ end
 -- GetArmyBrain(army) ist ein echtes Engine-Global (defaultunits.lua:442 u. a.).
 -- Als Stub lieferte es die Identitaet — also die ARMEE-ZAHL statt des Brains,
 -- worauf defaultunits.lua:443 eine Zahl indizierte.
-function GetArmyBrain(army) return __getBrain(army) end
+--- `GetArmyBrain(army)` nimmt Zahl ODER Namen — die Original-Lua reicht
+--- ueberall `strArmy` durch (scenarioutilities.lua:460/469). Die Aufloesung ist
+--- `ARMY_FromLuaState` (Cfile:1024163-1024225), dieselbe wie fuer
+--- `SetArmyEconomy` und `CreateUnitHPR`.
+function GetArmyBrain(army) return __getBrain(__resolveArmy(army)) end
 -- brain:GetListOfUnits(cat, needToBeIdle) -> living units of that army.
 function __armyUnits(army, cat)
   local out = {}

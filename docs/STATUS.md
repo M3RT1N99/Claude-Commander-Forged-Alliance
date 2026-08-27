@@ -186,6 +186,113 @@ ist nur bei einem die Karte installiert, und das enthält 1 Beat und 0 Befehle.
 installierten Karte.** `verify-replay.ts` führt die Zahl als Sperrklinke (heute
 0, darf nur steigen) und nennt je Replay, woran es scheitert.
 
+## Der Sitzungsstart läuft jetzt als Original-Lua
+
+Drei Stellen bauten die Startbedingungen in TypeScript nach — genau das, was
+CLAUDE.md verbietet:
+
+* `src/sim/session.ts` kopierte die Bündnisregel aus
+  `scenarioutilities.lua:488-500` nach TS. Der Kommentar zitierte sogar die
+  Zeile 495 — und die Übersetzung hatte **beide Zivilisten-Zweige verloren**
+  (`:491-493` `CivilianAlliance == 'neutral'`, `:497-498` `NEUTRAL_CIVILIAN`).
+* `src/main.ts:1031-1062` parste die `_save.lua` der Karte mit dem
+  TS-Blueprint-Parser, um zwei Werte herauszuziehen.
+* `src/engine-lua/units.lua` **erfand** ein leeres `Scenario`-Global — mit einem
+  Kommentar, der es zugab („minimal leer, damit `GetMarkers()` fehlerfrei
+  läuft"). Ein **fünfter Auto-Vivifier**, den CLAUDE.md nicht kennt, und der
+  schlimmste: `GetMarkers()` lieferte still `{}`, `InitializeArmies()` übersprang
+  jede Armee an `scenarioutilities.lua:449` (`if tblData then`), und **nichts
+  schlug fehl**.
+
+Jetzt läuft die echte Kette, jede Zeile mit ihrer Fundstelle in
+`src/engine-lua/session.lua`:
+
+```
+doscript('/lua/dataInit.lua')                              siminit.lua:92
+ScenarioInfo.Env = import('/lua/scenarioEnvironment.lua')  siminit.lua:82
+doscript(ScenarioInfo.save, ScenarioInfo.Env)              siminit.lua:93
+Scenario = ScenarioInfo.Env.Scenario                       siminit.lua:95
+doscript(ScenarioInfo.script, ScenarioInfo.Env)            siminit.lua:98
+je Armee: InitializeStartLocation + SetPlans               schook/lua/simInit.lua:47-48
+ScenarioInfo.Env.OnPopulate(ScenarioInfo)                  siminit.lua:145
+```
+
+Das Ergebnis auf SCMP_009, geprüft von `scripts/verify-session-start.ts`:
+**341 Marker aus der echten Karte** (das erfundene Global hatte 0), und **zwei
+Kommandeure auf 672.5/346.5 und 357.5/673.5 — den Markern `ARMY_1` und `ARMY_2`
+der Karte, dorthin gestellt von `scenarioutilities.lua`**. Die Bündnislage
+setzt `scenarioutilities.lua:495`, nicht mehr TypeScript.
+
+`setupSession` und `beginSession` sind jetzt zwei Schritte, wie in der Engine
+(`Sim::CreateArmies` Cfile:1072015, `Sim::BeginSession` Cfile:1072090):
+dazwischen werden die Blueprints geladen, die `OnPopulate` braucht — die Engine
+hat sie ebenfalls lange vorher (siminit.lua:8).
+
+Neu gebaut, jedes mit Beleg: `__resolveArmy` (= `ARMY_FromLuaState`,
+Cfile:1024163-1024225, Zahl ODER Name, drei Original-Fehlertexte),
+`SetArmyStart` (Cfile:1024490-1024526), `ShouldCreateInitialArmyUnits`
+(Cfile:1024319-1024333, **null** Argumente), `SetArmyPlans`, `InitializeArmyAI`
+(Cfile:724516-724518), `CreateInitialArmyUnit` (Cfile:1025200-1025275) und ein
+echter `GetArmyStartPos` — der stand bis jetzt in der stillen No-op-Liste
+(`moho.lua`, AIBRAIN_NAMES) und lieferte `nil` an genau die zwei Stellen, die
+ihn brauchen.
+
+Zwei Unterscheidungen, die die Engine macht und wir jetzt auch:
+`CreateUnitHPR` nimmt einen Armee-NAMEN (`ARMY_FromLuaState`, Cfile:980538),
+`CreateUnit` nicht (`lua_type != LUA_TNUMBER` → `TypeError "integer"`,
+Cfile:980336-980352). Und `SetArmyEconomy` warf einen unbekannten Namen
+still auf Armee 1 (`?? 1`) — jetzt `Unknown army: %s` wie im Original.
+
+Rot-Proben: `SetArmyStart` zum No-op gemacht → der Lauf scheitert laut an
+`scenarioutilities.lua:338` mit der Ursache im Klartext. Die Karte nicht laden →
+der Lauf scheitert sofort. **Ehrlich dazu:** das erfundene `Scenario` wieder
+einzusetzen macht die Suite NICHT rot — `Scenario = Scenario or {…}` weist nur
+zu, wenn nichts da ist, und der echte Lader überschreibt es danach. Die Suite
+belegt also, dass die echte Karte geladen wird, nicht die Löschung als solche.
+
+### Was die Löschung im vollen Lauf ausgelöst hat
+
+Drei Suiten gingen rot, und alle drei waren Befunde:
+
+* **`verify-multiunit` und `verify-upgrade`** starben beim Spawn von `ueb1103`
+  (Massextraktor). Ursache: `MassCollectionUnit.OnCreate` ruft
+  `ScenarioUtils.GetMarkers()` (defaultunits.lua:776), um zu sehen, ob der
+  Extraktor auf einem Massepunkt steht — vorher las es still `{}`, jetzt gibt es
+  ohne Karte gar kein `Scenario` und `pairs(nil)` wirft. Gelöst nicht durch
+  Zurücknehmen, sondern durch Verschieben: `__harnessScenario()` setzt die leere
+  Tabelle **nur im ausdrücklich kartenlosen Zweig** von `setupSession`. Der
+  Unterschied ist nicht kosmetisch — im Produktionspfad gibt es sie nicht mehr,
+  also fällt eine echte Sitzung, die das Laden vergisst, jetzt auf.
+* **`verify-army-victory`** erwartete unsere alte Fehlermeldung. `GetArmyBrain`
+  geht im Original durch `ARMY_FromLuaState` und meldet `"Invalid army %d"`
+  (Cfile:1024184) — und druckt dabei `index - 1`, fragt man also nach 99, sagt
+  es 98. Die andere Meldung („Invalid army index; must be >= …") gehört zu den
+  Positions-/Threat-Bindungen (Cfile:980344-980352). Die Suite prüft jetzt den
+  exakten Engine-Text statt eines Musters — eine schärfere Zusicherung als vorher.
+
+### Was dabei über die KI herauskam
+
+Mit `human: false` läuft `InitializeArmyAI` in `brain:OnCreateAI(plan)` — und
+der Pfad stirbt an `aibrain.lua:1144`: `plat:ForkThread(...)` auf
+`plat = self:GetPlatoonUniquelyNamed('ArmyPool')`, und
+**`GetPlatoonUniquelyNamed` ist einer der 147 stillen No-ops**. Es gibt kein
+Platoon-System, also gibt es keine KI-Armee. Das ist kein Testproblem, das ist
+der Zustand — nachgemessen in genau diesem Lauf.
+
+### Offen und benannt
+
+`/lua/simInit.lua` selbst läuft weiterhin nicht: es stirbt an
+`/lua/globalinit.lua:14-24` → `lua/system/localization.lua:29-30`, weil unser
+`DiskFindFiles` im Sim nur die registrierten Blueprints kennt und das
+`pattern`-Argument **ignoriert** (`blueprints.lua:346`). Die UI-VM hat den
+richtigen (`src/vfs/glob.ts`). Solange das so ist, fährt `session.lua` genau
+die Schritte nach, die `SetupSession`/`BeginSession` täten.
+
+Ebenfalls offen: `CreateResourceDeposit` (also keine Massepunkte aus der Karte),
+`ArmyInitializePrebuiltUnits` (nur bei `Options.PrebuiltUnits == 'On'`,
+Cfile:1073515-1073533 — unbedingt gebaut würde es in jedem Skirmish Basen
+hinstellen), `SetAlliance` mit Namen, und die Props aus `Scenario.Props`.
+
 ## Offener Befund: der Typecheck sieht die Skripte nicht
 
 `npx tsc --noEmit` prüft `tsconfig.json`, und dessen `include` ist `["src"]`.

@@ -489,7 +489,20 @@ export function installEconomy(host: LuaHost, mgr: EconomyManager): void {
   // Startvorrat der Armee (Original: aus dem Szenario/SetupSession heraus
   // gerufen). Vorher standen 150/400 als TS-Konstante im Code — erfunden.
   host.setGlobal('SetArmyEconomy', (army: number | string, mass: number, energy: number) => {
-    const a = mgr.army(typeof army === 'number' ? army : (armyIndex.get(army) ?? 1))
+    // Ein unbekannter NAME war hier `?? 1` — er landete still auf Armee 1.
+    // Das ist das Gegenteil der Fail-loudly-Regel und genau der Fall, der bei
+    // `SetArmyEconomy(strArmy, ...)` aus scenarioutilities.lua:456 auftritt,
+    // wenn die Zuordnung fehlt. Die Engine sagt dort `Unknown army: %s`
+    // (Cfile:1024210).
+    let index: number
+    if (typeof army === 'number') {
+      index = army
+    } else {
+      const found = armyIndex.get(army)
+      if (found === undefined) throw new Error(`Unknown army: ${army}`)
+      index = found
+    }
+    const a = mgr.army(index)
     a.mass = mass
     a.energy = energy
   })

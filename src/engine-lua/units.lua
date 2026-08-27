@@ -25,10 +25,19 @@ end
 -- Sound{}: Blueprint-DSL-Konstruktor -> Argument zurueck
 Sound = Sound or function(t) return t end
 
--- Scenario: Sim-Global mit den Kartendaten (Marker). Minimal leer, damit
--- OnCreate-Pfade wie GetMarkers() (scenarioutilities.lua) fehlerfrei laufen;
--- echte Marker aus der geladenen Karte kommen spaeter.
-Scenario = Scenario or { MasterChain = { _MASTERCHAIN_ = { Markers = {} } }, Armies = {}, Props = {} }
+-- Scenario: KEIN Platzhalter mehr.
+--
+-- Hier stand `Scenario = Scenario or { MasterChain = { _MASTERCHAIN_ =
+-- { Markers = {} } }, Armies = {}, Props = {} }` — „minimal leer, damit
+-- GetMarkers() fehlerfrei laeuft". Genau das war der Fehler: `GetMarkers()`
+-- (scenarioutilities.lua:53) lieferte still `{}`, und `InitializeArmies()`
+-- uebersprang jede Armee an `scenarioutilities.lua:449` (`if tblData then`),
+-- ohne dass irgendetwas fehlschlug. Eine erfundene Antwort auf eine echte
+-- Frage — und ein fuenfter Auto-Vivifier, den CLAUDE.md nicht kennt.
+--
+-- `Scenario` wird ausschliesslich von `SetupSession` gesetzt, aus der echten
+-- Karte (siminit.lua:95, `Scenario = ScenarioInfo.Env.Scenario`). Wer vorher
+-- darauf zugreift, bekommt den strikten `_G`-Fehler — und das ist richtig so.
 
 -- categories / EntityCategory*: echt in engineGlobals.ts (Ausdrucksbaum über
 -- die Blueprint-Categories-Liste), NICHT hier.
@@ -451,8 +460,14 @@ end
 
 --- CreateUnitHPR(blueprint, army, x, y, z, pitch, yaw, roll) — Cfile:980475.
 --- The same creation, only with Euler angles instead of a quaternion.
+---
+--- Anders als `CreateUnit` nimmt diese Bindung auch einen Armee-NAMEN: sie
+--- geht durch `ARMY_FromLuaState` (Cfile:980538), waehrend `cfunc_CreateUnitL`
+--- auf `LUA_TNUMBER` besteht und sonst `TypeError "integer"` wirft
+--- (Cfile:980336-980352). Die Original-Lua verlaesst sich darauf —
+--- `scenarioutilities.lua:206` reicht `strArmy` durch.
 function CreateUnitHPR(blueprint, army, x, y, z, pitch, yaw, roll)
-  return spawnCreateUnit(blueprint, army, x, y, z, yaw or 0, 'CreateUnitHPR')
+  return spawnCreateUnit(blueprint, __resolveArmy(army), x, y, z, yaw or 0, 'CreateUnitHPR')
 end
 
 --- CreateUnit2(blueprint, army, layer, x, z, heading) — Cfile:980637. The
@@ -916,4 +931,113 @@ function __readUnit(id)
   local u = __units[id]
   if not u then return nil end
   return readRow(id, u)
+end
+
+-- ── Startposition und Start-Einheit ──────────────────────────────────────────
+--
+-- Das Original setzt die Startposition BEVOR irgendetwas gebaut wird:
+-- `ScenarioUtils.InitializeStartLocation(name)` (scenarioutilities.lua:1026-1033)
+-- laeuft je Armee aus dem schook-`OnCreateArmyBrain` (schook/lua/simInit.lua:47),
+-- liest den Marker `ARMY_<n>` aus der geladenen Karte und ruft `SetArmyStart`.
+-- Fehlt der Marker, wuerfelt `GenerateArmyStart` eine Position.
+
+--- `SetArmyStart(army, x, z)` — drei Argumente, Armee ueber `ARMY_FromLuaState`,
+--- dann zwei Zahlen (cfunc_SetArmyStartL, Cfile:1024490-1024526).
+---
+--- Gespeichert wird ein **2D**-Vektor `Wm3::Vector2f(x, z)` (Cfile:1024524) —
+--- keine Hoehe. Die kommt erst beim Spawn aus dem Gelaende.
+function SetArmyStart(army, x, z)
+  local i = __resolveArmy(army)
+  if type(x) ~= 'number' or type(z) ~= 'number' then
+    error('SetArmyStart: number expected', 2)
+  end
+  __armyVar(i).start = { x, z }
+end
+
+--- `GenerateArmyStart(army)` — die Zufallsposition, wenn die Karte keinen
+--- Marker hat (Cfile:1017961-1017981). Die Engine ruft sie selbst waehrend der
+--- Armee-Erzeugung (Cfile:1017228); ein vorhandener Marker ueberschreibt sie
+--- danach.
+---
+--- Der Zufallsteil ist NICHT nachgebildet: die Engine zieht aus ihrem eigenen
+--- Generator (`rand * 1.862645e-10 + 0.1`, skaliert mit `width-1`/`height-1`).
+--- Diesen Generator gibt es hier nicht (siehe docs/STATUS.md, Prüfsummen), und
+--- eine eigene Zufallsquelle waere eine Erfindung. Deshalb: Kartenmitte, und
+--- der Aufrufer bekommt es GESAGT.
+function GenerateArmyStart(army)
+  local i = __resolveArmy(army)
+  local w, h = GetMapSize()
+  WARN('GenerateArmyStart(' .. tostring(army) .. '): kein ARMY-Marker; die '
+    .. 'Engine wuerfelt hier (Cfile:1017961-1017981), wir setzen die Kartenmitte. '
+    .. 'Solange der Zufallsgenerator der Engine fehlt, ist das nicht 1:1.')
+  __armyVar(i).start = { w * 0.5, h * 0.5 }
+end
+
+--- `ShouldCreateInitialArmyUnits()` — NULL Argumente (die Engine wirft sonst,
+--- Cfile:1024327-1024329), Ergebnis `not CFG_GetArgOption("/noinitialunits")`
+--- (Cfile:1024330-1024331). Ohne die Kommandozeilenoption also `true`.
+function ShouldCreateInitialArmyUnits()
+  return __noInitialUnits ~= true
+end
+
+--- `SetArmyPlans(army, plans)` und `InitializeArmyAI(name)` — die beiden
+--- anderen Haelften des schook-`OnCreateArmyBrain` (schook/lua/simInit.lua:45-51,
+--- siminit.lua:122).
+---
+--- `InitializeArmyAI` ist im Original `CAiBrain::Initialize`
+--- (Cfile:1024677-1024699): es ruft `brain:OnCreateHuman(plan)`, wenn die Armee
+--- menschlich ist, sonst `brain:OnCreateAI(plan)` (Cfile:724516-724518;
+--- `IsHuman` = `ArmyType() == "Human"`, Cfile:1017952-1017957).
+function SetArmyPlans(army, plans)
+  __armyVar(__resolveArmy(army)).plans = plans
+end
+
+function InitializeArmyAI(army)
+  local i = __resolveArmy(army)
+  local brain = __getBrain(i)
+  local human = false
+  if ScenarioInfo and ScenarioInfo.ArmySetup then
+    for name, a in pairs(ScenarioInfo.ArmySetup) do
+      if a.ArmyIndex == i then human = a.Human == true end
+    end
+  end
+  local plan = __armyVar(i).plans
+  if human then
+    if brain.OnCreateHuman then brain:OnCreateHuman(plan) end
+  else
+    if brain.OnCreateAI then brain:OnCreateAI(plan) end
+  end
+end
+
+--- `CreateInitialArmyUnit(army, blueprintId)` (cfunc_CreateInitialArmyUnitL,
+--- Cfile:1025200-1025275).
+---
+--- Zwei Argumente. Die Armee kommt ueber `ARMY_FromLuaState`, die POSITION aus
+--- `GetArmyStartPos()` derselben Armee — nicht aus einem Argument. Der Rest ist
+--- festgelegt: Orientierung Identitaet (`orient.x = 1.0`, Rest 0,
+--- Cfile:1025263-1025264), `pos.y = 0.0` (Cfile:1025265), `mCreator = 0` und
+--- `mComplete = 1` (Cfile:1025272-1025273). Ein unbekannter Blueprint ist
+--- `"Unknown initial unit: %s"` (Cfile:1025258).
+---
+--- Die Hoehe ist NICHT unsere: die Engine uebergibt `y = 0` und `Moho::Unit::Unit`
+--- ersetzt sie durch `CalcSpawnElevation(...)`, solange `!mFixElevation`
+--- (Cfile:950181-950196). Deshalb geht hier `y = 0` in denselben Spawn-Pfad,
+--- den jede andere Einheit nimmt — kein eigenes `GetSurfaceHeight`, das nur
+--- fuer die Land-Ebene stimmen wuerde.
+function CreateInitialArmyUnit(army, bpId)
+  local i = __resolveArmy(army)
+  if type(bpId) ~= 'string' then error('CreateInitialArmyUnit: string expected', 2) end
+  local start = __armyVar(i).start
+  if not start then
+    -- Die Engine kann hier nicht landen: `GenerateArmyStart` lief bereits
+    -- waehrend der Armee-Erzeugung (Cfile:1017228). Kommen wir doch hierher,
+    -- ist unser Sitzungsaufbau unvollstaendig — und das soll man merken.
+    error(string.format(
+      'CreateInitialArmyUnit: Armee %s hat keine Startposition. SetArmyStart '
+      .. 'oder GenerateArmyStart muss vorher gelaufen sein '
+      .. '(InitializeStartLocation, scenarioutilities.lua:1026).', tostring(army)), 2)
+  end
+  local u = CreateUnitHPR(bpId, i, start[1], 0, start[2], 0, 0, 0)
+  if not u then error(string.format('Unknown initial unit: %s', bpId), 2) end
+  return u
 end

@@ -131,7 +131,12 @@ console.log('\n== __getBrain is a LOOKUP, never a creator ==')
       return tostring(e)
     `),
   )
-  check(/Invalid army index/.test(err), `an undeclared army index raises (${err.slice(0, 80)})`)
+  // The engine's own text for THIS binding: `GetArmyBrain` goes through
+  // `ARMY_FromLuaState`, which reports "Invalid army %d" (Cfile:1024184) — and
+  // prints `index - 1`, so asking for 99 says 98. (The other message,
+  // "Invalid army index; must be >= ...", belongs to the position/threat
+  // bindings at Cfile:980344-980352 and is what we used to raise here.)
+  check(/Invalid army 98/.test(err), `an undeclared army index raises (${err.slice(0, 80)})`)
   check(
     host.eval(`return rawget(_G, 'ArmyBrains')[99] == nil`) === true,
     'and no brain was registered in ArmyBrains as a side effect',
