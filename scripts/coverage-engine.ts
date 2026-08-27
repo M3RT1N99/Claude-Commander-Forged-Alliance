@@ -26,7 +26,9 @@ import { GameFiles } from './gameFiles'
 const zeigeAlle = process.argv.includes('--alle')
 
 // --- Die Engine-Liste einlesen (generiert aus der Decomp) -------------------
-const md = await readFile('docs/research/engine-api.md', 'utf-8')
+// Normalise CRLF: the repo checks out with core.autocrlf=true, and the class
+// lines are matched with a `$`-anchored regex that never matches a trailing \r.
+const md = (await readFile('docs/research/engine-api.md', 'utf-8')).replace(/\r\n/g, '\n')
 
 interface Abschnitt {
   vm: 'Core' | 'UI' | 'Sim'
@@ -57,7 +59,7 @@ function parse(md: string): Abschnitt[] {
         imGlobalsBlock = true
         continue
       }
-      if (z.startsWith('### Klassen')) {
+      if (z.startsWith('### Classes')) {
         imGlobalsBlock = false
         continue
       }
