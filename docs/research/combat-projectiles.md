@@ -264,7 +264,7 @@ A projectile's blueprint ID is the **full lowercase path with `.bp`**
 | `UnitWeapon:FireWeapon()` | Cfile:987369 — manuelles Feuern | `DoDeathWeapon` (`FireOnDeath`) |
 | `UnitWeapon:GetFireClockPct` | Cfile:988512-988531: `1 − mFireClock / (10/RoF)` | `RenderFireClock` |
 | `UnitWeapon:DoInstaHit` | Cfile:987034 — Fallback without ProjectileId | Engine internal |
-| `Entity:Kill(instigator,type,overkill)` | Cfile:951962 (**No-Op today!**) | `unit.lua:812` |
+| `Entity:Kill(instigator,type,overkill)` | Cfile:951962 (implemented, moho.lua:175) | `unit.lua:812` |
 | `Entity:SetCollisionShape(shape,cx,cy,cz,size)` | Cfile:934167 | `unit.lua`, `Prop` |
 | `Entity:GetPosition([bone])` | Cfile:934579 — **We are missing bone argument** | `CollisionBeam:GetPosition(1)` |
 | `Entity:GetBoneDirection(name)` | Cfile:931458 | Weapons, Effects |
@@ -283,6 +283,16 @@ A projectile's blueprint ID is the **full lowercase path with `.bp`**
 (`a == b`). Without a real alliance table, any collision and friendly fire filter is out of the question.
 
 ## 7. Current status of our engine
+
+> **HISTORICAL (superseded 2026-08-25).** This section is the snapshot from
+> *before* the combat system existed and is kept only to show what the gap list
+> looked like then. Nearly every "missing" item below has since been built:
+> weapons acquire targets and fire, projectiles load and impact, `Kill`
+> (moho.lua:175) and `GetArmorMult` (moho.lua:443) have real bodies, and
+> `moho.projectile_methods` is a real class. For the current picture use
+> [docs/STATUS.md](../STATUS.md) and the coverage report
+> (`npx tsx --import ./scripts/register-lua.mjs scripts/coverage-engine.ts`),
+> which was itself blind to every class binding until 2026-08-24.
 
 **There:** the weapon objects themselves ([units.lua:54-88](../../src/engine-lua/units.lua)) — per
 `bp.Weapon` entry is an instance of the original class, with `OnCreate` ⇒ the state machine

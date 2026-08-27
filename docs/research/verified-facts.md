@@ -444,3 +444,98 @@ World position (`__readAllEmittersJson`, globals.lua; owner+bones above
   bone-uniform references (instanced props share the instanceMatrix
   attribute), then the ComputeShadow term in terrain/unit/prop/decal
   shaders behind a define.
+
+## Engine-fidelity round, August 2026 (spec 001)
+
+Twelve divergences pinned against the decompilation and fixed; each is covered
+by a suite. The facts worth remembering:
+
+- **`CAiBrain::TakeResource` is not a negative `GiveResource`.** It works on
+  `mTotals.mStored`, takes `min(requested, stored)`, writes back
+  `max(0, stored - taken)` and **returns the amount taken** — the help string
+  says so: `"taken = TakeResource(type,amount)"` (Cfile:735162, body
+  735173-735270). `GiveResource` instead accumulates into `mResources`, the
+  per-beat income accumulator, and returns nothing (Cfile:734991-735054).
+  `simutils.lua:152-155` pipes the return straight into `GiveResource`, so
+  losing it NaN'd the recipient's economy.
+- **Shield absorption is collected once per damage EVENT, not per target.**
+  `func_DoDamageArea` calls `SIM_DoDamage` once (Cfile:1063221) to record each
+  eligible dome's `OnGetDamageAbsorption`, subtracts the total of the domes
+  containing each entity (`sub_736E40`, Cfile:1062715), skips entities whose
+  remainder is `<= 0` (Cfile:1063264), and damages every dome exactly once with
+  what it absorbed (Cfile:1063310-1063386). A dome is skipped when the damage
+  ORIGIN lies inside it at `radius - 0.1` (Cfile:1062800). `shield.lua:96-99`
+  states the contract in the original's own words.
+  `func_DoDamagePoint` (Cfile:1062873-1063170) contains **no shield code at
+  all** — a direct hit is stopped by projectile-vs-shield collision instead.
+- **`FindBestEnemy` ranks by priority, not distance** (Cfile:791970-792233).
+  The lowest matching `mTargetPriorities` index wins outright
+  (Cfile:792190-792191); distance only breaks ties inside a category
+  (Cfile:792203). The whole selection sits inside
+  `if Size(mTargetPriorities)` (Cfile:792176), so a candidate matching no listed
+  category is not a target — most weapons end their list with `ALLUNITS`.
+  `SetTargetingPriorities` (Cfile:988316-988366) is the only writer; the ctor
+  leaves the vector empty (Cfile:984183-984185).
+- **`Unit::Materialize` ADJUSTS health, it never assigns it.**
+  `AdjustHealth(0, mMaxHealth * delta)` (Cfile:953468); for a positive delta the
+  fraction is first raised to `health / maxHealth` (Cfile:953464-953465) — the
+  fraction follows the health, never the reverse. Assigning
+  `maxHealth * fraction` healed away every hit a construction site took.
+- **`mResourceConsumed` is 0 unless consumption is active.** Reset to 0 every
+  tick (Cfile:953937) and set to `CEconRequest::LimitingRate` only while
+  `!IsDead && mConsumptionIsActive && mConsumptionData` (Cfile:953945-953948).
+  `LimitingRate` is `1.0` for an empty request and `min(granted / requested)`
+  otherwise (Cfile:1107891-1107909). `unit.lua:748-752` turns consumption off
+  exactly when both rates are zero, so "idle" really does report 0 — and
+  shield.lua's recharge (`ChargingUp`, shield.lua:288) stalls forever on an
+  owner with no drain. That is why the ACU's shield enhancement sets
+  `SetEnergyMaintenanceConsumptionOverride` (uel0001_script.lua:314/326).
+- **The dispatch gate has four conditions**, not three:
+  `!IsBeingBuilt && !IsDead && !Attached && !BlockCommandQueue`
+  (`IAiCommandDispatchImpl::TaskTick`, Cfile:746583-746586). Death is not
+  instant — `DeathThread` runs for several beats (unit.lua:1200-1241).
+- **A factory's production queue IS its command queue.** The entries are
+  `UNITCOMMAND_BuildFactory` commands in `mUnit->mCommandQueue`
+  (Cfile:838000-838062), and `ClearCommandQueue` removes every command without
+  exception (Cfile:1005371-1005399). `IssueStop` and `IssueClearCommands` are
+  **different**: `IssueStop` appends a Stop with `clear = 0` (Cfile:1007952)
+  whose whole effect is `CAiAttackerImpl::Stop` + `SiloStopBuild`
+  (Cfile:831239-831256); `IssueClearCommands` clears (Cfile:1007874-1007889).
+  The UI's Stop button is the clear case (`ISSUE_Command(..., 1)`,
+  Cfile:1255059-1255063).
+- **Unit height branches by motion type.** Only `RULEUMT_Water`,
+  `AmphibiousFloating` and `Hover` clamp up to the water surface
+  (`CAiPathSpline::Update` Cfile:765808-765823, `::Generate` Cfile:766391);
+  Land, Biped, Amphibious, SurfacingSub take the raw heightfield — an
+  amphibious unit **walks the seabed**, confirmed by `IsOnValidLayer` accepting
+  `LAYER_Seabed` for `RULEUMT_Amphibious` only (Cfile:965960-965975).
+  Enum: None=0, Land=1, Air=2, Water=3, Biped=4, SurfacingSub=5, Amphibious=6,
+  Hover=7, AmphibiousFloating=8, Special=9 (Cfile:656550-656583).
+- **Projectile surface collision needs the RAW heightfield.**
+  `GetSurfaceHeight` is already `max(elevation, waterElevation)`
+  (Cfile:1089855-1089876), so testing terrain with it made every water impact
+  report `Terrain`. The water plane and the heightfield are separate tests
+  (`CColHitResult::PlaneIntersection` Cfile:722370 vs `CHeightField::Intersection`).
+  The gate is `mWaterEnabled`, i.e. water level `> -10000` — absent water is
+  exactly `-10000` (Cfile:857506-857510), **not** "level <= 0".
+- **maui focus: two different callbacks, and a click does not steal focus.**
+  A `ButtonPress`/`ButtonDClick` on another control calls vtable offset **64**
+  = slot 16 = `LosingKeyboardFocus` → `RunScript "OnLoseKeyboardFocus"` on the
+  CURRENT focus control and leaves `Maui_CurrentFocusControl` untouched
+  (Cfile:1147524-1147531; vtable Cfile:396337-396366; binding
+  Cfile:1124565-1124570). Only `MAUI_SetKeyboardFocus` writes the focus, and it
+  uses offset **68** = slot 17 = `OnKeyboardFocusChange` on the OLD control,
+  after the new one is assigned (Cfile:1141557-1141596). Nothing is called on
+  the control that gains focus.
+- **`uimain.OnMouseButtonPress` is an engine call, not a Lua convention.** On
+  every `ButtonPress`/`ButtonDClick` the engine builds a FRESH table with only
+  `Type`, `x`, `y` (lowercase, Cfile:1147543-1147545), imports
+  `/lua/ui/uimain.lua` and calls it (Cfile:1147534-1147558, sole xref at
+  1147549) — **before** `PostEvent` delivers the event to the topmost control
+  (Cfile:1147582). `uimain.lua:167-177` fans it out to every
+  `AddOnMouseClickedFunc`; combo.lua:289 and orders.lua:539 depend on it.
+- **Blueprint `Footprint` defaults are derived, not 1.** The fields are `uchar`
+  struct members defaulting to 0 (Cfile:642465); `RUnitBlueprint::OnInitBlueprint`
+  raises a 0 to `ceil(SizeX/SizeZ)` (Cfile:647164-647177). 72 retail structures
+  ship no `Footprint` section at all. `Physics.BuildOnLayerCaps` likewise
+  defaults to the `LAYER_Land` bit (Cfile:656146-656172).

@@ -481,10 +481,17 @@ research: [combat-projectiles](research/combat-projectiles.md), supplemented by
 **Target experience:** Two tanks from different armies see each other, fire, hit, die, and leave a wreck
 with the correct reclaim value.
 
-Currently, **no weapon is ever given a target**: the FSM has been in `IdleState` since the first tick.
-`Kill` and `GetArmorMult` are **no-ops** (moho.lua:53/138), `moho.projectile_methods` is an empty
-Auto-Vivifier class, and `beat()` ([engine.ts](../src/lua/engine.ts):91-108) has six phases — none of
-them is weapon or projectile processing.
+> **This milestone is DONE (2026-08-25).** The paragraph below is the starting
+> position it was written against and is kept for context only. Since then:
+> weapons acquire targets (now priority-ranked, `FindBestEnemy` Cfile:791970),
+> fire and impact; `Kill` (moho.lua:175) and `GetArmorMult` (moho.lua:443) have
+> real bodies; `moho.projectile_methods` is a real class; and `beat()` runs the
+> weapon and projectile phases. Verified by `scripts/verify-combat.ts`.
+
+Starting position: **no weapon is ever given a target** — the FSM has been in `IdleState` since the
+first tick. `Kill` and `GetArmorMult` are **no-ops** (moho.lua:53/138), `moho.projectile_methods` is
+an empty Auto-Vivifier class, and `beat()` ([engine.ts](../src/lua/engine.ts):91-108) has six phases
+— none of them is weapon or projectile processing.
 
 **Engine components (smallest honestly testable steps):**
 

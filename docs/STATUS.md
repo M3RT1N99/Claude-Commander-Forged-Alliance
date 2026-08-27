@@ -15,8 +15,23 @@ UI (economy, multifunction, orders, construction, unitview, tabs, avatars,
 minimap window, ...) renders entirely from the original Lua through the real
 provider chain (DoPreload → first sync beat → DoInitializing); **keyboard input
 works** (keymap from keymapper.lua, 135 hotkeys, CUIKeyHandler executor,
-UI_Lua). Verified in 29 suites (`npm test`) and in the browser through
+UI_Lua). Verified in **53 suites** (`npm test`) and in the browser through
 `?sandbox=<map>&selftest=<blueprint>`.
+
+## Engine coverage (August 2026)
+
+`npx tsx --import ./scripts/register-lua.mjs scripts/coverage-engine.ts` measures
+every binding in [research/engine-api.md](research/engine-api.md) against what
+our engine made of it: **1149 bindings, 660 real / 147 no-op / 342 missing =
+57 %**.
+
+Take the earlier "86 %" as void. The report's class-line regex is `$`-anchored
+and the repo checks out CRLF, so **751 class bindings were never parsed at all**
+and the NO-OP column read 0 regardless of reality. The number above is the first
+honest one. Largest remaining gaps: `Unit` (54), `CPlatoon` (49) and `CAiBrain`
+(48) — the two AI classes are a scheduled phase in
+[MASTERPLAN.md](MASTERPLAN.md), not a defect — then Sim-Globals (47),
+`CAiPersonality` (35), `Entity` (27), `CLobby` (18).
 
 ## Known gaps
 
@@ -71,8 +86,22 @@ The path to the real UI: [PLAN-UI.md](PLAN-UI.md); the complete 1:1 roadmap:
   (UICommandGraph — order lines exist). Click picking is ONE
   depth-sorted raycast across units, wrecks and instanced map props
   (the closest entity of any kind wins — engine semantics).
-- **Sim findings:** units stack up at roll-off (no separation), Mex stall
-  (production × LimitingRate, Cfile:953938).
+- **Sim findings:** units stack up at roll-off (no separation).
+- **Fixed in the August 2026 fidelity round** (spec
+  [001-engine-fidelity-fixes](../specs/001-engine-fidelity-fixes/spec.md), each
+  with its decomp evidence and a suite): `AIBrain:TakeResource` drains storage
+  and returns what it took instead of being a negative `GiveResource`; shields
+  absorb once per damage event instead of once per covered unit; target
+  acquisition honours `TargetPriorities` instead of picking the nearest;
+  construction and decay *adjust* health by the delta instead of assigning it
+  (damage to a site is no longer healed away every tick); `Stop` clears a
+  factory's production queue; a dying factory stops producing;
+  `Unit:GetResourceConsumed` reports the real granted rate instead of a flat 1;
+  water impacts report `Water` instead of `Terrain`; the map's water elevation
+  reaches the Sim at last, and unit height now branches by motion type (only
+  Water/AmphibiousFloating/Hover float — an amphibious unit walks the seabed);
+  `uimain.OnMouseButtonPress` is called again, so every `AddOnMouseClickedFunc`
+  registration works; a click elsewhere no longer steals the keyboard focus.
 - **`src/ui/hud.ts`** is the last TS remainder (minimap image, strategic
   icons). Do not add anything new there; it disappears with worldview/minimap.
 - **The map is parsed in TS** (`main.ts` reads `Scenario…Markers` itself)
@@ -80,13 +109,22 @@ The path to the real UI: [PLAN-UI.md](PLAN-UI.md); the complete 1:1 roadmap:
   now reach the sim through the boot message (Sim::Setup step 7,
   5182/5182 on SCMP_009).
 - **The blueprint is read twice** — by the TS parser (models/bones) and the
-  real `LoadBlueprints()` pipeline. Two sources of truth.
+  real `LoadBlueprints()` pipeline. The TS side is a pure projection again:
+  `blueprintPlacement()` had grown two invented defaults (`Footprint → 1`,
+  `BuildOnLayerCaps → 0`) and disagreed with the pipeline on the 72 retail
+  structures that ship no `Footprint` section, so the build ghost judged a 3×3
+  building as 1×1. Both now derive from the engine rule, and
+  `verify-ogrid.ts` compares all 374 structures against the pipeline — a future
+  drift is a test failure, not a surprise.
 - **Assist works** (multi-builder placement plus Guard on a builder/factory);
   a Guard on a reclaiming builder does not assist yet (guard's
   assist-reclaim branch, sub_612E80).
-- **Economy Lua API is partly a no-op:** `SetProductionPerSecond*`,
-  `SetConsumptionPerSecond*`, and `SetBuildRate` still do not write to the
-  engine economy (values come only from the blueprint).
+- ~~**Economy Lua API is partly a no-op**~~ — no longer true, and the entry was
+  stale: `SetProductionPerSecond*` and `SetConsumptionPerSecond*` write through
+  `__econUpdateRate` into the army economy (moho.lua:793-808), and
+  `SetBuildRate` mutates the value the build task actually reads
+  (`b:GetBuildRate()`, build.lua:476). `Unit:GetResourceConsumed` now reports
+  the real granted rate too (the last placeholder in that corner).
 - **`research/economy-binary.md` describes more than `economy.ts` supports**
   (Handicap, overflow sharing, cumulative `granted` accumulator).
 - **DDS parser** handles DXT1/3/5, uncompressed 8/16/24/32-bit (incl. A1R5G5B5,
