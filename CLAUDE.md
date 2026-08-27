@@ -175,9 +175,25 @@ npx tsx scripts/peek-lua.ts --grep <regex>  # search original Lua/Blueprints
   either fixed in that commit or written into
   [docs/STATUS.md](docs/STATUS.md) as an accepted finding in the same commit.
   Neither “the tests were run” nor “it is a finding” replaces a green gate.
+- **Start every session by reading the state, then running the gate — before
+  changing anything:** `git log --oneline -15`, [docs/STATUS.md](docs/STATUS.md),
+  the open tasks in `specs/*/tasks.md`, then `npm test`. This is not ceremony:
+  commit `8325662` inherited a red `verify-combat` and pushed it, and turret
+  weapons were dead for ~23 hours of committed history because nobody looked
+  first.
+- **The gate runs on push**, via `.githooks/pre-push`. Activate it once with
+  `git config core.hooksPath .githooks`. It has to be local: 49 of the 56
+  suites read the original game files, which no CI runner has. The GitHub
+  workflow only typechecks and runs the three asset-free suites — a green tick
+  there does **not** mean the engine was verified.
+- **A check that cannot fail is not a check.** See every new check go red once
+  before trusting it: undo the fix, confirm red, restore. Written down because
+  in one session a check counted a field that does not exist (always 0, always
+  green), and three tasks named suites that were never extended.
 - Browser end-to-end: `?sandbox=<map>&selftest=<blueprint>` runs the tech demo
   without a mouse (headless Chrome; the Sim ticks in real time, not under
-  `--virtual-time-budget`).
+  `--virtual-time-budget`). **It only logs — it cannot fail yet**; the running
+  end-to-end gate is `scripts/verify-playthrough.ts`.
 - **Debugging:** errors in Lua threads are only logged — first search the WARN
   lines for `ForkThread-Fehler:`.
 - Commit messages are in **English**: what and why, one milestone per commit.

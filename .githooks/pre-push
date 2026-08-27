@@ -1,0 +1,23 @@
+#!/bin/sh
+#
+# Das echte Gate. Es läuft LOKAL, weil es hier laufen muss: 49 der 56 Suiten
+# lesen die Original-Spieldateien aus der FA-Installation, und die gibt es auf
+# keinem CI-Runner. Ein GitHub-Workflow kann hier nur typechecken.
+#
+# Warum es das gibt: Commit 8325662 ("codex work", 17 Dateien, kein Body) machte
+# jede Turmwaffe schussunfähig und wurde ROT gepusht — verify-combat war zu dem
+# Zeitpunkt unverändert und muss fehlgeschlagen sein. Erst der nächste Commit
+# meldete "verify-combat green again". Kampf war ~23 Stunden committeter
+# Historie tot, weil niemand vor dem Push geprüft hat.
+#
+# Aktivieren (einmalig):   git config core.hooksPath .githooks
+# Umgehen (nur bewusst):   git push --no-verify
+set -e
+
+echo "── pre-push: Typecheck"
+npx tsc --noEmit
+
+echo "── pre-push: alle Suiten"
+npm test
+
+echo "── pre-push: grün"

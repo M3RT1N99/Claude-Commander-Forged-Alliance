@@ -1,0 +1,37 @@
+# Was hier läuft, und was NICHT.
+#
+# LÄUFT: der Typecheck über das ganze Repo, und die drei Suiten, die ohne die
+# Original-Spieldateien auskommen.
+#
+# LÄUFT NICHT: die anderen 49 Suiten. Sie lesen `units.scd`, `lua.scd`,
+# `mohodata.scd` usw. aus einer echten Supreme-Commander-Installation
+# (`CFA_GAME_DIR`, scripts/gameFiles.ts:78). Diese Dateien sind Eigentum des
+# Spielers und liegen nicht im Repo — "bring your own assets" ist die
+# Grundannahme des Projekts. Ein Runner hat sie nicht.
+#
+# Das vollständige Gate ist deshalb `.githooks/pre-push` und läuft lokal.
+# Dieser Workflow ist eine Ergänzung, kein Ersatz — er soll nicht den Eindruck
+# erwecken, ein grüner Haken hier bedeute, dass die Engine geprüft wurde.
+name: CI (typecheck + assetfreie Suiten)
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Typecheck (ganzes Repo)
+        run: npx tsc --noEmit
+      - name: Die Suiten, die ohne Spieldateien laufen
+        run: |
+          npx tsx --import ./scripts/register-lua.mjs scripts/verify-economy.ts
+          npx tsx --import ./scripts/register-lua.mjs scripts/verify-keys.ts
+          npx tsx --import ./scripts/register-lua.mjs scripts/verify-emitter-runtime.ts
