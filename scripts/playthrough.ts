@@ -17,6 +17,9 @@
  *
  *   npx tsx --import ./scripts/register-lua.mjs scripts/playthrough.ts
  */
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { LuaHost } from '../src/lua/host'
 import { installEngine, beat } from '../src/lua/engine'
 import { setTerrainSource } from '../src/lua/engineGlobals'
@@ -515,5 +518,43 @@ if (echte === 0) {
 } else {
   console.log(`${echte} offene Punkte (siehe oben).`)
 }
+
+// --- Das Gate ---------------------------------------------------------------
+// Dieses Skript war das EINZIGE im Repo, das eine ganze Partie durchspielt —
+// und es endete unbedingt mit `process.exit(0)`. Es konnte also gar nicht
+// fehlschlagen: es sammelte jeden WARN mit Datei und Zeile ein, druckte sie und
+// meldete Erfolg. Ein Suchlauf, dessen Funde niemanden aufhalten, ist ein
+// Bericht, kein Gate.
+//
+// Ab jetzt gilt eine eingecheckte Fund-Liste. Ein NEUER Fund macht rot; ein
+// verschwundener ist Fortschritt und darf die Liste kuerzen. Verglichen werden
+// die Fund-SCHLUESSEL, nicht die Anzahl — sonst wuerde ein neuer Fehler von
+// einem behobenen verdeckt.
+const baselinePath = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'playthrough-baseline.json')
+const aktuell = sortiert
+  .map(([key, v]) => key.slice(0, v.wo.length + 1) + key.slice(v.wo.length + 1))
+  .filter((key) => !bekannt.some((b) => key.includes(b)))
+  .sort()
+
+let gateFehler = 0
+console.log('\n== Durchlauf gegen die eingecheckte Fund-Liste ==')
+if (!existsSync(baselinePath)) {
+  mkdirSync(dirname(baselinePath), { recursive: true })
+  writeFileSync(baselinePath, `${JSON.stringify({ findings: aktuell }, null, 2)}\n`)
+  console.log(`  Fund-Liste angelegt: ${aktuell.length} bekannte offene Punkte`)
+} else {
+  const b = JSON.parse(readFileSync(baselinePath, 'utf-8')) as { findings: string[] }
+  const neu = aktuell.filter((k) => !b.findings.includes(k))
+  const weg = b.findings.filter((k) => !aktuell.includes(k))
+  for (const k of neu) {
+    console.log(`  FAIL NEUER Fund: ${k}`)
+    gateFehler++
+  }
+  for (const k of weg) console.log(`  ok   behoben (darf aus der Liste): ${k}`)
+  if (neu.length === 0) {
+    console.log(`  OK   kein neuer Fund (${aktuell.length} bekannte offene Punkte)`)
+  }
+}
+
 await game.close()
-process.exit(0)
+process.exit(gateFehler === 0 ? 0 : 1)
