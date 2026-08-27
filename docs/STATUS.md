@@ -141,6 +141,51 @@ Byte) nachgebildet werden, und der eingespeiste Befehlsstrom muss bei uns
 überhaupt laufen. Das nächste ehrliche Fortschrittsmaß ist deshalb keine
 Prozentzahl, sondern: **bis zu welchem Beat kommen wir?**
 
+### Der Befehlsstrom ist jetzt dekodiert — 6 263 Datensätze, kein Rest
+
+`src/formats/scfareplay.ts` liest nicht mehr nur den Rahmen. Jedes Feld stammt
+aus dem Decompilat, und zwar von BEIDEN Seiten, weil die sich gegenseitig
+kontrollieren: `DecodeCommandData` (Cfile:997521-997590) gegen
+`WriteCommandData` (Cfile:999299-999428), `WriteTarget` (Cfile:999433-999493),
+`DecodeEntIdSet` (Cfile:997440-997444), `WriteCells` (Cfile:999496-999541),
+`SCR_FromByteStream` (Cfile:598588-598636), `DecodeLuaSimCallback`
+(Cfile:997312-997318).
+
+Über alle neun Replays: **258 107 Nachrichten, 4 884 Prüfsummen, 6 263
+Befehls-Datensätze — jeder auf das letzte Byte aufgegangen.** Dazu die drei
+Kopf-Blöcke als vollständige Lua-Bäume.
+
+Was dabei ans Licht kam:
+
+| Befund | |
+| --- | --- |
+| **G2, ein Fehler von heute Vormittag.** `gameMods`, `scenarioInfo` und `armies[].info` wurden mit `TextDecoder('latin1')` gelesen. Node bildet `latin1` auf **windows-1252** ab (nachgemessen: `.encoding === 'windows-1252'`, `0x80` → U+20AC) — und `0x80` ist das dritte Byte des Floats 1.0, das in jedem dieser Blöcke steht. Es sind `SCR_ToByteStream`-Bäume, kein Text. Jetzt `Uint8Array`. | behoben |
+| **Der `ori`-Block ist 24 Byte, nicht 20.** Die Engine schreibt Sentinel (4) + 16 + 4 (Cfile:999369-999393). Mit 20 verschob sich alles danach, und der Fehler tauchte drei Felder später auf: die Zellen-Anzahl las sich als 4 161 536, weil sie die halbe Bitfolge des Floats 1.0 war. | behoben |
+| **`LuaSimCallback` hat DREI Teile**, nicht zwei: Name, Lua-Wert, EntIdSet (Cfile:997312-997318). | belegt |
+| **Die Uhr ist keine Gleichheit.** Die Summe der Advance-Deltas ist NICHT immer der Beat der nächsten Prüfsumme. Gemessen: Versatz meist 0, aber bis 47. Das passt zum 128er-Ring `mSimHashes[beat & 0x7F]` (Cfile:1067934). Geprüft wird deshalb die Schranke `0 ≤ Versatz < 128` — verrutscht der Rahmen, sprengt der Versatz sie sofort. | korrigiert |
+| **`ESTITargetType` hat im Decompilat keine Zahlen.** Die STRUKTUR ist bewiesen (`WriteTarget`: Typ-Byte, dann 4 Byte Id bei `AITARGET_Entity`, 12 Byte Position bei `AITARGET_Ground`, sonst nichts). Die Werte 0/1/2 sind aus dem Bestand erschlossen. Der Leser WIRFT bei allem anderen. | UNBEKANNT, markiert |
+| **`unk1`, `unk3`, `unk4`, `index`** heißen so, weil ihre Bedeutung unbekannt ist. Ihre Bytes sind es nicht. | UNBEKANNT, markiert |
+
+Rot-Probe: vier Byte aus dem `ori`-Block genommen → fünf Replays scheitern
+sofort mit derselben unsinnigen Zellen-Anzahl.
+
+### Der eigentliche Befund: es gibt kein einspeisbares Replay
+
+Der Bestand nach Befehlstyp — 6 263 Befehle, angeführt von Move (3 519),
+BuildMobile (950), BuildFactory (410), Guard (359), Attack (224). Und acht
+verschiedene `LuaSimCallback`s, darunter **`GiveOrders` (109)**: das ist ein
+echter Befehlskanal, kein Debug-Verkehr.
+
+Aber: **keines der neun Replays ist einspeisbar.** Ein Replay taugt nur als
+Vergleich gegen die Originalengine, wenn dieselbe Lua läuft. Sechs tragen
+LOUD/BrewLAN/TotalMayhem/M28-AI, deren Lua unsere Sim-Skripte ersetzt — eine
+Abweichung dagegen misst den Mod, nicht unsere Engine. Von den drei mod-freien
+ist nur bei einem die Karte installiert, und das enthält 1 Beat und 0 Befehle.
+
+**Was fehlt, ist keine Codeänderung: es ist eine Partie ohne Mods auf einer
+installierten Karte.** `verify-replay.ts` führt die Zahl als Sperrklinke (heute
+0, darf nur steigen) und nennt je Replay, woran es scheitert.
+
 ## Offener Befund: der Typecheck sieht die Skripte nicht
 
 `npx tsc --noEmit` prüft `tsconfig.json`, und dessen `include` ist `["src"]`.

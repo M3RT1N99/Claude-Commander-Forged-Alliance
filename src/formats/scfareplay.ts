@@ -67,8 +67,15 @@ export interface ReplaySource {
 }
 
 export interface ReplayArmy {
-  /** Der Lua-Quelltext des Armee-Startblocks (u32-Länge + Bytes). */
-  info: string
+  /**
+   * Der Armee-Startblock, ROH (u32-Länge + Bytes).
+   *
+   * Es ist kein Lua-Quelltext, sondern ein `SCR_ToByteStream`-Baum — direkt
+   * nachsehbar: der Block beginnt mit `04` (Tag „Tabelle"), dann `01` (Tag
+   * „String") `PlayerColor<NUL>`, dann `00 00 00 80 3F` (Tag „Zahl", Float 1.0).
+   * `readLuaValue()` macht daraus einen Wert.
+   */
+  info: Uint8Array
   /** Die Id-Liste hinter dem Block, terminiert von 0xFF (`BVIntSet::Add`). */
   ids: number[]
 }
@@ -78,10 +85,18 @@ export interface ReplayHeader {
   version: string
   /** Der Szenario-Pfad, z. B. `/maps/…/x_scenario.lua`. */
   mapPath: string
-  /** `mGameMods` — Lua-Quelltext der Mod-Liste. */
-  gameMods: string
-  /** `mScenarioInfo` — Lua-Quelltext der Szenario-Angaben. */
-  scenarioInfo: string
+  /**
+   * `mGameMods` — die Mod-Liste, ROH.
+   *
+   * NICHT als Text lesen. Diese drei Blöcke sind `SCR_ToByteStream`-Bäume, und
+   * `new TextDecoder('latin1')` ist in Node **windows-1252** (nachgemessen:
+   * `.encoding === 'windows-1252'`, Byte `0x80` → U+20AC). Ein Text-Dekodieren
+   * zerstört damit jedes Byte 0x80-0x9F — und 0x80 ist das dritte Byte des
+   * Floats 1.0. Die erste Fassung dieser Datei tat genau das.
+   */
+  gameMods: Uint8Array
+  /** `mScenarioInfo` — die Szenario-Angaben, ROH (siehe `gameMods`). */
+  scenarioInfo: Uint8Array
   sources: ReplaySource[]
   cheatsEnabled: boolean
   armies: ReplayArmy[]
@@ -112,11 +127,30 @@ export interface ReplayChecksum {
  * `gpg::BinaryReader` über einem Puffer. Bewusst minimal: der Leser soll an
  * einem kaputten Replay SCHEITERN, nicht raten. Jede Grenzüberschreitung wirft.
  */
-class Reader {
+export class Reader {
   pos = 0
   private readonly dv: DataView
   constructor(private readonly b: Uint8Array) {
     this.dv = new DataView(b.buffer, b.byteOffset, b.byteLength)
+  }
+
+  get rest(): number {
+    return this.b.length - this.pos
+  }
+
+  f32(): number {
+    this.need(4, 'f32')
+    const v = this.dv.getFloat32(this.pos, true)
+    this.pos += 4
+    return v
+  }
+
+  /** Dieselben vier Bytes als rohes u32 — für den `0xFFFFFFFF`-Sentinel. */
+  raw32(): number {
+    this.need(4, 'raw32')
+    const v = this.dv.getUint32(this.pos, true)
+    this.pos += 4
+    return v
   }
 
   private need(n: number, was: string): void {
@@ -148,6 +182,12 @@ class Reader {
     return s
   }
 
+  /** `gpg::Stream::CheckByte` — schauen, ohne zu verbrauchen. */
+  peek(): number {
+    this.need(1, 'peek')
+    return this.dv.getUint8(this.pos)
+  }
+
   bytes(n: number, was: string): Uint8Array {
     this.need(n, was)
     const s = this.b.subarray(this.pos, this.pos + n)
@@ -155,10 +195,10 @@ class Reader {
     return s
   }
 
-  /** u32-Länge, dann so viele Bytes — das Muster für die Lua-Blöcke im Kopf. */
-  blob(was: string): string {
+  /** u32-Länge, dann so viele Bytes — das Muster für die Blöcke im Kopf. */
+  blob(was: string): Uint8Array {
     const n = this.u32()
-    return new TextDecoder('latin1').decode(this.bytes(n, was))
+    return this.bytes(n, was)
   }
 }
 
@@ -199,7 +239,7 @@ export function parseReplayHeader(bytes: Uint8Array): ReplayHeader {
     // Cfile:1304198-1304211: u32 Länge (0 = kein Block), dann Bytes; danach
     // Ids bis 0xFF.
     const n = r.u32()
-    const info = n > 0 ? new TextDecoder('latin1').decode(r.bytes(n, `Armee ${i}`)) : ''
+    const info = n > 0 ? r.bytes(n, `Armee ${i}`) : new Uint8Array(0)
     const ids: number[] = []
     for (let v = r.u8(); v !== 0xff; v = r.u8()) ids.push(v)
     armies.push({ info, ids })
@@ -271,4 +311,274 @@ export function readChecksums(bytes: Uint8Array, header?: ReplayHeader): ReplayC
     out.push({ beat: pv.getUint32(16, true), md5 })
   }
   return out
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DIE NUTZLASTEN
+//
+// Bis hierher kennt die Datei nur den Rahmen. Ab hier werden die Datensätze
+// gelesen, die etwas über das Spiel sagen.
+//
+// Jedes Feld unten ist am Decompilat belegt — LESESEITE und SCHREIBSEITE, weil
+// die beiden sich gegenseitig kontrollieren:
+//
+// | Was | Leseseite | Schreibseite |
+// | --- | --- | --- |
+// | Advance | Cfile:996910-996919 | `CMarshaller::AdvanceBeat` Cfile:999139-999177 |
+// | SetCommandSource | Cfile:996923-996927 | — |
+// | EntIdSet | `DecodeEntIdSet` Cfile:997440-997444 | — |
+// | Ziel | — | `CMarshaller::WriteTarget` Cfile:999433-999493 |
+// | Befehlsblock | `DecodeCommandData` Cfile:997521-997590 | `WriteCommandData` Cfile:999299-999428 |
+// | Zellen | — | `CMarshaller::WriteCells` Cfile:999496-999541 |
+// | Lua-Wert | `SCR_FromByteStream` Cfile:598588-598636 | `SCR_ToByteStream` Cfile:598647 |
+// | IssueCommand | Cfile:997095-997115 | `CMarshaller::IssueCommand` Cfile:998554-998604 |
+// | LuaSimCallback | `DecodeLuaSimCallback` Cfile:997312-997318 | — |
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Ein Lua-Wert, wie `SCR_FromByteStream` ihn aufbaut. */
+export type LuaValue = number | string | boolean | null | LuaTable
+export interface LuaTable {
+  [k: string]: LuaValue
+}
+
+/**
+ * `Moho::SCR_FromByteStream` (Cfile:598588-598636), Tag für Tag:
+ *
+ *   0  Zahl    `Read(&v7, 4)` in ein **float** — 4 Byte, nicht 8
+ *   1  String  `ReadString` (NUL-terminiert)
+ *   2  nil     ohne Nutzlast
+ *   3  bool    `Read(&v5, 1)`
+ *   4  Tabelle Schlüssel/Wert-Paare, bis `CheckByte == 5`; dann wird die 5
+ *              mit `ReadChar` verbraucht. Ein nil als Schlüssel ODER als Wert
+ *              ist im Original `gpg::Die` — hier ein `throw`.
+ *   5  fehlplatziert: das Original warnt und liefert nil
+ *   sonst: das Original warnt und liefert nil
+ *
+ * Die beiden Warn-Fälle liefern hier ebenfalls `null`, aber sie WERFEN nicht:
+ * das Original liest an der Stelle weiter, und ein Leser, der strenger ist als
+ * die Engine, würde gültige Dateien ablehnen.
+ */
+export function readLuaValue(r: Reader): LuaValue {
+  const tag = r.u8()
+  switch (tag) {
+    case 0:
+      return r.f32()
+    case 1:
+      return r.str()
+    case 2:
+      return null
+    case 3:
+      return r.u8() !== 0
+    case 4: {
+      const t: LuaTable = {}
+      // `CheckByte` schaut, ohne zu verbrauchen.
+      while (r.peek() !== 5) {
+        const k = readLuaValue(r)
+        if (k === null) throw new Error('Deserialized nil table key.')
+        const v = readLuaValue(r)
+        if (v === null) throw new Error('Deserialized nil table value.')
+        t[String(k)] = v
+      }
+      r.u8() // die 5 verbrauchen (ReadChar, Cfile:598628)
+      return t
+    }
+    default:
+      // Cfile:598630/598636: warnen und nil zuweisen, NICHT abbrechen.
+      return null
+  }
+}
+
+/** Bequemer Einstieg für die Kopf-Blöcke: ganzer Puffer, muss aufgehen. */
+export function readLuaBlob(bytes: Uint8Array, was: string): LuaValue {
+  const r = new Reader(bytes)
+  const v = readLuaValue(r)
+  if (r.rest !== 0) throw new Error(`${was}: ${r.rest} Byte übrig nach dem Lua-Wert`)
+  return v
+}
+
+/**
+ * `Moho::SSTITarget`. Die STRUKTUR ist bewiesen (`WriteTarget`,
+ * Cfile:999433-999493): ein Typ-Byte, dann je nach Typ 4 Byte Entity-Id
+ * (`AITARGET_Entity`), 12 Byte Position (`AITARGET_Ground`) oder gar nichts.
+ *
+ * **Die ZAHLEN sind es nicht.** IDA zeigt `Moho::ESTITargetType` nur symbolisch;
+ * die numerischen Werte stehen nirgends im Decompilat. `0/1/2` ist aus dem
+ * Bestand erschlossen: nur mit dieser Zuordnung gehen die Datensätze byteweise
+ * auf. Deshalb WIRFT der Leser bei jedem anderen Wert, statt zu raten — ein
+ * unbekannter Typ soll sich melden, nicht durchrutschen.
+ */
+export const AITARGET_NONE = 0
+export const AITARGET_ENTITY = 1
+export const AITARGET_GROUND = 2
+
+export interface ReplayTarget {
+  type: number
+  ent: number | null
+  pos: [number, number, number] | null
+}
+
+export function readTarget(r: Reader): ReplayTarget {
+  const type = r.u8()
+  if (type === AITARGET_ENTITY) return { type, ent: r.u32(), pos: null }
+  if (type === AITARGET_GROUND) return { type, ent: null, pos: [r.f32(), r.f32(), r.f32()] }
+  if (type === AITARGET_NONE) return { type, ent: null, pos: null }
+  throw new Error(
+    `unbekannter Zieltyp ${type}: ESTITargetType steht im Decompilat nur symbolisch, ` +
+      'nur 0/1/2 sind aus dem Bestand belegt',
+  )
+}
+
+/** `DecodeEntIdSet` (Cfile:997440-997444): `u32` Anzahl, dann Anzahl × `u32`. */
+export function readEntIdSet(r: Reader): number[] {
+  const n = r.u32()
+  const out: number[] = new Array<number>(n)
+  for (let i = 0; i < n; i++) out[i] = r.u32()
+  return out
+}
+
+/**
+ * Der Befehlsblock, in der Reihenfolge, in der `WriteCommandData` ihn schreibt
+ * (Cfile:999299-999428) und `DecodeCommandData` ihn liest (Cfile:997521-997590).
+ *
+ * Die Feldnamen sind die des Decompilats — auch die hässlichen. `unk1`, `unk3`,
+ * `unk4` und `index` heissen so, weil ihre BEDEUTUNG unbekannt ist; ihre Bytes
+ * sind es nicht. Sie hier `speed` oder `priority` zu nennen wäre eine Erfindung.
+ */
+export interface ReplayCommandData {
+  /** `mNextCmdId` — die Befehls-Id des Senders. */
+  cmdId: number
+  /** 4 Byte, Bedeutung UNBEKANNT (`a4->unk1`, Cfile:999319). */
+  unk1: number
+  /** `mCommandType`, < 0x28 (Cfile:997525-997537, sonst wirft die Engine). */
+  commandType: number
+  /** `mIndex` — als Float geschrieben (Cfile:999344), Bedeutung UNBEKANNT. */
+  index: number
+  target: ReplayTarget
+  /** `unk2` — ein ZWEITES Ziel (Cfile:999358-999359). Bedeutung UNBEKANNT. */
+  target2: ReplayTarget
+  /**
+   * `mMaybeOriArgs`/`mOri`: SECHS Floats, oder gar keine.
+   *
+   * Der erste Wert ist ein Sentinel: ist er roh `0xFFFFFFFF`, entfallen die
+   * folgenden 20 Byte (Cfile:999369-999393). Sonst folgen 16 Byte
+   * (`mMaybeOriArgs.y`, `.z`, `mOri.x`, `mOri.y`, Cfile:999378-999383) UND
+   * noch einmal 4 (`mOri.z`, Cfile:999385-999393) — zusammen mit dem Sentinel
+   * also 24 Byte.
+   *
+   * Hier stand zuerst 5 statt 6. Der fehlende Vierbyter verschob alles danach,
+   * und der Fehler tauchte drei Felder später auf: die Zellen-Anzahl las sich
+   * als 4 161 536, weil sie in Wahrheit die halbe Bitfolge des Floats 1.0 war.
+   */
+  ori: [number, number, number, number, number, number] | null
+  /** Der Blueprint-Name; leer, wenn keiner (Cfile:999400-999404). */
+  blueprint: string
+  /** `mCells`: `u32` Anzahl + Anzahl × 4 Byte (Cfile:999512-999541), ROH. */
+  cells: Uint8Array
+  /** 4 Byte, Bedeutung UNBEKANNT (Cfile:999406-999416). */
+  unk3: number
+  /** 4 Byte, Bedeutung UNBEKANNT (Cfile:999417-999427). */
+  unk4: number
+  /** `mLObj` — ein `SCR_ToByteStream`-Wert (Cfile:999428). */
+  lua: LuaValue
+}
+
+export function readCommandData(r: Reader): ReplayCommandData {
+  const cmdId = r.u32()
+  const unk1 = r.f32()
+  const commandType = r.u8()
+  if (commandType >= 0x28) {
+    // Cfile:997525-997537: die Engine wirft hier ebenfalls.
+    throw new Error(`ungültiger Befehlstyp ${commandType} (>= 0x28)`)
+  }
+  const index = r.f32()
+  const target = readTarget(r)
+  const target2 = readTarget(r)
+
+  const oriHead = r.raw32()
+  let ori: [number, number, number, number, number, number] | null = null
+  if (oriHead !== 0xffffffff) {
+    const dv = new DataView(new ArrayBuffer(4))
+    dv.setUint32(0, oriHead, true)
+    // 16 Byte (Cfile:999378-999383) plus 4 (Cfile:999385-999393).
+    ori = [dv.getFloat32(0, true), r.f32(), r.f32(), r.f32(), r.f32(), r.f32()]
+  }
+
+  const blueprint = r.str()
+  const nCells = r.u32()
+  const cells = r.bytes(nCells * 4, 'mCells')
+  const unk3 = r.u32()
+  const unk4 = r.u32()
+  const lua = readLuaValue(r)
+  return { cmdId, unk1, commandType, index, target, target2, ori, blueprint, cells, unk3, unk4, lua }
+}
+
+export interface ReplayIssue {
+  /** Die Einheiten, an die der Befehl geht (EntIdSet). */
+  units: number[]
+  data: ReplayCommandData
+  clearQueue: boolean
+}
+
+/**
+ * `IssueCommand` (0x0C) und `IssueFactoryCommand` (0x0D) — gleicher Aufbau
+ * (Cfile:997095-997115 bzw. 997143-997171): EntIdSet, Befehlsblock, ein Byte.
+ *
+ * Das letzte Byte muss 0 oder 1 sein; die Engine wirft bei allem darüber
+ * („Invalid value for ClearQueue flag", Cfile:997107-997112).
+ *
+ * Der Datensatz muss AUF DAS BYTE aufgehen. Bleibt etwas übrig, stimmt das
+ * Layout nicht — und ein Leser, der Reste stillschweigend verwirft, würde
+ * genau das verdecken.
+ */
+export function readIssue(payload: Uint8Array): ReplayIssue {
+  const r = new Reader(payload)
+  const units = readEntIdSet(r)
+  const data = readCommandData(r)
+  const clear = r.u8()
+  if (clear >= 2) throw new Error(`Invalid value for ClearQueue flag: ${clear}`)
+  if (r.rest !== 0) throw new Error(`Issue-Datensatz: ${r.rest} Byte übrig`)
+  return { units, data, clearQueue: clear === 1 }
+}
+
+/**
+ * `Advance` (0x00) — vier Byte, und das ist die einzige Uhr im Strom
+ * (Cfile:996910-996919; geschrieben Cfile:999175-999177).
+ *
+ * Der Wert ist ein DELTA, keine absolute Beat-Nummer: die Empfängerseite
+ * addiert ihn auf den zuletzt bestätigten Beat (Cfile:680549-680568).
+ */
+export function readAdvance(payload: Uint8Array): number {
+  const r = new Reader(payload)
+  const n = r.u32()
+  if (r.rest !== 0) throw new Error(`Advance-Datensatz: ${r.rest} Byte übrig`)
+  return n
+}
+
+/** `SetCommandSource` (0x01) — ein Byte (Cfile:996923-996927). */
+export function readSetCommandSource(payload: Uint8Array): number {
+  const r = new Reader(payload)
+  const v = r.u8()
+  if (r.rest !== 0) throw new Error(`SetCommandSource: ${r.rest} Byte übrig`)
+  return v
+}
+
+export interface ReplayLuaCallback {
+  name: string
+  value: LuaValue
+  units: number[]
+}
+
+/**
+ * `LuaSimCallback` (0x16) — DREI Teile, nicht zwei
+ * (`DecodeLuaSimCallback`, Cfile:997312-997318): Name, Lua-Wert, EntIdSet.
+ *
+ * Das ist kein Debug-Verkehr: `GiveOrders` läuft hier durch.
+ */
+export function readLuaSimCallback(payload: Uint8Array): ReplayLuaCallback {
+  const r = new Reader(payload)
+  const name = r.str()
+  const value = readLuaValue(r)
+  const units = readEntIdSet(r)
+  if (r.rest !== 0) throw new Error(`LuaSimCallback ${name}: ${r.rest} Byte übrig`)
+  return { name, value, units }
 }

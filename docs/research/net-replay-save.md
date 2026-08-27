@@ -207,6 +207,70 @@ sends whichever beat the sync-data request names, taken from the 128-entry ring
 For the oracle the measurement is what matters: a recorded original run offers a
 comparison point every 5 seconds of game time.
 
+#### The command-record wire format (both sides, from the decompilation)
+
+Implemented in [src/formats/scfareplay.ts](../../src/formats/scfareplay.ts) and
+proven against all 6,263 issue records in the local corpus — every one consumed
+to its exact last byte, no slack. Read side and write side were both used,
+because they check each other.
+
+```
+IssueCommand 0x0C / IssueFactoryCommand 0x0D   (read Cfile:997095-997115 / 997143-997171)
+  EntIdSet         u32 count, count x u32       (DecodeEntIdSet Cfile:997440-997444)
+  CommandData      see below
+  u8 clearQueue    must be 0 or 1; engine throws otherwise (Cfile:997107-997112)
+
+CommandData        (read Cfile:997521-997590, written Cfile:999299-999428)
+  i32  mNextCmdId          the sender's command id
+  f32  unk1                meaning UNKNOWN (Cfile:999319)
+  u8   mCommandType        < 0x28, engine throws otherwise (Cfile:997525-997537)
+  f32  mIndex              meaning UNKNOWN (Cfile:999344)
+  Target mTarget           see below
+  Target unk2              a SECOND target; meaning UNKNOWN (Cfile:999358-999359)
+  f32  mMaybeOriArgs.x     sentinel: raw 0xFFFFFFFF omits the next 20 bytes
+    f32 x4                 mMaybeOriArgs.y/.z, mOri.x/.y   (Cfile:999378-999383)
+    f32                    mOri.z                          (Cfile:999385-999393)
+  strz blueprint           empty when mOri.w == 0          (Cfile:999400-999404)
+  u32 count + count x 4B   mCells                          (WriteCells Cfile:999496-999541)
+  u32  unk3                meaning UNKNOWN (Cfile:999406-999416)
+  u32  unk4                meaning UNKNOWN (Cfile:999417-999427)
+  LuaValue mLObj           SCR_ToByteStream                (Cfile:999428)
+
+Target             (WriteTarget Cfile:999433-999493)
+  u8 type
+  type == AITARGET_Entity  -> u32 entity id
+  type == AITARGET_Ground  -> 3 x f32 position
+  otherwise                -> nothing
+
+LuaValue           (SCR_FromByteStream Cfile:598588-598636)
+  0 number   4-byte FLOAT (not a double)
+  1 string   NUL-terminated
+  2 nil
+  3 boolean  1 byte
+  4 table    key/value pairs until CheckByte == 5, then that byte is consumed;
+             a nil key or nil value is gpg::Die in the original
+  5 stray / anything else: the engine warns and yields nil, it does NOT abort
+
+Advance 0x00            i32 DELTA, not an absolute beat (Cfile:996910-996919,
+                        added to the last ack Cfile:680549-680568)
+SetCommandSource 0x01   u8                                (Cfile:996923-996927)
+LuaSimCallback 0x16     strz name + LuaValue + EntIdSet   (Cfile:997312-997318)
+                        — THREE parts. GiveOrders travels here (109 in the corpus).
+```
+
+**Two things are deliberately not resolved.** The numeric values of
+`Moho::ESTITargetType` appear nowhere in the decompilation — IDA prints the
+members symbolically. `0/1/2` is inferred from the corpus (only that assignment
+makes every record consume exactly), and the reader throws on anything else
+rather than guessing. And `unk1`, `unk3`, `unk4`, `mIndex` keep those names
+because their MEANING is unknown; their bytes are not.
+
+**The clock is a bound, not an equality.** The sum of Advance deltas is not
+always the beat of the next checksum: measured offset is usually 0 but reaches
+47. That fits the 128-entry ring `mSimHashes[beat & 0x7F]` (Cfile:1067934) — the
+marshaller sends whichever beat the sync request names. What is checkable is
+therefore `0 <= offset < 128`, and a framing slip breaks it instantly.
+
 ### Aufnahme
 No separate writer! `CDecoder::ReceiveMessage` (`CDecoder.cpp:181`) copies the complete wire bytes of each dispatched message **before** decoding 1:1 into the `CSimDriver::mStream`. The replay body is therefore identical to what the sim ate (including `CMDST_Advance`, `CMDST_VerifyChecksum`, `CMDST_SetCommandSource`). Whoever writes the header and opens the file is **not reconstructed** in faf-re (Lua side `CopyCurrentReplay` copies `USER_GetReplayDir()/<profile>/LastGame.<ext>`).
 

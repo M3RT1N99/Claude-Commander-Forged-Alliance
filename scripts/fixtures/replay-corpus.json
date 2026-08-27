@@ -1,0 +1,5 @@
+{
+  "minFeedable": 0,
+  "issues": 6263,
+  "note": "Sperrklinke, keine Zielvorgabe: die Zahl der einspeisbaren Replays darf steigen, nie fallen. Ist sie 0, ist das ein FUND, kein Fehler — dann fehlt eine mod-freie Aufzeichnung. Sobald eine da ist, mit --update nachziehen. `issues` deckelt gleichzeitig den Decoder: liest er weniger Befehls-Datensätze als vorher, hat er verloren."
+}
