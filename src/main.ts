@@ -1369,20 +1369,58 @@ async function startSandbox(mapFolder: string): Promise<void> {
  * (SelectUnits → commandmode → worldClick). Damit ist der Browser-Pfad prüfbar,
  * ohne dass jemand mit der Maus danebentippt.
  */
+/**
+ * Die Funde des Selbsttests — er hat sie immer BERECHNET und dann nur
+ * protokolliert. „SELFTEST-KAMPF: KEIN Projektil-Mesh", „KEIN Wrack-Mesh",
+ * „keine Cue abgespielt": alles Zeilen im Log, kein `throw`, kein Exit-Code,
+ * kein Signal, das ein Treiber lesen könnte. CLAUDE.md nannte diesen Selbsttest
+ * als Ende-zu-Ende-Gate — mechanisch existierte dieses Gate nicht.
+ *
+ * `selftestBefund(ok, text)` zählt jetzt mit. Am Ende steht das Ergebnis im
+ * `document.title` (`SELFTEST-OK` / `SELFTEST-FAIL:N`) und in
+ * `window.__selftest`, damit `scripts/shot.ts` über CDP danach fragen kann,
+ * statt Logzeilen zu lesen.
+ */
+let selftestFunde: string[] = []
+function selftestBefund(ok: boolean, text: string): void {
+  log(text)
+  if (!ok) selftestFunde.push(text)
+}
+function selftestErgebnis(): void {
+  const n = selftestFunde.length
+  const status = n === 0 ? 'SELFTEST-OK' : `SELFTEST-FAIL:${n}`
+  document.title = status
+  ;(window as unknown as { __selftest?: unknown }).__selftest = {
+    status,
+    failures: n,
+    findings: [...selftestFunde],
+  }
+  log(
+    n === 0
+      ? 'SELFTEST: BESTANDEN — kein Fund'
+      : `SELFTEST: ${n} FUND(E) — ${selftestFunde.join(' | ')}`,
+  )
+}
+
 async function runSelftest(blueprintId: string): Promise<void> {
+  selftestFunde = []
   const deadline = Date.now() + 60000
   while (luaUnits.length === 0 && Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 200))
   }
   const acu = luaUnits[0]
   if (!acu || !gameUi || !luaSim) {
-    log('SELFTEST: keine ACU')
+    selftestBefund(false, 'SELFTEST: keine ACU')
+    selftestErgebnis()
     return
   }
   try {
     gameUi.select([acu.id])
   } catch (err) {
-    log(`SELFTEST: select scheitert — ${(err as Error).stack?.slice(0, 300)}`)
+    // Ein Abbruch ist ein Fund, kein Grund still auszusteigen: ohne dieses
+    // Urteil endete der Selbsttest hier mit einem Logeintrag und ohne Ergebnis.
+    selftestBefund(false, `SELFTEST: select scheitert — ${(err as Error).stack?.slice(0, 300)}`)
+    selftestErgebnis()
     return
   }
   log(`SELFTEST: ACU ${acu.id} ausgewählt`)
@@ -1427,7 +1465,9 @@ async function runSelftest(blueprintId: string): Promise<void> {
   // 3-s-Fork ruft SelectUnits(acu) statt SelectUnits(nil). Bleibt die Auswahl
   // hier trotzdem leer, ist das ein FUND — der Selftest meldet ihn.
   const auswahl = gameUi.selectionCount()
-  if (auswahl === 0) log('SELFTEST: FUND — Auswahl vor dem Klick leer (Regression der Init-Reihenfolge?)')
+  selftestBefund(auswahl !== 0, auswahl === 0
+    ? 'SELFTEST: FUND — Auswahl vor dem Klick leer (Regression der Init-Reihenfolge?)'
+    : 'SELFTEST: Auswahl steht vor dem Klick')
   log(`SELFTEST: vor dem Klick — commandMode=${JSON.stringify(gameUi.commandMode())}, Auswahl=${auswahl}`)
   await issueWorldCommand(ziel, false)
 
@@ -1507,7 +1547,8 @@ async function selftestKampf(): Promise<void> {
     const feindLebt = luaSim.allStates().some((u) => u.army === 2)
     if (!feindLebt && maxProj > 0) break
   }
-  log(
+  selftestBefund(
+    maxMeshes > 0,
     maxMeshes > 0
       ? `SELFTEST-KAMPF: Projektile sichtbar — max. ${maxProj} gemeldet, ${maxMeshes} Mesh(es) in der Szene`
       : `SELFTEST-KAMPF: KEIN Projektil-Mesh (gemeldet: ${maxProj}) — der Sichtweg ist unterbrochen`,
@@ -1518,7 +1559,8 @@ async function selftestKampf(): Promise<void> {
     await new Promise((r) => setTimeout(r, 500))
   }
   const nProps = luaSim.allProps().length
-  log(
+  selftestBefund(
+    propMeshes.size > 0,
     propMeshes.size > 0
       ? `SELFTEST-WRACK: ${nProps} Prop(s) gemeldet, ${propMeshes.size} Wrack-Mesh(es) in der Szene`
       : `SELFTEST-WRACK: KEIN Wrack-Mesh (gemeldet: ${nProps}) — der Props-Sichtweg ist unterbrochen`,
@@ -1526,7 +1568,8 @@ async function selftestKampf(): Promise<void> {
   // Das Partikelsystem: Mündungsfeuer/Einschläge/Bau-Glow müssen als
   // Instanzen in den Batches gelandet sein.
   const nPartikel = particles?.totalParticles() ?? 0
-  log(
+  selftestBefund(
+    nPartikel > 0,
     nPartikel > 0
       ? `SELFTEST-PARTIKEL: ${nPartikel} Partikel gespawnt — das Partikelsystem lebt`
       : 'SELFTEST-PARTIKEL: KEIN Partikel gespawnt — Emitter-Kette prüfen',
@@ -1541,11 +1584,14 @@ async function selftestKampf(): Promise<void> {
   // zählt maxBeams über den ganzen Selftest (der Kampf hat meist keine).
   log(`SELFTEST-BEAMS: max. ${maxBeamsGesehen} Beam(s) gleichzeitig im Bild`)
   const nCues = gameAudio?.playedCount ?? -1
-  log(
+  selftestBefund(
+    nCues > 0,
     nCues > 0
       ? `SELFTEST-AUDIO: ${nCues} Cue(s) als PCM abgespielt — die XACT-Kette lebt`
       : `SELFTEST-AUDIO: keine Cue abgespielt (${nCues < 0 ? 'kein AudioContext' : 'Kette prüfen'})`,
   )
+  // Der Kampf ist der letzte Abschnitt: hier faellt das Urteil.
+  selftestErgebnis()
 }
 
 /** Höchststand gleichzeitiger Beams — gepflegt in luaSimUpdate. */
