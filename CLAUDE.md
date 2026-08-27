@@ -37,10 +37,23 @@ responsible for game logic: `Unit.lua`, `defaultunits.lua`, `aibrain.lua`, and
   [src/engine-lua/](src/engine-lua/); the adjacent TS files are only loaders
   and bridges.
 
-Two **Auto-Vivifiers** are deliberately in the production path (they do not
-fail there): `moho.<x>` creates empty classes
-([moho.lua](src/engine-lua/moho.lua)), and `__getBrain(army)` silently creates
-Brains ([brain.lua](src/engine-lua/brain.lua)).
+**Four Auto-Vivifiers** are deliberately in the production path (they do not
+fail there), and the list is exhaustive:
+
+1. `moho.<x>` creates empty classes ([moho.lua](src/engine-lua/moho.lua))
+2. `__getBrain(army)` creates Brains ([brain.lua](src/engine-lua/brain.lua))
+3. `categories.<NAME>` returns a token category
+   ([globals.lua](src/engine-lua/globals.lua))
+4. `EconomyManager.army(n)` creates an army economy
+   ([economy.ts](src/sim/economy.ts))
+
+Creating the shell so the original Lua can **reference** it is the sanctioned
+part. **Answering a real question with invented state is not** — an
+auto-vivified object must fail on the first semantically required operation,
+and where the retail engine rejects the input outright, so do we (an undeclared
+army index: `Cfile:980346-980352`). The reference-works / call-throws pattern is
+in [ui-globals-missing.lua](src/engine-lua/ui-globals-missing.lua). A fifth
+entry in that list is a change to this document, not an implementation detail.
 
 ## Sources of truth — in this order
 
@@ -50,7 +63,16 @@ Brains ([brain.lua](src/engine-lua/brain.lua)).
 2. **Original Lua + Blueprints:** `npx tsx scripts/peek-lua.ts <path> <from> <to>`
    or `--grep <regex>` (searches lua.scd, mohodata.scd, and units.scd, including
    `.bp`).
-3. **faf-re / community / web** — only when 1 and 2 provide no answer.
+3. **faf-re / community / web** — only when 1 and 2 provide no answer, and
+   **only to tell you where to look**. Rank 3 never supplies a value on its
+   own: anything found there is verified against 1 or 2 before it enters the
+   code, or carried explicitly as `UNVERIFIED`. faf-re is wrong in places; on
+   conflict the Decomp wins.
+
+**`UNKNOWN` / `UNVERIFIED` is a legitimate state.** Research that did not
+resolve is recorded as unresolved — in the plan's Evidence Base, in
+[docs/STATUS.md](docs/STATUS.md), or in a comment at the site. An open question
+blocks the affected task; it never licenses a guess.
 
 Do not hallucinate. Research first, then implement, then verify against real
 data.
@@ -107,6 +129,16 @@ far from the cause. `globals.lua` deliberately contains no `Class(`.
   @0x51E480) populates **every field** first — Lua accesses
   `bp.Defense.Shield.ShieldSize` without checking, even when the `.bp` has no
   Shield section.
+- **One authoritative blueprint representation.** The real `LoadBlueprints()`
+  pipeline ([blueprints.lua](src/engine-lua/blueprints.lua)) owns blueprint
+  semantics — struct defaults and derivations included. The TS reader
+  ([blueprint.ts](src/formats/blueprint.ts)) and its consumers are a **pure
+  projection** (rendering, indexing, binary access) and must not re-derive
+  semantics with their own defaults. Where a projection unavoidably needs a
+  derived value, it reproduces the engine derivation *with its citation* **and**
+  a suite compares it against the pipeline for every affected blueprint. **If
+  the two readers disagree, verification fails**
+  ([verify-ogrid.ts](scripts/verify-ogrid.ts) does this for placement).
 - **`class.lua` copies base-class fields** (there is no `__index` fallback): a
   method name may appear in exactly **one** moho name list; otherwise a no-op
   shadows the real implementation.
@@ -136,15 +168,41 @@ npx tsx scripts/peek-lua.ts --grep <regex>  # search original Lua/Blueprints
   `--import ./scripts/register-lua.mjs`**; otherwise it gets
   `ERR_UNKNOWN_FILE_EXTENSION ".lua"`. `npm test` sets it itself.
 - Tests are verification suites against real game data, not mocks. A failing
-  test after an honesty correction is a **finding**, not a regression.
-- Run the appropriate suite while working; before **every commit**, run
-  `npx tsc --noEmit` and `npm test` (all suites).
+  test after an honesty correction is a **finding**, not a regression — but a
+  finding is something you *record*, not something you leave lying around.
+- Run the appropriate suite while working; before **every commit**,
+  `npx tsc --noEmit` and `npm test` (all suites) must **pass**. A red suite is
+  either fixed in that commit or written into
+  [docs/STATUS.md](docs/STATUS.md) as an accepted finding in the same commit.
+  Neither “the tests were run” nor “it is a finding” replaces a green gate.
 - Browser end-to-end: `?sandbox=<map>&selftest=<blueprint>` runs the tech demo
   without a mouse (headless Chrome; the Sim ticks in real time, not under
   `--virtual-time-budget`).
 - **Debugging:** errors in Lua threads are only logged — first search the WARN
   lines for `ForkThread-Fehler:`.
 - Commit messages are in **English**: what and why, one milestone per commit.
+
+### Spec-driven workflow (spec-kit)
+
+[GitHub Spec Kit](https://github.com/github/spec-kit) is installed
+(`.specify/`, skills in `.claude/skills/speckit-*`). Use it for work that spans
+more than one file or one session — not for a single verified fix.
+
+- **The constitution** ([.specify/memory/constitution.md](.specify/memory/constitution.md))
+  is the governance mirror of this file: the five invariants (original Lua is
+  the game, evidence over invention, fail loudly, one boot path/two VMs,
+  verification against real data). Every spec and plan runs a Constitution
+  Check against it. **On conflict, CLAUDE.md wins** and the constitution is
+  amended to match.
+- **Loop:** `/speckit-specify` (what and why, no solution) → `/speckit-clarify`
+  (optional) → `/speckit-plan` → `/speckit-tasks` → `/speckit-analyze`
+  (optional) → `/speckit-implement` → `/speckit-converge` (repeat until
+  converged). Artifacts land in `specs/<NNN>-<name>/`.
+- **Project rule:** every task names the check that proves it —
+  a `scripts/verify-*.ts` suite, `npm test`, or `?sandbox=…&selftest=…`.
+  A task without a runnable check is not a task.
+- The scripts are PowerShell (`.specify/scripts/powershell/`); they create
+  `specs/` directories only and never switch git branches.
 
 ## Working style by model
 
@@ -195,6 +253,7 @@ browser self-test `?sandbox=…&selftest=…`) — never to “looks done.”
 | Document | Contents |
 | --- | --- |
 | [docs/STATUS.md](docs/STATUS.md) | Status + known gaps (read first) |
+| [.specify/memory/constitution.md](.specify/memory/constitution.md) | Spec-kit constitution (the invariants as governance) |
 | [docs/PLAN-1ZU1.md](docs/PLAN-1ZU1.md) | Consolidated 1:1 roadmap (milestones) |
 | [docs/PLAN-UI.md](docs/PLAN-UI.md) | Path to the real `lua/ui`, with Decomp evidence |
 | [docs/MASTERPLAN.md](docs/MASTERPLAN.md) | Full-game inventory, phases A–F |
