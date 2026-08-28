@@ -2433,3 +2433,55 @@ end
 function AudioSetLanguage(language)
   if language == nil then error('AudioSetLanguage(language) -- expected 1 args, but got 0', 2) end
 end
+
+-- ── Rohstoff-Lagerstaetten ───────────────────────────────────────────────────
+--
+-- `CreateResourceDeposit(type, x, y, z, size)` (cfunc_CreateResourceDepositL,
+-- Cfile:687704-687772). Genau FUENF Argumente, sonst wirft die Engine
+-- (Cfile:687704-687706). Die Zuordnung im Decompilat ist verdreht lesbar, aber
+-- eindeutig: Argument 2 -> `pos.x`, 3 -> `pos.y`, 4 -> `pos.z`
+-- (Cfile:687718-687738), Argument 5 -> ein quadratisches `Vector2i{size, size}`
+-- (Cfile:687744-687752). Am Ende `AddDepositPoint(typ, pos, size)`
+-- (Cfile:687769).
+--
+-- Der Typ wird im Original in einem String-Array nachgeschlagen; ist er
+-- unbekannt, LOGGT die Engine `"unknown resource deposit type: %s"` und nimmt
+-- Index 0 (Cfile:687753-687767) — sie bricht NICHT ab.
+--
+-- **Die Enum-Werte sind UNBEKANNT.** IDA zeigt nur den Container
+-- `resource_deposit_t`, nicht seine Zeichenketten (Cfile:422326). Deshalb wird
+-- hier der STRING gespeichert und keine Zahl erfunden. Benutzt werden ohnehin
+-- nur zwei: `Mass` und `Hydrocarbon` (markertemplates.lua:9-23, beide
+-- `resource = true`).
+--
+-- Was die Engine damit tut, haben wir NICHT: `CSimResources` speist die
+-- Bauplatzpruefung, damit ein Extraktor nur auf einer Lagerstaette stehen darf.
+-- Hier wird bis auf Weiteres nur GESAMMELT — und nichts liest es, ausser der
+-- Pruefung. Das ist eine Luecke, keine Implementierung.
+__resourceDeposits = {}
+
+function CreateResourceDeposit(depositType, x, y, z, size)
+  if depositType == nil or x == nil or y == nil or z == nil or size == nil then
+    error('CreateResourceDeposit(type,x,y,z,size) -- expected 5 args', 2)
+  end
+  if type(depositType) ~= 'string' then error('CreateResourceDeposit: string expected', 2) end
+  for _, n in ipairs({ 'x', 'y', 'z', 'size' }) do
+    local v = ({ x = x, y = y, z = z, size = size })[n]
+    if type(v) ~= 'number' then error('CreateResourceDeposit: number expected for ' .. n, 2) end
+  end
+  if depositType ~= 'Mass' and depositType ~= 'Hydrocarbon' then
+    -- Wie die Engine: melden und weitermachen (Cfile:687767).
+    LOG('unknown resource deposit type: ' .. depositType)
+  end
+  __resourceDeposits[#__resourceDeposits + 1] =
+    { type = depositType, x = x, y = y, z = z, size = size }
+end
+
+--- Wie viele Lagerstaetten eines Typs bisher angelegt wurden (fuer die Pruefung).
+function __countResourceDeposits(depositType)
+  local n = 0
+  for _, d in ipairs(__resourceDeposits) do
+    if depositType == nil or d.type == depositType then n = n + 1 end
+  end
+  return n
+end

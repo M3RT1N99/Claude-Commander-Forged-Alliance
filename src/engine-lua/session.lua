@@ -84,6 +84,13 @@ function __beginSession()
   if not (ScenarioInfo and ScenarioInfo.Env) then
     error('__beginSession: __loadScenario() muss vorher gelaufen sein', 2)
   end
+  -- Der schook-Hook macht VOR dem Basis-BeginSession zwei Dinge
+  -- (schook/lua/simInit.lua:17-18): die Props der Karte und ihre Lagerstaetten.
+  -- Beides gehoert zum Weltaufbau und muss vor `OnPopulate` stehen — eine
+  -- Einheit, die auf einem Massepunkt landet, fragt danach.
+  local su = import('/lua/sim/ScenarioUtilities.lua')
+  su.CreateProps()
+  su.CreateResources()
   if ScenarioInfo.Env.OnPopulate then ScenarioInfo.Env.OnPopulate(ScenarioInfo) end
   if ScenarioInfo.Env.OnStart then ScenarioInfo.Env.OnStart(ScenarioInfo) end
 end

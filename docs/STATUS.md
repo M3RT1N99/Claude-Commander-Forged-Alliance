@@ -316,10 +316,41 @@ bereits hinter sich hat — das ist eine Kollision der Boot-Reihenfolge, kein
 fehlendes Global, und damit ein eigener Meilenstein. Bis dahin fährt
 `session.lua` genau die Schritte nach, die `SetupSession`/`BeginSession` täten.
 
-Ebenfalls offen: `CreateResourceDeposit` (also keine Massepunkte aus der Karte),
-`ArmyInitializePrebuiltUnits` (nur bei `Options.PrebuiltUnits == 'On'`,
-Cfile:1073515-1073533 — unbedingt gebaut würde es in jedem Skirmish Basen
-hinstellen), `SetAlliance` mit Namen, und die Props aus `Scenario.Props`.
+### Die Karte bringt jetzt ihre Lagerstätten und Props mit
+
+`CreateResourceDeposit` fehlte als einzige der Bindungen, die
+`ScenarioUtils.CreateResources()` (scenarioutilities.lua:371-431) braucht —
+`CreatePropHPR`, `CreateSplat` und `Random` waren längst da. Belegt aus
+`cfunc_CreateResourceDepositL` (Cfile:687704-687772): genau fünf Argumente
+(sonst wirft die Engine), Argument 2/3/4 → `pos.x/y/z`, Argument 5 → ein
+quadratisches `Vector2i{size,size}`, am Ende `AddDepositPoint`. Ein unbekannter
+Typ wird nur **geloggt**, nicht abgelehnt (Cfile:687767).
+
+**Die Enum-Werte sind UNBEKANNT** — IDA zeigt nur den Container
+`resource_deposit_t` (Cfile:422326), nicht seine Zeichenketten. Deshalb wird der
+STRING gespeichert und keine Zahl erfunden. Benutzt werden ohnehin nur zwei:
+`Mass` und `Hydrocarbon` (markertemplates.lua:9-23).
+
+`__beginSession()` fährt jetzt vor `OnPopulate` das, was der schook-Hook fährt:
+`CreateProps()` und `CreateResources()` (schook/lua/simInit.lua:17-18). Auf
+SCMP_009 ergibt das **108 Masse- und 8 Hydrokohlenstoff-Lagerstätten**, und die
+Suite prüft sie gegen die Marker der Karte — ohne diese Gegenprobe würde sie
+auch für einen Lader gelten, der irgendetwas anlegt.
+
+Dabei kam heraus, dass `loadProps` in `gameFiles.ts` zu eng filterte: nur
+`/props/**`, während die Karte aus `/env/common/props/` baut
+(`massDeposit01_prop.bp`, scenarioutilities.lua:389). Die Engine warf dort
+richtig („Invalid blueprint"); jetzt werden 335 Prop-Blueprints geladen.
+
+**Gesammelt, nicht benutzt:** was die Engine mit den Lagerstätten tut, haben wir
+nicht. `CSimResources` speist im Original die Bauplatzprüfung, damit ein
+Extraktor nur auf einem Massepunkt stehen darf. Hier liest sie bis auf Weiteres
+nur die Prüfung. Das ist eine Lücke, keine Implementierung — und sie steht so im
+Code.
+
+Weiterhin offen: `ArmyInitializePrebuiltUnits` (nur bei
+`Options.PrebuiltUnits == 'On'`, Cfile:1073515-1073533 — unbedingt gebaut würde
+es in jedem Skirmish Basen hinstellen) und `SetAlliance` mit Namen.
 
 ## Offener Befund: der Typecheck sieht die Skripte nicht
 

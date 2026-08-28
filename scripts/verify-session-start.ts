@@ -137,6 +137,10 @@ if (bootFehler) {
 for (const id of ['uel0001', 'ual0001', 'url0001', 'xsl0001']) {
   await game.giveUnit(host, id)
 }
+// Und die Prop-Blueprints: `CreateResources()` setzt auf jeden Massepunkt ein
+// `/env/common/props/massDeposit01_prop.bp` (scenarioutilities.lua:389).
+const nProps = game.loadProps(host)
+check(nProps > 0, `${nProps} Prop-Blueprints geladen`)
 let popFehler = ''
 try {
   beginSession(host, session)
@@ -196,6 +200,31 @@ for (const [i, want] of [ARMY1, ARMY2].entries()) {
     `Armee ${i + 1} steht auf ${want.x}/${want.z} (${u?.x}/${u?.z})`,
   )
 }
+
+console.log('\n== Die Karte hat ihre Lagerstätten ==')
+// `ScenarioUtils.CreateResources()` (scenarioutilities.lua:371-431) läuft aus
+// dem schook-BeginSession (schook/lua/simInit.lua:18) und legt für jeden Marker
+// mit `resource = true` eine Lagerstätte an — dazu je einen Prop. Die Zahlen
+// stehen in der Karte, nicht hier.
+const masse = Number(q(`return __countResourceDeposits('Mass')`))
+const hydro = Number(q(`return __countResourceDeposits('Hydrocarbon')`))
+console.log(`  ${masse} Masse- und ${hydro} Hydrokohlenstoff-Lagerstätten`)
+check(masse > 0 && hydro > 0, 'SCMP_009 hat Masse- UND Hydrokohlenstoff-Punkte')
+// Gegenprobe aus den Markern selbst: genau so viele, wie die Karte deklariert.
+// Ohne sie würde die Prüfung auch für einen Lader gelten, der irgendetwas anlegt.
+const ausMarkern = Number(
+  q(`local m, h = 0, 0
+     for _, v in pairs(Scenario.MasterChain._MASTERCHAIN_.Markers) do
+       if v.resource then
+         if v.type == 'Mass' then m = m + 1 elseif v.type == 'Hydrocarbon' then h = h + 1 end
+       end
+     end
+     return m * 1000 + h`),
+)
+check(
+  ausMarkern === masse * 1000 + hydro,
+  `so viele, wie die Marker deklarieren (${Math.floor(ausMarkern / 1000)}/${ausMarkern % 1000})`,
+)
 
 console.log('\n== Das Bündnis kommt aus der Original-Lua ==')
 check(q('return IsEnemy(1, 2)') === true, 'IsEnemy(1,2) — gesetzt von scenarioutilities.lua:495')

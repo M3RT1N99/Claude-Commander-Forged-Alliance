@@ -184,9 +184,20 @@ export class GameFiles {
     return loadProjectileBlueprints(host, paths)
   }
 
-  /** Die Prop-Blueprints (Wracks) — /props/**.bp. */
+  /**
+   * Die Prop-Blueprints: alles unter `props/` und unter `env/<x>/props/`.
+   *
+   * `/env` gehoert dazu, weil die Karte selbst daraus baut:
+   * `ScenarioUtils.CreateResources()` setzt auf jeden Massepunkt ein
+   * `/env/common/props/massDeposit01_prop.bp` (scenarioutilities.lua:389) und
+   * auf jede Hydrokohlenstoff-Stelle ein `hydrocarbonDeposit01_prop.bp`
+   * (:399). Ohne sie wirft `CreateProp` „Invalid blueprint" — was richtig ist,
+   * aber eben bedeutet, dass sie geladen sein muessen.
+   */
   loadProps(host: LuaHost): number {
-    const paths = [...this.paths].filter((p) => p.startsWith('props/') && p.endsWith('.bp'))
+    const paths = [...this.paths].filter(
+      (p) => p.endsWith('.bp') && (p.startsWith('props/') || /(^|\/)env\/.*\/props\//.test(p)),
+    )
     return loadPropBlueprints(host, paths)
   }
 
