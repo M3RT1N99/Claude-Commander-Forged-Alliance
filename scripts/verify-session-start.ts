@@ -28,9 +28,11 @@
  *
  *   npx tsx --import ./scripts/register-lua.mjs scripts/verify-session-start.ts
  */
+import { readFileSync } from 'node:fs'
 import { LuaHost } from '../src/lua/host'
-import { installEngine } from '../src/lua/engine'
+import { installEngine, beat, type Engine } from '../src/lua/engine'
 import { setTerrainSource } from '../src/lua/engineGlobals'
+import { parseScmap } from '../src/formats/scmap'
 import { GameFiles } from './gameFiles'
 import { beginSession, type SessionInfo } from '../src/sim/session'
 
@@ -50,6 +52,11 @@ const check = (ok: boolean, label: string): void => {
 }
 
 const game = await GameFiles.open()
+// Die .scmap liegt lose neben den Skripten der Karte.
+const GAME_DIR =
+  process.env.CFA_GAME_DIR ??
+  'C:/Program Files (x86)/Steam/steamapps/common/Supreme Commander Forged Alliance'
+const scmap = parseScmap(new Uint8Array(readFileSync(`${GAME_DIR}/maps/${MAP}/${MAP}.scmap`)))
 const luaErrors: string[] = []
 const host = await LuaHost.create(game.luaFiles, (level, msg) => {
   if (level === 'WARN' && /Fehler|error/i.test(msg)) luaErrors.push(msg)
@@ -113,8 +120,9 @@ console.log('\n== Ohne Szenario setzt niemand ein Bündnis ==')
 
 console.log('\n== Die echte Kette ==')
 let bootFehler = ''
+let engine: Engine | null = null
 try {
-  installEngine(host, undefined, session)
+  engine = installEngine(host, undefined, session)
 } catch (e) {
   bootFehler = (e as Error).message
 }
@@ -123,7 +131,25 @@ check(bootFehler === '', `installEngine mit Szenario${bootFehler ? ` — ${bootF
 // `installEngine` erst anlegt. `CreateInitialArmyUnit` übergibt y = 0 und lässt
 // den Spawn-Pfad die Höhe ableiten (Cfile:950181-950196), also muss eine
 // Geländequelle stehen, bevor `OnPopulate` spawnt.
-if (!bootFehler) setTerrainSource(host, () => 20, { width: 1024, height: 1024 })
+if (!bootFehler) {
+  // DAS ECHTE GELÄNDE der Karte, nicht flach 20. Ohne das steht die ACU auf
+  // einer erfundenen Ebene, und jede Höhen-, Wasser- und Schichtentscheidung
+  // der Sim ist eine Antwort auf eine Frage, die niemand gestellt hat.
+  const stride = scmap.width + 1
+  setTerrainSource(
+    host,
+    (x, z) => {
+      const xi = Math.max(0, Math.min(scmap.width, Math.round(x)))
+      const zi = Math.max(0, Math.min(scmap.height, Math.round(z)))
+      return (scmap.heightmap[zi * stride + xi] ?? 0) * scmap.heightScale
+    },
+    {
+      width: scmap.width,
+      height: scmap.height,
+      waterElevation: scmap.water.hasWater ? scmap.water.elevation : undefined,
+    },
+  )
+}
 if (bootFehler) {
   host.close()
   await game.close()
@@ -140,6 +166,14 @@ for (const id of ['uel0001', 'ual0001', 'url0001', 'xsl0001']) {
 // Und die Prop-Blueprints: `CreateResources()` setzt auf jeden Massepunkt ein
 // `/env/common/props/massDeposit01_prop.bp` (scenarioutilities.lua:389).
 const nProps = game.loadProps(host)
+// Und die Projektil-/Effekt-Blueprints. Der Grund ist nicht Vollstaendigkeit:
+// `CreateInitialArmyGroup` versteckt die ACU und forkt `CommanderWarpDelay`,
+// wenn `Options.PrebuiltUnits == 'Off'` (scenarioutilities.lua:340-343), und
+// `PlayCommanderWarpInEffect` (uel0001_script.lua:183-193) baut daraus ein
+// `/effects/entities/UnitTeleport01/...`. Ohne die Blueprints wirft die Engine
+// dort zu Recht — der Warp-In-Pfad laeuft jetzt naemlich wirklich mit.
+const nProj = game.loadProjectiles(host)
+check(nProj > 250, `${nProj} Projektil-/Effekt-Blueprints geladen`)
 check(nProps > 0, `${nProps} Prop-Blueprints geladen`)
 let popFehler = ''
 try {
@@ -252,9 +286,48 @@ check(
   'CreateUnit mit Namen wirft (die Engine verlangt dort eine Zahl)',
 )
 check(
-  !throws(`return CreateUnitHPR('uel0001', 'ARMY_1', 100, 20, 100, 0, 0, 0)`),
+  !throws(`local u = CreateUnitHPR('uel0001', 'ARMY_1', 100, 20, 100, 0, 0, 0)
+           -- Die Probe legt eine ECHTE Einheit an; sie darf im Zustand nicht
+           -- liegen bleiben, sonst zaehlt der Beat-Abschnitt sie mit.
+           u:Destroy()
+           return u ~= nil`),
   'CreateUnitHPR mit Namen geht (ARMY_FromLuaState, Cfile:980538)',
 )
+
+console.log('\n== Und dann läuft sie ==')
+// Bis hierher stand die Welt nur da. Ein Sitzungsstart, den niemand tickt,
+// beweist wenig: die interessanten Fehler entstehen im ersten Beat, wenn
+// OnCreate-Threads anlaufen, die Ökonomie die ACU-Startressourcen verteilt und
+// die Bewegungsschicht ihre erste Höhen- und Wasserentscheidung trifft — auf
+// ECHTEN Kartendaten, nicht auf einer flachen 20er-Ebene.
+const vorher = luaErrors.length
+for (let i = 0; i < 100; i++) beat(engine!)
+const neueFehler = luaErrors.slice(vorher)
+check(
+  neueFehler.length === 0,
+  `100 Beats auf der echten Karte ohne Lua-Fehler${neueFehler[0] ? ` — ${neueFehler[0].slice(0, 140)}` : ''}`,
+)
+
+// Die ACUs müssen den Lauf überlebt haben und dürfen sich nicht bewegt haben:
+// niemand hat ihnen einen Befehl gegeben.
+const nach = (JSON.parse(String(q('return __readAllUnitsJson()'))) as Row[]).sort(
+  (a, b) => a.army - b.army,
+)
+check(nach.length === 2, `nach 100 Beats stehen noch 2 Einheiten (${nach.length})`)
+for (const [i, want] of [ARMY1, ARMY2].entries()) {
+  const u = nach[i]
+  check(
+    u !== undefined && Math.abs(u.x - want.x) < 0.01 && Math.abs(u.z - want.z) < 0.01,
+    `Armee ${i + 1} steht unverändert auf ${want.x}/${want.z} (${u?.x}/${u?.z})`,
+  )
+}
+// Die ACU bringt ihren Startvorrat selbst mit (GiveInitialResources,
+// uel0001_script.lua:159-163). Nach 100 Beats muss beide Armeen etwas haben —
+// ohne das hätte die Ökonomie die Sitzung nie gesehen.
+for (const a of [1, 2]) {
+  const e = engine!.economy.army(a)
+  check(e.mass > 0 && e.energy > 0, `Armee ${a} hat Ressourcen (${e.mass.toFixed(0)} M / ${e.energy.toFixed(0)} E)`)
+}
 
 check(luaErrors.length === 0, `keine Lua-Fehler${luaErrors[0] ? `: ${luaErrors[0]}` : ''}`)
 

@@ -348,9 +348,29 @@ Extraktor nur auf einem Massepunkt stehen darf. Hier liest sie bis auf Weiteres
 nur die Prüfung. Das ist eine Lücke, keine Implementierung — und sie steht so im
 Code.
 
+### Und dann läuft sie: 100 Beats auf echten Kartendaten
+
+Ein Sitzungsstart, den niemand tickt, beweist wenig. `verify-session-start.ts`
+setzt jetzt das **echte Höhenfeld der `.scmap`** als Geländequelle (nicht flach
+20) und lässt die Sim 100 Beats laufen. Ergebnis: **kein Lua-Fehler**, beide
+Kommandeure stehen unverändert auf ihren Markern, beide Armeen haben ihren
+Startvorrat (650 Masse / 4000 Energie, von der ACU selbst über
+`GiveInitialResources`).
+
+Der erste Lauf war rot, und der Grund war aufschlussreich:
+`CreateProjectile: Invalid blueprint /effects/entities/UnitTeleport01/…` an
+`uel0001_script.lua:193`. Das ist `PlayCommanderWarpInEffect` — geforkt von
+`CommanderWarpDelay`, weil `Options.PrebuiltUnits == 'Off'` ist
+(scenarioutilities.lua:340-343). Mit anderen Worten: **der Warp-In der ACU läuft
+seit dieser Änderung wirklich mit**, und der Suite fehlten nur seine
+Blueprints. Die Engine hat dort zu Recht geworfen.
+
 Weiterhin offen: `ArmyInitializePrebuiltUnits` (nur bei
 `Options.PrebuiltUnits == 'On'`, Cfile:1073515-1073533 — unbedingt gebaut würde
-es in jedem Skirmish Basen hinstellen) und `SetAlliance` mit Namen.
+es in jedem Skirmish Basen hinstellen) und `SetAlliance` mit Namen. Und der
+Browser-Pfad: `src/sim/luaSimClient.ts` schickt dem Worker weiterhin keine
+Kartendateien, also profitieren bislang nur die Node-Suiten davon —
+`src/main.ts:1031-1062` parst die `_save.lua` dort noch mit dem TS-Parser.
 
 ## Offener Befund: der Typecheck sieht die Skripte nicht
 
