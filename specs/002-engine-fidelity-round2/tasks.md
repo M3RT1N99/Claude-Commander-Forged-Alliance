@@ -85,8 +85,22 @@ Principles II and V).
 - [ ] T013 **US11** Ship `speed / MaxSpeed` from the sim and scale the walk
       animation with it (`CAnimationManipulator::MoveManipulator` Cfile:873406,
       ratio 873557-873559). `src/main.ts:2716`.
-- [ ] T014 **US12** Decode `DDPF_LUMINANCE` (0x20000) as luminance replicated
+### US12 — DDPF_LUMINANCE ✅ DONE
+
+- [x] T014 **US12** Decode `DDPF_LUMINANCE` (0x20000) as luminance replicated
       to RGB, leaving the `DDPF_ALPHA` path alone. `src/formats/dds.ts:122/155`.
+      Counted over all 14,307 DDS in the archives: exactly ONE file has the
+      flag — `textures/particles/beam_white_03.dds` (8-bit, pfFlags 0x20000,
+      R mask 0xff, G/B/A = 0). Without the branch its brightness lands on RED
+      alone, so a white beam renders red.
+      The semantics are NOT in the decompilation ("luminance" does not appear —
+      the engine hands the DDS to D3DX); they are Direct3D's D3DFMT_L8, i.e.
+      source 3, and marked as such at the site. What grounds it is source 2:
+      the one affected file is a WHITE beam.
+      check: scripts/verify-dds.ts
+      asserts: Pixel sind grau
+      asserts: nicht einfach schwarz
+      Red probe: turn the flag off -> 14,991 of 16,384 pixels go non-grey.
 
 ---
 

@@ -113,6 +113,33 @@ console.log('\n== DDS-Cubemaps: 6 Faces je Datei ==')
   check(flat.cubeFaces === null, 'eine 2D-Textur bleibt 2D (cubeFaces = null)')
 }
 
+console.log('\n== DDPF_LUMINANCE: eine Helligkeit, drei Kanäle ==')
+{
+  // Genau EINE Datei im Spiel hat dieses Format — nachgezählt über alle 14 307
+  // DDS der Archive. Ohne Sonderbehandlung landet die Helligkeit allein auf
+  // ROT, und ein weißer Strahl wäre ein roter.
+  const lumPath = 'textures/particles/beam_white_03.dds'
+  check(game.exists(lumPath), `${lumPath} vorhanden (die einzige Luminanz-Textur)`)
+  const lum = parseDds(await game.read(lumPath))
+  const mip = lum.mips[0]!
+  let grau = 0
+  let bunt = 0
+  let hellstes = 0
+  for (let i = 0; i < mip.width * mip.height; i++) {
+    const o = i * 4
+    const bB = mip.data[o] ?? 0
+    const gG = mip.data[o + 1] ?? 0
+    const rR = mip.data[o + 2] ?? 0
+    if (bB === gG && gG === rR) grau++
+    else bunt++
+    if (rR > hellstes) hellstes = rR
+  }
+  check(bunt === 0, `alle ${grau} Pixel sind grau (R=G=B), ${bunt} nicht`)
+  // Ohne diese Zeile würde die Prüfung auch für ein völlig schwarzes Bild
+  // gelten — und schwarz ist ebenfalls überall R=G=B.
+  check(hellstes > 200, `und es ist nicht einfach schwarz (hellster Wert ${hellstes})`)
+}
+
 await game.close()
 console.log(failures === 0 ? '\nDDS BESTANDEN' : `\n${failures} CHECK(S) FEHLGESCHLAGEN`)
 process.exit(failures === 0 ? 0 : 1)

@@ -41,6 +41,22 @@ export interface DdsImage {
 
 const DDS_MAGIC = 0x20534444 // 'DDS '
 const DDPF_FOURCC = 0x4
+/**
+ * `DDPF_LUMINANCE` — ein einkanaliges Graustufenbild. Die Helligkeit steht in
+ * der R-Maske; G und B sind 0.
+ *
+ * Ohne Sonderbehandlung landet sie allein auf ROT, und eine weisse Textur wird
+ * rot. Im Spiel betrifft das genau EINE Datei — nachgezaehlt ueber alle 14 307
+ * DDS der Archive: `textures/particles/beam_white_03.dds` (8 Bit, pfFlags
+ * 0x20000, R-Maske 0xff, G/B/A = 0). Der Name sagt, was herauskommen soll.
+ *
+ * Die Semantik selbst steht NICHT im Decompilat — dort kommt „luminance" nicht
+ * vor, weil die Engine das DDS an D3DX weiterreicht. Sie ist Direct3D:
+ * `D3DFMT_L8` repliziert die Helligkeit beim Abtasten auf R, G und B. Das ist
+ * Quelle 3 und hier ausdruecklich als solche vermerkt; belegt ist es dadurch,
+ * dass die einzige betroffene Datei ein WEISSER Strahl ist und nicht ein roter.
+ */
+const DDPF_LUMINANCE = 0x20000
 const DDSCAPS2_CUBEMAP = 0x200
 
 function fourCc(view: DataView, offset: number): string {
@@ -68,6 +84,8 @@ interface RawLayout {
   gMask: number
   bMask: number
   aMask: number
+  /** `DDPF_LUMINANCE`: die R-Maske ist die Helligkeit, sie gilt fuer R, G UND B. */
+  luminance: boolean
 }
 
 /**
@@ -79,7 +97,7 @@ interface RawLayout {
  * bit replication — also holds for 1..3-bit channels (see `scale` below).
  */
 function expandToBgra(src: Uint8Array, count: number, layout: RawLayout): Uint8Array {
-  const { bytesPerPixel, rMask, gMask, bMask, aMask } = layout
+  const { bytesPerPixel, rMask, gMask, bMask, aMask, luminance } = layout
   const out = new Uint8Array(count * 4)
 
   const shiftOf = (mask: number): number => {
@@ -119,9 +137,17 @@ function expandToBgra(src: Uint8Array, count: number, layout: RawLayout): Uint8A
     // absent COLOR channel as 0 and an absent ALPHA as 1.0 (255). So an A8
     // texture presents RGB=0, not white (the old 255 default gave A8/L8 lookup
     // textures a white instead of black RGB).
-    out[d + 0] = bMask ? scale((px & bMask) >>> B.shift, B.bits) : 0
-    out[d + 1] = gMask ? scale((px & gMask) >>> G.shift, G.bits) : 0
-    out[d + 2] = rMask ? scale((px & rMask) >>> R.shift, R.bits) : 0
+    if (luminance) {
+      // Eine Helligkeit, drei Kanaele (D3DFMT_L8) — siehe DDPF_LUMINANCE oben.
+      const l = rMask ? scale((px & rMask) >>> R.shift, R.bits) : 0
+      out[d + 0] = l
+      out[d + 1] = l
+      out[d + 2] = l
+    } else {
+      out[d + 0] = bMask ? scale((px & bMask) >>> B.shift, B.bits) : 0
+      out[d + 1] = gMask ? scale((px & gMask) >>> G.shift, G.bits) : 0
+      out[d + 2] = rMask ? scale((px & rMask) >>> R.shift, R.bits) : 0
+    }
     out[d + 3] = aMask ? scale((px >>> A.shift) & ((1 << A.bits) - 1), A.bits) : 255
   }
   return out
@@ -158,6 +184,7 @@ export function parseDds(data: Uint8Array): DdsImage {
       gMask: view.getUint32(96, true),
       bMask: view.getUint32(100, true),
       aMask: view.getUint32(104, true),
+      luminance: (pfFlags & DDPF_LUMINANCE) !== 0,
     }
   }
 
