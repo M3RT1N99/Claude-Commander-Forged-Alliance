@@ -127,6 +127,24 @@ Principles II and V).
 - [ ] T019 **US17** Split the SCMAP `>= 60` gate into the engine's two:
       skybox from 58 (Cfile:1339158), cartographic decal-batch count from 59.
       `src/formats/scmap.ts:415/443`.
+      **BLOCKED — not verifiable with the installed data, and deliberately not
+      guessed.** Both gates are confirmed in the decompilation: `if (v108 >= 0x3A)`
+      -> `Moho::SkyDome::Load` (Cfile:1339157-1339161) and, after it,
+      `if (v53 >= 0x3B)` -> `Moho::Cartographic::ReadDecals`
+      (Cfile:1339183-1339184), which reads a u32 count followed by that many
+      `CartographicDecalBatch(version, reader)` (Cfile:1182437-1182453).
+      But: **all 60 installed maps are versionMinor 60** (measured). No 58 or 59
+      map exists here, so any change to the gate is unobservable on the corpus
+      and unfalsifiable — exactly the guess this project forbids.
+      Worse, there is an unresolved contradiction to settle first: the engine
+      reads the cartographic decals AFTER the skybox, while
+      `src/formats/scmap.ts:380` reads its decal-group block BEFORE it — and our
+      parser nevertheless consumes every one of the 60 maps to the exact last
+      byte (`scmap.ts:465` throws otherwise). Either the decompiled control flow
+      is not the file order, or the two "decal" blocks are different things.
+      **UNKNOWN.** Resolve that before touching the gate.
+      check: none — the assertion cannot be made false with the data on this
+      machine; a 58/59 map would be needed.
 
 ---
 

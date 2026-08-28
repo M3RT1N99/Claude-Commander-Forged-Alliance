@@ -412,6 +412,26 @@ Vektor, und ob der 256 Plätze hat, steht nicht im Decompilat. Statt zu raten
 wird einmal je Code gewarnt und der Default geliefert — sichtbar, nicht still.
 Auf den geprüften Karten feuert die Warnung nicht.
 
+### T019/US17 bleibt offen — und zwar bewusst
+
+Die Aufgabe lautet, das SCMAP-Gate `>= 60` in die zwei der Engine zu zerlegen.
+Beide sind im Decompilat bestätigt: `if (v108 >= 0x3A)` → `SkyDome::Load`
+(Cfile:1339157-1339161) und danach `if (v53 >= 0x3B)` →
+`Cartographic::ReadDecals` (Cfile:1339183-1339184), das eine `u32`-Anzahl und so
+viele `CartographicDecalBatch` liest (Cfile:1182437-1182453).
+
+**Trotzdem wird nichts geändert.** Gemessen: **alle 60 installierten Karten
+haben versionMinor 60.** Es gibt hier keine 58er- oder 59er-Karte, also wäre
+jede Änderung am Gate unbeobachtbar und unwiderlegbar — genau die Sorte
+Vermutung, die dieses Projekt verbietet.
+
+Und es gibt einen ungelösten Widerspruch, der zuerst geklärt gehört: die Engine
+liest die kartografischen Dekale **nach** dem Skybox, unser Parser liest seinen
+Dekal-Gruppenblock (`scmap.ts:380`) **davor** — und braucht dabei jede der 60
+Karten bis aufs letzte Byte auf (`scmap.ts:465` wirft sonst). Entweder ist der
+dekompilierte Kontrollfluss nicht die Dateireihenfolge, oder die beiden
+„Dekal"-Blöcke sind verschiedene Dinge. **UNBEKANNT.**
+
 Weiterhin offen: `ArmyInitializePrebuiltUnits` (nur bei
 `Options.PrebuiltUnits == 'On'`, Cfile:1073515-1073533 — unbedingt gebaut würde
 es in jedem Skirmish Basen hinstellen). Und der Browser-Pfad: `src/sim/luaSimClient.ts` schickt dem Worker weiterhin keine
