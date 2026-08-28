@@ -448,6 +448,53 @@ Einheit an etwas aus der Kategorie TRANSPORTATION hängt
 (Cfile:951400-951424). Einen Anhänge-Zustand gibt es hier nicht — `AttachTo` ist
 einer der stillen No-ops, und einer der **neun**, die das Spiel wirklich ruft.
 
+### Der schook-Blocker war ein Typfehler an der JS-Grenze — und er ist behoben
+
+`Hook /schook/lua/simInit.lua: TypeError: self is not a function` sah nach einem
+Lua-Problem aus. Es war keines.
+
+`DiskFindFiles` endet in `__simDiskFindFiles`, einer **JS-Funktion**, die ein
+`string[]` liefert. wasmoon legt das nicht als Lua-Tabelle ab, sondern als
+**userdata**-Proxy. Selbst nachgemessen:
+
+| | |
+| --- | --- |
+| `type(...)` | `userdata` |
+| `#` und `ipairs` | funktionieren |
+| `pairs` | **reisst die VM um** — `Cannot read properties of null (reading 'then')` |
+| `for k,v in t do` (FA-Dialekt → `__foriter`) | **`TypeError: self is not a function`** |
+
+`__foriter` (compat.lua:14-22) prüft im Tabellen-Zweig auf
+`type(a) == 'table'`; userdata fällt durch, und der generische `for` ruft den
+Proxy als Iterator auf. Genau daran starb der Hook.
+
+Und es war **nicht auf die Sim beschränkt**: die UI-VM hat dieselbe Brücke
+(`uiEngine.ts:130`) und damit denselben Fehler — er hätte die Kartenliste der
+Lobby getroffen (`maputil.lua:106 for index, fileName in scenFiles do`,
+`helptext.lua:26`). Beide VMs kopieren den Proxy jetzt in eine echte Tabelle.
+
+Dieselbe Familie wie die `null`-Falle in `LuaHost.setGlobal`: ein
+JS-Rückgabewert, den Lua anders sieht als gedacht. Die Prüfung in
+`verify-core-globals.ts` nagelt deshalb ausdrücklich den **Dialekt-Weg** fest,
+nicht nur die Länge — `#` allein hätte den Fehler nicht gesehen.
+
+### Damit läuft die Retail-Kette
+
+Mit dieser einen Korrektur (plus dem `moho`-Umbau in die C-Form und einem
+`CreatePrefetchSet`-Ersatz) fährt `doscript('/lua/simInit.lua')` durch, und
+`SetupSession` / `OnCreateArmyBrain` / `BeginSession` **der Retail-Lua** liefern
+dieselben fünf Werte wie unsere Handkette: 341 Marker, ARMY_1 bei 672.5, zwei
+Einheiten, `IsEnemy(1,2)` false → true, 100 Beats ohne Warnung — nur eben ohne
+`session.lua`.
+
+Was der Sim heute noch fehlt, gemessen gegen den Retail-Boot: **0 statt 108
+Buffs** (`schook/lua/globalinit.lua:15`), kein `TriggerManager`, keine 40
+KI-Datendateien (491 KB), kein striktes `_G` im Sim-VM, und
+`ScenarioInfo.PlatoonHandles/UnitGroups/UnitNames/…` alle nil. `buff.lua:41-42`
+**wirft** bei einem unbekannten Buff — jedes `Buff.ApplyBuff` aus der
+Original-Lua ist damit ein Fehler, der nur darauf wartet, dass jemand den Pfad
+läuft.
+
 ### Der Retail-Boot ist weiter weg als gedacht
 
 Die Recherche zu `/lua/simInit.lua` hat eine Behauptung selbst widerlegt, die

@@ -212,6 +212,40 @@ console.log('\n== DiskFindFiles (Sim) honours the pattern and sees the real VFS 
     Number(sim.eval(`return #DiskFindFiles('/units', '*.bp')`)) === 0,
     `'*.bp' still comes from __bpFiles (deliberate — we load blueprints selectively)`,
   )
+
+  // ── And it must be a REAL Lua table ──────────────────────────────────────
+  //
+  // The bridge is a JS function, and wasmoon hands its array to Lua as a
+  // USERDATA proxy, not a table. Measured: `#` and `ipairs` work, but `pairs`
+  // tears the VM down ("Cannot read properties of null (reading 'then')"), and
+  // the original Lua's `for k,v in t do` — which the transpiler turns into
+  // `__foriter(t)` (compat.lua:14-22, table branch tests `type(a)=='table'`) —
+  // falls through and CALLS the proxy as an iterator: "self is not a function".
+  //
+  // That is exactly what killed /schook/lua/simInit.lua, and it would equally
+  // kill maputil.lua:106 and helptext.lua:26 in the UI VM — the lobby's map
+  // list. `#` alone would not have caught it, which is why the dialect path is
+  // asserted here and not just the length.
+  check(
+    sim.eval(`return type(DiskFindFiles('/loc', '*strings_db.lua'))`) === 'table',
+    'das Ergebnis ist eine echte Lua-Tabelle, keine userdata',
+  )
+  check(
+    Number(
+      sim.eval(
+        `local n = 0 for _ in pairs(DiskFindFiles('/loc', '*strings_db.lua')) do n = n + 1 end return n`,
+      ),
+    ) === loc,
+    'pairs() läuft darüber (auf userdata stürzt die VM ab)',
+  )
+  check(
+    Number(
+      sim.eval(
+        `local n = 0 for k, v in __foriter(DiskFindFiles('/loc', '*strings_db.lua')) do n = n + 1 end return n`,
+      ),
+    ) === loc,
+    'und der FA-Dialekt-Weg `for k,v in t do` (__foriter) auch — daran starb der schook-Hook',
+  )
 }
 
 sim.close()

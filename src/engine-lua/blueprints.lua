@@ -382,6 +382,25 @@ function DiskFindFiles(dir, pattern)
     end
     return out
   end
-  -- Alles andere: der echte Dateisatz.
-  return __simDiskFindFiles(dir, pattern)
+  -- Alles andere: der echte Dateisatz — aber ALS ECHTE TABELLE.
+  --
+  -- `__simDiskFindFiles` ist eine JS-Funktion, und wasmoon legt ihr Array nicht
+  -- als Lua-Tabelle ab, sondern als USERDATA-Proxy. Nachgemessen: `type(...)`
+  -- ist `userdata`, `#` und `ipairs` gehen, aber `pairs` reisst die VM um
+  -- (`Cannot read properties of null (reading 'then')`) — und `for k,v in t do`
+  -- der Original-Lua wird vom Transpiler zu `__foriter(t)` (compat.lua:14-22),
+  -- dessen Tabellen-Zweig auf `type(a) == 'table'` prueft. Userdata faellt
+  -- durch, der generische `for` ruft den Proxy als Iterator auf, und heraus
+  -- kommt `TypeError: self is not a function`.
+  --
+  -- Genau daran starb `/schook/lua/simInit.lua`. Betroffen ist jede
+  -- Original-Stelle, die das Ergebnis durchlaeuft: `maputil.lua:106`,
+  -- `helptext.lua:26`, `mods.lua:261`, `localization.lua:29`.
+  --
+  -- Dieselbe Familie wie die `null`-Falle in `LuaHost.setGlobal` — ein
+  -- JS-Rueckgabewert, den Lua anders sieht als gedacht.
+  local raw = __simDiskFindFiles(dir, pattern)
+  local out = {}
+  for i = 1, #raw do out[i] = raw[i] end
+  return out
 end

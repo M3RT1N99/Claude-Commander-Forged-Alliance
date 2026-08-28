@@ -130,9 +130,20 @@ export function installUiEngine(host: LuaHost, fs: UiFileSystem): UiEngine {
   host.setGlobal('__uiDiskFindFiles', (dir: string, pattern: string) =>
     fs.find(normalize(dir), pattern),
   )
+  // Das Ergebnis muss eine ECHTE Lua-Tabelle sein, keine userdata.
+  //
+  // wasmoon legt das Array einer JS-Funktion als USERDATA-Proxy ab: `#` und
+  // `ipairs` gehen, `pairs` reisst die VM um, und `for k,v in t do` der
+  // Original-Lua (Transpiler -> `__foriter`, compat.lua:14-22) ruft den Proxy
+  // als Iterator auf und wirft `TypeError: self is not a function`.
+  // Genau das trifft `maputil.lua:106` (`for index, fileName in scenFiles do`)
+  // und `helptext.lua:26` — also die Kartenauswahl der Lobby.
   host.eval(`
     function DiskFindFiles(dir, pattern)
-      return __uiDiskFindFiles(dir, pattern or '*')
+      local raw = __uiDiskFindFiles(dir, pattern or '*')
+      local out = {}
+      for i = 1, #raw do out[i] = raw[i] end
+      return out
     end
   `)
 
