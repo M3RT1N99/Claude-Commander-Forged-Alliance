@@ -102,9 +102,24 @@ local entity = withNoops(ENTITY_NAMES, {
   -- IsIntelEnabled(type) as a BOOLEAN (unit.lua:1826). Before this both returned
   -- nil (no-op), crashing those comparisons. Keyed per intel-type string
   -- ('Radar','Omni','Vision','Cloak',…).
+  --
+  -- `InitIntel` legt den Typ AN — und das ist mehr als eine Formalie.
+  -- `CIntel::InitIntel` (Cfile:1103700-1103913) erzeugt je nach Typ ein Gitter
+  -- (Radar/Sonar/Vision/Omni) oder setzt fuer die reinen Schalter-Typen
+  -- (Jammer, Cloak, RadarStealth, SonarStealth) ein „hat"-Byte
+  -- (Cfile:1103907-1103908). Ein Typ, den `InitIntel` nie gesehen hat, existiert
+  -- fuer die Engine nicht.
+  --
+  -- Deshalb tut `EnableIntel` auf so einem Typ NICHTS: `cfunc_EntityEnableIntelL`
+  -- springt an Cfile:933447 ueber das Setzen hinweg, wenn das „hat"-Byte fehlt,
+  -- und an Cfile:933452-933453 passiert dasselbe, wenn kein Gitter da ist.
+  -- `IsIntelEnabled` liest genauso: erst „hat", dann „an"
+  -- (Cfile:933356-933369). Vorher legte `EnableIntel` den Eintrag hier selbst
+  -- an — man konnte also etwas einschalten, das es gar nicht gibt.
   InitIntel = function(self, army, itype, radius)
     self.__intel = self.__intel or {}
     local slot = self.__intel[itype] or {}
+    slot.has = true
     if radius ~= nil then slot.radius = tonumber(radius) or 0 end
     slot.radius = slot.radius or 0
     self.__intel[itype] = slot
@@ -120,19 +135,25 @@ local entity = withNoops(ENTITY_NAMES, {
     return (slot and slot.radius) or 0
   end,
   EnableIntel = function(self, itype)
-    self.__intel = self.__intel or {}
-    local slot = self.__intel[itype] or {}
-    slot.enabled = true
-    self.__intel[itype] = slot
+    -- Ohne `InitIntel` gibt es nichts einzuschalten (Cfile:933447/933452).
+    local slot = self.__intel and self.__intel[itype]
+    if slot and slot.has then slot.enabled = true end
   end,
   DisableIntel = function(self, itype)
     local slot = self.__intel and self.__intel[itype]
-    if slot then slot.enabled = false end
+    if slot and slot.has then slot.enabled = false end
   end,
   IsIntelEnabled = function(self, itype)
     local slot = self.__intel and self.__intel[itype]
-    return (slot and slot.enabled) == true
+    return (slot and slot.has and slot.enabled) == true
   end,
+  -- NICHT nachgebildet: die Engine WIRFT `"EnableIntel called before InitIntel"`,
+  -- wenn die Entity ueberhaupt keinen Intel-Manager hat (Cfile:933353/933441) —
+  -- auch aus `IsIntelEnabled` heraus, mit genau diesem Text. Ob jede Einheit
+  -- einen Manager bekommt oder nur eine mit `Intel`-Abschnitt im Blueprint,
+  -- steht nicht im Decompilat: der Zeiger wird woanders gesetzt. UNBEKANNT,
+  -- deshalb hier kein Fehler, sondern `false` — eine erfundene Ausnahme waere
+  -- schlimmer als eine fehlende.
 
   -- Lifecycle. Entity::Destroy (Cfile:916089) loescht NICHT sofort: es setzt
   -- mDestroyQueued und haengt die Entity in Sim::mDeletionQueue. Erst am Ende

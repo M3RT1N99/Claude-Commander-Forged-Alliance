@@ -556,6 +556,50 @@ check(
   `no targeted engine warnings (${targetedWarnings.slice(0, 1).join('')})`,
 )
 
+// ── Intel: a type InitIntel never created cannot be enabled ─────────────────
+//
+// CIntel::InitIntel (Cfile:1103700-1103913) is what brings an intel type into
+// existence: a grid for Radar/Sonar/Vision/Omni, or a "has" byte for the pure
+// switches Jammer/Cloak/RadarStealth/SonarStealth (Cfile:1103907-1103908).
+//
+// So EnableIntel on a type that was never initialised does NOTHING:
+// cfunc_EntityEnableIntelL skips the write when the "has" byte is missing
+// (Cfile:933447) and likewise when there is no grid (Cfile:933452-933453).
+// IsIntelEnabled reads in the same order — first "has", then "enabled"
+// (Cfile:933356-933369).
+//
+// Before this, EnableIntel created the slot itself, so anything could be
+// switched on, including a type the unit does not have.
+console.log('\n== Intel: erst InitIntel, dann EnableIntel (Cfile:933447) ==')
+{
+  const u = spawnLuaUnit(host, 'uel0001', { x: 300, y: 20, z: 300 }, 1)
+  const ev = (code: string): unknown => host.eval(`local u = __units[${u}] ${code}`)
+
+  // Never initialised: enabling must not take.
+  ev(`u:EnableIntel('Radar')`)
+  check(
+    ev(`return u:IsIntelEnabled('Radar')`) === false,
+    'EnableIntel ohne InitIntel schaltet NICHT ein',
+  )
+
+  // Initialised: now it takes, and it survives a disable/enable round trip.
+  ev(`u:InitIntel(1, 'Radar', 30)`)
+  check(ev(`return u:IsIntelEnabled('Radar')`) === false, 'InitIntel allein schaltet nichts ein')
+  ev(`u:EnableIntel('Radar')`)
+  check(ev(`return u:IsIntelEnabled('Radar')`) === true, 'nach InitIntel schaltet EnableIntel ein')
+  ev(`u:DisableIntel('Radar')`)
+  check(ev(`return u:IsIntelEnabled('Radar')`) === false, 'und DisableIntel wieder aus')
+
+  // A different, still uninitialised type stays untouched — proving the "has"
+  // bit is per type and not a single flag on the unit.
+  check(
+    ev(`u:EnableIntel('Omni') return u:IsIntelEnabled('Omni')`) === false,
+    'ein anderer, nicht initialisierter Typ bleibt aus (das Bit gilt je Typ)',
+  )
+  // The radius is a separate channel and must survive all of it.
+  check(Number(ev(`return u:GetIntelRadius('Radar')`)) === 30, 'der Radius bleibt 30')
+}
+
 host.close()
 await game.close()
 console.log(

@@ -412,6 +412,31 @@ Vektor, und ob der 256 Plätze hat, steht nicht im Decompilat. Statt zu raten
 wird einmal je Code gewarnt und der Default geliefert — sichtbar, nicht still.
 Auf den geprüften Karten feuert die Warnung nicht.
 
+### Der Retail-Boot ist weiter weg als gedacht
+
+Die Recherche zu `/lua/simInit.lua` hat eine Behauptung selbst widerlegt, die
+zunächst nach Erfolg aussah. Mit einem moho-Umbau und einem
+`CreatePrefetchSet`-Ersatz **läuft** `doscript('/lua/simInit.lua')` ohne
+Ausnahme durch, und die fünf gemessenen SCMP_009-Werte bleiben gleich.
+
+Nur beweist das nichts: dasselbe in `verify-session-start.ts` eingespleißt macht
+die Suite **rot** — `Hook /schook/lua/simInit.lua: TypeError: self is not a
+function`. Die schook-Hooks installieren also gar nicht, weder
+`OnCreateArmyBrain` → `InitializeStartLocation`/`SetPlans` noch `BeginSession` →
+`CreateProps`/`CreateResources`. Die Zahlen halten nur, weil
+`src/engine-lua/session.lua` den Sitzungsstart weiterhin von Hand fährt. **Die
+Retail-`simInit` hat nichts übernommen.** Der Hook-Fehler ist der Blocker, nicht
+`class.lua:273`.
+
+Zweite Korrektur, gemessen: die Boot-Nutzlast des Sim-Workers ist heute **4 281
+Dateien / 15,5 MB** — davon allein `effects/**` 7,07 MB, was der Kommentar in
+`luaSimClient.ts:287` gar nicht erwähnt. Die drei Lua-Dateien von SCMP_009 sind
+**217 829 Byte, also 1,4 %** davon (gzip: 11 KB). Die Annahme „alle Karten zu
+schicken ist keine Option" ist damit nicht haltbar — alle 228 Karten-Lua sind
+24,4 MB roh, aber nur 1,14 MB gzip, und `gameFiles.ts` liest sie ohnehin aus dem
+Spielordner des Nutzers. Der Browser-Pfad ist also billig; er ist nur nicht in
+Node prüfbar, weshalb er hier noch offen steht.
+
 ### T019/US17 bleibt offen — und zwar bewusst
 
 Die Aufgabe lautet, das SCMAP-Gate `>= 60` in die zwei der Engine zu zerlegen.

@@ -79,9 +79,26 @@ Principles II and V).
       toggle-cap mask (never `TestToggleCaps` — enhancements add caps at
       runtime, `ual0001_script.lua:261`). `moho.lua:525`,
       `Moho::Unit::ToggleScriptBit` Cfile:951384-951441.
-- [ ] T012 **US10** Model the "has this intel type" bit that `InitIntel`
+### US10 — the intel "has" bit ✅ DONE
+
+- [x] T012 **US10** Model the "has this intel type" bit that `InitIntel`
       creates (Cfile:1103903-1103913 / 1103745+); `EnableIntel`/`IsIntelEnabled`
       must answer against it. `moho.lua:77-107`.
+      `CIntel::InitIntel` brings the type into existence — a grid for
+      Radar/Sonar/Vision/Omni, or a "has" byte for the pure switches
+      Jammer/Cloak/RadarStealth/SonarStealth (Cfile:1103907-1103908).
+      `EnableIntel` therefore does NOTHING on an uninitialised type: it skips
+      the write at Cfile:933447 (no byte) and Cfile:933452-933453 (no grid).
+      `IsIntelEnabled` reads in the same order (Cfile:933356-933369).
+      NOT modelled, and marked at the site: the engine throws
+      "EnableIntel called before InitIntel" when the entity has no intel manager
+      at all (Cfile:933353/933441) — whether every unit gets one is UNKNOWN, so
+      inventing that exception would be worse than omitting it.
+      check: scripts/verify-moho-sim-contracts.ts
+      asserts: EnableIntel ohne InitIntel schaltet NICHT ein
+      asserts: das Bit gilt je Typ
+      Red probe: let EnableIntel create the slot again -> "InitIntel allein
+      schaltet nichts ein" goes red (the leaked switch).
 - [ ] T013 **US11** Ship `speed / MaxSpeed` from the sim and scale the walk
       animation with it (`CAnimationManipulator::MoveManipulator` Cfile:873406,
       ratio 873557-873559). `src/main.ts:2716`.
