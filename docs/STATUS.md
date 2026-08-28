@@ -412,6 +412,42 @@ Vektor, und ob der 256 Plätze hat, steht nicht im Decompilat. Statt zu raten
 wird einmal je Code gewarnt und der Default geliefert — sichtbar, nicht still.
 Auf den geprüften Karten feuert die Warnung nicht.
 
+### US9: Script-Bits gingen an Einheiten, die sie gar nicht haben
+
+`ToggleScriptBit` kippte den Bit ohne jede Prüfung. Die Engine prüft als
+allererstes die **Laufzeit**-Toggle-Cap-Maske: `if ((1 << bit) &
+GetAttributes1(this)->mToggleCaps)` (Cfile:951398) — ist das Bit nicht drin,
+passiert gar nichts, kein Umschalten, kein Callback. `SetScriptBit` macht
+nichts eigenes; es rechnet die Cap-Zeichenkette in einen Index um und delegiert
+(Cfile:974910-974925).
+
+Es muss die Laufzeit-Maske sein, nicht `TestToggleCaps`: das prüft ausdrücklich
+das unveränderliche Blueprint-Feld (Cfile:975885-975932), während Erweiterungen
+Caps zur Laufzeit **hinzufügen**. Gegen das Blueprint zu prüfen hieße, jede
+Erweiterung wirkungslos zu machen.
+
+Gemessen, wer überhaupt Caps hat: `ueb4202` (Schild) `RULEUTC_ShieldToggle`,
+`ueb3101` (Radar) `RULEUTC_IntelToggle`, `url0101` `RULEUTC_CloakToggle` —
+**`uel0001` (ACU) und `ueb0101` (Fabrik) haben keine.**
+
+Das hat zwei Dinge aufgedeckt:
+
+* **`verify-toggle-pause` prüfte Verhalten, das die Engine nicht hat.** Sie legte
+  den Schild-Bit an der ACU um und bekam ihn auch. Jetzt läuft der Block am
+  Schildgenerator, plus einer Gegenprobe an der ACU, bei der nichts passieren
+  darf. Nebenbei kam heraus, dass der Schildgenerator seinen Bit beim Erzeugen
+  **selbst** setzt — Original-Lua bei der Arbeit; die Messung bringt ihn jetzt
+  erst auf einen bekannten Stand.
+* **Der Golden Master schlug an**, und sein Diff war chirurgisch: ein Feld an
+  einer Einheit. Die beschildete ACU hatte `scriptBits = 1`, jetzt `0`. Ökonomie
+  identisch, alle zehn Einheiten identisch, sonst nichts. Der Hash ist mit
+  diesem Commit nachgezogen.
+
+Nicht nachgebildet, mangels Grundlage: die Engine blockt zusätzlich, solange die
+Einheit an etwas aus der Kategorie TRANSPORTATION hängt
+(Cfile:951400-951424). Einen Anhänge-Zustand gibt es hier nicht — `AttachTo` ist
+einer der stillen No-ops, und einer der **neun**, die das Spiel wirklich ruft.
+
 ### Der Retail-Boot ist weiter weg als gedacht
 
 Die Recherche zu `/lua/simInit.lua` hat eine Behauptung selbst widerlegt, die

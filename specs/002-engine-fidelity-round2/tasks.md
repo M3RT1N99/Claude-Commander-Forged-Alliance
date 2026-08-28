@@ -75,10 +75,27 @@ Principles II and V).
       enough to change it on a guess.
       *Verified by*: `scripts/verify-econ-lua.ts` — a killed ACU's production
       drops to 0 in the same beat while it is still un-destroyed.
-- [ ] T011 **US9** Gate `SetScriptBit`/`ToggleScriptBit` on the RUNTIME
+### US9 — script bits gated on the runtime toggle-cap mask ✅ DONE
+
+- [x] T011 **US9** Gate `SetScriptBit`/`ToggleScriptBit` on the RUNTIME
       toggle-cap mask (never `TestToggleCaps` — enhancements add caps at
       runtime, `ual0001_script.lua:261`). `moho.lua:525`,
       `Moho::Unit::ToggleScriptBit` Cfile:951384-951441.
+      The gate is the first thing the engine does:
+      `if ((1 << bit) & GetAttributes1(this)->mToggleCaps)` (Cfile:951398).
+      Not in the mask means nothing happens — no flip, no callback.
+      `SetScriptBit` does no work itself; it converts the cap string to an index
+      and delegates to ToggleScriptBit (Cfile:974910-974925), so the gate lives
+      in one place here too. The numbering lines up: script bit 0 is
+      RULEUTC_ShieldToggle is toggle-cap bit 0x1, through 8 (Cloak).
+      NOT modelled, for lack of anything to check against: the engine also
+      blocks while the unit is attached to something in category TRANSPORTATION
+      (Cfile:951400-951424). We have no attachment state — `AttachTo` is one of
+      the silent no-ops, and one of the NINE the game actually calls.
+      check: scripts/verify-moho-sim-contracts.ts
+      asserts: ohne Cap schaltet SetScriptBit NICHT
+      asserts: TestToggleCaps prüft weiter das Blueprint
+      Red probe: remove the gate -> the no-cap assertions go red.
 ### US10 — the intel "has" bit ✅ DONE
 
 - [x] T012 **US10** Model the "has this intel type" bit that `InitIntel`

@@ -31,7 +31,9 @@ const game = await GameFiles.open()
 const simHost = await LuaHost.create(game.luaFiles, () => {})
 const engine = installEngine(simHost)
 setTerrainSource(simHost, () => 20) // flat test ground at height 20
-for (const id of ['uel0001', 'ueb0101']) await game.giveUnit(simHost, id)
+// `ueb4202` ist der Schildgenerator — die einzige der drei mit einer ToggleCap
+// im Blueprint (`General.ToggleCaps.RULEUTC_ShieldToggle`).
+for (const id of ['uel0001', 'ueb0101', 'ueb4202']) await game.giveUnit(simHost, id)
 
 const acu = spawnLuaUnit(simHost, 'uel0001', { x: 100, y: 20, z: 100 }, 1)
 // GiveInitialResources runs after WaitTicks(5) — only then does the army pay.
@@ -40,27 +42,54 @@ for (let i = 0; i < 8; i++) beat(engine)
 // ── ToggleScriptBit: the sim flips the bit and fires the callbacks ──
 console.log('\n== ToggleScriptBit reaches the sim ==')
 {
+  // NICHT die ACU. `Moho::Unit::ToggleScriptBit` prüft als erstes die
+  // Toggle-Cap-Maske (Cfile:951398), und die ACU hat im Blueprint KEINE
+  // ToggleCaps — nachgemessen: `uel0001` und `ueb0101` haben keine, `ueb4202`
+  // hat `RULEUTC_ShieldToggle`, `ueb3101` `RULEUTC_IntelToggle`, `url0101`
+  // `RULEUTC_CloakToggle`.
+  //
+  // Bis hierher legte diese Suite den Schild-Bit an einer Einheit ohne Schild
+  // um und bekam ihn auch — also Verhalten, das die Engine nicht hat. Das fiel
+  // erst auf, als das Tor eingebaut wurde.
+  const shield = spawnLuaUnit(simHost, 'ueb4202', { x: 130, y: 20, z: 130 }, 1)
+  // Der Schildgenerator setzt seinen eigenen Bit beim Erzeugen — das ist die
+  // Original-Lua bei der Arbeit, nicht Rauschen. Also erst auf einen bekannten
+  // Stand bringen, DANN die Zähler nullen; sonst zählt die Messung die
+  // Einschaltung der Einheit mit.
+  simHost.eval(`__units[${shield}]:SetScriptBit(0, false)`)
   simHost.eval(`
-    local u = __units[${acu}]
+    local u = __units[${shield}]
     u.__sbSet, u.__sbClear = 0, 0
     u.OnScriptBitSet = function(self, bit) self.__sbSet = self.__sbSet + 1 end
     u.OnScriptBitClear = function(self, bit) self.__sbClear = self.__sbClear + 1 end
   `)
-  const on = (): boolean => simHost.eval(`return __units[${acu}]:GetScriptBit(0)`) as boolean
-  const sets = (): number => simHost.eval(`return __units[${acu}].__sbSet`) as number
-  const clears = (): number => simHost.eval(`return __units[${acu}].__sbClear`) as number
+  const on = (): boolean => simHost.eval(`return __units[${shield}]:GetScriptBit(0)`) as boolean
+  const sets = (): number => simHost.eval(`return __units[${shield}].__sbSet`) as number
+  const clears = (): number => simHost.eval(`return __units[${shield}].__sbClear`) as number
 
-  simHost.eval(`__units[${acu}]:ToggleScriptBit(0)`)
+  // Die Cap steht im Blueprint — ohne sie täte das Folgende gar nichts.
+  check(
+    simHost.eval(`return __units[${shield}]:TestToggleCaps('RULEUTC_ShieldToggle')`) === true,
+    'ueb4202 hat RULEUTC_ShieldToggle im Blueprint',
+  )
+  simHost.eval(`__units[${shield}]:ToggleScriptBit(0)`)
   check(on() === true, `bit 0 set (GetScriptBit -> ${on()})`)
   check(sets() === 1, `OnScriptBitSet fired once (${sets()})`)
 
   // SetScriptBit remains the idempotent primitive used by the toggle.
-  simHost.eval(`__units[${acu}]:SetScriptBit(0, true)`)
+  simHost.eval(`__units[${shield}]:SetScriptBit(0, true)`)
   check(sets() === 1, `re-setting the same state does not fire again (${sets()})`)
 
-  simHost.eval(`__units[${acu}]:ToggleScriptBit(0)`)
+  simHost.eval(`__units[${shield}]:ToggleScriptBit(0)`)
   check(on() === false, `bit 0 cleared (GetScriptBit -> ${on()})`)
   check(clears() === 1, `OnScriptBitClear fired once (${clears()})`)
+
+  // Und die Gegenprobe an der ACU: sie hat die Cap nicht, also passiert nichts.
+  simHost.eval(`__units[${acu}]:ToggleScriptBit(0)`)
+  check(
+    simHost.eval(`return __units[${acu}]:GetScriptBit(0)`) === false,
+    'die ACU hat die Cap nicht — bei ihr passiert gar nichts (Cfile:951398)',
+  )
 }
 
 // ── SetPaused: a paused builder makes no progress, then resumes ──

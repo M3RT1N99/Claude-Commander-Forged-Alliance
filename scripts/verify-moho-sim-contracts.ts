@@ -410,6 +410,9 @@ check(
 
 console.log('\n== Unit:SetImmobile pauses and resumes one movement order ==')
 await game.giveUnit(host, 'uel0001')
+// Ein Panzer hat GAR KEINE ToggleCaps im Blueprint — der saubere Negativfall
+// für das Script-Bit-Tor weiter unten.
+await game.giveUnit(host, 'uel0201')
 const mover = spawnLuaUnit(host, 'uel0001', { x: 100, y: 20, z: 100 }, 1)
 host.eval(`__units[${mover}]:GetNavigator():SetGoal({ 125, 20, 100 })`)
 for (let i = 0; i < 8; i++) beat(engine)
@@ -598,6 +601,54 @@ console.log('\n== Intel: erst InitIntel, dann EnableIntel (Cfile:933447) ==')
   )
   // The radius is a separate channel and must survive all of it.
   check(Number(ev(`return u:GetIntelRadius('Radar')`)) === 30, 'der Radius bleibt 30')
+}
+
+// ── Script bits are gated on the RUNTIME toggle-cap mask ────────────────────
+//
+// Moho::Unit::ToggleScriptBit checks first: `if ((1 << bit) &
+// GetAttributes1(this)->mToggleCaps)` (Cfile:951398). Not in the mask means
+// nothing happens at all — no flip, no callback. SetScriptBit does no work
+// itself; it converts the cap string to an index and delegates
+// (Cfile:974910-974925), which is why the gate sits in one place here too.
+//
+// It has to be the RUNTIME mask, not TestToggleCaps: that one deliberately
+// tests the immutable blueprint field (Cfile:975885-975932), while enhancements
+// ADD caps at runtime (ual0001_script.lua:261 calls AddToggleCap). Gating on
+// the blueprint would make every enhancement inert.
+console.log('\n== Script-Bits gegen die Laufzeit-Maske (Cfile:951398) ==')
+{
+  // A tank has no toggle caps at all — the perfect negative case.
+  const tank = spawnLuaUnit(host, 'uel0201', { x: 340, y: 20, z: 340 }, 1)
+  const t = (code: string): unknown => host.eval(`local u = __units[${tank}] ${code}`)
+  check(
+    Number(t(`return __ensureToggleCapMask(u)`)) === 0,
+    'uel0201 hat keine ToggleCaps im Blueprint',
+  )
+  t(`u:SetScriptBit('RULEUTC_ShieldToggle', true)`)
+  check(
+    t(`return u:GetScriptBit(0)`) === false,
+    'ohne Cap schaltet SetScriptBit NICHT (die Engine tut dort gar nichts)',
+  )
+  // The callback must not have fired either — "nothing happens" is the claim.
+  t(`u.OnScriptBitSet = function(self, b) self.__sah = b end`)
+  t(`u:ToggleScriptBit(0)`)
+  check(t(`return u.__sah == nil`) === true, 'und OnScriptBitSet wurde nicht gerufen')
+
+  // Now give it the cap at runtime, the way an enhancement does. The blueprint
+  // is untouched, so TestToggleCaps must still say no — that is the whole point
+  // of using the runtime mask instead.
+  t(`u:AddToggleCap('RULEUTC_ShieldToggle')`)
+  check(
+    t(`return u:TestToggleCaps('RULEUTC_ShieldToggle')`) === false,
+    'TestToggleCaps prüft weiter das Blueprint (Cfile:975885) und sagt nein',
+  )
+  t(`u:SetScriptBit('RULEUTC_ShieldToggle', true)`)
+  check(t(`return u:GetScriptBit(0)`) === true, 'mit der Laufzeit-Cap schaltet es')
+  check(Number(t(`return u.__sah`)) === 0, 'und OnScriptBitSet kam mit Bit 0')
+
+  // Removing the cap again freezes the bit where it is.
+  t(`u:RemoveToggleCap('RULEUTC_ShieldToggle') u:SetScriptBit('RULEUTC_ShieldToggle', false)`)
+  check(t(`return u:GetScriptBit(0)`) === true, 'ohne Cap lässt es sich auch nicht mehr ausschalten')
 }
 
 host.close()

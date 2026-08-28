@@ -578,16 +578,43 @@ local unit = withNoops(UNIT_NAMES, {
     local n = scriptBitIndex(bit)
     return (math.floor(bits / (2 ^ n)) % 2) == 1
   end,
+  -- `SetScriptBit` macht im Original NICHTS selbst: es rechnet die Cap-Zeichen-
+  -- kette in einen Bit-Index um und ruft `ToggleScriptBit`, wenn der Ist-Zustand
+  -- vom Soll abweicht (cfunc_UnitSetScriptBitL, Cfile:974910-974925). Deshalb
+  -- steht das Tor unten an genau EINER Stelle, so wie in der Engine.
   SetScriptBit = function(self, bit, state)
     local n = scriptBitIndex(bit)
-    local was = self:GetScriptBit(n)
-    if was == (state == true) then return end
-    self.__scriptBits = (self.__scriptBits or 0) + (state and (2 ^ n) or -(2 ^ n))
+    if self:GetScriptBit(n) == (state == true) then return end
+    self:ToggleScriptBit(n)
+  end,
+  -- `Moho::Unit::ToggleScriptBit` (Cfile:951386-951440) prueft ZUERST die
+  -- Laufzeit-Maske: `if ((1 << bit) & GetAttributes1(this)->mToggleCaps)`
+  -- (Cfile:951398). Ist das Bit nicht drin, passiert GAR NICHTS — kein
+  -- Umschalten, kein Callback.
+  --
+  -- Die Nummerierung deckt sich: Skript-Bit 0 ist `RULEUTC_ShieldToggle` ist
+  -- Toggle-Cap-Bit 0x1, und so weiter bis 8 (Cloak). Deshalb ist `1 << bit`
+  -- direkt das Cap-Bit.
+  --
+  -- Es muss die LAUFZEIT-Maske sein, nicht `TestToggleCaps`: das prueft
+  -- ausdruecklich das unveraenderliche Blueprint-Feld (Cfile:975885-975932),
+  -- waehrend Erweiterungen Caps zur Laufzeit HINZUFUEGEN
+  -- (`ual0001_script.lua:261` ruft `AddToggleCap`). Gegen das Blueprint zu
+  -- pruefen hiesse, jede Erweiterung wirkungslos zu machen.
+  --
+  -- NICHT nachgebildet, und zwar mangels Grundlage: die Engine blockt zusaetzlich,
+  -- wenn die Einheit an etwas aus der Kategorie TRANSPORTATION angehaengt ist
+  -- (Cfile:951400-951424). Wir haben keinen Anhaenge-Zustand — `AttachTo` ist
+  -- einer der stillen No-ops, und zwar einer der NEUN, die das Spiel wirklich
+  -- ruft (docs/STATUS.md). Ohne ihn gibt es nichts zu pruefen.
+  ToggleScriptBit = function(self, bit)
+    local n = scriptBitIndex(bit)
+    local capBit = 2 ^ n
+    if (__ensureToggleCapMask(self) // capBit) % 2 ~= 1 then return end
+    local state = not self:GetScriptBit(n)
+    self.__scriptBits = (self.__scriptBits or 0) + (state and capBit or -capBit)
     local cb = state and self.OnScriptBitSet or self.OnScriptBitClear
     if cb then pcall(function() cb(self, n) end) end
-  end,
-  ToggleScriptBit = function(self, bit)
-    self:SetScriptBit(bit, not self:GetScriptBit(bit))
   end,
   GetCurrentLayer = function(self) return self.__layer or 'Land' end,
   IsBeingBuilt = function(self) return self.__beingBuilt or false end,
