@@ -2,6 +2,7 @@ import { LuaFactory, type LuaEngine } from 'wasmoon'
 import { transpileFaLua, COMPAT_LUA } from './transpile'
 import BOOT_LUA from '../engine-lua/boot.lua?raw'
 import STR_LUA from '../engine-lua/str.lua?raw'
+import { findFiles } from '../vfs/glob'
 
 /**
  * Host für die Original-Lua-Sim-Umgebung von Supreme Commander FA.
@@ -183,6 +184,17 @@ export class LuaHost {
   /** Prüft, ob ein Modul-Pfad im Host-VFS vorhanden ist. */
   hasFile(path: string): boolean {
     return this.files.has(path.replace(/^\/+/, '').toLowerCase())
+  }
+
+  /**
+   * `DiskFindFiles(dir, pattern)` über die Dateien, die dieser Host wirklich
+   * hat. Dieselbe Musterlogik wie in der UI-VM (`src/vfs/glob.ts`) — nur `*`
+   * ist ein Platzhalter, so wie es die Original-Lua benutzt
+   * (`localization.lua:29` `'*strings_db.lua'`, `maputil.lua:102`
+   * `nameFilter .. '_scenario.lua'`).
+   */
+  findFiles(dir: string, pattern: string): string[] {
+    return findFiles(this.files.keys(), dir, pattern)
   }
 
   /** Führt ein Boot-Modul im globalen Environment aus (öffentlich für Setup). */

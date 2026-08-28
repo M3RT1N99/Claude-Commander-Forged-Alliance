@@ -281,12 +281,40 @@ der Zustand — nachgemessen in genau diesem Lauf.
 
 ### Offen und benannt
 
-`/lua/simInit.lua` selbst läuft weiterhin nicht: es stirbt an
-`/lua/globalinit.lua:14-24` → `lua/system/localization.lua:29-30`, weil unser
-`DiskFindFiles` im Sim nur die registrierten Blueprints kennt und das
-`pattern`-Argument **ignoriert** (`blueprints.lua:346`). Die UI-VM hat den
-richtigen (`src/vfs/glob.ts`). Solange das so ist, fährt `session.lua` genau
-die Schritte nach, die `SetupSession`/`BeginSession` täten.
+`/lua/simInit.lua` selbst läuft weiterhin nicht — aber der Grund ist ein
+anderer geworden, und der alte ist behoben.
+
+**Behoben: `DiskFindFiles` in der Sim war eine stille falsche Antwort.** Die
+Fassung in `blueprints.lua` durchsuchte nur `__bpFiles` und **ignorierte das
+`pattern`-Argument vollständig**. `localization.lua:29` fragt nach
+`DiskFindFiles('/loc', '*strings_db.lua')` und bekam Blueprint-Pfade oder
+nichts — deshalb kam `/lua/globalinit.lua:14-24` nie durch. Die UI-VM hatte die
+richtige Fassung die ganze Zeit (`src/vfs/glob.ts`).
+
+Jetzt liefert `/loc '*strings_db.lua'` die Datei, `/maps '*_scenario.lua'` die
+61 installierten Karten, und ein Muster, das nicht passen kann, liefert nichts.
+`.bp` kommt weiterhin aus `__bpFiles` — eine **benannte** Abweichung: die Engine
+hätte hier den ganzen Spielordner, wir laden Blueprints absichtlich selektiv,
+sonst zöge jeder Testlauf alle 2437 durch die Original-Pipeline. Beide Hälften
+sind in `verify-core-globals.ts` festgenagelt; Rot-Probe: das Muster wieder
+ignorieren → genau die Zusicherung „das Muster wird wirklich angewandt" wird rot.
+
+**Ebenfalls neu:** `HasLocalizedVO` und `AudioSetLanguage` gibt es jetzt auch in
+der Sim. Sie stehen in **beiden** VM-Listen (`engine-api.md:45` und `:104`), und
+die Sim-Fassungen tun nachweislich nichts: `cfunc_HasLocalizedVOSim`
+(Cfile:1090520-1090533) und `cfunc_AudioSetLanguageSim` (Cfile:1090484-1090497)
+prüfen nur die Argumentzahl und machen `return 0` — ohne Rückgabewert. Für
+`localization.lua:43` heißt das: der `else`-Zweig greift. Das ist der
+Unterschied zu einem stillen Stub — hier IST Nichtstun das Verhalten der Engine,
+mit Fundstelle.
+
+**Der neue Blocker liegt tiefer:** `doscript('/lua/simInit.lua')` kommt jetzt
+durch die ganze Lokalisierung und scheitert erst an `class.lua:273`
+(„Attempted to add field `__index` after class was defined"). Die volle
+`simInit.lua` fährt den `ConvertCClassToLuaClass`-Lauf, den unser `installEngine`
+bereits hinter sich hat — das ist eine Kollision der Boot-Reihenfolge, kein
+fehlendes Global, und damit ein eigener Meilenstein. Bis dahin fährt
+`session.lua` genau die Schritte nach, die `SetupSession`/`BeginSession` täten.
 
 Ebenfalls offen: `CreateResourceDeposit` (also keine Massepunkte aus der Karte),
 `ArmyInitializePrebuiltUnits` (nur bei `Options.PrebuiltUnits == 'On'`,

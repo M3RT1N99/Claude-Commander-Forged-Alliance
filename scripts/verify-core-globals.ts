@@ -180,6 +180,40 @@ check(
 console.log('\n== GetVersion ==')
 check(sim.eval(`return GetVersion()`) === '1.5.3764', 'the Sim VM reports the real FA engine version 1.5.3764')
 
+// ── DiskFindFiles in the SIM VM ─────────────────────────────────────────────
+//
+// It used to search only `__bpFiles` and IGNORE the pattern argument entirely
+// (blueprints.lua). That is a silent wrong answer, and it had a consequence:
+// localization.lua:29 asks for `DiskFindFiles('/loc', '*strings_db.lua')` and
+// got blueprint paths or nothing, so /lua/globalinit.lua:14-24 — and with it
+// the retail /lua/simInit.lua — could never run. The UI VM had the correct
+// implementation all along (src/vfs/glob.ts).
+//
+// Blueprints deliberately still come from `__bpFiles`: the engine would return
+// the whole game directory here, we load blueprints selectively. That deviation
+// is named in blueprints.lua; this check pins BOTH halves of it.
+console.log('\n== DiskFindFiles (Sim) honours the pattern and sees the real VFS ==')
+{
+  const loc = Number(sim.eval(`return #DiskFindFiles('/loc', '*strings_db.lua')`))
+  check(loc > 0, `/loc '*strings_db.lua' finds ${loc} file(s) — what localization.lua:29 needs`)
+  // The pattern really filters: the same directory with a pattern that cannot
+  // match must come back empty. Without this the check above would also pass
+  // for a reader that ignores the pattern and returns everything it has.
+  check(
+    Number(sim.eval(`return #DiskFindFiles('/loc', '*_nothing_matches_this.lua')`)) === 0,
+    'and a pattern that cannot match returns nothing (the pattern is really applied)',
+  )
+  check(
+    Number(sim.eval(`return #DiskFindFiles('/maps', '*_scenario.lua')`)) > 0,
+    `/maps '*_scenario.lua' finds the installed maps`,
+  )
+  // The blueprint narrowing: `.bp` comes from `__bpFiles`, which is empty here.
+  check(
+    Number(sim.eval(`return #DiskFindFiles('/units', '*.bp')`)) === 0,
+    `'*.bp' still comes from __bpFiles (deliberate — we load blueprints selectively)`,
+  )
+}
+
 sim.close()
 
 // --- The UI VM: the same globals must exist (scr_CoreInits => both) ---
@@ -224,6 +258,7 @@ console.log('\n== The UI VM has them too (scr_CoreInits) ==')
   check(ui.eval(`return Dirname('/a/b.lua')`) === '/a', 'and they behave the same (Dirname)')
   ui.close()
 }
+
 
 await game.close()
 console.log(failures === 0 ? '\nCORE GLOBALS PASSED' : `\nCORE GLOBALS FAILED (${failures})`)

@@ -52,6 +52,12 @@ export function installUnitFactory(host: LuaHost): void {
  * einzelne Blueprints über die echte `LoadBlueprints()`.
  */
 export function installBlueprintPipeline(host: LuaHost): void {
+  // Die Naht zum echten VFS fuer `DiskFindFiles`. Vorher durchsuchte die
+  // Sim-Fassung nur `__bpFiles` und ignorierte das Muster — `/loc`, `/maps`
+  // und `/mods` waren damit unsichtbar (siehe blueprints.lua).
+  host.setGlobal('__simDiskFindFiles', (dir: string, pattern: string) =>
+    host.findFiles(dir, pattern),
+  )
   host.eval(BLUEPRINTS_LUA)
   host.loadGlobal('/lua/system/Blueprints.lua')
 }

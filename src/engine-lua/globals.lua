@@ -2409,3 +2409,27 @@ function __simCallback(func, args, unitIds)
     WARN('SimCallback ' .. tostring(func) .. ': ' .. tostring(err))
   end
 end
+
+-- ── Sprache: in der SIM absichtlich leer ─────────────────────────────────────
+--
+-- `HasLocalizedVO` und `AudioSetLanguage` sind in BEIDEN VMs registriert
+-- (engine-api.md:45 und :104), aber die Sim-Fassungen tun nachweislich nichts:
+-- `cfunc_HasLocalizedVOSim` (Cfile:1090520-1090533) und
+-- `cfunc_AudioSetLanguageSim` (Cfile:1090484-1090497) pruefen beide nur die
+-- Argumentzahl (genau 1, sonst Fehler) und machen dann `return 0` — sie legen
+-- KEINEN Rueckgabewert ab.
+--
+-- Fuer `localization.lua:43` heisst das: `HasLocalizedVO(la)` ist nil, der
+-- `else`-Zweig greift, und `AudioSetLanguage('us')` verpufft. Ton ist Sache der
+-- UI-VM.
+--
+-- Das ist der Unterschied zu einem stillen Stub: hier IST Nichtstun das
+-- Verhalten der Engine, und die Fundstelle steht daneben. Die Argumentpruefung
+-- kommt mit, weil sie Teil davon ist.
+function HasLocalizedVO(language)
+  if language == nil then error('HasLocalizedVO(language) -- expected 1 args, but got 0', 2) end
+end
+
+function AudioSetLanguage(language)
+  if language == nil then error('AudioSetLanguage(language) -- expected 1 args, but got 0', 2) end
+end

@@ -343,10 +343,45 @@ function __emitterBpJson(bpId)
 end
 function BlueprintLoaderUpdateProgress() end
 __bpFiles = {}
+
+--- `DiskFindFiles(dir, pattern)` — zwei Quellen, und die Trennung ist Absicht.
+---
+--- Hier stand eine Fassung, die NUR `__bpFiles` durchsuchte und das
+--- `pattern`-Argument **vollständig ignorierte**. Das war eine stille falsche
+--- Antwort: `localization.lua:29` fragt nach `'*strings_db.lua'` und bekam
+--- Blueprint-Pfade oder nichts, weshalb `/lua/globalinit.lua:14-24` — und damit
+--- die echte `/lua/simInit.lua` — nie durchlief. Die UI-VM hatte die richtige
+--- Fassung die ganze Zeit (`src/vfs/glob.ts`).
+---
+--- `.bp` kommt weiterhin aus `__bpFiles`, und das ist eine bewusste Abweichung
+--- von der Engine: die hätte hier den ganzen Spielordner, wir laden Blueprints
+--- ABSICHTLICH selektiv (`unitFactory.ts` setzt `__bpFiles` vor jedem
+--- `LoadBlueprints()`). Ohne diese Verengung zöge jeder Testlauf alle 2437
+--- Blueprints durch die Original-Pipeline. Alles andere — `/loc`, `/maps`,
+--- `/mods`, `/tutorials` — kommt aus dem echten Dateisatz des Hosts.
+---
+--- Das Muster kennt nur `*` als Platzhalter, wie im Original.
+local function __matchesPattern(name, pattern)
+  if not pattern or pattern == '' or pattern == '*' then return true end
+  local rx = string.gsub(pattern, '[%^%$%(%)%%%.%[%]%+%-%?]', '%%%1')
+  rx = string.gsub(rx, '%*', '.*')
+  return string.find(string.lower(name), '^' .. rx .. '$') ~= nil
+end
+
 function DiskFindFiles(dir, pattern)
-  local out = {}
-  for _, f in ipairs(__bpFiles) do
-    if string.find(f, dir, 1, true) == 1 then out[#out+1] = f end
+  pattern = pattern or '*'
+  -- Blueprints: die vom Host ausgewaehlte Liste.
+  if string.find(string.lower(pattern), '%.bp$') then
+    local out = {}
+    for _, f in ipairs(__bpFiles) do
+      local name = string.match(f, '[^/]+$') or f
+      if string.find(string.lower(f), string.lower(dir), 1, true) == 1
+        and __matchesPattern(name, pattern) then
+        out[#out + 1] = f
+      end
+    end
+    return out
   end
-  return out
+  -- Alles andere: der echte Dateisatz.
+  return __simDiskFindFiles(dir, pattern)
 end
