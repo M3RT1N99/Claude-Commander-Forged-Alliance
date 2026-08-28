@@ -329,6 +329,26 @@ for (const a of [1, 2]) {
   check(e.mass > 0 && e.energy > 0, `Armee ${a} hat Ressourcen (${e.mass.toFixed(0)} M / ${e.energy.toFixed(0)} E)`)
 }
 
+// Die sechs Bindungen, die ueber `__armyVar` laufen, nehmen im Original
+// ebenfalls einen Namen — sie gehen alle durch `ARMY_FromLuaState`:
+// SetIgnoreArmyUnitCap, ArmyIsOutOfGame, ArmyIsCivilian (Cfile:1025687),
+// GetArmyUnitCap (Cfile:1024976), SetArmyUnitCap (Cfile:1025033),
+// SetArmyOutOfGame (Cfile:1026347).
+console.log('\n== Auch die Armee-Zustandsbindungen nehmen Namen ==')
+check(
+  Number(q(`SetArmyUnitCap('ARMY_1', 77) return GetArmyUnitCap('ARMY_1')`)) === 77,
+  `SetArmyUnitCap/GetArmyUnitCap mit Namen`,
+)
+check(
+  Number(q(`return GetArmyUnitCap(1)`)) === 77,
+  'und Zahl und Name meinen dieselbe Armee',
+)
+check(
+  !throws(`SetIgnoreArmyUnitCap('ARMY_2', true) return ArmyIsCivilian('ARMY_2')`),
+  'SetIgnoreArmyUnitCap/ArmyIsCivilian mit Namen',
+)
+check(throws(`return GetArmyUnitCap('ARMY_NICHT_DA')`), 'ein unbekannter Name wirft auch hier')
+
 check(luaErrors.length === 0, `keine Lua-Fehler${luaErrors[0] ? `: ${luaErrors[0]}` : ''}`)
 
 host.close()

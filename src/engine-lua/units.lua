@@ -314,7 +314,18 @@ end
 -- the army table, Cfile:1017244/1017634).
 __armyVarDat = {}
 function __armyVar(army)
+  -- Auch hier gilt `ARMY_FromLuaState`: SECHS Bindungen haengen an dieser
+  -- Funktion, und alle sechs nehmen im Original einen Armee-NAMEN, weil sie
+  -- durch `ARMY_FromLuaState` gehen — nachgesehen, nicht angenommen:
+  -- `SetIgnoreArmyUnitCap`, `ArmyIsOutOfGame`, `ArmyIsCivilian`
+  -- (Cfile:1025687), `GetArmyUnitCap` (Cfile:1024976), `SetArmyUnitCap`
+  -- (Cfile:1025033), `SetArmyOutOfGame` (Cfile:1026347).
+  --
+  -- Zahlen gehen unveraendert durch: `__armyVar` wird intern mit bereits
+  -- aufgeloesten Indizes gerufen, und eine zusaetzliche Bereichspruefung hier
+  -- wuerde Aufrufer treffen, die es heute richtig machen.
   local i = army
+  if type(i) == 'string' then i = __resolveArmy(i) end
   if type(i) ~= 'number' then error('Unexpected type for army object', 2) end
   local r = __armyVarDat[i]
   if not r then

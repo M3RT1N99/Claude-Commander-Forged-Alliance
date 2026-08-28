@@ -365,10 +365,25 @@ Der erste Lauf war rot, und der Grund war aufschlussreich:
 seit dieser Änderung wirklich mit**, und der Suite fehlten nur seine
 Blueprints. Die Engine hat dort zu Recht geworfen.
 
+### Armee-Namen: was schon ging, und was nicht
+
+`SetAlliance` mit Namen stand hier als offener Punkt — **es ging bereits.** Die
+gemeinsame Auflösung `__resolveArmy` hatte es miterledigt, samt der
+Engine-Meldung `Unknown army: %s` für einen unbekannten Namen. Nachgemessen,
+nicht angenommen.
+
+Offen war etwas anderes, das niemand aufgeschrieben hatte: **sechs Bindungen
+gehen über `__armyVar` und lehnten Namen ab** — `SetIgnoreArmyUnitCap`,
+`ArmyIsOutOfGame`, `ArmyIsCivilian` (Cfile:1025687), `GetArmyUnitCap`
+(Cfile:1024976), `SetArmyUnitCap` (Cfile:1025033), `SetArmyOutOfGame`
+(Cfile:1026347). Alle sechs gehen im Original durch `ARMY_FromLuaState`,
+nehmen also Namen; nachgesehen für jede einzelne. Behoben an der gemeinsamen
+Stelle, wobei Zahlen unverändert durchgehen — eine zusätzliche Bereichsprüfung
+dort hätte Aufrufer getroffen, die es heute richtig machen.
+
 Weiterhin offen: `ArmyInitializePrebuiltUnits` (nur bei
 `Options.PrebuiltUnits == 'On'`, Cfile:1073515-1073533 — unbedingt gebaut würde
-es in jedem Skirmish Basen hinstellen) und `SetAlliance` mit Namen. Und der
-Browser-Pfad: `src/sim/luaSimClient.ts` schickt dem Worker weiterhin keine
+es in jedem Skirmish Basen hinstellen). Und der Browser-Pfad: `src/sim/luaSimClient.ts` schickt dem Worker weiterhin keine
 Kartendateien, also profitieren bislang nur die Node-Suiten davon —
 `src/main.ts:1031-1062` parst die `_save.lua` dort noch mit dem TS-Parser.
 
