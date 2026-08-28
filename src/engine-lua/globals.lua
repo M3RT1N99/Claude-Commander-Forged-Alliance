@@ -1207,13 +1207,59 @@ function GetSurfaceHeight(x, z)
   return h
 end
 
--- GetTerrainType(x, z) returns a terrain-type record from TerrainTypes
--- (lua/terraintypes.lua:126, a global list whose first entry is 'Default').
--- The original Lua indexes the result without checking (unit.lua:2420) and
--- explicitly asks for the default with (-1, -1) (unit.lua:2421). Until a map
--- with a terrain-type layer is loaded, every position is the default type.
+-- GetTerrainType(x, z) — `Moho::STIMap::GetTerrainType` (Cfile:1087694-1087707).
+--
+-- Die Engine macht dreierlei, und der zweite Punkt ist der ueberraschende:
+--
+--   1. ausserhalb der Karte (`x >= width-1` oder `z >= height-1`) ist der Index
+--      fest **1** (Cfile:1087702-1087703) — nicht 0;
+--   2. sonst ist er das Byte der Terrain-Typ-Ebene an dieser Zelle
+--      (`mTerrainType.data[x + z * width]`, Cfile:1087705);
+--   3. nachgeschlagen wird `mTerrainTypes.ttvec.start[index]` — ein C++-Vektor,
+--      indiziert nach TYPCODE, nicht nach Listenposition. terrainTypes.lua:8
+--      sagt es selbst: „Each terrain type has a type code that must be unique,
+--      with a max of 255", und die Bereiche beginnen bei 002.
+--
+-- Damit ergibt der Randfall genau das, was die Datei verspricht: Code 1 ist
+-- `TerrainTypes[1]` mit `TypeCode = 1` und `Name = 'Default'`
+-- (terrainTypes.lua:126-129) — „Position (-1, -1) will return the 'Default'
+-- terrain type" (terrainTypes.lua:15-16). `unit.lua:2421` verlaesst sich darauf.
+--
+-- Vorher stand hier `return TerrainTypes[1]` fuer JEDE Position. Fuer den
+-- Randfall war das zufaellig richtig und fuer jede echte Zelle falsch: die Karte
+-- hat eine Typ-Ebene, und sie wurde nie gelesen.
+__terrainTypeAt = false
+__terrainTypeByCode = false
+
+-- Ein Code OHNE Eintrag ist UNBEKANNT: die Engine indiziert dort ihren Vektor,
+-- und ob der 256 Plaetze hat oder nur so viele wie die Liste, steht nicht im
+-- Decompilat. Statt zu raten wird gewarnt (einmal je Code) und der Default
+-- geliefert — sichtbar, nicht still.
+__terrainTypeWarned = {}
+
 function GetTerrainType(x, z)
-  return TerrainTypes and TerrainTypes[1]
+  if not TerrainTypes then return nil end
+  if not __terrainTypeByCode then
+    local m = {}
+    for _, t in ipairs(TerrainTypes) do
+      if t.TypeCode then m[t.TypeCode] = t end
+    end
+    __terrainTypeByCode = m
+  end
+  local code = 1
+  if __terrainTypeAt and __mapSizeX and x and z
+    and x >= 0 and z >= 0 and x < __mapSizeX and z < __mapSizeZ then
+    code = __terrainTypeAt(x, z)
+  end
+  local t = __terrainTypeByCode[code]
+  if t then return t end
+  if not __terrainTypeWarned[code] then
+    __terrainTypeWarned[code] = true
+    WARN('GetTerrainType: Typcode ' .. tostring(code) .. ' hat keinen Eintrag in '
+      .. 'TerrainTypes; die Engine indiziert dort ihren Vektor (Cfile:1087706), '
+      .. 'was sie dabei liefert ist UNBEKANNT. Default zurueckgegeben.')
+  end
+  return __terrainTypeByCode[1]
 end
 
 -- === Befehle an Units (sim_SimInits) ===

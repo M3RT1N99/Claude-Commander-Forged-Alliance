@@ -110,10 +110,20 @@ Principles II and V).
       `src/engine-lua/damage.lua:405`.
       *Verified by*: `scripts/verify-toggle-pause.ts` — an entity destroyed
       from inside another's `OnDestroy` is fully destroyed in the same flush.
-- [ ] T018 **US16** Carry the parsed per-cell terrain-type layer into the sim
+### US16 — GetTerrainType reads the map's type layer ✅ DONE
+
+- [x] T018 **US16** Carry the parsed per-cell terrain-type layer into the sim
       (`src/formats/scmap.ts:130/411` → `setTerrainSource` → `__terrainTypeAt`)
       so `GetTerrainType` stops answering Default everywhere
-      (`STIMap::GetTerrainType`, Cfile:1087694-1087707).
+      (`STIMap::GetTerrainType`, Cfile:1087694-1087707). The lookup is by TYPE
+      CODE, not list position (terrainTypes.lua:8), and out of bounds is index
+      1 — which is exactly the `TypeCode = 1` 'Default' entry
+      (terrainTypes.lua:126-129), as the file's own doc promises for (-1,-1).
+      check: scripts/verify-session-start.ts
+      asserts: die Typ-Ebene wird wirklich gelesen
+      Red probe: ignore the layer and answer code 1 -> both assertions red.
+
+### US17 — open
 - [ ] T019 **US17** Split the SCMAP `>= 60` gate into the engine's two:
       skybox from 58 (Cfile:1339158), cartographic decal-batch count from 59.
       `src/formats/scmap.ts:415/443`.

@@ -30,7 +30,21 @@ export function installEngineGlobals(host: LuaHost): void {
 export function setTerrainSource(
   host: LuaHost,
   heightAt: (x: number, z: number) => number,
-  size?: { width: number; height: number; waterElevation?: number },
+  size?: {
+    width: number
+    height: number
+    waterElevation?: number
+    /**
+     * Der TYPCODE der Terrain-Typ-Ebene an einer Zelle
+     * (`scmap.terrainTypeData`, ein Byte je Zelle).
+     *
+     * Ohne ihn beantwortet `GetTerrainType` jede Position mit 'Default'
+     * (`STIMap::GetTerrainType`, Cfile:1087705 liest genau diese Ebene) — und
+     * damit sind Bewegungs-, Effekt- und Geräuschentscheidungen, die daran
+     * hängen, auf jeder Karte gleich.
+     */
+    terrainTypeAt?: (x: number, z: number) => number
+  },
 ): void {
   host.setGlobal('__terrainHeight', heightAt)
   if (size) {
@@ -43,5 +57,6 @@ export function setTerrainSource(
     // mWaterEnabled = false behaviour and GetSurfaceHeight stays the raw
     // elevation.
     host.eval(`__setWaterLevel(${size.waterElevation ?? 'nil'})`)
+    if (size.terrainTypeAt) host.setGlobal('__terrainTypeAt', size.terrainTypeAt)
   }
 }

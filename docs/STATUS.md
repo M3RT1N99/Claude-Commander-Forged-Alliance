@@ -381,6 +381,37 @@ nehmen also Namen; nachgesehen für jede einzelne. Behoben an der gemeinsamen
 Stelle, wobei Zahlen unverändert durchgehen — eine zusätzliche Bereichsprüfung
 dort hätte Aufrufer getroffen, die es heute richtig machen.
 
+### `GetTerrainType` las die Typ-Ebene der Karte gar nicht (US16/T018)
+
+Die Funktion lieferte für **jede** Position `TerrainTypes[1]`. Für den Randfall
+war das zufällig richtig, für jede echte Zelle falsch — die Karte hat eine
+Terrain-Typ-Ebene, und sie wurde nie gelesen.
+
+`STIMap::GetTerrainType` (Cfile:1087694-1087707) macht dreierlei, und das
+mittlere ist das überraschende:
+
+1. außerhalb der Karte (`x >= width-1` oder `z >= height-1`) ist der Index fest
+   **1**, nicht 0 (Cfile:1087702-1087703);
+2. sonst das Byte der Typ-Ebene an dieser Zelle (Cfile:1087705);
+3. nachgeschlagen wird nach **TYPCODE**, nicht nach Listenposition — der Vektor
+   ist ein C++-Vektor über Codes bis 255. `terrainTypes.lua:8` sagt es selbst,
+   und die Bereiche beginnen bei 002.
+
+Damit stimmt der Randfall mit dem überein, was die Datei verspricht:
+`TerrainTypes[1]` hat `TypeCode = 1` und heißt `'Default'`
+(terrainTypes.lua:126-129) — „Position (-1, -1) will return the 'Default'
+terrain type" (:15-16), worauf sich `unit.lua:2421` verlässt.
+
+Gemessen: SCMP_009 hat **11 verschiedene Typcodes**, SCMP_001 neun, SCMP_015
+fünf. Über ein Raster gelesen liefert die Karte jetzt **Water03, Water02,
+Rocky02, Vegetation04, Water04, Vegetation03, Dirt02, Sand02, Dirt03** statt
+neunmal `Default`.
+
+Ein Code **ohne** Eintrag bleibt UNBEKANNT: die Engine indiziert dort ihren
+Vektor, und ob der 256 Plätze hat, steht nicht im Decompilat. Statt zu raten
+wird einmal je Code gewarnt und der Default geliefert — sichtbar, nicht still.
+Auf den geprüften Karten feuert die Warnung nicht.
+
 Weiterhin offen: `ArmyInitializePrebuiltUnits` (nur bei
 `Options.PrebuiltUnits == 'On'`, Cfile:1073515-1073533 — unbedingt gebaut würde
 es in jedem Skirmish Basen hinstellen). Und der Browser-Pfad: `src/sim/luaSimClient.ts` schickt dem Worker weiterhin keine

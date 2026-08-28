@@ -147,6 +147,14 @@ if (!bootFehler) {
       width: scmap.width,
       height: scmap.height,
       waterElevation: scmap.water.hasWater ? scmap.water.elevation : undefined,
+      // Die Terrain-Typ-Ebene der Karte: ein Byte je Zelle
+      // (scmap.ts:411), nachgeschlagen wie in STIMap::GetTerrainType
+      // (Cfile:1087705).
+      terrainTypeAt: (x, z) => {
+        const xi = Math.max(0, Math.min(scmap.width - 1, Math.floor(x)))
+        const zi = Math.max(0, Math.min(scmap.height - 1, Math.floor(z)))
+        return scmap.terrainTypeData[zi * scmap.width + xi] ?? 1
+      },
     },
   )
 }
@@ -348,6 +356,28 @@ check(
   'SetIgnoreArmyUnitCap/ArmyIsCivilian mit Namen',
 )
 check(throws(`return GetArmyUnitCap('ARMY_NICHT_DA')`), 'ein unbekannter Name wirft auch hier')
+
+console.log('\n== GetTerrainType liest die Typ-Ebene der Karte ==')
+// `STIMap::GetTerrainType` (Cfile:1087694-1087707): ausserhalb der Karte fest
+// Index 1, sonst das Byte der Typ-Ebene — und nachgeschlagen wird nach TYPCODE,
+// nicht nach Listenposition (terrainTypes.lua:8 „a type code ... max of 255").
+// Vorher lieferte diese Funktion fuer JEDE Position `TerrainTypes[1]`.
+const ttDefault = String(q(`return GetTerrainType(-1, -1).Name`))
+check(ttDefault === 'Default', `GetTerrainType(-1,-1) = 'Default' (${ttDefault})`)
+// Und auf der Karte selbst muss etwas ANDERES herauskommen, sonst wird die
+// Ebene wieder nicht gelesen. SCMP_009 hat 11 verschiedene Codes.
+const ttNamen = new Set<string>()
+for (let x = 8; x < scmap.width; x += 37) {
+  for (let z = 8; z < scmap.height; z += 37) {
+    ttNamen.add(String(q(`return GetTerrainType(${x}, ${z}).Name`)))
+  }
+}
+console.log(`  Typen im Raster: ${[...ttNamen].join(', ')}`)
+check(ttNamen.size > 1, `mehr als ein Terrain-Typ auf der Karte (${ttNamen.size})`)
+check(
+  [...ttNamen].some((n) => n !== 'Default'),
+  'und mindestens einer ist nicht Default — die Typ-Ebene wird wirklich gelesen',
+)
 
 check(luaErrors.length === 0, `keine Lua-Fehler${luaErrors[0] ? `: ${luaErrors[0]}` : ''}`)
 
