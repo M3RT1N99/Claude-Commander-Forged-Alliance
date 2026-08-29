@@ -248,6 +248,40 @@ console.log('\n== DiskFindFiles (Sim) honours the pattern and sees the real VFS 
   )
 }
 
+// ── CreatePrefetchSet (scr_CoreInits — both VMs) ────────────────────────────
+//
+// `Prefetcher = CreatePrefetchSet()` sits at siminit.lua:232, so the retail
+// /lua/simInit.lua cannot get past that line without it. Registered at
+// Cfile:563841-563853 with the help string "create an empty prefetch set", and
+// its metatable carries exactly two methods, Update (Cfile:563891-563897) and
+// Reset (Cfile:563950-563956).
+console.log('\n== CreatePrefetchSet (siminit.lua:232) ==')
+{
+  check(sim.eval(`return type(CreatePrefetchSet)`) === 'function', 'existiert in der Sim-VM')
+  check(
+    sim.eval(`local p = CreatePrefetchSet() return type(p.Update) == 'function' and type(p.Reset) == 'function'`) ===
+      true,
+    'liefert ein Objekt mit genau Update und Reset',
+  )
+  // Exactly the call simInit.lua:252 makes, with exactly the table
+  // DefaultPrefetchSet() builds — three EMPTY lists, because all three
+  // DiskFindFiles loops in it are commented out (siminit.lua:237-247).
+  check(
+    sim.eval(
+      `local p = CreatePrefetchSet()
+       local ok = pcall(function() p:Update({ models = {}, anims = {}, d3d_textures = {} }) end)
+       return ok`,
+    ) === true,
+    'Prefetcher:Update(DefaultPrefetchSet()) läuft durch (drei leere Listen)',
+  )
+  // And it is not a function that swallows anything: a non-table is an error,
+  // the way the engine's argument check is.
+  check(
+    sim.eval(`local p = CreatePrefetchSet() return pcall(function() p:Update('nope') end)`) === false,
+    'ein Nicht-Tabellen-Argument wirft',
+  )
+}
+
 sim.close()
 
 // --- The UI VM: the same globals must exist (scr_CoreInits => both) ---
@@ -285,6 +319,9 @@ console.log('\n== The UI VM has them too (scr_CoreInits) ==')
     'MinLerp',
     'MinSlerp',
     'GetVersion',
+    // scr_CoreInits: `CreatePrefetchSet` ist in BEIDEN VMs registriert
+    // (Cfile:563845 haengt es an `scr_CoreInits.mForms`).
+    'CreatePrefetchSet',
   ]) {
     check(ui.eval(`return type(${name})`) === 'function', `${name} is callable in the UI VM`)
   }

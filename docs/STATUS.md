@@ -478,6 +478,26 @@ JS-Rückgabewert, den Lua anders sieht als gedacht. Die Prüfung in
 `verify-core-globals.ts` nagelt deshalb ausdrücklich den **Dialekt-Weg** fest,
 nicht nur die Länge — `#` allein hätte den Fehler nicht gesehen.
 
+### `CreatePrefetchSet` — die nächste fehlende Zutat, gebaut
+
+`Prefetcher = CreatePrefetchSet()` steht in `siminit.lua:232`; ohne diese
+Bindung kommt die echte `/lua/simInit.lua` dort nicht vorbei. Registriert in
+**`scr_CoreInits`** (Cfile:563845), also in beiden VMs — deshalb liegt sie in
+`str.lua`, das `LuaHost` in beide lädt. Hilfetext wörtlich: „create an empty
+prefetch set". Die Metatabelle trägt genau **zwei** Methoden:
+`Update({d3d_textures=…, batch_textures=…, models=…, anims=…})`
+(Cfile:563891-563897) und `Reset()` (Cfile:563950-563956).
+
+Dass `Update` hier nichts tut, ist **keine Auslassung**: `DefaultPrefetchSet()`
+(siminit.lua:234-250) baut `{ models = {}, anims = {}, d3d_textures = {} }` —
+alle drei `DiskFindFiles`-Schleifen darin sind **auskommentiert** (:237-247) —
+und `siminit.lua:252` übergibt genau das. Auf diese Eingabe ist Nichtstun das
+Verhalten der Engine.
+
+Käme je eine nicht leere Liste, wäre es etwas anderes: dann lädt die Engine
+Assets vor, und das haben wir nicht. Dann warnt es — einmal — statt still zu
+schlucken.
+
 ### Damit läuft die Retail-Kette
 
 Mit dieser einen Korrektur (plus dem `moho`-Umbau in die C-Form und einem
