@@ -22,6 +22,13 @@ function __createBrain(army, planName)
   local mod = import('/lua/aibrain.lua')
   local b = mod.AIBrain()
   b.__army = army
+  -- Zu jedem Brain gehoert eine Personality, und der Konstruktor liest sie
+  -- sofort ein: `CAiBrain::CAiBrain` legt sie an (Cfile:724303-724309) und ruft
+  -- `CAiPersonality::ReadData` (Cfile:724385). `aibrain.lua:1373`
+  -- (CalculateLayerPreference) und `:878` (der Plan-Thread) rufen sie in JEDEM
+  -- KI-Spiel, lange bevor irgendetwas anderes passiert.
+  b.__personality = import('/lua/aipersonality.lua').AIPersonality()
+  b.__personality.__p = __readPersonalityData()
   b.Name = 'ARMY_' .. tostring(army)
   b.Nickname = b.Name
   b:OnCreateHuman(planName or '')

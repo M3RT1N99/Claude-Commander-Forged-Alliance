@@ -1447,7 +1447,7 @@ local AIBRAIN_NAMES = {
   'GetEconomyStoredRatio', 'GetEconomyTrend', 'GetEconomyUsage', 'GetFactionIndex',
   'GetHighestThreatPosition', 'GetListOfUnits', 'GetMapWaterRatio', 'GetNoRushTicks',
   'GetNumPlatoonsTemplateNamed', 'GetNumPlatoonsWithAI', 'GetNumUnitsAroundPoint',
-  'GetPersonality', 'GetPlatoonUniquelyNamed', 'GetPlatoonsList', 'GetThreatAtPosition',
+  'GetPlatoonUniquelyNamed', 'GetPlatoonsList', 'GetThreatAtPosition',
   'GetThreatBetweenPositions', 'GetThreatsAroundPosition', 'GetUnitBlueprint',
   'GetUnitsAroundPoint', 'GiveResource', 'GiveStorage', 'IsAnyEngineerBuilding',
   'IsOpponentAIRunning', 'MakePlatoon', 'NumCurrentlyBuilding', 'PickBestAttackVector',
@@ -1458,6 +1458,16 @@ local AIBRAIN_NAMES = {
 
 local aibrain = withNoops(AIBRAIN_NAMES, {
   GetArmyIndex = function(self) return self.__army or 1 end,
+  --- `GetPersonality()` gibt `mPersonality` zurueck — das Objekt, das der
+  --- Brain-Konstruktor angelegt hat (cfunc_CAiBrainGetPersonalityL,
+  --- Cfile:733640-733690; angelegt in Cfile:724303-724309).
+  GetPersonality = function(self)
+    if not self.__personality then
+      error('GetPersonality: dieser Brain hat keine Personality — '
+        .. '__createBrain legt sie an (CAiBrain::CAiBrain, Cfile:724303)', 2)
+    end
+    return self.__personality
+  end,
   -- `brain:GetArmyStartPos()` gibt ZWEI Zahlen zurueck, x und z
   -- (cfunc_CAiBrainGetArmyStartPosL, Cfile:735971-735976: zweimal
   -- `lua_pushnumber`, `return 2`). Die Quelle ist der 2D-Vektor, den
@@ -2102,6 +2112,122 @@ rawset(moho, 'weapon_methods', cclass(weapon, moho.entity_methods))
 -- die Klasse — und class.lua:147 bricht mit „field 'X' is ambiguous" ab.
 rawset(moho, 'projectile_methods', cclass(projectile))
 rawset(moho, 'prop_methods', cclass(prop))
+
+-- ---------------------------------------------------------------------
+-- aipersonality_methods (CAiPersonality) — 35 bindings
+-- ---------------------------------------------------------------------
+--
+-- `CAiBrain::CAiBrain` legt zu JEDEM Brain eine Personality an und ruft
+-- danach `CAiPersonality::ReadData` (Cfile:724303-724309, 724385).
+--
+-- `ReadData` (Cfile:768303-769100) importiert `/lua/aipersonality.lua`, holt
+-- `AIPersonalityTemplate` und sucht darin den Eintrag mit **33 Feldern**, dessen
+-- Feld 1 (case-insensitiv) `"AverageJoe"` ist — der Name ist im Binaercode
+-- festverdrahtet (Cfile:768539-768541). Findet es keinen, bleiben die Werte des
+-- Konstruktors stehen: alle Bereiche 0, `mDifficulty = 0.5` (Cfile:768162-768194).
+--
+-- Die Feld-Indizes sind NICHT aus den Kommentaren der Lua-Datei abgelesen,
+-- sondern aus den `operator[](template, i)`-Aufrufen in `ReadData` — Feld 19 ist
+-- `mAirUnitsEmphasis` (Cfile:768898-768910), und so weiter. Feld 2 ist die
+-- Chat-Personality, 18 und 27 sind Zeichenketten-Listen.
+local PERSONALITY_RANGES = {
+  ArmySize = 3, PlatoonSize = 4, AttackFrequency = 5, RepeatAttackFrequency = 6,
+  CounterForces = 7, IntelGathering = 8, CoordinatedAttacks = 9, ExpansionDriven = 10,
+  TechAdvancement = 11, UpgradesDriven = 12, DefenseDriven = 13, EconomyDriven = 14,
+  FactoryTycoon = 15, IntelBuildingTycoon = 16, SuperWeaponTendency = 17,
+  AirUnitsEmphasis = 19, TankUnitsEmphasis = 20, BotUnitsEmphasis = 21,
+  SeaUnitsEmphasis = 22, SpecialtyForcesEmphasis = 23, SupportUnitsEmphasis = 24,
+  DirectDamageEmphasis = 25, InDirectDamageEmphasis = 26, SurvivalEmphasis = 28,
+  TeamSupport = 29, FormationUse = 30, TargetSpread = 31, QuittingTendency = 32,
+  ChatFrequency = 33,
+}
+
+--- Der Konstruktor-Zustand (Cfile:768162-768194): jeder Bereich 0/0, die
+--- Schwierigkeit 0,5. Nichts im Spiel setzt `mDifficulty` sonst — nur die
+--- Serialisierung liest und schreibt es (Cfile:769840/770181).
+local function neuePersonalityDaten()
+  local d = { name = '', chat = '', difficulty = 0.5, structures = {}, units = {} }
+  for feld in pairs(PERSONALITY_RANGES) do d[feld] = { min = 0, max = 0 } end
+  return d
+end
+
+--- `CAiPersonality::ReadData` (Cfile:768303-769100).
+function __readPersonalityData()
+  local daten = neuePersonalityDaten()
+  local vorlagen = import('/lua/aipersonality.lua').AIPersonalityTemplate
+  if not vorlagen then
+    -- gpg::Logf("Can't find AIPersonalityTemplate") (Cfile:768521) — die Engine
+    -- laeuft mit den Konstruktor-Werten weiter.
+    LOG("Can't find AIPersonalityTemplate")
+    return daten
+  end
+  local eintrag
+  for _, v in ipairs(vorlagen) do
+    if type(v) == 'table' and #v == 33 and type(v[1]) == 'string'
+      and string.lower(v[1]) == 'averagejoe' then
+      eintrag = v
+      break
+    end
+  end
+  if not eintrag then return daten end
+  daten.name = eintrag[1]
+  daten.chat = eintrag[2]
+  for feld, index in pairs(PERSONALITY_RANGES) do
+    local bereich = eintrag[index]
+    if type(bereich) == 'table' then
+      daten[feld] = { min = tonumber(bereich[1]) or 0, max = tonumber(bereich[2]) or 0 }
+    end
+  end
+  for _, s in ipairs(eintrag[18] or {}) do daten.structures[#daten.structures + 1] = s end
+  for _, s in ipairs(eintrag[27] or {}) do daten.units[#daten.units + 1] = s end
+  return daten
+end
+
+--- Jeder Bereichs-Getter ist dieselbe Interpolation ueber die Schwierigkeit:
+--- `(1 - d) * min + max * d` (Cfile:770438-770439 fuer GetArmySize,
+--- 771247-771248 fuer GetAirUnitsEmphasis — identisch fuer alle 29).
+local aipersonality = {
+  --- `AdjustDelay(basis, faktor)` (Cfile:770360-770392): beide Argumente sind
+  --- GANZZAHLEN (`lua_type` muss 3 sein, sonst TypeError "integer"), und das
+  --- Ergebnis ist `basis + (int)((1 - d) * (basis * faktor))` — die innere
+  --- Multiplikation laeuft ganzzahlig, erst danach kommt die Schwierigkeit
+  --- dazu, und das Ergebnis wird abgeschnitten, nicht gerundet.
+  AdjustDelay = function(self, basis, faktor)
+    if type(basis) ~= 'number' or type(faktor) ~= 'number' then
+      error('AdjustDelay: integer expected', 2)
+    end
+    local b, f = math.floor(basis), math.floor(faktor)
+    local zuschlag = (1.0 - self.__p.difficulty) * (b * f)
+    return b + (zuschlag >= 0 and math.floor(zuschlag) or math.ceil(zuschlag))
+  end,
+  --- `GetDifficulty()` gibt `mDifficulty` unveraendert zurueck (Cfile:770324).
+  GetDifficulty = function(self) return self.__p.difficulty end,
+  GetPersonalityName = function(self) return self.__p.name end,
+  GetChatPersonality = function(self) return self.__p.chat end,
+  --- Beide Listen kommen als NEUE Lua-Tabelle zurueck (`AssignNewTable` +
+  --- Kopie je Eintrag, Cfile:771170-771200).
+  GetFavouriteStructures = function(self)
+    local out = {}
+    for i, s in ipairs(self.__p.structures) do out[i] = s end
+    return out
+  end,
+  GetFavouriteUnits = function(self)
+    local out = {}
+    for i, s in ipairs(self.__p.units) do out[i] = s end
+    return out
+  end,
+}
+
+for feld in pairs(PERSONALITY_RANGES) do
+  aipersonality['Get' .. feld] = function(self)
+    local r = self.__p[feld]
+    local d = self.__p.difficulty
+    return (1.0 - d) * r.min + r.max * d
+  end
+end
+
+rawset(moho, 'aipersonality_methods', cclass(aipersonality))
+
 rawset(moho, 'aibrain_methods', cclass(aibrain))
 rawset(moho, 'cursor_methods', cclass(cursor))
 

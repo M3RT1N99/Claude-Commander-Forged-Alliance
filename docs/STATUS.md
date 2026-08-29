@@ -687,6 +687,47 @@ gilt `WaitFrames == coroutine.yield` woertlich, statt eines Wrappers, der
 `debug.getinfo(...).short_src`; der Rot-Test (zurueck auf `globalInit.lua`)
 zeigt sofort wieder `ui-globals.lua`.
 
+### `CAiPersonality` — der erste von drei Blockern der KI-Armee
+
+Eine KI-Armee (`human: false`) stirbt an drei Stellen. Gemessen auf SCMP_009 mit
+`ARMY_2` als KI:
+
+| Stelle | Fehler |
+| --- | --- |
+| `aibrain.lua:1144` | `plat:ForkThread` — `GetPlatoonUniquelyNamed('ArmyPool')` liefert nichts |
+| `aibrain.lua:1373` | `personality:GetAirUnitsEmphasis()` |
+| `aibrain.lua:878` | `personality:AdjustDelay(20, 4)` |
+
+Die letzten beiden sind erledigt. `CAiBrain::CAiBrain` legt zu **jedem** Brain
+eine Personality an (Cfile:724303-724309) und ruft sofort
+`CAiPersonality::ReadData` (Cfile:724385). `ReadData` (Cfile:768303-769100)
+importiert `/lua/aipersonality.lua`, holt `AIPersonalityTemplate` und sucht den
+Eintrag mit **33 Feldern**, dessen Feld 1 case-insensitiv `"AverageJoe"` ist —
+der Name steht fest im Binaercode (Cfile:768539-768541). Findet es keinen,
+bleiben die Konstruktor-Werte: alle Bereiche 0/0, `mDifficulty = 0.5`
+(Cfile:768162-768194). Nichts sonst im Spiel setzt die Schwierigkeit; nur die
+Serialisierung liest und schreibt sie (Cfile:769840/770181).
+
+Die 29 Bereichs-Getter sind alle dieselbe Interpolation:
+`(1 - d) * min + max * d` (Cfile:770438-770439). `AdjustDelay(basis, faktor)`
+ist `basis + (int)((1 - d) * (basis * faktor))` — beide Argumente muessen
+Ganzzahlen sein, sonst `TypeError "integer"` (Cfile:770360-770392). Die beiden
+Listen-Getter liefern je Aufruf eine **neue** Tabelle (`AssignNewTable`,
+Cfile:771170).
+
+Die Feld-Indizes sind nicht aus den Kommentaren der Lua-Datei abgelesen, sondern
+mechanisch aus den `operator[](template, i)`-Aufrufen in `ReadData` extrahiert.
+`verify-ai-personality.ts` vergleicht die Getter gegen die Vorlage aus der
+Original-Datei, nicht gegen abgeschriebene Zahlen; der Rot-Test (Index 19 -> 18)
+faellt sofort um.
+
+**Offen bleibt der erste Blocker: das Platoon-System.** `MakePlatoon`,
+`GetPlatoonUniquelyNamed`, `PlatoonExists`, `DisbandPlatoon`,
+`AssignUnitsToPlatoon`, `GetPlatoonsList` sind No-ops, und
+`moho.platoon_methods` gibt es nicht — 296 `cfunc_CPlatoon`-Stellen im Decomp.
+Solange das so ist, gibt es keine KI-Armee, und `mapSession()` setzt beide
+Armeen auf `human: true`.
+
 ### Die Boot-Nutzlast des Sim-Workers
 
 Gemessen: die Boot-Nutzlast des Sim-Workers ist heute **4 281
