@@ -55,6 +55,26 @@ end
 -- GetHealth appears in both the entity and the unit binding list — filling it
 -- with a no-op on the unit silently made every unit report zero health. So a
 -- name the parent already implements is never no-op'd here.
+--- Die C-Form, in der die Engine ihre Klassen uebergibt.
+---
+--- `globalInit.lua:27-29` sagt es in Prosa: „Classes exported from the engine
+--- are in the 'moho' table. But they aren't full classes yet, just lists of
+--- exported methods and base classes." Also: eine EINFACHE Tabelle, String-
+--- Schluessel sind Methoden, Basisklassen liegen im ARRAY-Teil, keine
+--- Metatabelle. `ConvertCClassToLuaClass` (class.lua:387-406) rekursiert ueber
+--- `ipairs(cclass)` und macht daraus an Ort und Stelle echte Klassen.
+---
+--- Vorher standen hier fertige `Class(base)(spec)`. Das war der Grund, warum
+--- die echte `/lua/simInit.lua` an `class.lua:273` starb: beim erneuten Laden
+--- von `class.lua` ist `Class` eine NEUE Tabelle, der Kurzschluss
+--- `getmetatable(cclass) == Class` (class.lua:389) greift nicht mehr, und die
+--- Umwandlung laeuft ein zweites Mal ueber eine Tabelle, deren alte
+--- `Class`-Metatabelle den `__newindex`-Waechter traegt.
+local function cclass(spec, base)
+  if base then spec[1] = base end
+  return spec
+end
+
 local function withNoops(names, methods, parent)
   for _, name in ipairs(names) do
     if methods[name] == nil and not (parent and parent[name]) then
@@ -1841,7 +1861,15 @@ local border = withNoops(BORDER_NAMES, {
 -- ---------------------------------------------------------------------
 moho = setmetatable({}, {
   __index = function(t, k)
-    local c = Class() {}
+    -- Solange `moho` noch die C-Form traegt, muss auch ein neuer Eintrag die
+    -- C-Form haben — sonst laeuft `ConvertCClassToLuaClass` (class.lua:387)
+    -- ueber eine fertige Klasse und wir haetten genau das Problem zurueck, das
+    -- die Umstellung beseitigt. Ist die Umwandlung durch (erkennbar daran, dass
+    -- `entity_methods` eine Klasse ist), gilt das Gegenteil: dann muss ein
+    -- neuer Eintrag sofort eine Klasse sein, weil niemand mehr umwandelt.
+    local konvertiert = rawget(t, 'entity_methods') ~= nil
+      and getmetatable(rawget(t, 'entity_methods')) == Class
+    local c = konvertiert and (Class() {}) or {}
     rawset(t, k, c)
     return c
   end,
@@ -2058,13 +2086,13 @@ local collision_beam = withNoops({
   GetBoneCount = function(self) return 2 end,
 }, entity)
 
-rawset(moho, 'entity_methods', Class() (entity))
+rawset(moho, 'entity_methods', cclass(entity))
 -- MIT entity_methods als Basis — anders als projectile/prop: CollisionBeam.lua
 -- mischt Entity NICHT selbst dazu (`Class(moho.CollisionBeamEntity)` pur,
 -- CollisionBeam.lua:16); im Original erbt die C++-Klasse von Entity.
-rawset(moho, 'CollisionBeamEntity', Class(moho.entity_methods) (collision_beam))
-rawset(moho, 'unit_methods', Class(moho.entity_methods) (unit))
-rawset(moho, 'weapon_methods', Class(moho.entity_methods) (weapon))
+rawset(moho, 'CollisionBeamEntity', cclass(collision_beam, moho.entity_methods))
+rawset(moho, 'unit_methods', cclass(unit, moho.entity_methods))
+rawset(moho, 'weapon_methods', cclass(weapon, moho.entity_methods))
 -- OHNE entity_methods als Basis — und das ist kein Versehen:
 --   Projectile.lua:16  Projectile = Class(moho.projectile_methods, Entity)
 --   Prop.lua:16        Prop       = Class(moho.prop_methods, Entity)
@@ -2072,15 +2100,15 @@ rawset(moho, 'weapon_methods', Class(moho.entity_methods) (weapon))
 -- /lua/sim/Entity.lua ist bereits Class(moho.entity_methods)). Wuerden wir hier
 -- ebenfalls von entity_methods erben, kaeme jedes Entity-Feld ueber ZWEI Wege in
 -- die Klasse — und class.lua:147 bricht mit „field 'X' is ambiguous" ab.
-rawset(moho, 'projectile_methods', Class() (projectile))
-rawset(moho, 'prop_methods', Class() (prop))
-rawset(moho, 'aibrain_methods', Class() (aibrain))
-rawset(moho, 'cursor_methods', Class() (cursor))
+rawset(moho, 'projectile_methods', cclass(projectile))
+rawset(moho, 'prop_methods', cclass(prop))
+rawset(moho, 'aibrain_methods', cclass(aibrain))
+rawset(moho, 'cursor_methods', cclass(cursor))
 
 -- maui (nur UI-VM). group_methods hat keine eigenen Bindungen — ein Group ist
 -- ein CMauiControl mit der Klasse "group" (deshalb steht CMauiGroup auch nicht
 -- in der Decomp-Liste). Die leere Klasse liefert das lazy-moho von selbst.
-rawset(moho, 'control_methods', Class() (control))
+rawset(moho, 'control_methods', cclass(control))
 -- ---------------------------------------------------------------------
 -- item_list_methods (CMauiItemList) — 18 Bindungen.
 --
@@ -2459,13 +2487,13 @@ local worldview = withNoops(WORLDVIEW_NAMES, {
   end,
 }, control)
 
-rawset(moho, 'bitmap_methods', Class(moho.control_methods) (bitmap))
-rawset(moho, 'text_methods', Class(moho.control_methods) (text))
-rawset(moho, 'frame_methods', Class(moho.control_methods) (frame))
-rawset(moho, 'border_methods', Class(moho.control_methods) (border))
-rawset(moho, 'item_list_methods', Class(moho.control_methods) (item_list))
-rawset(moho, 'edit_methods', Class(moho.control_methods) (edit))
-rawset(moho, 'scrollbar_methods', Class(moho.control_methods) (scrollbar))
+rawset(moho, 'bitmap_methods', cclass(bitmap, moho.control_methods))
+rawset(moho, 'text_methods', cclass(text, moho.control_methods))
+rawset(moho, 'frame_methods', cclass(frame, moho.control_methods))
+rawset(moho, 'border_methods', cclass(border, moho.control_methods))
+rawset(moho, 'item_list_methods', cclass(item_list, moho.control_methods))
+rawset(moho, 'edit_methods', cclass(edit, moho.control_methods))
+rawset(moho, 'scrollbar_methods', cclass(scrollbar, moho.control_methods))
 -- ---------------------------------------------------------------------
 -- camera_methods (CameraImpl) — 25 Bindungen, mHelp woertlich:
 --
@@ -2512,18 +2540,30 @@ local camera = withNoops(CAMERA_NAMES, {
     __uiCameraMove(self.__name, pos, hpr, zoom, seconds or 0)
   end,
 })
-rawset(moho, 'camera_methods', Class() (camera))
+rawset(moho, 'camera_methods', cclass(camera))
 
-rawset(moho, 'movie_methods', Class(moho.control_methods) (movie))
-rawset(moho, 'UIWorldView', Class(moho.control_methods) (worldview))
+rawset(moho, 'movie_methods', cclass(movie, moho.control_methods))
+rawset(moho, 'UIWorldView', cclass(worldview, moho.control_methods))
 
 
 -- CMauiLuaDragger: KEIN Control (kein Layout, kein Parent) — die Engine haelt
 -- ihn separat und ruft OnMove/OnRelease/OnCancel (Cfile:1130393-1130413).
 -- dragger.lua:15 raeumt ihn selbst weg: `OnRelease -> self:Destroy()`.
-rawset(moho, 'dragger_methods', Class() ({
+rawset(moho, 'dragger_methods', cclass({
   Destroy = function(self)
     __mauiDraggerDestroy(self)
     self.__destroyed = true
   end,
 }))
+
+-- HIER WIRD NICHTS UMGEWANDELT.
+--
+-- `moho` bleibt genau das, was die Engine uebergibt: Listen von Methoden und
+-- Basisklassen (globalInit.lua:27-29). Die Umwandlung in echte Klassen macht
+-- `globalInit.lua:31-34` — mit `ConvertCClassToLuaClass` (class.lua:387-406).
+--
+-- Es selbst zu tun waere folgenlos und ausgemessen: wandelt man beim Boot um,
+-- scheitert das spaetere Neuladen von `class.lua` GENAUSO an `class.lua:273`,
+-- weil `Class` dann eine neue Tabelle ist und der Kurzschluss bei
+-- `class.lua:389` nicht greift. Der Zwischenschritt bringt nichts; nur die
+-- richtige Reihenfolge tut es.

@@ -11,7 +11,7 @@ import { open, type FileHandle } from 'node:fs/promises'
 import { ZipArchive } from '../src/vfs/zipArchive'
 import type { RandomAccessFile } from '../src/vfs/randomAccess'
 import { LuaHost } from '../src/lua/host'
-import { bonesFromBlueprint } from './gameFiles'
+import { bonesFromBlueprint, bootArchives } from './gameFiles'
 import { installEngine } from '../src/lua/engine'
 import { setTerrainSource } from '../src/lua/engineGlobals'
 import { FLAT_TEST_TERRAIN } from '../src/sim/terrain'
@@ -32,7 +32,7 @@ const GAME = process.env.CFA_GAME_DIR ?? 'C:/Program Files (x86)/Steam/steamapps
 
 const openFiles: NF[] = []
 const files = new Map<string, Uint8Array>()
-for (const a of ['mohodata.scd', 'lua.scd']) {
+for (const a of ['mohodata.scd', 'lua.scd', ...(await bootArchives())]) {
   const f = await NF.open(`${GAME}/gamedata/${a}`); openFiles.push(f)
   const z = await ZipArchive.open(f)
   for (const [k, e] of z.entries) if (k.endsWith('.lua')) files.set(k, await z.read(e))

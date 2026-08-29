@@ -12,6 +12,7 @@ import { LuaHost } from '../src/lua/host'
 import { installEngine } from '../src/lua/engine'
 import { setTerrainSource } from '../src/lua/engineGlobals'
 import { FLAT_TEST_TERRAIN } from '../src/sim/terrain'
+import { bootArchives } from './gameFiles'
 
 class NodeFile implements RandomAccessFile {
   private constructor(
@@ -38,7 +39,7 @@ const GAME =
 
 const files = new Map<string, Uint8Array>()
 const openFiles: NodeFile[] = []
-for (const archive of ['mohodata.scd', 'lua.scd']) {
+for (const archive of ['mohodata.scd', 'lua.scd', ...(await bootArchives())]) {
   const file = await NodeFile.open(`${GAME}/gamedata/${archive}`)
   openFiles.push(file)
   const zip = await ZipArchive.open(file)

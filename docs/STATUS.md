@@ -498,40 +498,90 @@ Käme je eine nicht leere Liste, wäre es etwas anderes: dann lädt die Engine
 Assets vor, und das haben wir nicht. Dann warnt es — einmal — statt still zu
 schlucken.
 
-### Damit läuft die Retail-Kette
+### Der Sim bootet jetzt die echte `/lua/simInit.lua`
 
-Mit dieser einen Korrektur (plus dem `moho`-Umbau in die C-Form und einem
-`CreatePrefetchSet`-Ersatz) fährt `doscript('/lua/simInit.lua')` durch, und
-`SetupSession` / `OnCreateArmyBrain` / `BeginSession` **der Retail-Lua** liefern
-dieselben fünf Werte wie unsere Handkette: 341 Marker, ARMY_1 bei 672.5, zwei
-Einheiten, `IsEnemy(1,2)` false → true, 100 Beats ohne Warnung — nur eben ohne
-`session.lua`.
+`installEngine()` setzte die Boot-Kette bisher von Hand zusammen: `class.lua`
+neu laden, `installMoho`, `utils.lua`, `repr.lua`, `buffblueprints.lua`, später
+`doscript('/lua/SimSync.lua')` und `ResetSyncTable()`. Alles davon steht in
+`globalInit.lua:14-24` bzw. `siminit.lua:45/100` — nachgebaut, wo es
+auszuführen gereicht hätte. Jetzt macht der Sim-Boot, was
+`Moho::Sim::Create` macht: `SCR_LuaDoScript(mLuaState, "/lua/simInit.lua", 0)`
+(Cfile:1071613).
 
-Was der Sim heute noch fehlt, gemessen gegen den Retail-Boot: **0 statt 108
-Buffs** (`schook/lua/globalinit.lua:15`), kein `TriggerManager`, keine 40
-KI-Datendateien (491 KB), kein striktes `_G` im Sim-VM, und
-`ScenarioInfo.PlatoonHandles/UnitGroups/UnitNames/…` alle nil. `buff.lua:41-42`
-**wirft** bei einem unbekannten Buff — jedes `Buff.ApplyBuff` aus der
-Original-Lua ist damit ein Fehler, der nur darauf wartet, dass jemand den Pfad
-läuft.
+Voraussetzung dafür war die `moho`-Übergabeform. `globalInit.lua:27-29` sagt es
+in Prosa: *„Classes exported from the engine are in the 'moho' table. But they
+aren't full classes yet, just lists of exported methods and base classes."* Also
+einfache Tabellen, Methoden unter String-Schlüsseln, Basisklassen im
+**Array-Teil**, keine Metatabelle — genau das, was `ConvertCClassToLuaClass`
+(class.lua:387-406) verbraucht: es rekursiert über `ipairs(cclass)` und wandelt
+**an Ort und Stelle** um. `moho.lua` veröffentlichte stattdessen 20 fertige
+`Class(base)(spec)`, und daran starb die Retail-Kette an `class.lua:273`: beim
+erneuten Laden von `class.lua` ist `Class` eine **neue** Tabelle, der Kurzschluss
+`getmetatable(cclass) == Class` (class.lua:389) greift nicht, und die Umwandlung
+läuft ein zweites Mal über eine Tabelle, deren alte `Class`-Metatabelle den
+`__newindex`-Wächter trägt.
 
-### Der Retail-Boot ist weiter weg als gedacht
+Der UI-VM hatte dieselbe Handkette und dieselbe Begründung im Kommentar („den
+`ConvertCClassToLuaClass`-Lauf brauchen wir nicht, unsere moho-Klassen SIND schon
+Lua-Klassen"). Er lädt jetzt `doscript('/lua/globalInit.lua')` — das, was
+`userInit.lua:11` tut.
 
-Die Recherche zu `/lua/simInit.lua` hat eine Behauptung selbst widerlegt, die
-zunächst nach Erfolg aussah. Mit einem moho-Umbau und einem
-`CreatePrefetchSet`-Ersatz **läuft** `doscript('/lua/simInit.lua')` ohne
-Ausnahme durch, und die fünf gemessenen SCMP_009-Werte bleiben gleich.
+**Was der Retail-Boot mitbringt** (gemessen, vorher/nachher):
 
-Nur beweist das nichts: dasselbe in `verify-session-start.ts` eingespleißt macht
-die Suite **rot** — `Hook /schook/lua/simInit.lua: TypeError: self is not a
-function`. Die schook-Hooks installieren also gar nicht, weder
-`OnCreateArmyBrain` → `InitializeStartLocation`/`SetPlans` noch `BeginSession` →
-`CreateProps`/`CreateResources`. Die Zahlen halten nur, weil
-`src/engine-lua/session.lua` den Sitzungsstart weiterhin von Hand fährt. **Die
-Retail-`simInit` hat nichts übernommen.** Der Hook-Fehler ist der Blocker, nicht
-`class.lua:273`.
+| | vorher | jetzt |
+| --- | --- | --- |
+| `Buffs` | 0 | **108** |
+| `Prefetcher`, `PlatoonTemplate` | nil | Tabelle |
+| `InitialRegistration` | nil | `false` (schook setzt es um) |
+| striktes `_G` im Sim-VM | nein | **ja** |
+| `SetupSession` / `BeginSession` | unsere | **`/mod/schook/lua/siminit.lua:9/16`** |
+| Meldungen beim Boot | — | 79 SPEW, **0 WARN**, 0 Hook-Fehler |
 
-Zweite Korrektur, gemessen: die Boot-Nutzlast des Sim-Workers ist heute **4 281
+Die letzte Zeile widerlegt eine frühere Eintragung hier: *„Die schook-Hooks
+installieren also gar nicht … Der Hook-Fehler ist der Blocker, nicht
+`class.lua:273`."* Beides war falsch herum. Der Hook-Fehler kam von der
+wasmoon-Containergrenze (JS-Array → userdata statt Tabelle), die inzwischen an
+beiden `DiskFindFiles` behoben ist; `class.lua:273` **war** der Blocker.
+`SetupSession` und `BeginSession` kommen jetzt nachweislich aus dem Hook.
+
+**Was die Umstellung gekostet hat** — 31 von 63 Suiten rot, in drei Ursachen:
+
+1. **Striktes `_G` erreicht den Sim.** `config.lua` lässt das Lesen eines nie
+   zugewiesenen Globals werfen, und `x = nil` legt keinen Schlüssel an. Betroffen
+   waren genau zwei: `__engineVersion` (globals.lua) und `__terrainFlatten`
+   (globals.lua, ein Haken, den heute niemand setzt). Beide sind jetzt mit
+   `false` deklariert. Eine Suche über alle `engine-lua/*.lua` nach echten
+   Global-Lesungen ohne Zuweisung liefert sonst nur Kommentar-Treffer und die
+   `__econ*`-Brücken, die TS **vor** `simInit` setzt.
+2. **Der UI-VM wandelte `moho` nicht um** — siehe oben, `globalInit.lua`.
+3. **Handverlesene Test-VFS.** Zwölf Suiten mounten nur `mohodata.scd` +
+   `lua.scd`. Der Retail-Boot braucht mehr: `loc_*.scd`, sonst stirbt
+   `localization.lua:30` an `string.gsub(nil, …)`; und `schook.scd`, weil
+   `schook/lua/GlobalInit.lua` die Datei lädt, die `BuffBlueprint` **definiert**
+   (`/lua/system/BuffBlueprints.lua`) — ohne sie fällt
+   `/lua/sim/adjacencybuffs.lua:37`, mit ihr `/lua/defaultunits.lua` und damit
+   jede Einheit. `scripts/gameFiles.ts` hat dafür `bootArchives()`;
+   `GameFiles.open()` braucht es nicht, das mountet ohnehin alles.
+
+Festgenagelt in `verify-moho-sim-contracts.ts`, und zwar an einem **nackten**
+Host (nur `installMoho`, sonst nichts): keine Metatabelle, Basisklasse im
+Array-Teil, `GetEntityId` noch nicht geerbt. Nach dem Boot dann das Gegenteil.
+Der Rot-Test — `cclass` wieder `Class(base)(spec)` liefern lassen — bringt
+`class.lua:273` zurück. Die vorherige Fassung dieses Blocks prüfte `__bases[1]`
+auf dem gebooteten Host; das gilt für **beide** Formen und konnte nicht
+scheitern.
+
+**Was der Sim-Boot noch nicht tut:** `src/sim/session.ts` ruft weiterhin
+`__loadScenario()` / `__initArmyFromScenario()` / `__beginSession()` aus
+`src/engine-lua/session.lua`, statt das jetzt vorhandene `SetupSession()` /
+`BeginSession()` laufen zu lassen. Erst damit füllen sich
+`ScenarioInfo.PlatoonHandles/UnitGroups/UnitNames/…` und
+`ScenarioInfo.TriggerManager` (ein **Feld**, kein Global — eine frühere
+Eintragung hier suchte den falschen Namen).
+
+### Die Boot-Nutzlast des Sim-Workers
+
+Gemessen: die Boot-Nutzlast des Sim-Workers ist heute **4 281
 Dateien / 15,5 MB** — davon allein `effects/**` 7,07 MB, was der Kommentar in
 `luaSimClient.ts:287` gar nicht erwähnt. Die drei Lua-Dateien von SCMP_009 sind
 **217 829 Byte, also 1,4 %** davon (gzip: 11 KB). Die Annahme „alle Karten zu

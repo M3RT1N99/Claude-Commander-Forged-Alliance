@@ -78,6 +78,28 @@ export const GAME_DIR =
   process.env.CFA_GAME_DIR ??
   'C:/Program Files (x86)/Steam/steamapps/common/Supreme Commander Forged Alliance'
 
+/**
+ * The archives a hand-picked suite VFS must mount on top of its own list, so
+ * that the retail Sim boot (`doscript('/lua/simInit.lua')`) finds what the real
+ * VFS always has. `GameFiles.open()` mounts every .scd and needs none of this.
+ *
+ * - `loc_*.scd` — globalInit.lua:22 loads Localization.lua, and
+ *   localization.lua:20-31 resolves the language by asking the VFS: first
+ *   `exists('/loc/<la>/strings_db.lua')`, then `'us'`, and only then
+ *   `DiskFindFiles('/loc', '*strings_db.lua')`. With no loc archive all three
+ *   miss and the boot dies at `string.gsub(dbfiles[1], ...)` on nil.
+ * - `schook.scd` — the hook layer `doscript` applies. `schook/lua/GlobalInit.lua`
+ *   is what loads `/lua/system/BuffBlueprints.lua` (which DEFINES the global
+ *   `BuffBlueprint`) plus BuffDefinitions, GlobalPlatoonTemplate,
+ *   GlobalBuilderTemplate/Group and GlobalBaseTemplate. Without it
+ *   `/lua/sim/adjacencybuffs.lua:37` dies on `BuffBlueprint`, which takes
+ *   `/lua/defaultunits.lua` and with it every unit down.
+ */
+export async function bootArchives(): Promise<string[]> {
+  const found = (await readdir(`${GAME_DIR}/gamedata`)).filter((n) => /^loc_.*\.scd$/i.test(n))
+  return [...found.sort((a, b) => a.localeCompare(b)), 'schook.scd']
+}
+
 export class GameFiles {
   private constructor(
     /** Alle .lua und .bp — das, was der Lua-Host als VFS bekommt. */

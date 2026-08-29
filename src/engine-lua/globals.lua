@@ -320,6 +320,13 @@ end
 -- host may override it (uiEngine.ts sets __engineVersion from package.json, so
 -- the main menu shows this reimplementation's version); the Sim VM reports the
 -- real FA engine version. main.lua:172 draws it.
+--
+-- Declared as `false` first: from the retail boot on, config.lua's strict `_G`
+-- is active in the Sim VM too, and reading a global that was never assigned
+-- throws instead of returning nil. `__engineVersion = nil` would NOT create the
+-- key (config.lua drops nil assignments), so `false` it is.
+__engineVersion = false
+
 function GetVersion()
   return __engineVersion or '1.5.3764'
 end
@@ -2420,6 +2427,12 @@ end
 -- Hoehenkarte; solange keine Karte geladen ist, werden die Rechtecke
 -- gesammelt (der Renderer/die Karte wenden sie an).
 __flattenRects = {}
+-- Declared as `false`, not left unset: from the retail boot on, config.lua's
+-- strict `_G` is active in the Sim VM, and reading a global that was never
+-- assigned throws. Nothing installs this hook today — the rects are collected
+-- and applied by whoever owns the heightfield.
+__terrainFlatten = false
+
 function FlattenMapRect(x, z, w, h, y)
   __flattenRects[#__flattenRects + 1] = { x = x, z = z, w = w, h = h, y = y }
   if __terrainFlatten then __terrainFlatten(x, z, w, h, y) end

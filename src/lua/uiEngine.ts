@@ -147,21 +147,23 @@ export function installUiEngine(host: LuaHost, fs: UiFileSystem): UiEngine {
     end
   `)
 
-  // Die gemeinsame Boot-Kette beider VMs — dieselben Dateien, die
-  // globalInit.lua:14-24 lädt. Nicht einzeln zusammengeraten: config.lua
-  // bringt `iscallable`, Localization.lua bringt `LOC`, collapse.lua die
-  // Pfad-Normalisierung. (Den ConvertCClassToLuaClass-Lauf am Ende von
-  // globalInit brauchen wir nicht: unsere moho-Klassen SIND schon Lua-Klassen,
-  // siehe engine-lua/moho.lua.)
-  host.loadGlobal('/lua/system/config.lua')
-  host.loadGlobal('/lua/system/class.lua')
+  // moho zuerst — in der C-Form, wie die Engine sie uebergibt
+  // (globalInit.lua:27-29): Methodenlisten und Basisklassen, keine fertigen
+  // Klassen. Braucht deshalb noch kein `Class`.
   installMoho(host)
-  host.loadGlobal('/lua/system/utils.lua')
-  host.loadGlobal('/lua/system/repr.lua')
-  host.loadGlobal('/lua/system/trashbag.lua')
-  host.loadGlobal('/lua/system/Localization.lua')
-  host.loadGlobal('/lua/system/MultiEvent.lua')
-  host.loadGlobal('/lua/system/collapse.lua')
+
+  // Und dann die gemeinsame Boot-Kette beider VMs, indem die Datei laeuft, die
+  // sie IST: `userInit.lua:11` macht `doscript '/lua/globalInit.lua'`, und das
+  // laedt config.lua (striktes `_G`, iscallable), import.lua, utils.lua,
+  // repr.lua, class.lua, trashbag.lua, Localization.lua (LOC), MultiEvent.lua,
+  // collapse.lua (Pfad-Normalisierung) — und wandelt danach `moho` um
+  // (globalInit.lua:31-34).
+  //
+  // Vorher stand hier dieselbe Liste von Hand, mit der Begruendung, den
+  // ConvertCClassToLuaClass-Lauf brauche man nicht, weil moho schon fertige
+  // Lua-Klassen liefere. Genau das war der Nachbau: seit moho die C-Form
+  // uebergibt, ist dieser Lauf das, was die Klassen ueberhaupt erzeugt.
+  host.eval(`doscript('/lua/globalInit.lua')`)
 
   // Die UI-Seite des Sync-Tables. Das Gegenstück zu `/lua/simsync.lua` in der
   // Sim: die Engine legt beides selbst in den jeweiligen State (keine Lua-Datei

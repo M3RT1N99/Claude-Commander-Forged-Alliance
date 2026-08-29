@@ -8,6 +8,7 @@ import { open, type FileHandle } from 'node:fs/promises'
 import { ZipArchive } from '../src/vfs/zipArchive'
 import type { RandomAccessFile } from '../src/vfs/randomAccess'
 import { LuaHost } from '../src/lua/host'
+import { bootArchives } from './gameFiles'
 
 class NodeFile implements RandomAccessFile {
   private constructor(
@@ -35,7 +36,7 @@ const GAME =
 // Alle Lua-Dateien vorladen. mohodata.scd = Basis, lua.scd überlagert.
 const files = new Map<string, Uint8Array>()
 const openFiles: NodeFile[] = []
-for (const archive of ['mohodata.scd', 'lua.scd']) {
+for (const archive of ['mohodata.scd', 'lua.scd', ...(await bootArchives())]) {
   const file = await NodeFile.open(`${GAME}/gamedata/${archive}`)
   openFiles.push(file)
   const zip = await ZipArchive.open(file)

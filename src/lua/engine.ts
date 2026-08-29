@@ -59,41 +59,37 @@ export function installEngine(
   installEconomy(host, economy)
   installMotion(host)
   installBuild(host)
-  // Reload the class system now that the engine globals exist (the LuaHost
-  // bootstrap loaded it earlier, when ForkThread was still nil).
-  host.loadGlobal('/lua/system/class.lua')
-
-  // From here on original Lua runs and may capture engine globals.
+  // moho: die C-Form, wie die Engine sie uebergibt — Methodenlisten und
+  // Basisklassen, KEINE fertigen Klassen (globalInit.lua:27-29). Braucht
+  // deshalb kein `Class` und steht vor der Boot-Kette.
   installMoho(host)
-  host.loadGlobal('/lua/system/utils.lua')
-  // globalInit.lua:19 lädt repr.lua direkt nach utils — simcallbacks.lua:18
-  // ruft `repr(name)` im Fehlerpfad, unit.lua nutzt es in Debug-Zweigen.
-  // Die UI-VM hatte es (uiEngine.ts), die Sim-VM nicht: gefunden, als der
-  // SimCallback-Dispatcher statt "No callback named …" an `repr == nil` starb.
-  host.loadGlobal('/lua/system/repr.lua')
-  // The buff system is original Lua: /lua/system/buffblueprints.lua declares
-  // the global `Buffs` table and the `BuffBlueprint{...}` constructor
-  // (buffblueprints.lua:11/30-60), and /lua/sim/buff.lua looks its definitions
-  // up in exactly that table. Nothing in lua.scd imports the file — the engine
-  // loads it into the sim state, so we do it here.
-  host.loadGlobal('/lua/system/buffblueprints.lua')
+  // Die Blueprint-Pipeline ebenfalls davor: `__blueprints` ist in der Engine
+  // gefuellt, BEVOR simInit.lua ueberhaupt laeuft (siminit.lua:8).
   installBlueprintPipeline(host)
+
+  // ── Und hier faehrt die echte Boot-Kette ────────────────────────────────
+  //
+  // `Moho::Sim::Create` macht genau das: `SCR_LuaDoScript(mLuaState,
+  // "/lua/simInit.lua", 0)` (Cfile:1071613). `simInit.lua` zieht
+  // `globalInit.lua` nach, und das laedt config.lua (striktes `_G`),
+  // import.lua, utils.lua, repr.lua, class.lua, trashbag.lua, Localization.lua,
+  // MultiEvent.lua, collapse.lua — und wandelt danach `moho` um
+  // (globalInit.lua:31-34).
+  //
+  // Vorher stand hier eine Handkette: class.lua neu laden, utils.lua,
+  // repr.lua, buffblueprints.lua, spaeter `doscript('/lua/SimSync.lua')` und
+  // `ResetSyncTable()`. Alles davon ist in globalInit.lua:16-24 bzw.
+  // siminit.lua:45/100 enthalten — nachgebaut, wo es auszufuehren gereicht
+  // haette.
+  host.eval(`doscript('/lua/simInit.lua')`)
+
+  // Ab hier gibt es `Class`, und `moho` ist umgewandelt.
   installUnitFactory(host)
   // Kampf: Schaden, Projektile, Props, Waffen-Tasks. Nach der UnitFactory, weil
   // die Löschwarteschlange und die Projektile auf __units/__nextUnitId aufsetzen.
   installCombat(host)
-  // Original-Lua, nicht nachgebaut: SimInit.lua:45 fährt `doscript
-  // '/lua/SimSync.lua'`. Sie legt die Sim→UI-Brücke an (Sync, UnitData) —
-  // ohne sie scheitert Unit:OnPreCreate an SyncMeta (unit.lua:23-40 schreibt
-  // in UnitData). Das ist der erste Baustein der echten Boot-Kette.
-  //
-  // Und zwar über `doscript`, nicht über loadGlobal: nur doscript fährt die
-  // HOOKS mit (boot.lua, `hook = {'/schook'}` aus bin/SupComDataPath.lua).
-  // `schook/lua/simsync.lua:61` definiert `RemoveAllUnitEnhancements` — und
-  // genau die ruft unit.lua:1287 beim Tod JEDER Einheit (OnDestroy). Ohne den
-  // Hook stirbt der Todes-Pfad, und kein Wrack bleibt liegen.
-  host.eval(`doscript('/lua/SimSync.lua')`)
-  host.eval('ResetSyncTable()')
+  // `/lua/SimSync.lua` und `ResetSyncTable()` stehen nicht mehr hier:
+  // `simInit.lua:45` bzw. `:100` fahren sie selbst, samt schook-Hooks.
   // Original Lua: the global TerrainTypes list that GetTerrainType() serves
   // (terraintypes.lua:126; unit.lua:2420 indexes the result unchecked).
   host.loadGlobal('/lua/terrainTypes.lua')

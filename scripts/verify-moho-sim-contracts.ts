@@ -14,6 +14,7 @@
  */
 import { LuaHost } from '../src/lua/host'
 import { installEngine, beat } from '../src/lua/engine'
+import { installMoho } from '../src/lua/moho'
 import { setTerrainSource } from '../src/lua/engineGlobals'
 import { spawnLuaUnit } from '../src/lua/unitFactory'
 import { GameFiles } from './gameFiles'
@@ -649,6 +650,69 @@ console.log('\n== Script-Bits gegen die Laufzeit-Maske (Cfile:951398) ==')
   // Removing the cap again freezes the bit where it is.
   t(`u:RemoveToggleCap('RULEUTC_ShieldToggle') u:SetScriptBit('RULEUTC_ShieldToggle', false)`)
   check(t(`return u:GetScriptBit(0)`) === true, 'ohne Cap lässt es sich auch nicht mehr ausschalten')
+}
+
+// ── moho is handed over in the retail C shape ────────────────
+//
+// globalInit.lua:27-29 states it in prose: "Classes exported from the engine
+// are in the 'moho' table. But they aren't full classes yet, just lists of
+// exported methods and base classes." Plain tables, methods under string
+// keys, base classes in the ARRAY part, no metatable — that is what
+// ConvertCClassToLuaClass (class.lua:387-406) consumes: it recurses over
+// ipairs(cclass) and converts IN PLACE.
+//
+// moho.lua used to publish finished Class(base)(spec) objects instead. That is
+// why the retail /lua/simInit.lua died at class.lua:273: on the reload Class is
+// a NEW table, the getmetatable(cclass)==Class short-circuit (class.lua:389)
+// misses, and the conversion runs a second time over a table whose old Class
+// metatable carries the __newindex guard.
+console.log('\n== moho kommt in der Retail-C-Form (globalInit.lua:27-34) ==')
+{
+  // Measured on a BARE host — installMoho and nothing else. After the boot the
+  // handover shape is gone: globalInit.lua:31-34 has already converted it in
+  // place, so it can only be observed before that point.
+  //
+  // The earlier version of this block asserted `__bases[1] == entity_methods`
+  // and `getmetatable(entity_methods) == Class` on the booted host. Both hold
+  // for the old `Class(base)(spec)` publication too, so the block was green no
+  // matter what moho.lua handed over — a check that could not fail.
+  const bare = await LuaHost.create(game.luaFiles)
+  installMoho(bare)
+  check(
+    bool(bare, `getmetatable(moho.unit_methods) == nil`),
+    'unit_methods traegt keine Metatabelle — eine Methodenliste, keine Klasse',
+  )
+  check(
+    bool(bare, `rawget(moho.unit_methods, 1) == moho.entity_methods`),
+    'die Basisklasse steht im ARRAY-Teil (genau das liest ipairs(cclass), class.lua:397)',
+  )
+  check(
+    bool(bare, `rawget(moho.unit_methods, 'GetEntityId') == nil
+      and type(rawget(moho.entity_methods, 'GetEntityId')) == 'function'`),
+    'und noch nichts ist geerbt — GetEntityId liegt allein in entity_methods',
+  )
+  bare.close()
+
+  // Und auf dem gebooteten Host hat die Retail-Umwandlung stattgefunden:
+  // echte Klassen, mit tragender Vererbung.
+  check(
+    bool(host, `getmetatable(moho.entity_methods) == Class`),
+    'nach dem Boot IST entity_methods eine Klasse (globalInit.lua hat umgewandelt)',
+  )
+  check(
+    host.eval(`return type(moho.unit_methods.GetEntityId)`) === 'function',
+    'und die Vererbung traegt (GetEntityId kommt jetzt von entity_methods)',
+  )
+  // Zweimal umwandeln muss folgenlos sein, nicht ein Fehler — class.lua:389
+  // kurzschliesst auf getmetatable(cclass) == Class.
+  check(
+    bool(host, `(pcall(ConvertCClassToLuaClass, moho.unit_methods))`),
+    'ein zweiter ConvertCClassToLuaClass ist folgenlos (class.lua:389 greift)',
+  )
+  check(
+    host.eval(`return type(moho.unit_methods.GetEntityId)`) === 'function',
+    'und die Klasse ist danach unversehrt',
+  )
 }
 
 host.close()

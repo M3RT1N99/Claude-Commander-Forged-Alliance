@@ -14,6 +14,7 @@ import { LuaFactory } from 'wasmoon'
 import { ZipArchive } from '../src/vfs/zipArchive'
 import type { RandomAccessFile } from '../src/vfs/randomAccess'
 import { transpileFaLua, COMPAT_LUA } from '../src/lua/transpile'
+import { bootArchives } from './gameFiles'
 
 class NodeFile implements RandomAccessFile {
   private constructor(
@@ -45,7 +46,7 @@ const failures: string[] = []
 const stats = { hashComments: 0, notEquals: 0, forInTable: 0, continues: 0, varargArg: 0 }
 const openFiles: NodeFile[] = []
 
-for (const archive of ['lua.scd', 'mohodata.scd', 'units.scd', 'projectiles.scd']) {
+for (const archive of ['lua.scd', 'mohodata.scd', 'units.scd', 'projectiles.scd', ...(await bootArchives())]) {
   const file = await NodeFile.open(`${GAME}/gamedata/${archive}`)
   openFiles.push(file)
   const zip = await ZipArchive.open(file)
