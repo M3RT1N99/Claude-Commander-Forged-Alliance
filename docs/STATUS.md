@@ -761,6 +761,58 @@ Bedrohungskarte**, nicht mehr das Platoon-System. `mapSession()` laesst beide
 Armeen bis dahin auf `human: true` — eine KI-Armee wuerde nur diese eine Warnung
 im Takt wiederholen.
 
+### Nur EIN Initialisierungspfad je Armee — und was danach sichtbar wurde
+
+`__createBrain` rief unbedingt `b:OnCreateHuman(planName)`. Das war schon vorher
+falsch und wurde durch den Retail-Sitzungsstart schaedlich: `OnCreateArmyBrain`
+→ `InitializeArmyAI` waehlt selbst (Cfile:1024677-1024699, Entscheidung
+`IsHuman` in Cfile:724516-724518), also bekam eine KI-Armee **beide** Pfade —
+`CreateBrainShared` (aibrain.lua:406) lief zweimal, mit neuem TrashBag und dem
+alten verwaist, dazu `InitializeVO` fuer eine KI.
+
+`CAiBrain::CAiBrain` (Cfile:724270-724386) ruft im Konstruktor **keinen** der
+beiden. Jetzt auch bei uns nicht; der kartenlose Harness-Pfad ruft dafuer
+`InitializeArmyAI` selbst, an derselben Stelle im Ablauf. Nachweis in
+`verify-ai-platoon.ts`: `VOTable` legt allein `InitializeVO` an, und das ruft
+allein `OnCreateHuman` (aibrain.lua:352, 916-921) — die KI-Armee darf keine
+haben.
+
+Damit lief die KI-Armee der **Sandbox** zum ersten Mal wirklich los, und
+`verify-playthrough.ts` meldete prompt einen neuen Fund: `IsOpponentAIRunning`
+als No-op aufgerufen. Genau dafuer ist die Fund-Liste da. Zwei Konsequenzen:
+
+1. **`IsOpponentAIRunning` ist jetzt echt** (cfunc_CAiBrainIsOpponentAIRunningL,
+   Cfile:733465-733503): steht `/noai` auf der Kommandozeile → `false`, sonst
+   der Sim-ConVar `AI_RunOpponentAI`, dessen Standardwert 1 ist
+   (`register_AI_RunOpponentAI_SimConVarDef`, Cfile:1944553-1944556). Beide
+   Werte sind in `globals.lua` deklariert, weil das strikte `_G` sonst beim
+   Lesen wirft.
+2. **`SANDBOX_SESSION` setzt ARMY_2 auf `human: true`** — mit derselben
+   Begruendung, die schon in `mapSession()` und `verify-session-start.ts` steht.
+   Die Sandbox ist nicht der Ort, an dem eine halbfertige KI ausprobiert wird;
+   das ist `verify-ai-platoon.ts`.
+
+Und noch ein Fund aus demselben Lauf: die Bindungsliste `PLATOON_NAMES` war
+**unvollstaendig**. Sie stammte aus den `"CPlatoon:X()"`-Hilfetexten des Decomps
+und liess drei Bindungen aus, die dort anders formatiert sind —
+`PlatoonCategoryCount`, `PlatoonCategoryCountAroundPosition` und
+`GetPlatoonUnits`. Die KI fiel an `platoon.lua:258` um. Die belastbare Quelle
+sind die `luadef_CPlatoon*`-Symbole: **49 Bindungen**, nicht 46.
+
+Beide Zaehler stehen jetzt echt da, und zwei Details daran waren nicht zu
+erraten: `PlatoonCategoryCountAroundPosition` liest den Radius von Stack-Index 4
+**zweimal** und multipliziert ihn mit sich selbst, und der Abstand ist
+**zweidimensional** — `(pos.x - u.x)² + (pos.z - u.z)² <= r²`, die Hoehe geht
+nicht ein.
+
+**Der Stand der KI-Armee, gemessen:** sie kommt durch `installEngine` und
+`BeginSession`, bildet aus ihrem Pool eigene Platoons und laeuft 60 Beats. Es
+bleiben **zwei** benannte Haltepunkte, beide als Ratsche in
+`verify-ai-platoon.ts`: `aibrain.lua:3470` (die Bedrohungskarte fehlt) und
+`scenarioplatoonai.lua:66` (`platoon.BuilderHandle:SetPriority` — es gibt noch
+keine BuilderManagers, aibrain.lua:1137). Ein dritter Fehler waere ein neuer
+Fund und macht die Suite rot.
+
 ### Die Boot-Nutzlast des Sim-Workers
 
 Gemessen: die Boot-Nutzlast des Sim-Workers ist heute **4 281

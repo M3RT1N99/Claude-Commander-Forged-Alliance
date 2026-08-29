@@ -1458,6 +1458,15 @@ local AIBRAIN_NAMES = {
 
 local aibrain = withNoops(AIBRAIN_NAMES, {
   GetArmyIndex = function(self) return self.__army or 1 end,
+  --- `IsOpponentAIRunning()` (cfunc_CAiBrainIsOpponentAIRunningL,
+  --- Cfile:733465-733503): steht `/noai` auf der Kommandozeile, ist die
+  --- Antwort `false`; sonst ist es der Sim-ConVar `AI_RunOpponentAI`. Dessen
+  --- Standardwert ist 1 — `register_AI_RunOpponentAI_SimConVarDef` setzt
+  --- `value = 1` (Cfile:1944553-1944556). Ein Argument (self), sonst wirft es.
+  IsOpponentAIRunning = function(self)
+    if __argNoAi then return false end
+    return __simConVar_AI_RunOpponentAI
+  end,
   --- `GetPersonality()` gibt `mPersonality` zurueck — das Objekt, das der
   --- Brain-Konstruktor angelegt hat (cfunc_CAiBrainGetPersonalityL,
   --- Cfile:733640-733690; angelegt in Cfile:724303-724309).
@@ -2251,25 +2260,34 @@ rawset(moho, 'aipersonality_methods', cclass(aipersonality))
 
 
 -- ---------------------------------------------------------------------
--- platoon_methods (CPlatoon) — 47 bindings
+-- platoon_methods (CPlatoon) — 49 bindings
 -- ---------------------------------------------------------------------
 --
 -- `Platoon = Class(moho.platoon_methods)` (platoon.lua:23). Was hier NICHT
 -- steht, kommt aus der Original-Lua: `ForkThread` zum Beispiel definiert
 -- `platoon.lua:138` selbst, es ist keine Engine-Bindung.
+--
+-- Die Liste stammt aus den `luadef_CPlatoon*`-Symbolen des Decomps, NICHT aus
+-- den `"CPlatoon:X()"`-Hilfetexten: die erste Fassung dieser Liste kam aus den
+-- Hilfetexten und liess `PlatoonCategoryCount`,
+-- `PlatoonCategoryCountAroundPosition` und `GetPlatoonUnits` aus — die KI fiel
+-- dann an `platoon.lua:258` um.
 local PLATOON_NAMES = {
   'AggressiveMoveToLocation', 'AttackTarget', 'CalculatePlatoonThreat',
   'CalculatePlatoonThreatAroundPosition', 'CanAttackTarget',
-  'CanConsiderFormingPlatoon', 'CanFormPlatoon', 'DisbandOnIdle',
+  'CanConsiderFormingPlatoon', 'CanFormPlatoon', 'Destroy', 'DisbandOnIdle',
   'FerryToLocation', 'FindClosestUnit', 'FindClosestUnitToBase',
   'FindFurthestUnit', 'FindHighestValueUnit', 'FindPrioritizedUnit',
-  'FormPlatoon', 'GetFerryBeacons', 'GetPlatoonLifetimeStats',
-  'GetPlatoonPosition', 'GetSquadPosition', 'GetSquadUnits', 'GuardTarget',
-  'IsAttacking', 'IsCommandsActive', 'IsFerrying', 'IsMoving',
-  'IsOpponentAIRunning', 'IsPatrolling', 'LoadUnits', 'MoveToLocation',
-  'MoveToTarget', 'Patrol', 'SetPlatoonFormationOverride',
-  'SetPrioritizedTargetList', 'Stop', 'SwitchAIPlan', 'UnloadAllAtLocation',
-  'UnloadUnitsAtLocation', 'UseFerryBeacon', 'UseTeleporter',
+  'FormPlatoon', 'GetAIPlan', 'GetBrain', 'GetFactionIndex', 'GetFerryBeacons',
+  'GetPersonality', 'GetPlatoonLifetimeStats', 'GetPlatoonPosition',
+  'GetPlatoonUniqueName', 'GetPlatoonUnits', 'GetSquadPosition',
+  'GetSquadUnits', 'GuardTarget', 'IsAttacking', 'IsCommandsActive',
+  'IsFerrying', 'IsMoving', 'IsOpponentAIRunning', 'IsPatrolling', 'LoadUnits',
+  'MoveToLocation', 'MoveToTarget', 'Patrol', 'PlatoonCategoryCount',
+  'PlatoonCategoryCountAroundPosition', 'SetPlatoonFormationOverride',
+  'SetPrioritizedTargetList', 'Stop', 'SwitchAIPlan', 'UniquelyNamePlatoon',
+  'UnloadAllAtLocation', 'UnloadUnitsAtLocation', 'UseFerryBeacon',
+  'UseTeleporter',
 }
 
 local platoon = withNoops(PLATOON_NAMES, {
@@ -2302,6 +2320,47 @@ local platoon = withNoops(PLATOON_NAMES, {
   --- `Destroy()` loest das Platoon auf — dieselbe Wirkung wie
   --- `brain:DisbandPlatoon(self)`.
   Destroy = function(self) __disbandPlatoon(self.__army, self) end,
+  --- Dieselbe Antwort wie beim Brain (die Bindung gibt es auf beiden Klassen).
+  IsOpponentAIRunning = function(self)
+    if __argNoAi then return false end
+    return __simConVar_AI_RunOpponentAI
+  end,
+  --- `PlatoonCategoryCount(category)` (cfunc_CPlatoonPlatoonCategoryCountL,
+  --- zwei Argumente): zaehlt die Einheiten des Platoons, deren BLUEPRINT in der
+  --- Kategorie liegt (`EntityCategory::HasBlueprint`), und ueberspringt tote
+  --- und zum Loeschen vorgemerkte. Ohne Platoon: 0.
+  PlatoonCategoryCount = function(self, category)
+    local n = 0
+    for _, u in ipairs(self.__platoonUnits or {}) do
+      if not u.__dead and not u.__destroyQueued and EntityCategoryContains(category, u) then
+        n = n + 1
+      end
+    end
+    return n
+  end,
+  --- `PlatoonCategoryCountAroundPosition(category, position, radius)`
+  --- (cfunc_CPlatoonPlatoonCategoryCountAroundPositionL, VIER Argumente).
+  ---
+  --- Zwei Dinge daran sind nicht offensichtlich, beide direkt aus der Bindung:
+  --- der Radius wird von Stack-Index 4 ZWEIMAL gelesen und mit sich selbst
+  --- multipliziert (also quadriert), und der Abstand ist ZWEIDIMENSIONAL —
+  --- `(pos.x - u.x)^2 + (pos.z - u.z)^2 <= r^2`, die Hoehe geht nicht ein.
+  PlatoonCategoryCountAroundPosition = function(self, category, position, radius)
+    if type(radius) ~= 'number' then error('PlatoonCategoryCountAroundPosition: number expected', 2) end
+    local r2 = radius * radius
+    local px, pz = position[1], position[3]
+    local n = 0
+    for _, u in ipairs(self.__platoonUnits or {}) do
+      if not u.__dead and not u.__destroyQueued then
+        local p = u:GetPosition()
+        local dx, dz = px - p[1], pz - p[3]
+        if dx * dx + dz * dz <= r2 and EntityCategoryContains(category, u) then
+          n = n + 1
+        end
+      end
+    end
+    return n
+  end,
 })
 
 rawset(moho, 'platoon_methods', cclass(platoon))

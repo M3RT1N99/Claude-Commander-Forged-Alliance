@@ -18,9 +18,24 @@ __brains = __brains or {}
 -- use rawget/rawset instead of `ArmyBrains = ArmyBrains or {}`.
 if rawget(_G, 'ArmyBrains') == nil then rawset(_G, 'ArmyBrains', {}) end
 
+--- `CAiBrain::CAiBrain` (Cfile:724270-724386) — der KONSTRUKTOR, und nichts
+--- weiter. Er legt das Lua-Objekt an, haengt die Personality daran und liest sie
+--- ein; `OnCreateHuman`/`OnCreateAI` ruft er NICHT. Das macht
+--- `InitializeArmyAI` (Cfile:1024677-1024699), und zwar mit der Entscheidung
+--- `IsHuman` -> Human, sonst AI (Cfile:724516-724518).
+---
+--- Hier stand einmal ein unbedingtes `b:OnCreateHuman(planName)`. Seit der
+--- Sitzungsstart die Retail-Kette faehrt, ruft `OnCreateArmyBrain` ->
+--- `InitializeArmyAI` das selbst — eine KI-Armee bekam damit BEIDE Pfade, und
+--- `CreateBrainShared` (aibrain.lua:406) lief zweimal: neuer TrashBag, der alte
+--- verwaist, dazu `InitializeVO` fuer eine KI.
 function __createBrain(army, planName)
   local mod = import('/lua/aibrain.lua')
   local b = mod.AIBrain()
+  -- `planName` bleibt als Parameter erhalten, weil die kartenlose Harness-Seite
+  -- ihn ueber `SetArmyPlans` weiterreicht; der Konstruktor selbst benutzt ihn
+  -- nicht.
+  __armyVar(army).plans = planName or ''
   b.__army = army
   -- Zu jedem Brain gehoert eine Personality, und der Konstruktor liest sie
   -- sofort ein: `CAiBrain::CAiBrain` legt sie an (Cfile:724303-724309) und ruft
@@ -31,7 +46,6 @@ function __createBrain(army, planName)
   b.__personality.__p = __readPersonalityData()
   b.Name = 'ARMY_' .. tostring(army)
   b.Nickname = b.Name
-  b:OnCreateHuman(planName or '')
   __brains[army] = b
   -- Das Pool-Platoon entsteht MIT der Armee, nicht auf Zuruf: die
   -- Armee-Erzeugung macht `MakePlatoon(army, "Pool", "PoolAI")` und nennt es

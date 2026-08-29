@@ -88,6 +88,21 @@ check(
   'ein unbekannter Name liefert nil, keinen Fehler (die Bindung pusht lua_pushnil)',
 )
 
+console.log()
+console.log('== Und NUR einer der beiden Pfade laeuft je Armee ==')
+// `CAiBrain::CAiBrain` ruft weder `OnCreateHuman` noch `OnCreateAI`; das macht
+// `InitializeArmyAI` (Cfile:1024677-1024699) mit der Entscheidung `IsHuman`
+// (Cfile:724516-724518). Der Beweis, dass hier nicht BEIDE laufen: `VOTable`
+// legt allein `InitializeVO` an, und das ruft allein `OnCreateHuman`
+// (aibrain.lua:352, 916-921).
+check(q(`return ArmyBrains[1].BrainType`) === 'Human', 'ARMY_1 ist Human')
+check(q(`return ArmyBrains[2].BrainType`) === 'AI', 'ARMY_2 ist AI')
+check(q(`return ArmyBrains[1].VOTable ~= nil`) === true, 'die menschliche Armee hat eine VOTable')
+check(
+  q(`return ArmyBrains[2].VOTable == nil`) === true,
+  'die KI-Armee hat KEINE — sonst waere OnCreateHuman zusaetzlich gelaufen',
+)
+
 console.log('\n== MakePlatoon ruft OnCreate MIT dem Plan (Cfile:1048349) ==')
 q(`__testPlatoon = ArmyBrains[1]:MakePlatoon('TestGruppe', 'TestPlan')`)
 check(q(`return __testPlatoon:GetAIPlan()`) === 'TestPlan', 'GetAIPlan() gibt den Plan zurueck')
@@ -127,13 +142,25 @@ try {
   popFehler = (e as Error).message
 }
 check(popFehler === '', `BeginSession mit KI-Armee${popFehler ? ` — ${popFehler.slice(0, 160)}` : ''}`)
-for (let i = 0; i < 60; i++) beat(engine)
+// SOFORT, vor dem ersten Beat: eine frische Einheit gehoert dem Pool ihrer
+// Armee. Danach darf die KI sie herausnehmen — und tut es auch.
 for (const army of [1, 2]) {
   check(
     Number(q(`return #ArmyBrains[${army}]:GetPlatoonUniquelyNamed('ArmyPool'):GetPlatoonUnits()`)) === 1,
     `die ACU von Armee ${army} liegt im Pool (Cfile:950549 vor OnCreate)`,
   )
 }
+for (let i = 0; i < 60; i++) beat(engine)
+// Und die KI raeumt ihn ab: `ExecuteAIThread` bildet aus den Pool-Einheiten
+// Platoons (aibrain.lua:874-880). Die menschliche Armee tut das nicht.
+check(
+  Number(q(`return #ArmyBrains[1]:GetPlatoonUniquelyNamed('ArmyPool'):GetPlatoonUnits()`)) === 1,
+  'nach 60 Beats liegt die ACU der MENSCHLICHEN Armee immer noch im Pool',
+)
+check(
+  Number(q(`return #ArmyBrains[2]:GetPlatoonsList()`)) > 1,
+  `die KI-Armee hat sich Platoons gebildet (${String(q(`return #ArmyBrains[2]:GetPlatoonsList()`))})`,
+)
 
 console.log('\n== AssignUnitsToPlatoon verschiebt, es kopiert nicht ==')
 q(`__acu = ArmyBrains[1]:GetPlatoonUniquelyNamed('ArmyPool'):GetPlatoonUnits()[1]`)
@@ -170,13 +197,25 @@ console.log('\n== Was die KI-Armee jetzt noch bremst ==')
 // Der naechste gemessene Halt, damit er nicht in Vergessenheit geraet:
 // `GetHighestThreatPosition` ist ein No-op, also ist `insertTable.Strength` nil
 // und `GetAllianceEnemy` vergleicht nil (aibrain.lua:3466 -> :3470).
-const threat = warnungen.filter((w) => /aibrain\.lua:3470/.test(w))
-check(
-  threat.length > 0,
-  `aibrain.lua:3470 vergleicht nil — GetHighestThreatPosition fehlt noch (${threat.length} WARN)`,
-)
-const andere = warnungen.filter((w) => /ForkThread-Fehler/.test(w) && !/aibrain\.lua:3470/.test(w))
-check(andere.length === 0, `sonst kein Thread-Fehler${andere[0] ? `: ${andere[0].slice(0, 140)}` : ''}`)
+// Eine RATSCHE: die zwei gemessenen Haltepunkte stehen namentlich da, alles
+// andere ist ein neuer Fund und macht die Suite rot.
+const BEKANNT = [
+  {
+    muster: /aibrain\.lua:3470/,
+    was: 'GetHighestThreatPosition ist ein No-op, also vergleicht GetAllianceEnemy nil (aibrain.lua:3466 -> :3470)',
+  },
+  {
+    muster: /scenarioplatoonai\.lua:66/,
+    was: 'platoon.BuilderHandle:SetPriority — es gibt noch keine BuilderManagers (aibrain.lua:1137)',
+  },
+]
+const threadFehler = warnungen.filter((w) => /ForkThread-Fehler/.test(w))
+for (const b of BEKANNT) {
+  const treffer = threadFehler.filter((w) => b.muster.test(w))
+  check(treffer.length > 0, `bekannter Halt: ${b.was} (${treffer.length}x)`)
+}
+const neue = threadFehler.filter((w) => !BEKANNT.some((b) => b.muster.test(w)))
+check(neue.length === 0, `kein NEUER Thread-Fehler${neue[0] ? `: ${neue[0].slice(0, 180)}` : ''}`)
 
 host.close()
 await game.close()

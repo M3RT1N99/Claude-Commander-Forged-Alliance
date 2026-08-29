@@ -60,7 +60,16 @@ export const SANDBOX_SESSION: SessionInfo = {
   type: 'skirmish',
   armies: [
     { name: 'ARMY_1', index: 1, faction: 1, human: true },
-    { name: 'ARMY_2', index: 2, faction: 3, human: false },
+    // BEIDE menschlich — und das ist ein Befund, keine Bequemlichkeit.
+    //
+    // `human: false` laesst `InitializeArmyAI` den Zweig `brain:OnCreateAI`
+    // nehmen (Cfile:724516-724518), und der startet `EvaluateAIThread` und
+    // `ExecuteAIThread` (aibrain.lua:384-385). Diese Threads laufen inzwischen
+    // wirklich — und rufen dabei Bindungen, die noch No-ops sind. Die Sandbox
+    // ist nicht der Ort, an dem eine halbfertige KI ausprobiert wird; das ist
+    // `verify-ai-platoon.ts`, wo genau eine KI-Armee laeuft und der naechste
+    // Halt namentlich festgehalten wird.
+    { name: 'ARMY_2', index: 2, faction: 3, human: true },
   ],
 }
 
@@ -131,7 +140,15 @@ ${armySetup}
     host.eval(`__createBrain(${a.index}, ''):SetArmyStat('FactionIndex', ${a.faction})`)
     host.eval(`__brains[${a.index}].__faction = ${a.faction}`)
     host.eval(`__econSetArmyName('${a.name}', ${a.index})`)
-    if (!info.scenarioFile) continue
+    if (!info.scenarioFile) {
+      // Ohne Karte gibt es kein `OnCreateArmyBrain`, das `InitializeArmyAI`
+      // riefe — also ruft es hier die Sitzung, an derselben Stelle im Ablauf.
+      // Das ist die Funktion des Originals (Cfile:1024677-1024699), nicht ein
+      // Ersatz dafuer: sie entscheidet `IsHuman` -> `OnCreateHuman`, sonst
+      // `OnCreateAI` (Cfile:724516-724518).
+      host.eval(`InitializeArmyAI(${a.index})`)
+      continue
+    }
     // The nickname is the player's lobby name; the engine takes it from the
     // launch info it also builds ArmySetup from. Without a lobby the army name
     // is what we have — it reaches exactly one place, `LocGlobals.PlayerName`

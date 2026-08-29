@@ -2544,3 +2544,18 @@ function __countResourceDeposits(depositType)
   end
   return n
 end
+
+-- === Sim-ConVars und Kommandozeilenoptionen ===============================
+--
+-- Die Engine haelt beides ausserhalb der Lua und fragt es an einzelnen Stellen
+-- ab. Deklariert (nicht bloss gedacht), weil das strikte `_G` aus config.lua
+-- sonst beim Lesen wirft.
+--
+-- `AI_RunOpponentAI`: `Moho::TSimConVar_bool`, Standardwert 1
+-- (register_AI_RunOpponentAI_SimConVarDef, Cfile:1944553-1944556). Gelesen von
+-- `CAiBrain:IsOpponentAIRunning` (Cfile:733497) und Cfile:1054139.
+__simConVar_AI_RunOpponentAI = true
+
+-- `/noai`: `CFG_GetArgOption("/noai", …)` (Cfile:733491). Wir haben keine
+-- Kommandozeile, also steht die Option nicht.
+__argNoAi = false
