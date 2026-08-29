@@ -129,6 +129,8 @@ const klassenKarte: Record<string, string> = {
   Projectile: 'projectile_methods',
   Prop: 'prop_methods',
   CAiBrain: 'aibrain_methods',
+  CAiPersonality: 'aipersonality_methods',
+  CPlatoon: 'platoon_methods',
   CAiNavigatorImpl: 'navigator_methods',
   CMauiControl: 'control_methods',
   CMauiBitmap: 'bitmap_methods',
