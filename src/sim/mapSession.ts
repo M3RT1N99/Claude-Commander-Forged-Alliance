@@ -109,10 +109,12 @@ export function mapScenarioFile(all: Iterable<string>, mapFolder: string): strin
  *   then plays two-handed, which `InitializeArmies` handles by iterating
  *   `ScenarioInfo.ArmySetup` (scenarioutilities.lua:467).
  * - `human: false` runs `InitializeArmyAI` in `brain:OnCreateAI(plan)`
- *   (Cfile:724516-724518) and dies at `aibrain.lua:1144`: `plat:ForkThread(...)`
- *   on `plat = self:GetPlatoonUniquelyNamed('ArmyPool')`, and
- *   `GetPlatoonUniquelyNamed` is one of the silent no-ops in `moho.lua`. There
- *   is no platoon system, so there is no AI army. See docs/STATUS.md.
+ *   (Cfile:724516-724518). That path now BOOTS — the platoon system is in
+ *   (`verify-ai-platoon.ts` drives a session with ARMY_2 as the AI) — but it
+ *   cannot play yet: `GetHighestThreatPosition` is still a no-op, so
+ *   `insertTable.Strength` is nil and `GetAllianceEnemy` compares nil once per
+ *   cycle (aibrain.lua:3466 -> :3470). Until the threat map is there, an AI
+ *   army in the sandbox would only produce a repeating WARN.
  */
 export function mapSession(all: Iterable<string>, mapFolder: string): SessionInfo | undefined {
   const scenarioFile = mapScenarioFile(all, mapFolder)

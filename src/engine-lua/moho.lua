@@ -1468,6 +1468,27 @@ local aibrain = withNoops(AIBRAIN_NAMES, {
     end
     return self.__personality
   end,
+  --- Die Platoon-Seite des Brains. Jede dieser Bindungen geht auf `mArmy->…`:
+  --- die ARMEE haelt die Liste, nicht das Brain
+  --- (cfunc_CAiBrainGetPlatoonUniquelyNamedL ruft `mArmy->GetPlatoon(name)`,
+  --- cfunc_CAiBrainDisbandPlatoonL ruft `mArmy->DisbandPlatoon`).
+  MakePlatoon = function(self, name, plan) return __makePlatoon(self.__army, name, plan) end,
+  GetPlatoonUniquelyNamed = function(self, name)
+    -- Kein String -> nil, wie die Bindung: sie prueft `IsString` und pusht
+    -- sonst `lua_pushnil`.
+    if type(name) ~= 'string' then return nil end
+    return __platoonNamed(self.__army, name)
+  end,
+  GetPlatoonsList = function(self) return __platoonList(self.__army) end,
+  PlatoonExists = function(self, p) return __platoonExists(self.__army, p) end,
+  DisbandPlatoon = function(self, p) __disbandPlatoon(self.__army, p) end,
+  DisbandPlatoonUniquelyNamed = function(self, name)
+    local p = __platoonNamed(self.__army, name)
+    if p then __disbandPlatoon(self.__army, p) end
+  end,
+  AssignUnitsToPlatoon = function(self, ziel, units, squad, formation)
+    return __assignUnitsToPlatoon(self.__army, ziel, units, squad, formation)
+  end,
   -- `brain:GetArmyStartPos()` gibt ZWEI Zahlen zurueck, x und z
   -- (cfunc_CAiBrainGetArmyStartPosL, Cfile:735971-735976: zweimal
   -- `lua_pushnumber`, `return 2`). Die Quelle ist der 2D-Vektor, den
@@ -2227,6 +2248,63 @@ for feld in pairs(PERSONALITY_RANGES) do
 end
 
 rawset(moho, 'aipersonality_methods', cclass(aipersonality))
+
+
+-- ---------------------------------------------------------------------
+-- platoon_methods (CPlatoon) — 47 bindings
+-- ---------------------------------------------------------------------
+--
+-- `Platoon = Class(moho.platoon_methods)` (platoon.lua:23). Was hier NICHT
+-- steht, kommt aus der Original-Lua: `ForkThread` zum Beispiel definiert
+-- `platoon.lua:138` selbst, es ist keine Engine-Bindung.
+local PLATOON_NAMES = {
+  'AggressiveMoveToLocation', 'AttackTarget', 'CalculatePlatoonThreat',
+  'CalculatePlatoonThreatAroundPosition', 'CanAttackTarget',
+  'CanConsiderFormingPlatoon', 'CanFormPlatoon', 'DisbandOnIdle',
+  'FerryToLocation', 'FindClosestUnit', 'FindClosestUnitToBase',
+  'FindFurthestUnit', 'FindHighestValueUnit', 'FindPrioritizedUnit',
+  'FormPlatoon', 'GetFerryBeacons', 'GetPlatoonLifetimeStats',
+  'GetPlatoonPosition', 'GetSquadPosition', 'GetSquadUnits', 'GuardTarget',
+  'IsAttacking', 'IsCommandsActive', 'IsFerrying', 'IsMoving',
+  'IsOpponentAIRunning', 'IsPatrolling', 'LoadUnits', 'MoveToLocation',
+  'MoveToTarget', 'Patrol', 'SetPlatoonFormationOverride',
+  'SetPrioritizedTargetList', 'Stop', 'SwitchAIPlan', 'UnloadAllAtLocation',
+  'UnloadUnitsAtLocation', 'UseFerryBeacon', 'UseTeleporter',
+}
+
+local platoon = withNoops(PLATOON_NAMES, {
+  --- `GetBrain()` — das Brain der Armee, zu der das Platoon gehoert.
+  GetBrain = function(self) return __getBrain(self.__army) end,
+  --- `GetPlatoonUnits()` liefert eine Tabelle der Einheiten; die Engine baut
+  --- sie neu, wenn sich die Liste geaendert hat, und gibt sonst die
+  --- zwischengespeicherte zurueck (mHasLuaList/mLuaUnitList,
+  --- cfunc_CPlatoonGetPlatoonUnitsL). Tote Einheiten sind nicht darin.
+  GetPlatoonUnits = function(self)
+    local out = {}
+    for _, u in ipairs(self.__platoonUnits or {}) do
+      if not u.__dead and not u.__destroyed then out[#out + 1] = u end
+    end
+    return out
+  end,
+  --- `GetPlatoonUniqueName()` / `UniquelyNamePlatoon(name)` — `mUniqueName`
+  --- (Cfile:1017578 setzt es fuer das Pool-Platoon auf "ArmyPool").
+  GetPlatoonUniqueName = function(self) return self.__uniqueName end,
+  UniquelyNamePlatoon = function(self, name)
+    if type(name) ~= 'string' then error('UniquelyNamePlatoon: string expected', 2) end
+    __namePlatoon(self.__army, self, name)
+  end,
+  --- `GetAIPlan()` gibt `mPlan` zurueck — den Namen, mit dem der Ctor
+  --- `OnCreate` gerufen hat (Cfile:1048347-1048349).
+  GetAIPlan = function(self) return self.__plan end,
+  --- Beides delegiert an die Armee: dasselbe Ergebnis wie beim Brain.
+  GetFactionIndex = function(self) return __getBrain(self.__army):GetFactionIndex() end,
+  GetPersonality = function(self) return __getBrain(self.__army):GetPersonality() end,
+  --- `Destroy()` loest das Platoon auf — dieselbe Wirkung wie
+  --- `brain:DisbandPlatoon(self)`.
+  Destroy = function(self) __disbandPlatoon(self.__army, self) end,
+})
+
+rawset(moho, 'platoon_methods', cclass(platoon))
 
 rawset(moho, 'aibrain_methods', cclass(aibrain))
 rawset(moho, 'cursor_methods', cclass(cursor))

@@ -268,6 +268,11 @@ function __spawnUnit(scriptPath, bpId, x, y, z, army, complete, requestedLayer)
   -- Erstellungs-Tick: die Build-/Wreckage-Shader zaehlen ihr Alter darueber
   -- (mesh.fx: material.x = time - creationTime).
   u.__spawnTick = __gameTick or 0
+  -- Die frische Einheit landet im Pool ihrer Armee — und zwar BEVOR ihr
+  -- `OnCreate` laeuft: `Sim::CreateUnit` macht erst
+  -- `mArmy->Func9(…, "ArmyPool")` (Cfile:950549) und dann
+  -- `RunScript("OnCreate")` (Cfile:950554).
+  __addUnitToArmyPool(u)
   -- Engine-bereitgestellte Instanz-Felder (vor OnCreate vorhanden)
   u.Trash = TrashBag()
   __units[id] = u

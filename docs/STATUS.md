@@ -721,12 +721,45 @@ mechanisch aus den `operator[](template, i)`-Aufrufen in `ReadData` extrahiert.
 Original-Datei, nicht gegen abgeschriebene Zahlen; der Rot-Test (Index 19 -> 18)
 faellt sofort um.
 
-**Offen bleibt der erste Blocker: das Platoon-System.** `MakePlatoon`,
-`GetPlatoonUniquelyNamed`, `PlatoonExists`, `DisbandPlatoon`,
-`AssignUnitsToPlatoon`, `GetPlatoonsList` sind No-ops, und
-`moho.platoon_methods` gibt es nicht — 296 `cfunc_CPlatoon`-Stellen im Decomp.
-Solange das so ist, gibt es keine KI-Armee, und `mapSession()` setzt beide
-Armeen auf `human: true`.
+### Und das Platoon-System — der dritte Blocker
+
+Ein Platoon ist ein CScriptObject: `CPlatoon::CPlatoon` laedt
+`import('/lua/platoon.lua').Platoon` (func_LoadPlatoon, Cfile:1048422-1048435),
+setzt `mName = a4` und `mPlan = a5` und ruft
+`CScriptObject::Call_Str(this, "OnCreate", &this->mPlan)` (Cfile:1048347-1048349).
+Aus der Lua heisst das: `brain:MakePlatoon(name, plan)` → `OnCreate(plan)`, und
+`platoon.lua:27-31` startet daraus den KI-Thread, wenn die Klasse eine Methode
+dieses Namens hat.
+
+Der Schluessel war, wo das `'ArmyPool'`-Platoon herkommt: **die
+Armee-Erzeugung** macht `MakePlatoon(army, "Pool", "PoolAI")`, haengt ein
+`CSquad` mit `SQUADCLASS_Unassigned` an und setzt `mUniqueName = "ArmyPool"`
+(Cfile:1017576-1017578). Und jede neue Einheit landet darin, **bevor** ihr
+`OnCreate` laeuft: `Sim::CreateUnit` macht erst
+`mArmy->Func9(…, "ArmyPool")` (Cfile:950549) und dann
+`RunScript("OnCreate")` (Cfile:950554).
+
+Damit stehen `MakePlatoon`, `GetPlatoonUniquelyNamed`, `GetPlatoonsList`,
+`PlatoonExists`, `DisbandPlatoon`, `DisbandPlatoonUniquelyNamed` und
+`AssignUnitsToPlatoon` mit echten Ruempfen, dazu `moho.platoon_methods` mit
+`GetBrain`, `GetPlatoonUnits`, `GetPlatoonUniqueName`, `UniquelyNamePlatoon`,
+`GetAIPlan`, `GetFactionIndex`, `GetPersonality` und `Destroy`. Die restlichen
+39 CPlatoon-Bindungen sind weiterhin No-ops — der Bestand steigt damit, und das
+ist ehrlich als Schuld verbucht, nicht als Fortschritt.
+
+Zwei Feinheiten, beide aus der Bindung und nicht geraten: `AssignUnitsToPlatoon`
+nimmt als erstes Argument auch einen **Namen** (`aiutilities.lua:875` uebergibt
+`'ArmyPool'`), und `PlatoonExists` liefert `false` statt eines Fehlers, wenn das
+Objekt kein lebendes Platoon mehr ist.
+
+**Gemessen:** eine Sitzung auf SCMP_009 mit `ARMY_2` als KI kommt jetzt durch
+`installEngine` UND `BeginSession`, beide ACUs stehen, und jede liegt im Pool
+ihrer Armee. Es bleibt **genau eine** Fehlermeldung pro Zyklus:
+`aibrain.lua:3470` vergleicht nil, weil `GetHighestThreatPosition`
+(aibrain.lua:3466) ein No-op ist. **Der naechste Blocker ist also die
+Bedrohungskarte**, nicht mehr das Platoon-System. `mapSession()` laesst beide
+Armeen bis dahin auf `human: true` — eine KI-Armee wuerde nur diese eine Warnung
+im Takt wiederholen.
 
 ### Die Boot-Nutzlast des Sim-Workers
 

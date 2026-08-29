@@ -33,6 +33,11 @@ function __createBrain(army, planName)
   b.Nickname = b.Name
   b:OnCreateHuman(planName or '')
   __brains[army] = b
+  -- Das Pool-Platoon entsteht MIT der Armee, nicht auf Zuruf: die
+  -- Armee-Erzeugung macht `MakePlatoon(army, "Pool", "PoolAI")` und nennt es
+  -- `"ArmyPool"` (Cfile:1017576-1017578). `aibrain.lua:1142` holt es im ersten
+  -- Zug jeder KI-Armee.
+  __makeArmyPool(army)
   -- This is what OnCreateArmyBrain does (siminit.lua:115-117).
   ArmyBrains[army] = b
   return b
@@ -57,4 +62,153 @@ function __getBrain(army)
   -- The message is the engine's, off-by-one wording included.
   error(string.format('Invalid army index; must be >= 1 and < %d but got %s',
     maxArmy, tostring(army)), 2)
+end
+
+-- === Platoons (Moho::CPlatoon) ============================================
+--
+-- Ein Platoon ist ein CScriptObject: `CPlatoon::CPlatoon` laedt
+-- `import('/lua/platoon.lua').Platoon` (func_LoadPlatoon, Cfile:1048422-1048435),
+-- setzt `mName = a4` und `mPlan = a5` und ruft dann
+-- `CScriptObject::Call_Str(this, "OnCreate", &this->mPlan)` (Cfile:1048347-1048349).
+-- Aus der Lua heisst das: `brain:MakePlatoon(name, plan)` -> `OnCreate(plan)`,
+-- und `platoon.lua:27-31` startet daraus den KI-Thread, wenn die Klasse eine
+-- Methode dieses Namens hat.
+--
+-- Jede Armee hat von Anfang an EIN Platoon: die Armee-Erzeugung macht
+-- `MakePlatoon(army, "Pool", "PoolAI")`, haengt ein `CSquad` mit
+-- SQUADCLASS_Unassigned daran und setzt `mUniqueName = "ArmyPool"`
+-- (Cfile:1017576-1017578). `aibrain.lua:1142` holt genau dieses Platoon.
+__platoons = {}
+
+local function platoonListe(army)
+  local s = __platoons[army]
+  if not s then
+    s = { liste = {}, nachName = {} }
+    __platoons[army] = s
+  end
+  return s
+end
+
+--- `CArmyImpl::MakePlatoon(name, plan)` (Cfile:1017576, Ctor Cfile:1048282-1048351).
+function __makePlatoon(army, name, plan)
+  local p = import('/lua/platoon.lua').Platoon()
+  p.__army = army
+  p.__platoonName = name or ''
+  p.__plan = plan or ''
+  p.__uniqueName = ''
+  p.__platoonUnits = {}
+  p.__disbanded = false
+  local s = platoonListe(army)
+  s.liste[#s.liste + 1] = p
+  -- Der Ctor ruft OnCreate MIT dem Plan (Cfile:1048349).
+  if p.OnCreate then p:OnCreate(p.__plan) end
+  return p
+end
+
+--- Das Pool-Platoon der Armee. Es entsteht mit der Armee, nicht auf Zuruf —
+--- deshalb legt `__createBrain` es an und nicht der erste Aufrufer.
+function __makeArmyPool(army)
+  local p = __makePlatoon(army, 'Pool', 'PoolAI')
+  p.__uniqueName = 'ArmyPool'
+  platoonListe(army).nachName['ArmyPool'] = p
+  return p
+end
+
+--- `CArmyImpl::GetPlatoon(name)` — die Suche hinter
+--- `GetPlatoonUniquelyNamed` (Cfile:738340-738365). Kein Treffer: `nil`
+--- (cfunc_CAiBrainGetPlatoonUniquelyNamedL pusht dann `lua_pushnil`).
+function __platoonNamed(army, name)
+  return platoonListe(army).nachName[name]
+end
+
+function __platoonList(army)
+  local out = {}
+  for i, p in ipairs(platoonListe(army).liste) do out[i] = p end
+  return out
+end
+
+--- `PlatoonExists` pusht `CPlatoonOpt != 0` — also ob das uebergebene
+--- Lua-Objekt noch auf ein LEBENDES CPlatoon zeigt (Cfile: cfunc_CAiBrain
+--- PlatoonExistsL). Ein aufgeloestes Platoon ist damit `false`, nicht ein
+--- Fehler.
+function __platoonExists(army, p)
+  if type(p) ~= 'table' or p.__disbanded then return false end
+  for _, q in ipairs(platoonListe(army).liste) do
+    if q == p then return true end
+  end
+  return false
+end
+
+--- `DisbandPlatoon` (Cfile: cfunc_CAiBrainDisbandPlatoonL ->
+--- `mArmy->DisbandPlatoon`). Die Einheiten wandern zurueck in den Pool: eine
+--- Einheit gehoert immer zu genau einem Platoon, und der Pool ist das, in das
+--- die Armee jede neue Einheit legt (Cfile:950549).
+function __disbandPlatoon(army, p)
+  if type(p) ~= 'table' then return end
+  local s = platoonListe(army)
+  local pool = s.nachName['ArmyPool']
+  if pool and pool ~= p then
+    for _, u in ipairs(p.__platoonUnits or {}) do
+      if not u.__dead then
+        pool.__platoonUnits[#pool.__platoonUnits + 1] = u
+        u.__platoon = pool
+      end
+    end
+  end
+  p.__platoonUnits = {}
+  p.__disbanded = true
+  if p.__uniqueName ~= '' then s.nachName[p.__uniqueName] = nil end
+  for i, q in ipairs(s.liste) do
+    if q == p then table.remove(s.liste, i) break end
+  end
+end
+
+--- `AssignUnitsToPlatoon(platoon, units, squad, formation)` (Cfile:
+--- cfunc_CAiBrainAssignUnitsToPlatoonL): FUENF Argumente inklusive self, das
+--- erste darf eine Zeichenkette sein — dann wird ueber `GetPlatoon` gesucht
+--- (`aiutilities.lua:875` uebergibt `'ArmyPool'`). `units` muss eine Tabelle
+--- sein, `squad` eine Zeichenkette (sonst TypeError "string").
+function __assignUnitsToPlatoon(army, ziel, units, squad, formation)
+  local p = ziel
+  if type(ziel) == 'string' then p = __platoonNamed(army, ziel) end
+  if type(p) ~= 'table' then
+    error('AssignUnitsToPlatoon: kein Platoon fuer ' .. tostring(ziel), 2)
+  end
+  if type(units) ~= 'table' then error('AssignUnitsToPlatoon: table expected', 2) end
+  if type(squad) ~= 'string' then error('AssignUnitsToPlatoon: string expected', 2) end
+  for _, u in ipairs(units) do
+    -- Eine Einheit gehoert zu genau einem Platoon: erst austragen, dann
+    -- eintragen.
+    local alt = u.__platoon
+    if alt and alt.__platoonUnits then
+      for i, q in ipairs(alt.__platoonUnits) do
+        if q == u then table.remove(alt.__platoonUnits, i) break end
+      end
+    end
+    p.__platoonUnits[#p.__platoonUnits + 1] = u
+    u.__platoon = p
+    u.__squad = squad
+  end
+  p.__formation = formation
+  return p
+end
+
+--- Was `Sim::CreateUnit` tut, BEVOR `OnCreate` der Einheit laeuft: die frische
+--- Einheit landet im Pool ihrer Armee (Cfile:950549, direkt vor
+--- Cfile:950554 `RunScript("OnCreate")`).
+function __addUnitToArmyPool(u)
+  local pool = __platoonNamed(u.__army, 'ArmyPool')
+  if not pool then return end
+  pool.__platoonUnits[#pool.__platoonUnits + 1] = u
+  u.__platoon = pool
+  u.__squad = 'Unassigned'
+end
+
+--- `UniquelyNamePlatoon(name)` setzt `mUniqueName`; danach findet
+--- `GetPlatoonUniquelyNamed` es (Cfile:1017578 macht genau das fuer den Pool).
+function __namePlatoon(army, p, name)
+  local s = platoonListe(army)
+  if p.__uniqueName ~= '' then s.nachName[p.__uniqueName] = nil end
+  p.__uniqueName = name
+  s.nachName[name] = p
 end
