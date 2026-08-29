@@ -672,6 +672,21 @@ Der Land/Seabed-Fall nimmt `GetElevation`, **nicht** `GetSurface` — ein Seabed
 liegt unter Wasser, und `GetSurfaceHeight` würde ihn auf den Wasserspiegel
 heben.
 
+### Und die UI-VM bootet `/lua/userInit.lua`
+
+Dasselbe noch einmal fuer den anderen VM. `userInit.lua` ist das Gegenstueck zu
+`simInit.lua`: es setzt `__language` aus den Einstellungen (userinit.lua:8 —
+*„for the Sim init, the engine sets `__language` for us"*), macht
+`doscript '/lua/globalInit.lua'` (:11) und definiert danach `WaitFrames`,
+`WaitSeconds` (:13-21), `FrontEndData` (:24) und `Prefetcher` (:27).
+
+`WaitFrames` und `WaitSeconds` standen in `ui-globals.lua` nachgebaut — mit dem
+Kommentar, dass `userinit.lua:13-21` sie definiert. Sie sind geloescht; jetzt
+gilt `WaitFrames == coroutine.yield` woertlich, statt eines Wrappers, der
+`n or 1` daraus machte. `verify-ui-boot.ts` prueft die Herkunft ueber
+`debug.getinfo(...).short_src`; der Rot-Test (zurueck auf `globalInit.lua`)
+zeigt sofort wieder `ui-globals.lua`.
+
 ### Die Boot-Nutzlast des Sim-Workers
 
 Gemessen: die Boot-Nutzlast des Sim-Workers ist heute **4 281

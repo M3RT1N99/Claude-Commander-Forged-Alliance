@@ -2078,8 +2078,11 @@ end
 --   end
 --
 -- Ein UI-Thread wartet also auf BILDER, und `WaitSeconds` pollt die echte Uhr.
--- Deshalb ueberschreibt die UI-VM hier das Tick-basierte WaitSeconds aus
--- threads.lua (das gilt nur in der Sim). __uiTime zaehlt __mauiFrame(delta) hoch.
+-- Beide Funktionen standen hier einmal nachgebaut; seit die UI-VM
+-- `doscript('/lua/userInit.lua')` faehrt, kommen sie aus der Original-Datei und
+-- ueberschreiben das Tick-basierte `WaitSeconds` aus threads.lua (das gilt nur
+-- in der Sim) von selbst. Was hier bleibt, ist die UHR, die sie ablesen:
+-- __uiTime zaehlt __mauiFrame(delta) hoch.
 function CurrentTime()
   return __uiTime
 end
@@ -2092,18 +2095,6 @@ end
 --- __mauiFrame(delta) advances it by the real frame time.
 function GetSystemTimeSeconds()
   return __uiTime
-end
-
-function WaitFrames(n)
-  coroutine.yield(n or 1)
-end
-
-function WaitSeconds(n)
-  local later = CurrentTime() + (n or 0)
-  WaitFrames(1)
-  while CurrentTime() < later do
-    WaitFrames(1)
-  end
 end
 
 -- === Extra-Select-Liste der Session ===

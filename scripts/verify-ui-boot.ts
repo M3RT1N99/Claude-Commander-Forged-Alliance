@@ -74,6 +74,41 @@ const uiFs = {
 
 console.log('\n== UI-VM booten (zweiter Lua-State, scr_UserInits) ==')
 installUiEngine(host, uiFs)
+
+// ── Die UI-VM bootet /lua/userInit.lua, nicht eine Liste von Hand ──────────
+//
+// `userInit.lua` ist das Gegenstueck zu `simInit.lua`: es zieht globalInit nach
+// (userinit.lua:11) und definiert danach selbst `WaitFrames`/`WaitSeconds`
+// (userinit.lua:13-21), `FrontEndData` (:24) und `Prefetcher` (:27). Solange
+// die Datei nicht laeuft, stammt das alles aus einem Nachbau — und `moho`
+// bleibt in der C-Form liegen, weil niemand `ConvertCClassToLuaClass` ruft.
+console.log()
+console.log('== Der UI-Boot ist /lua/userInit.lua (Cfile: userInit -> globalInit) ==')
+{
+  const quelle = (fn: string): string =>
+    String(host.eval(`local i = debug.getinfo(${fn}, 'S') return i.short_src .. ':' .. i.linedefined`))
+  check(
+    quelle('WaitSeconds').includes('userinit.lua'),
+    `WaitSeconds kommt aus der Original-Datei (${quelle('WaitSeconds')})`,
+  )
+  check(
+    host.eval(`return WaitFrames == coroutine.yield`) === true,
+    'WaitFrames IST coroutine.yield (userinit.lua:13) — kein Wrapper davor',
+  )
+  check(host.eval(`return type(FrontEndData)`) === 'table', 'FrontEndData steht (userinit.lua:24)')
+  check(host.eval(`return type(Prefetcher)`) === 'table', 'Prefetcher steht (userinit.lua:27)')
+  check(
+    host.eval(`return type(rawget(_G, '__language'))`) === 'string',
+    '__language kommt aus den Einstellungen (userinit.lua:8)',
+  )
+  // Und die moho-Umwandlung, die globalInit.lua:31-34 macht: ohne sie ist
+  // `moho.control_methods` eine Methodenliste und keine Klasse, und jedes
+  // maui-Control faellt beim ersten `Class(...)` um.
+  check(
+    host.eval(`return getmetatable(moho.control_methods) == Class`) === true,
+    'moho ist umgewandelt (globalInit.lua:31-34) — Controls sind echte Klassen',
+  )
+}
 check(host.eval('return type(_c_CreateCursor)') === 'function', '_c_CreateCursor ist da (UI-Global)')
 check(
   host.eval('return rawget(_G, "CreateUnit") == nil') === true,

@@ -152,18 +152,20 @@ export function installUiEngine(host: LuaHost, fs: UiFileSystem): UiEngine {
   // Klassen. Braucht deshalb noch kein `Class`.
   installMoho(host)
 
-  // Und dann die gemeinsame Boot-Kette beider VMs, indem die Datei laeuft, die
-  // sie IST: `userInit.lua:11` macht `doscript '/lua/globalInit.lua'`, und das
-  // laedt config.lua (striktes `_G`, iscallable), import.lua, utils.lua,
-  // repr.lua, class.lua, trashbag.lua, Localization.lua (LOC), MultiEvent.lua,
-  // collapse.lua (Pfad-Normalisierung) — und wandelt danach `moho` um
-  // (globalInit.lua:31-34).
+  // Und dann der Boot der UI-VM, indem die Datei laeuft, die er IST.
+  // `/lua/userInit.lua` ist das Gegenstueck zu `/lua/simInit.lua`: es setzt
+  // `__language` aus den Einstellungen (userinit.lua:8 — „for the Sim init, the
+  // engine sets __language for us"), macht `doscript '/lua/globalInit.lua'`
+  // (userinit.lua:11, und das laedt config.lua mit dem strikten `_G`,
+  // import.lua, utils.lua, repr.lua, class.lua, trashbag.lua, Localization.lua,
+  // MultiEvent.lua, collapse.lua und wandelt danach `moho` um), und definiert
+  // dann `WaitFrames`/`WaitSeconds`, `FrontEndData` und `Prefetcher`.
   //
   // Vorher stand hier dieselbe Liste von Hand, mit der Begruendung, den
   // ConvertCClassToLuaClass-Lauf brauche man nicht, weil moho schon fertige
   // Lua-Klassen liefere. Genau das war der Nachbau: seit moho die C-Form
   // uebergibt, ist dieser Lauf das, was die Klassen ueberhaupt erzeugt.
-  host.eval(`doscript('/lua/globalInit.lua')`)
+  host.eval(`doscript('/lua/userInit.lua')`)
 
   // Die UI-Seite des Sync-Tables. Das Gegenstück zu `/lua/simsync.lua` in der
   // Sim: die Engine legt beides selbst in den jeweiligen State (keine Lua-Datei
