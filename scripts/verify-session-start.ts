@@ -379,6 +379,37 @@ check(
   'und mindestens einer ist nicht Default — die Typ-Ebene wird wirklich gelesen',
 )
 
+// ── Der Sitzungsstart lief in der Retail-Lua, nicht in unserem Nachbau ──
+//
+// `SetupSession()` (siminit.lua:53-102) legt sieben Tabellen in `ScenarioInfo`
+// an, holt `ScenarioInfo.Env` aus `/lua/scenarioEnvironment.lua` und kopiert
+// `Scenario` nach oben; der schook-Haken (schook/lua/simInit.lua:10-14) setzt
+// `TriggerManager` davor. `OnCreateArmyBrain` (siminit.lua:113-126) traegt die
+// Brains in `ArmyBrains` ein und gibt jeder Armee ihre drei Untertabellen.
+// Nichts davon tat unsere Handkette — sie lud nur Save und Script.
+console.log('\n== SetupSession/OnCreateArmyBrain der Retail-Lua ==')
+for (const feld of ['PlatoonHandles', 'UnitGroups', 'UnitNames', 'VarTable',
+                    'OSPlatoonCounter', 'BuilderTable', 'MapData', 'Env']) {
+  check(String(q(`return type(ScenarioInfo.${feld})`)) === 'table',
+    `ScenarioInfo.${feld} steht (siminit.lua:64-82)`)
+}
+check(String(q(`return type(ScenarioInfo.TriggerManager)`)) === 'table',
+  'ScenarioInfo.TriggerManager steht (schook/lua/simInit.lua:11)')
+check(String(q(`return type(Scenario)`)) === 'table',
+  'das globale `Scenario` kommt aus ScenarioInfo.Env (siminit.lua:95)')
+for (const [i, name] of [[1, 'ARMY_1'], [2, 'ARMY_2']] as const) {
+  check(String(q(`return tostring(ArmyBrains[${i}] and ArmyBrains[${i}].Name)`)) === name,
+    `ArmyBrains[${i}].Name = '${name}' (siminit.lua:115-117)`)
+  check(String(q(`return type(ScenarioInfo.UnitGroups[${i}])`)) === 'table',
+    `ScenarioInfo.UnitGroups[${i}] steht (siminit.lua:118-120)`)
+}
+// Und die Funktionen selbst kommen aus der Original-Lua, nicht von uns: der
+// schook-Haken ueberschreibt beide (schook/lua/simInit.lua:9/16).
+for (const fn of ['SetupSession', 'BeginSession', 'OnCreateArmyBrain']) {
+  const quelle = String(q(`local i = debug.getinfo(${fn}, 'S') return i.short_src`))
+  check(quelle.includes('schook'), `${fn} kommt aus dem schook-Haken (${quelle})`)
+}
+
 check(luaErrors.length === 0, `keine Lua-Fehler${luaErrors[0] ? `: ${luaErrors[0]}` : ''}`)
 
 host.close()

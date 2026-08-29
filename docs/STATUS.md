@@ -331,8 +331,9 @@ Typ wird nur **geloggt**, nicht abgelehnt (Cfile:687767).
 STRING gespeichert und keine Zahl erfunden. Benutzt werden ohnehin nur zwei:
 `Mass` und `Hydrocarbon` (markertemplates.lua:9-23).
 
-`__beginSession()` fährt jetzt vor `OnPopulate` das, was der schook-Hook fährt:
-`CreateProps()` und `CreateResources()` (schook/lua/simInit.lua:17-18). Auf
+Vor `OnPopulate` läuft, was der schook-Hook fährt: `CreateProps()` und
+`CreateResources()` (schook/lua/simInit.lua:17-18) — inzwischen der Hook selbst,
+nicht mehr unser Nachbau davon. Auf
 SCMP_009 ergibt das **108 Masse- und 8 Hydrokohlenstoff-Lagerstätten**, und die
 Suite prüft sie gegen die Marker der Karte — ohne diese Gegenprobe würde sie
 auch für einen Lader gelten, der irgendetwas anlegt.
@@ -571,13 +572,31 @@ Der Rot-Test — `cclass` wieder `Class(base)(spec)` liefern lassen — bringt
 auf dem gebooteten Host; das gilt für **beide** Formen und konnte nicht
 scheitern.
 
-**Was der Sim-Boot noch nicht tut:** `src/sim/session.ts` ruft weiterhin
-`__loadScenario()` / `__initArmyFromScenario()` / `__beginSession()` aus
-`src/engine-lua/session.lua`, statt das jetzt vorhandene `SetupSession()` /
-`BeginSession()` laufen zu lassen. Erst damit füllen sich
-`ScenarioInfo.PlatoonHandles/UnitGroups/UnitNames/…` und
-`ScenarioInfo.TriggerManager` (ein **Feld**, kein Global — eine frühere
-Eintragung hier suchte den falschen Namen).
+### Und der Sitzungsstart ist jetzt auch der echte
+
+`src/sim/session.ts` rief `__loadScenario()` / `__initArmyFromScenario(name)` /
+`__beginSession()` aus `src/engine-lua/session.lua` — Nachbauten von
+`SetupSession()` (siminit.lua:53-102), dem schook-`OnCreateArmyBrain`
+(schook/lua/simInit.lua:45-51) und `BeginSession()` (siminit.lua:137-146). Die
+Originale liegen seit dem Retail-Boot im VM, also rufen wir sie: Schritt 4a
+`SetupSession()`, Schritt 5a je Armee `OnCreateArmyBrain(index, brain, name,
+nickname)` wie `Sim::CreateArmies` (Cfile:1072015), Schritt 6a `BeginSession()`.
+Die drei Nachbauten sind gelöscht.
+
+Was sie ausgelassen hatten, und was jetzt steht (`verify-session-start.ts`
+prüft jede Zeile einzeln): die sieben `ScenarioInfo`-Untertabellen
+(`PlatoonHandles`, `UnitGroups`, `UnitNames`, `VarTable`, `OSPlatoonCounter`,
+`BuilderTable`, `MapData`), `ScenarioInfo.Env`, `ScenarioInfo.TriggerManager`
+(ein **Feld**, kein Global — eine frühere Eintragung hier suchte den falschen
+Namen), `ArmyBrains[i].Name`/`.Nickname`, die drei Untertabellen je Armee, und
+die Team-/TeamLock-Auswertung am Ende von `BeginSession`. Der Rot-Test — die
+alten drei wieder einsetzen — bringt 12 FAIL-Zeilen.
+
+Ein Wert kommt dabei nicht aus dem Spiel: der **Nickname**. Den liefert im
+Original die Lobby über die Launch-Info, aus der die Engine auch `ArmySetup`
+baut; ohne Lobby steht der Armeename dort. Er erreicht genau eine Stelle,
+`LocGlobals.PlayerName` (siminit.lua:139-142), also `{g PlayerName}` in
+Loc-Strings.
 
 ### Die Boot-Nutzlast des Sim-Workers
 

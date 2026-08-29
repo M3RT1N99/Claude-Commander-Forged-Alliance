@@ -26,6 +26,8 @@ export interface SessionArmy {
   /** 1 = UEF, 2 = Aeon, 3 = Cybran, 4 = Seraphim. */
   faction: number
   human: boolean
+  /** Player name from the lobby. Reaches `LocGlobals.PlayerName` only. */
+  nickname?: string
   /** 1-based command-source indices allowed to issue orders for this army. */
   authorizedCommandSources?: number[]
   /** Start resources are NOT set here — the ACU grants them via GiveInitialResources. */
@@ -99,30 +101,46 @@ ${armySetup}
     host.eval(`ScenarioInfo.Options[${JSON.stringify(k)}] = ${JSON.stringify(v)}`)
   }
 
-  // One brain per army — created by the engine, exactly as in step 5a.
+  // ── THE REAL PATH — steps 4a and 5a, run by the original Lua ────────────
+  //
+  // Step 6a (`BeginSession` -> `OnPopulate` -> the ACUs) is deliberately NOT
+  // here. It needs the unit blueprints, and the engine has those long before:
+  // `__blueprints` is filled in before SimInit.lua runs at all
+  // (siminit.lua:8). The caller loads them and then calls `beginSession()`,
+  // exactly as `Sim::CreateArmies` (Cfile:1072015) and `Sim::BeginSession`
+  // (Cfile:1072090) are two separate engine steps.
+  if (info.scenarioFile) {
+    host.eval(`__mergeScenarioFile(${JSON.stringify(info.scenarioFile)})`)
+    // Step 4a: the engine calls SetupSession() once ScenarioInfo is set and
+    // BEFORE any army exists (Cfile:1071898/1071906, siminit.lua:49-53). It
+    // loads `/lua/dataInit.lua`, the map's `_save.lua` and `_script.lua` into
+    // `ScenarioInfo.Env`, copies `Scenario` up to a global and resets the sync
+    // table — and the schook hook puts `TriggerManager` in front of it
+    // (schook/lua/simInit.lua:10-14).
+    host.eval('SetupSession()')
+  }
+
+  // Step 5a: `Sim::CreateArmies` creates one brain per army and reports each
+  // one to the Lua as `OnCreateArmyBrain(index, brain, name, nickname)`
+  // (Cfile:1072015, siminit.lua:113-126). The schook hook runs
+  // `InitializeStartLocation` + `SetPlans` first (schook/lua/simInit.lua:45-51)
+  // — the start marker has to be in place before `OnPopulate`, because
+  // `CreateInitialArmyUnit` reads the start position instead of being handed
+  // one (Cfile:1025236-1025270).
   for (const a of info.armies) {
     host.eval(`__createBrain(${a.index}, ''):SetArmyStat('FactionIndex', ${a.faction})`)
     host.eval(`__brains[${a.index}].__faction = ${a.faction}`)
     host.eval(`__econSetArmyName('${a.name}', ${a.index})`)
+    if (!info.scenarioFile) continue
+    // The nickname is the player's lobby name; the engine takes it from the
+    // launch info it also builds ArmySetup from. Without a lobby the army name
+    // is what we have — it reaches exactly one place, `LocGlobals.PlayerName`
+    // (siminit.lua:139-142), which expands `{g PlayerName}` in loc strings.
+    const nickname = a.nickname ?? a.name
+    host.eval(`OnCreateArmyBrain(${a.index}, __brains[${a.index}], '${a.name}', ${JSON.stringify(nickname)})`)
   }
 
-  if (info.scenarioFile) {
-    // THE REAL PATH — steps 4a and 5a. Original Lua doing original work: the
-    // map's own `_save.lua` and `_script.lua` into the Sim, then per army the
-    // start marker into `SetArmyStart`. See `src/engine-lua/session.lua` for
-    // the step-by-step correspondence with siminit.lua and the Cfile.
-    //
-    // Step 6a (`BeginSession` -> `OnPopulate` -> the ACUs) is NOT here. It
-    // needs the unit blueprints, and the engine has those long before:
-    // `__blueprints` is filled in before SimInit.lua runs at all
-    // (siminit.lua:8). The caller loads them and then calls `beginSession()`,
-    // exactly as `Sim::CreateArmies` (Cfile:1072015) and `Sim::BeginSession`
-    // (Cfile:1072090) are two separate steps.
-    host.eval(`__mergeScenarioFile(${JSON.stringify(info.scenarioFile)})`)
-    host.eval('__loadScenario()')
-    for (const a of info.armies) host.eval(`__initArmyFromScenario('${a.name}')`)
-    return
-  }
+  if (info.scenarioFile) return
 
   // NO SCENARIO — and then this is a harness, not a game.
   //
@@ -162,5 +180,13 @@ ${armySetup}
  */
 export function beginSession(host: LuaHost, info: SessionInfo): void {
   if (!info.scenarioFile) return
-  host.eval('__beginSession()')
+  // The schook hook runs `CreateProps()` + `CreateResources()` before the base
+  // BeginSession (schook/lua/simInit.lua:17-18) — the map's props and deposits
+  // belong to the world and must stand before `OnPopulate`, because a unit that
+  // lands on a mass point asks for them. Which function `OnPopulate` actually
+  // is was decided by `doscript(ScenarioInfo.script, ...)` in SetupSession; for
+  // SCMP_009 it is `ScenarioUtils.InitializeArmies()`
+  // (SCMP_009_script.lua:3-5), for another map something else — which is why
+  // nothing here may be wired to a name.
+  host.eval('BeginSession()')
 }

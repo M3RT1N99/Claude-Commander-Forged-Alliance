@@ -37,63 +37,15 @@
 -- aus config.lua sonst beim Lesen wirft.
 __noInitialUnits = false
 
---- Schritt 4a: was `SetupSession()` an der Szenariodatei tut
---- (siminit.lua:82-98). Braucht `ScenarioInfo.save` und `.script`.
----
---- Die Reihenfolge ist nicht beliebig: `_save.lua` besteht ausschliesslich aus
---- `GROUP()`/`VECTOR3()`/`STRING()`-Aufrufen, die `/lua/dataInit.lua` erst
---- definiert (datainit.lua:3-34). Ohne den ersten Schritt ist die Karte ein
---- Haufen nicht existierender Globals.
-function __loadScenario()
-  if not (ScenarioInfo and ScenarioInfo.save and ScenarioInfo.script) then
-    error('__loadScenario: ScenarioInfo.save/.script fehlen — die Engine setzt '
-      .. 'sie aus der Sitzung (Cfile:1071853-1071889)', 2)
-  end
-  doscript('/lua/dataInit.lua')
-  ScenarioInfo.Env = import('/lua/scenarioEnvironment.lua')
-  doscript(ScenarioInfo.save, ScenarioInfo.Env)
-  Scenario = ScenarioInfo.Env.Scenario
-  doscript(ScenarioInfo.script, ScenarioInfo.Env)
-end
-
---- Schritt 5a je Armee — der Rumpf des schook-`OnCreateArmyBrain`
---- (schook/lua/simInit.lua:45-51, siminit.lua:113-126).
----
---- `InitializeStartLocation` (scenarioutilities.lua:1026-1033) liest den Marker
---- `ARMY_<n>` aus der eben geladenen Karte und ruft `SetArmyStart`; fehlt er,
---- greift `GenerateArmyStart`. Das muss VOR `OnPopulate` laufen, weil
---- `CreateInitialArmyUnit` die Startposition liest, statt eine zu bekommen
---- (Cfile:1025236-1025270).
-function __initArmyFromScenario(name)
-  local su = import('/lua/sim/ScenarioUtilities.lua')
-  su.InitializeStartLocation(name)
-  su.SetPlans(name)
-  InitializeArmyAI(name)
-end
-
---- Schritt 6a: `BeginSession()` (siminit.lua:145).
----
---- Gerufen wird NICHT `InitializeArmies()` direkt. Welche Funktion läuft,
---- entscheidet das Kartenskript: `doscript(ScenarioInfo.script, ...)` hat
---- `OnPopulate` in die Umgebung geschrieben und damit den No-op-Standard aus
---- `scenarioenvironment.lua:15-17` überschrieben. Für SCMP_009 ist das
---- `ScenarioUtils.InitializeArmies()` (SCMP_009_script.lua:3-5) — für eine
---- andere Karte etwas anderes, und genau darum darf hier nichts fest verdrahtet
---- sein.
-function __beginSession()
-  if not (ScenarioInfo and ScenarioInfo.Env) then
-    error('__beginSession: __loadScenario() muss vorher gelaufen sein', 2)
-  end
-  -- Der schook-Hook macht VOR dem Basis-BeginSession zwei Dinge
-  -- (schook/lua/simInit.lua:17-18): die Props der Karte und ihre Lagerstaetten.
-  -- Beides gehoert zum Weltaufbau und muss vor `OnPopulate` stehen — eine
-  -- Einheit, die auf einem Massepunkt landet, fragt danach.
-  local su = import('/lua/sim/ScenarioUtilities.lua')
-  su.CreateProps()
-  su.CreateResources()
-  if ScenarioInfo.Env.OnPopulate then ScenarioInfo.Env.OnPopulate(ScenarioInfo) end
-  if ScenarioInfo.Env.OnStart then ScenarioInfo.Env.OnStart(ScenarioInfo) end
-end
+-- Die Schritte 4a/5a/6a stehen hier nicht mehr. `__loadScenario()`,
+-- `__initArmyFromScenario(name)` und `__beginSession()` waren Nachbauten von
+-- `SetupSession()` (siminit.lua:53-102), dem schook-`OnCreateArmyBrain`
+-- (schook/lua/simInit.lua:45-51) und `BeginSession()` (siminit.lua:137-146).
+-- Seit der Sim `/lua/simInit.lua` bootet, gibt es die Originale im VM, und
+-- `src/sim/session.ts` ruft sie. Die Nachbauten liessen dabei aus, was ihnen
+-- nicht aufgefallen war: die sieben `ScenarioInfo`-Untertabellen, `ArmyBrains`,
+-- `ScenarioInfo.TriggerManager`, `InitializeArmyAI` je Armee und die
+-- Team-/TeamLock-Auswertung am Ende von `BeginSession`.
 
 --- Die Startinformationen der Karte. Im Original liest die LOBBY die
 --- `_scenario.lua` und reicht sie als Launch-Info an die Engine, die daraus
