@@ -598,6 +598,80 @@ baut; ohne Lobby steht der Armeename dort. Er erreicht genau eine Stelle,
 `LocGlobals.PlayerName` (siminit.lua:139-142), also `{g PlayerName}` in
 Loc-Strings.
 
+### Der Browser fährt denselben Sitzungsstart — und TypeScript liest die Karte nicht mehr
+
+Der Sandbox-Pfad las die `_save.lua` selbst: ein TS-Parser holte den
+`ARMY_1`-Marker heraus, setzte daraus den Spawn-Punkt, sammelte die Massepunkte
+und `spawnViaLua('uel0001')` stellte die ACU dorthin. Dieselbe Datei, zweimal
+gelesen, einmal nachgebaut.
+
+Jetzt bekommt der Worker die Lua der Karte in seinen VFS, und `SetupSession()`
+macht `doscript` darauf (siminit.lua:91-98). Die ACUs setzt `BeginSession()`
+über das `OnPopulate` der Karte, die Massevorkommen `CreateResources()`. Im
+Browser gemessen (headless, `?http&sandbox=SCMP_009`):
+
+```
+Sitzungsstart: uel0001 angefordert
+BeginSession: 2 Einheiten aus OnPopulate
+ARMY_1 steht bei 673, 347 (Marker der Karte)
+```
+
+und `__cfaSzene()` zeigt beide ACUs sichtbar auf 672,5/346,5 und 357,5/673,5.
+
+**Eine benannte Abweichung:** die Engine hat vor `simInit.lua` JEDEN Blueprint
+(siminit.lua:8). Der Worker kann das nicht — zu jeder Einheit gehört ihr
+Skelett, und das steckt im Modell: **78 MB `_lod0.scm` für 580 Einheiten**
+(gemessen). Deshalb fragt die Sim selbst, welche Blueprints *dieser*
+Sitzungsstart benennen kann — `__sessionInitialUnits()` aus
+`factions.lua Factions[i].InitialUnit` (scenarioutilities.lua:336-338) und den
+Gruppen der Karte (scenarioutilities.lua:279/287) — und der Client liefert genau
+die. Für SCMP_009 ist das eine einzige: `uel0001`. Alles darüber hinaus
+scheitert weiterhin laut („Unknown unit kind"), nicht still.
+
+**`scripts/verify-browser-session.ts`** prüft das in Node: es baut den VFS aus
+denselben Funktionen, die der Client benutzt (`simBootPaths`, `mapSession` in
+`src/sim/mapSession.ts`), bootet darin und fährt den Sitzungsstart. Fällt eine
+Dateigruppe aus der Browser-Nutzlast, fällt sie hier aus — und hier ist sie eine
+rote Zeile. Genau so kamen drei Befunde heraus, die vorher niemand sehen konnte:
+
+1. **Die Nutzlast hatte kein `/loc`.** Der Worker wäre seit dem Retail-Boot an
+   `localization.lua:30` gestorben (`string.gsub(nil, …)`), und keine Node-Suite
+   hätte es gemerkt.
+2. **Ein Fehler im Worker war ein stiller Tod.** `onmessage` war `async`, eine
+   abgelehnte Zusage landete nirgends, der Hauptthread wartete ewig auf
+   `booted`. Jetzt meldet der Worker, woran er gestorben ist — das hat den
+   nächsten Fehler in einer Minute statt in einer Stunde gefunden.
+3. **Die Spawn-Höhe fehlte in der Engine** (siehe unten).
+
+### `CalcSpawnElevation` — die ACU stand auf y = 0
+
+`SUnitConstructionParams::SUnitConstructionParams` setzt `mFixElevation = 1` und
+in der nächsten Zeile `if (!layer) mFixElevation = 0` (Cfile:733280-733285).
+`layer` ist das **optionale zehnte Argument** von `CreateUnit`: `cfunc_CreateUnitL`
+initialisiert `layer = 0` und ruft `COORDS_StringToLayer` nur, wenn Argument 10
+ein String ist (Cfile:980412-980423). Und `Moho::Unit::Unit` ersetzt dann `pos.y`
+durch `Moho::IUnit::CalcSpawnElevation` mit der eben bestimmten **Startebene**
+(Cfile:950181-950196).
+
+Ohne Ebenen-Argument ist das übergebene y also gar kein Wunsch — es wird
+verworfen. `CreateInitialArmyUnit` verlässt sich darauf und schickt immer y = 0
+(Cfile:1025265). Bei uns kam es genau so an: **ACU auf y = 0, Boden auf 18,68.**
+Unsichtbar, weil jede Suite bisher ein eigenes y übergab.
+
+`CalcSpawnElevation` (Cfile:683091-683120) hat fünf Fälle, in dieser Reihenfolge:
+
+| Ebene | Höhe |
+| --- | --- |
+| Land/Seabed (0x03) | `CHeightField::GetElevation(x, z)` — das reine Gelände |
+| Water (0x08) | der Wasserspiegel, ohne Wasser −10000 |
+| Sub (0x04) | `Physics.Elevation` + Wasserspiegel |
+| Air (0x10) | `STIMap::GetSurface(x, z)` + `Physics.Elevation` |
+| sonst | 0 |
+
+Der Land/Seabed-Fall nimmt `GetElevation`, **nicht** `GetSurface` — ein Seabed
+liegt unter Wasser, und `GetSurfaceHeight` würde ihn auf den Wasserspiegel
+heben.
+
 ### Die Boot-Nutzlast des Sim-Workers
 
 Gemessen: die Boot-Nutzlast des Sim-Workers ist heute **4 281

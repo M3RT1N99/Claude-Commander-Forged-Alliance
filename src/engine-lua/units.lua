@@ -187,6 +187,31 @@ local function startingLayer(u, bp, x, z, requested)
   return 'Seabed'
 end
 
+--- `Moho::IUnit::CalcSpawnElevation(map, attributes, layer, pos)`
+--- (Cfile:683091-683120) — die Hoehe, mit der eine Einheit entsteht.
+---
+--- Fuenf Faelle, in dieser Reihenfolge (die Bits sind die aus `LAYER_INFO`):
+---   Land|Seabed (0x03) -> `CHeightField::GetElevation(x, z)`, also das reine
+---                         Gelaende (bei uns `GetTerrainHeight`, NICHT
+---                         `GetSurfaceHeight`: der Seabed liegt unter Wasser)
+---   Water (0x08)       -> der Wasserspiegel, ohne Wasser -10000
+---   Sub (0x04)         -> `Physics.Elevation` + Wasserspiegel (bzw. -10000)
+---   Air (0x10)         -> `STIMap::GetSurface(x, z)` + `Physics.Elevation`
+---   sonst              -> 0
+---
+--- `a2->mElevation` ist `UnitAttributes.mElevation`, das die Engine aus
+--- `Physics.Elevation` des Blueprints fuellt.
+local function calcSpawnElevation(bp, layerName, x, z)
+  local info = LAYER_INFO[string.lower(layerName or '')]
+  local bit = info and info.bit or 0
+  local elevation = (bp.Physics and bp.Physics.Elevation) or 0
+  if (bit & 0x03) ~= 0 then return GetTerrainHeight(x, z) end
+  if (bit & 0x08) ~= 0 then return __mapWaterLevel or -10000 end
+  if (bit & 0x04) ~= 0 then return elevation + (__mapWaterLevel or -10000) end
+  if (bit & 0x10) ~= 0 then return GetSurfaceHeight(x, z) + elevation end
+  return 0
+end
+
 function __spawnUnit(scriptPath, bpId, x, y, z, army, complete, requestedLayer)
   local bp = __registered.Unit[bpId]
   if not bp then return -1, 'blueprint not registered: ' .. tostring(bpId) end
@@ -203,7 +228,6 @@ function __spawnUnit(scriptPath, bpId, x, y, z, army, complete, requestedLayer)
   u.__id = id
   u.__army = army
   u.__brain = __getBrain(army)
-  u.__pos = { x, y, z }
   -- mVarDat.mLayer is initialized before Weapon.OnCreate. Original Lua also
   -- reads the legacy `Layer` field, so both names must refer to the same
   -- starting layer. Previously only `Layer` was set while GetCurrentLayer and
@@ -211,6 +235,24 @@ function __spawnUnit(scriptPath, bpId, x, y, z, army, complete, requestedLayer)
   -- report Land.
   u.__layer = startingLayer(u, bp, x, z, requestedLayer)
   u.Layer = u.__layer
+  -- Die HOEHE gehoert der Engine, nicht dem Aufrufer.
+  --
+  -- `SUnitConstructionParams::SUnitConstructionParams` setzt
+  -- `mFixElevation = 1` und direkt danach `if (!layer) mFixElevation = 0`
+  -- (Cfile:733280-733285) — `layer` ist das OPTIONALE zehnte Argument von
+  -- `CreateUnit` (cfunc_CreateUnitL: `layer = 0`, und nur wenn Argument 10 ein
+  -- String ist, `COORDS_StringToLayer`, Cfile:980412-980423). Und
+  -- `Moho::Unit::Unit` ersetzt dann `pos.y` durch `CalcSpawnElevation` mit der
+  -- eben bestimmten STARTEBENE (Cfile:950181-950196).
+  --
+  -- Ohne Ebenen-Argument ist das uebergebene y also gar kein Wunsch, sondern
+  -- wird verworfen — genau darauf verlaesst sich `CreateInitialArmyUnit`, das
+  -- immer y = 0 schickt (Cfile:1025265). Vorher stand die ACU deshalb auf 0
+  -- statt auf dem Berg.
+  if not coordsStringToLayer(requestedLayer) then
+    y = calcSpawnElevation(bp, u.__layer, x, z)
+  end
+  u.__pos = { x, y, z }
   -- Das Skelett aus dem Modell (siehe __setBones). Es muss VOR OnCreate stehen:
   -- die Waffen pruefen ihre Turm-Knochen beim Aufbau (weapon.lua:67).
   u.__bones = __unitBones[string.lower(bpId)] or { names = {}, xform = {}, index = {} }

@@ -125,3 +125,70 @@ end
 function __harnessScenario()
   Scenario = { MasterChain = { _MASTERCHAIN_ = { Markers = {} } }, Armies = {}, Props = {} }
 end
+
+--- Welche Unit-Blueprints der Sitzungsstart erzeugen kann.
+---
+--- Die Engine braucht so eine Liste nicht: `__blueprints` ist mit JEDEM
+--- Blueprint gefuellt, bevor `simInit.lua` ueberhaupt laeuft (siminit.lua:8).
+--- Im Browser geht das nicht mit: die Sim braucht zu jeder Einheit auch ihr
+--- SKELETT, und das kommt aus dem Modell — 78 MB `_lod0.scm` fuer 580
+--- Einheiten. Der Worker fragt deshalb genau das ab, was DIESER Sitzungsstart
+--- benennen kann, und holt sich die Nutzlast dafuer, bevor `BeginSession()`
+--- laeuft. Alles darueber hinaus scheitert weiterhin laut („Unknown unit kind",
+--- units.lua), nicht still — das ist der Unterschied zu einem Stub.
+---
+--- Zwei Quellen, beide die, aus denen das Original liest:
+---   * `factions.lua` `Factions[i].InitialUnit` — was `CreateInitialArmyGroup`
+---     spawnt, wenn die Karte keine INITIAL-Gruppe hat
+---     (scenarioutilities.lua:336-338).
+---   * jeder UNIT-Knoten unter `Scenario.Armies[<armee>].Units` — die Gruppen
+---     der Karte selbst (scenarioutilities.lua:279/287, `CreateArmySubGroup`
+---     laeuft denselben Baum ab).
+local function sammleGruppe(knoten, raus)
+  if type(knoten) ~= 'table' then return end
+  if type(knoten.type) == 'string' and knoten.type ~= 'GROUP' then
+    raus[string.lower(knoten.type)] = true
+  end
+  if type(knoten.Units) == 'table' then
+    for _, kind in pairs(knoten.Units) do sammleGruppe(kind, raus) end
+  end
+end
+
+function __sessionInitialUnits()
+  local raus = {}
+  local factions = import('/lua/factions.lua').Factions
+  for _, setup in pairs((ScenarioInfo and ScenarioInfo.ArmySetup) or {}) do
+    local f = factions[setup.Faction]
+    if f and f.InitialUnit then raus[string.lower(f.InitialUnit)] = true end
+    local armee = Scenario and Scenario.Armies and Scenario.Armies[setup.ArmyName]
+    if armee then sammleGruppe(armee.Units, raus) end
+  end
+  local liste = {}
+  for id in pairs(raus) do liste[#liste + 1] = id end
+  table.sort(liste)
+  return liste
+end
+
+--- Dieselbe Liste als JSON — der Weg ueber die wasmoon-Grenze
+--- (`LuaHost.pull`), weil eine zurueckgegebene Lua-Tabelle in der Registry
+--- haengen bleibt.
+function __sessionInitialUnitsJson()
+  local teile = {}
+  for _, id in ipairs(__sessionInitialUnits()) do
+    teile[#teile + 1] = '"' .. id .. '"'
+  end
+  return '[' .. table.concat(teile, ',') .. ']'
+end
+
+--- Die Startposition einer Armee als JSON — derselbe Weg ueber die
+--- wasmoon-Grenze wie `__sessionInitialUnitsJson`, weil `LuaHost.pull` einen
+--- AUSDRUCK auswertet und `local x, z = ...` keiner ist.
+---
+--- `brain:GetArmyStartPos()` liefert zwei Zahlen, x und z
+--- (cfunc_CAiBrainGetArmyStartPosL, Cfile:735971-735976); geschrieben hat sie
+--- `InitializeStartLocation` aus dem Marker der Karte
+--- (scenarioutilities.lua:1026-1033).
+function __armyStartPosJson(index)
+  local x, z = ArmyBrains[index]:GetArmyStartPos()
+  return '[' .. x .. ',' .. z .. ']'
+end

@@ -2,6 +2,7 @@ import type { GameVfs } from '../vfs/vfs'
 import type { HeightfieldData } from './terrain'
 import type { EcoSnapshot } from '../ui/hud'
 import { parseBlueprint } from '../formats/blueprint'
+import { simBootPaths, mapSession } from './mapSession'
 import { resolveUnitPaths } from '../formats/unitPaths'
 import { parseScm } from '../formats/scm'
 import { toSimBones, type SimBone } from '../lua/unitFactory'
@@ -201,7 +202,10 @@ export interface SimAudioRequest {
   h: number
 }
 type OutMsg =
-  | { type: 'booted' }
+  | { type: 'booted'; starts?: { army: number; x: number; z: number }[] }
+  // The worker asks for the blueprints the session start can name. It waits for
+  // the answer before `BeginSession()` — see luaSimWorker.ts at the call site.
+  | { type: 'needUnits'; ids: string[] }
   | { type: 'reset-done' }
   | { type: 'log'; level: string; msg: string }
   | { type: 'spawned'; reqId: number; uid: number }
@@ -227,6 +231,12 @@ export class LuaSimClient {
   gameTick = 0
   private nextReq = 1
   private bootResolve: (() => void) | null = null
+  /**
+   * Where the armies start — the map's ARMY_n markers, as
+   * `InitializeStartLocation` wrote them into `SetArmyStart`
+   * (scenarioutilities.lua:1026-1033). Empty without a map session.
+   */
+  armyStarts: { army: number; x: number; z: number }[] = []
   private resetResolve: (() => void) | null = null
   private readonly spawnPending = new Map<number, { resolve: (uid: number) => void; reject: (e: Error) => void }>()
   private readonly emitterBpPending = new Map<number, (bp: unknown) => void>()
@@ -258,6 +268,14 @@ export class LuaSimClient {
     waterElevation?: number,
     /** scmap map props — spawned in the sim before any unit (Sim::Setup 7). */
     props: MapPropSpawn[] = [],
+    /**
+     * The map's folder under `maps/`. With it the worker runs the REAL session
+     * start: the map's `_save.lua`/`_script.lua` go into the Sim's VFS,
+     * `SetupSession()` loads them and `BeginSession()` runs the map's own
+     * `OnPopulate` — which is what puts the ACUs on the ARMY_n markers. Without
+     * it the Sim stays the map-less harness from `session.ts`.
+     */
+    mapFolder?: string,
   ): Promise<LuaSimClient> {
     // ALLE lua/-Dateien, auch lua/ui/. Die UI des Originals ist Lua (maui) und
     // soll ausgeführt werden, nicht in TS/HTML nachgebaut — sie hier
@@ -272,9 +290,8 @@ export class LuaSimClient {
     // Ohne diese Dateien fehlen der Sim u. a. SimUnitEnhancements/
     // RemoveAllUnitEnhancements (schook/lua/SimSync.lua) — unit.lua:1287
     // ruft das in JEDEM OnDestroy.
-    const files = await vfs.readMany(
-      vfs.find((p) => (p.startsWith('lua/') || p.startsWith('schook/')) && p.endsWith('.lua')),
-    )
+    const groups = simBootPaths(vfs.find(() => true), mapFolder)
+    const files = await vfs.readMany(groups.core)
 
     // Dazu ALLE PROJEKTILE (`projectiles/<id>/<id>_proj.bp` + `_script.lua`).
     //
@@ -290,13 +307,11 @@ export class LuaSimClient {
     // And the 334 env/** map-prop blueprints (rocks, trees): the engine
     // creates every scmap prop in Sim::Setup step 7 (Cfile:1072041-1072105)
     // — reclaim needs their Economy.ReclaimMassMax/EnergyMax in the sim.
-    const projPaths = vfs.find(
-      (p) =>
-        ((p.startsWith('projectiles/') || p.startsWith('props/') || p.startsWith('effects/')) &&
-          (p.endsWith('.bp') || p.endsWith('.lua'))) ||
-        (p.startsWith('env/') && p.endsWith('_prop.bp')),
-    )
-    for (const [p, b] of await vfs.readMany(projPaths)) files.set(p, b)
+    for (const [p, b] of await vfs.readMany(groups.blueprints)) files.set(p, b)
+    // Und die Lua der Karte: `SetupSession()` macht `doscript` darauf IN DER
+    // SIM (siminit.lua:91-98), also muss sie im VFS des Workers liegen — nicht
+    // nur im Hauptthread lesbar sein.
+    for (const [p, b] of await vfs.readMany(groups.map)) files.set(p, b)
 
     const worker = new Worker(new URL('./luaSimWorker.ts', import.meta.url), { type: 'module' })
     const client = new LuaSimClient(worker, vfs)
@@ -304,7 +319,8 @@ export class LuaSimClient {
       client.bootResolve = res
     })
     worker.onmessage = (e: MessageEvent<OutMsg>) => client.onMessage(e.data, log)
-    worker.postMessage({ type: 'boot', files, terrain, waterElevation, props })
+    const session = mapFolder ? mapSession(vfs.find(() => true), mapFolder) : undefined
+    worker.postMessage({ type: 'boot', files, terrain, waterElevation, props, session })
     await booted
     return client
   }
@@ -312,7 +328,16 @@ export class LuaSimClient {
   private onMessage(m: OutMsg, log: (level: string, msg: string) => void): void {
     switch (m.type) {
       case 'booted':
+        this.armyStarts = m.starts ?? []
         this.bootResolve?.()
+        break
+      case 'needUnits':
+        // The Sim named the blueprints its session start can create. Answering
+        // is what lets `BeginSession()` run the map's OnPopulate — the worker
+        // waits for this message.
+        void Promise.all(m.ids.map(async (id) => ({ id, ...(await this.unitPayload(id)) }))).then(
+          (units) => this.worker.postMessage({ type: 'units', units }),
+        )
         break
       case 'reset-done':
         this.resetResolve?.()

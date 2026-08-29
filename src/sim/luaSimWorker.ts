@@ -11,6 +11,7 @@
  */
 import { LuaHost } from '../lua/host'
 import { installEngine, beat, type Engine } from '../lua/engine'
+import { beginSession, type SessionInfo } from './session'
 import { queueFactoryBuild } from './build'
 import {
   loadUnitBlueprint,
@@ -36,18 +37,38 @@ let bootFiles: Map<string, Uint8Array> | null = null
  * VM und ihren eigenen Frame-Takt), genau wie im Original.
  */
 let paused = false
+/**
+ * Resolves the boot's wait for the client's unit payloads. The round trip
+ * exists because `BeginSession()` creates units and the Sim cannot load a
+ * blueprint mid-tick — see the comment at the call site.
+ */
+let unitsResolve: ((units: UnitPrep[]) => void) | null = null
+/** Army start positions, from the map's markers via SetArmyStart. */
+let starts: { army: number; x: number; z: number }[] = []
 
 interface Vec3 {
   x: number
   y: number
   z: number
 }
+/** What `prepare()` needs to make a blueprint spawnable in the Sim. */
+export interface UnitPrep {
+  id: string
+  scriptPath: string
+  scriptBytes: Uint8Array | null
+  bpBytes: Uint8Array | null
+  bones: SimBone[]
+}
 type InMsg =
   // `waterElevation` is the map's water surface, or undefined when the map has
   // no water — the Sim needs it for GetSurfaceHeight, the motion layer rule and
   // projectile water impacts. Absent water means -10000, matching
   // Entity::GetStartingLayer (Cfile:857506-857510).
-  | { type: 'boot'; files: Map<string, Uint8Array>; terrain: HeightfieldData; waterElevation?: number; props?: MapPropSpawn[] }
+  | { type: 'boot'; files: Map<string, Uint8Array>; terrain: HeightfieldData; waterElevation?: number; props?: MapPropSpawn[]; session?: SessionInfo }
+  // The client's answer to 'needUnits': one payload per blueprint the session
+  // start named, so `prepare()` can put script, blueprint and skeleton in
+  // place before `BeginSession()` creates the unit.
+  | { type: 'units'; units: UnitPrep[] }
   | { type: 'spawn'; reqId: number; id: string; scriptPath: string; scriptBytes: Uint8Array | null; bpBytes: Uint8Array | null; bones: SimBone[]; pos: Vec3; army: number }
   | { type: 'move'; id: number; x: number; z: number; queue?: boolean }
   | { type: 'stop'; id: number }
@@ -159,15 +180,27 @@ function spawnMapProps(h: LuaHost, props: MapPropSpawn[]): void {
   }
 }
 
-ctx.onmessage = async (e: MessageEvent<InMsg>): Promise<void> => {
-  const msg = e.data
+ctx.onmessage = (e: MessageEvent<InMsg>): void => {
+  // Ein Fehler im Worker war bisher ein STILLER Tod: `onmessage` war async, und
+  // eine abgelehnte Zusage landete nirgends — der Hauptthread wartete dann
+  // ewig auf 'booted'. Jetzt meldet der Worker, woran er gestorben ist.
+  void handleMessage(e.data).catch((err: unknown) => {
+    const text = err instanceof Error ? `${err.message} — ${err.stack ?? ''}` : String(err)
+    ctx.postMessage({ type: 'log', level: 'WARN', msg: `Sim-Worker: ${text.slice(0, 600)}` })
+  })
+}
+
+const handleMessage = async (msg: InMsg): Promise<void> => {
   if (msg.type === 'boot') {
     bootFiles = msg.files
     const h = await LuaHost.create(msg.files, (level, m) => ctx.postMessage({ type: 'log', level, msg: m }))
     // Der EINE Engine-Boot — derselbe wie in jeder Testsuite. Vorher stellte
     // sich der Worker die Engine selbst zusammen und vergaß dabei das
     // Bau-System (build.ts lief im Browser überhaupt nicht).
-    engine = installEngine(h)
+    // Die Sitzung geht MIT in den Boot: mit Szenariodatei faehrt der echte
+    // Sitzungsstart (SetupSession -> OnCreateArmyBrain), ohne bleibt es der
+    // kartenlose Harness aus session.ts.
+    engine = installEngine(h, undefined, msg.session)
     // Das Gelände der geladenen Karte, VOR dem ersten Spawn: OnCreate-Pfade der
     // Original-Lua lesen GetSurfaceHeight, und ohne Quelle knallt es jetzt (statt
     // still 0 zu liefern). Dieselbe bilineare Abfrage wie im Renderer.
@@ -186,7 +219,40 @@ ctx.onmessage = async (e: MessageEvent<InMsg>): Promise<void> => {
     // (Cfile:1072041-1072105).
     spawnMapProps(h, msg.props ?? [])
     host = h
-    ctx.postMessage({ type: 'booted' })
+
+    // Schritt 6a. `BeginSession()` laeuft das `OnPopulate` der Karte
+    // (siminit.lua:145) und erzeugt dabei Einheiten — die Sim kann mitten im
+    // Tick nichts nachladen. Die Engine hat alle Blueprints lange vorher
+    // (siminit.lua:8); wir koennen das nicht mitschicken, weil zu jeder Einheit
+    // ihr SKELETT gehoert (78 MB _lod0.scm fuer 580 Einheiten). Also fragt die
+    // Sim SELBST, welche Blueprints dieser Sitzungsstart benennen kann
+    // (__sessionInitialUnits, aus factions.lua und den Gruppen der Karte), und
+    // der Client schickt genau die.
+    if (msg.session?.scenarioFile) {
+      const ids = h.pull<string[]>('__sessionInitialUnitsJson()')
+      ctx.postMessage({ type: 'log', level: 'INFO', msg: `Sitzungsstart: ${ids.join(', ')} angefordert` })
+      const geliefert = new Promise<UnitPrep[]>((res) => {
+        unitsResolve = res
+      })
+      ctx.postMessage({ type: 'needUnits', ids })
+      for (const u of await geliefert) prepare(h, u)
+      beginSession(h, msg.session)
+      ctx.postMessage({
+        type: 'log',
+        level: 'INFO',
+        msg: `BeginSession: ${h.eval('local n = 0 for _ in pairs(__units) do n = n + 1 end return n')} Einheiten aus OnPopulate`,
+      })
+      // Und wo die Armeen stehen, sagt jetzt die Sim — aus dem Marker der
+      // Karte, den `InitializeStartLocation` in `SetArmyStart` geschrieben hat
+      // (scenarioutilities.lua:1026-1033). Der Hauptthread hat dafuer vorher
+      // die `_save.lua` selbst geparst.
+      starts = msg.session.armies.map((a) => {
+        const p = h.pull<[number, number]>(`__armyStartPosJson(${a.index})`)
+        return { army: a.index, x: p[0], z: p[1] }
+      })
+    }
+
+    ctx.postMessage({ type: 'booted', starts })
     setInterval(tickAndPost, 100) // 10-Hz-Sim-Beat im Worker-Thread
     return
   }
@@ -197,22 +263,19 @@ ctx.onmessage = async (e: MessageEvent<InMsg>): Promise<void> => {
     ctx.postMessage({ type: 'reset-done' })
     return
   }
+  if (msg.type === 'units') {
+    unitsResolve?.(msg.units)
+    unitsResolve = null
+    return
+  }
   if (msg.type === 'pause') {
     paused = msg.paused
     return
   }
   if (!host) return
-  // Script, Blueprint und Skelett muessen in der Sim liegen, BEVOR eine Unit
-  // dieses Typs entsteht — auch wenn die Fabrik sie spaeter selbst spawnt.
-  const prepare = (m: { id: string; scriptPath: string; scriptBytes: Uint8Array | null; bpBytes: Uint8Array | null; bones: SimBone[] }): void => {
-    if (!host) return
-    if (m.scriptBytes && !host.hasFile(m.scriptPath)) host.addFile(m.scriptPath, m.scriptBytes)
-    if (m.bpBytes) loadUnitBlueprint(host, m.id, m.bpBytes)
-    setUnitBones(host, m.id, m.bones ?? [])
-  }
   if (msg.type === 'spawn') {
     try {
-      prepare(msg)
+      prepare(host, msg)
       const uid = spawnLuaUnit(host, msg.id, msg.pos, msg.army)
       ctx.postMessage({ type: 'spawned', reqId: msg.reqId, uid })
     } catch (err) {
@@ -220,7 +283,7 @@ ctx.onmessage = async (e: MessageEvent<InMsg>): Promise<void> => {
     }
   } else if (msg.type === 'build') {
     try {
-      prepare(msg)
+      prepare(host, msg)
       // Reihenfolge wie in der Engine: erst die Baustelle (Sim::CreateUnit mit
       // beingBuilt=1), dann der Auftrag an den Bauer (OnStartBuild/'MobileBuild').
       const uid = spawnBuildSite(host, msg.id, msg.pos, msg.army)
@@ -230,7 +293,7 @@ ctx.onmessage = async (e: MessageEvent<InMsg>): Promise<void> => {
       ctx.postMessage({ type: 'spawnError', reqId: msg.reqId, error: (err as Error).message })
     }
   } else if (msg.type === 'factoryBuild') {
-    prepare(msg)
+    prepare(host, msg)
     queueFactoryBuild(host, msg.factoryId, msg.id, msg.count)
   } else if (msg.type === 'adjustQueue') {
     host.eval(`__adjustFactoryQueue(${msg.factoryId}, ${msg.index}, ${msg.delta})`)
@@ -353,6 +416,17 @@ function loadBlueprintGroups(h: LuaHost, files: Map<string, Uint8Array>): void {
     level: 'INFO',
     msg: `Sim: ${nProj} Projektil-Blueprints, ${nProps} Prop-Blueprints`,
   })
+}
+
+/**
+ * Script, blueprint and skeleton have to be in the Sim BEFORE a unit of that
+ * kind comes into being — whether the client spawns it, a factory produces it,
+ * or the map's `OnPopulate` creates it during `BeginSession()`.
+ */
+function prepare(h: LuaHost, m: UnitPrep): void {
+  if (m.scriptBytes && !h.hasFile(m.scriptPath)) h.addFile(m.scriptPath, m.scriptBytes)
+  if (m.bpBytes) loadUnitBlueprint(h, m.id, m.bpBytes)
+  setUnitBones(h, m.id, m.bones ?? [])
 }
 
 function tickAndPost(): void {

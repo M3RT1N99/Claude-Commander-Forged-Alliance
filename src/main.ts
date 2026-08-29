@@ -579,6 +579,8 @@ function conVarChanged(name: string, value: string | number | boolean): void {
 }
 let buildPreview: BuildPreview | null = null
 let currentScmap: ScmapData | null = null
+/** The map folder the sandbox is on — the Sim boots its session from it. */
+let currentMapFolder: string | undefined
 /** The map's water surface height, or undefined when the map has no water —
  *  a build (and its preview) is clamped up to it (GetSurfaceHeight). */
 function mapWaterElevation(): number | undefined {
@@ -587,7 +589,6 @@ function mapWaterElevation(): number | undefined {
 let spawnPoint = new THREE.Vector3(20, 0, 20)
 /** The unit id under the cursor (rollover) — drives the enemy life-bar rule. */
 let rolloverUnitId: number | null = null
-let massSpots: { x: number; z: number }[] = []
 const sandboxAssetCache = new Map<string, SandboxUnitAssets>()
 
 // --- Build-placement validity (the ghost's red/green) ------------------------
@@ -998,6 +999,7 @@ function setIngame(on: boolean): void {
 }
 
 async function startSandbox(mapFolder: string): Promise<void> {
+  currentMapFolder = mapFolder
   if (!vfs || !source) return
   try {
     sandbox = null
@@ -1028,47 +1030,24 @@ async function startSandbox(mapFolder: string): Promise<void> {
       log('Lua-Sim zurückgesetzt (neue Karte)')
     }
 
-    // Spawn-Punkt der Armee 1 aus der _save.lua
-    const files = await source.list(`maps/${mapFolder}`)
-    const saveFile = files.find((f) => f.name.toLowerCase().endsWith('_save.lua'))
-    if (saveFile) {
-      const raf = await source.open(`maps/${mapFolder}/${saveFile.name}`)
-      const text = new TextDecoder('utf-8').decode(await raf.slice(0, raf.size))
-      const save = parseLuaAssignments(text)
-      const marker =
-        bpGet(save, 'Scenario.MasterChain._MASTERCHAIN_.Markers.ARMY_1.position') ??
-        bpGet(save, 'Scenario.MasterChain._MASTERCHAIN_.Markers.ARMY_2.position')
-      if (Array.isArray(marker) && marker.length === 3 && marker.every((v) => typeof v === 'number')) {
-        spawnPoint = new THREE.Vector3(marker[0] as number, marker[1] as number, marker[2] as number)
-        log(`Spawn ARMY_1: ${spawnPoint.x.toFixed(0)}, ${spawnPoint.z.toFixed(0)}`)
-      }
-
-      // Mass-Punkte aus den Markern
-      const allMarkers = bpGet(save, 'Scenario.MasterChain._MASTERCHAIN_.Markers')
-      if (allMarkers && typeof allMarkers === 'object' && !Array.isArray(allMarkers)) {
-        const spots: { x: number; z: number }[] = []
-        for (const m of Object.values(allMarkers)) {
-          if (m && typeof m === 'object' && !Array.isArray(m)) {
-            const mm = m as BpObject
-            const pos = mm.position
-            if (mm.type === 'Mass' && Array.isArray(pos) && typeof pos[0] === 'number') {
-              spots.push({ x: pos[0] as number, z: pos[2] as number })
-            }
-          }
-        }
-        massSpots = spots
-        log(`${spots.length} Mass-Punkte gefunden`)
-      }
-    }
+    // Die `_save.lua` wird hier NICHT mehr gelesen.
+    //
+    // Sie gehoert in die Sim: `SetupSession()` macht `doscript` darauf
+    // (siminit.lua:91-98), `InitializeStartLocation` holt den ARMY_n-Marker
+    // heraus und schreibt ihn nach `SetArmyStart`
+    // (scenarioutilities.lua:1026-1033), und `CreateResources()` legt aus
+    // denselben Markern die Massevorkommen an. Vorher stand hier ein
+    // TS-Parser, der dieselbe Datei ein zweites Mal las und dabei die Haelfte
+    // nachbaute — der Spawn-Punkt kommt jetzt aus `sim.armyStarts`.
 
     // Die Maße des Auswahlrings kommen aus der Original-Datei
     // lua/renderselectparams.lua (die Engine liest genau sie, Cfile:1215033).
     await loadSelectParams()
     sandbox = new SandboxController(viewer)
-    // massSpots werden NICHT mehr als erfundene Ringe gezeichnet. Sie bleiben
-    // geparst (Struktur der Karte), bis der Session-Start sie als echte
-    // Ressourcen-Vorkommen über ScenarioUtilities.lua anlegt und die Engine
-    // ihre Original-Icons rendert.
+    // Die Massepunkte werden hier nicht mehr geparst: `CreateResources()` legt
+    // sie im Sitzungsstart als echte Lagerstaetten an (schook/lua/simInit.lua:18,
+    // scenarioutilities.lua:389) — auf SCMP_009 sind das 108 Masse- und 8
+    // Hydrokohlenstoff-Vorkommen.
     if (currentScmap) {
       hud = new Hud(vfs, viewer, hudSource)
     }
@@ -1323,13 +1302,21 @@ async function startSandbox(mapFolder: string): Promise<void> {
       // Die 3D-Seite rendert in genau diese Rechtecke — sie legt sie nicht fest.
       if (gameUi) viewer.setWorldViews(gameUi.worldViews())
     })
-    // ACU über die ECHTE Original-Lua-Sim spawnen (Engine-Pfad) statt als
-    // SimWorld-Platzhalter. Nicht awaiten, damit die Karte sofort bedienbar ist
-    // (die Lua-VM bootet einmalig im Hintergrund).
-    void spawnViaLua('uel0001')
+    // KEIN TS-Spawn mehr. Die ACUs setzt die Karte selbst: `BeginSession()`
+    // laeuft ihr `OnPopulate` (siminit.lua:145), fuer SCMP_009 also
+    // `ScenarioUtils.InitializeArmies()` (SCMP_009_script.lua:3-5). Der
+    // Sitzungsstart passiert im Worker-Boot; hier wird nur noch dorthin
+    // geschaut, wo die Sim die Armee hingestellt hat.
     const params = new URLSearchParams(location.search)
     const zoomParam = Number(params.get('zoom'))
-    viewer.focusOn(spawnPoint, zoomParam > 0 ? zoomParam : 14)
+    void getLuaSim().then((sim) => {
+      const start = sim.armyStarts.find((s) => s.army === 1)
+      if (start) {
+        spawnPoint = new THREE.Vector3(start.x, viewer.heightAt(start.x, start.z), start.z)
+        log(`ARMY_1 steht bei ${start.x.toFixed(0)}, ${start.z.toFixed(0)} (Marker der Karte)`)
+      }
+      viewer.focusOn(spawnPoint, zoomParam > 0 ? zoomParam : 14)
+    })
     sandboxInfo.innerHTML =
       `Karte <strong>${mapFolder}</strong> — Klick auf Einheit = Auswahl, ` +
       `Bau-Icon + Klick aufs Terrain = Gebäude setzen, Rechtsklick = Bewegung`
@@ -2138,12 +2125,18 @@ async function getLuaSim(): Promise<LuaSimClient> {
       vfs!,
       terrain,
       (lvl, msg) => {
-        if (lvl === 'WARN') log(`Lua-WARN: ${msg.slice(0, 80)}`)
-        // The engine logs its prop-creation count too (Cfile:1072082).
-        else if (msg.startsWith('NUM PROPS')) log(msg)
+        // WARN mit voller Laenge: eine abgeschnittene Fehlermeldung hat in
+        // dieser Sitzung eine Stunde gekostet.
+        if (lvl === 'WARN') log(`Lua-WARN: ${msg.slice(0, 400)}`)
+        // Der Sitzungsstart dauert; was er tut, gehoert ins Log. Die SPEW-Flut
+        // der Original-Lua („Loading module …") bleibt draussen.
+        else if (/^(NUM PROPS|Sim:|Sitzungsstart|BeginSession)/.test(msg)) log(msg)
       },
       mapWaterElevation(),
       mapPropSpawns(),
+      // Mit dem Kartenordner faehrt im Worker der ECHTE Sitzungsstart:
+      // SetupSession -> OnCreateArmyBrain -> BeginSession -> OnPopulate.
+      currentMapFolder,
     ).then((sim) => {
       luaSim = sim
       log('Lua-Sim bereit')
