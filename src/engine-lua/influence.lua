@@ -359,8 +359,14 @@ function __threatsAroundPosition(eigenArmee, pos, ring, restriction, typ, armyAr
       for x = cx - radius, cx + radius do
         if x >= 0 and x < m.width and (not onMap or (x >= rx0 and x <= rx1)) then
           local wert = zellenBedrohung(m.zellen[x + z * m.width], feld, ohneGeteilt, army)
-          local mx, _, mz = zellenMitte(m, x, z)
-          out[#out + 1] = { mx, mz, wert }
+          -- NUR Zellen mit echter Bedrohung: `if (Threat > 0.0)`
+          -- (Cfile:1035944). Eine leere Zelle steht nicht in der Liste — wer
+          -- alle Zellen zurueckgibt, laesst die KI ueber Nullen sortieren und
+          -- `[1]` ist dann nicht mehr das Maximum.
+          if wert > 0 then
+            local mx, _, mz = zellenMitte(m, x, z)
+            out[#out + 1] = { mx, mz, wert }
+          end
         end
       end
     end
@@ -369,25 +375,53 @@ function __threatsAroundPosition(eigenArmee, pos, ring, restriction, typ, armyAr
   return out
 end
 
---- `CAiBrain:GetThreatBetweenPositions(pos1, pos2, restriction, threatType)`:
---- summiert die Zellen entlang der Verbindung. Der einzige Aufrufer im ganzen
---- Spiel ist `aiattackutilities.lua:1233` (GeneratePath), und er uebergibt im
---- dritten Feld `nil`.
-function __threatBetweenPositions(eigenArmee, pos1, pos2, restriction, typ)
+--- `CAiBrain:GetThreatBetweenPositions(pos1, pos2, restriction, [threatType],
+--- [armyIndex])` (Hilfetext Cfile:740343-Umgebung; Rumpf Cfile:1035672-1035760).
+---
+--- Beide Positionen werden mit derselben Klemmung wie ueberall in ZELLEN
+--- umgerechnet, dann jeweils +0.5 (Zellenmittelpunkte in Zelleinheiten), und
+--- der Weg dazwischen wird abgeschritten. JEDER Schritt geht durch
+--- `GetThreatRect` mit **Radius 0** — also genau eine Zelle je Schritt — und
+--- bekommt `restriction` als `onMap` durchgereicht (der Decompiler nennt den
+--- Parameter `ring`, aber es ist der fuenfte Parameter von `GetThreatRect`).
+---
+--- Der einzige Aufrufer im Spiel ist `aiattackutilities.lua:1233`
+--- (GeneratePath), und er uebergibt im dritten Feld `nil` — was
+--- `LuaStackObject::GetBoolean` als false liest.
+---
+--- UNVERIFIZIERT: die genaue Schrittregel. Die Engine baut ein `struct_Line`
+--- und laeuft es ab; der dekompilierte Rumpf ist so verschraenkt, dass die
+--- Tie-Break-Regel fuer exakt diagonale Linien nicht ablesbar ist. Hier steht
+--- ein gewoehnlicher Bresenham ueber die Zellen. Fuer alle nicht-diagonalen
+--- Linien ist die Zellenfolge dieselbe; auf der Diagonalen kann sie um eine
+--- Zelle abweichen.
+function __threatBetweenPositions(eigenArmee, pos1, pos2, restriction, typ, armyArg)
   local feld = feldFuer(typ, 'GetThreatBetweenPositions')
   local ohneGeteilt = typ ~= nil and string.lower(typ) == 'overallnotassigned'
   local m = karte(eigenArmee)
+  local army = armeeIndex(armyArg, 'GetThreatBetweenPositions')
+  local onMap = restriction == true
   local x1, z1 = zelleAus(m, pos1[1], pos1[3])
   local x2, z2 = zelleAus(m, pos2[1], pos2[3])
-  local schritte = math.max(math.abs(x2 - x1), math.abs(z2 - z1))
+  local dx, dz = math.abs(x2 - x1), math.abs(z2 - z1)
+  local sx = x1 < x2 and 1 or -1
+  local sz = z1 < z2 and 1 or -1
+  local fehler = dx - dz
+  local x, z = x1, z1
   local summe = 0.0
-  if schritte == 0 then
-    return zellenBedrohung(m.zellen[x1 + z1 * m.width], feld, ohneGeteilt, -1)
-  end
-  for i = 0, schritte do
-    local x = math.floor(x1 + (x2 - x1) * i / schritte + 0.5)
-    local z = math.floor(z1 + (z2 - z1) * i / schritte + 0.5)
-    summe = summe + zellenBedrohung(m.zellen[x + z * m.width], feld, ohneGeteilt, -1)
+  while true do
+    -- Radius 0: `GetThreatRect(this, x, z, 0, ring, …)` (Cfile:1035707).
+    summe = summe + rechteck(m, x, z, 0, onMap, feld, ohneGeteilt, army)
+    if x == x2 and z == z2 then break end
+    local e2 = 2 * fehler
+    if e2 > -dz then
+      fehler = fehler - dz
+      x = x + sx
+    end
+    if e2 < dx then
+      fehler = fehler + dx
+      z = z + sz
+    end
   end
   return summe
 end

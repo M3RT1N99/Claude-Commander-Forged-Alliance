@@ -1521,8 +1521,8 @@ local aibrain = withNoops(AIBRAIN_NAMES, {
   GetThreatsAroundPosition = function(self, pos, ring, restriction, typ, armyIndex)
     return __threatsAroundPosition(self.__army, pos, ring, restriction, typ, armyIndex)
   end,
-  GetThreatBetweenPositions = function(self, pos1, pos2, restriction, typ)
-    return __threatBetweenPositions(self.__army, pos1, pos2, restriction, typ)
+  GetThreatBetweenPositions = function(self, pos1, pos2, restriction, typ, armyIndex)
+    return __threatBetweenPositions(self.__army, pos1, pos2, restriction, typ, armyIndex)
   end,
   -- `brain:GetArmyStartPos()` gibt ZWEI Zahlen zurueck, x und z
   -- (cfunc_CAiBrainGetArmyStartPosL, Cfile:735971-735976: zweimal

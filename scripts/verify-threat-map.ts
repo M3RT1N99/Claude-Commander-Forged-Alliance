@@ -164,7 +164,10 @@ const um = host.pull<[number, number, number][]>(`(function()
   for _, v in ipairs(t) do teile[#teile+1] = string.format('[%d,%d,%.9g]', v[1], v[2], v[3]) end
   return '[' .. table.concat(teile, ',') .. ']'
 end)()`)
-check(um.length === 9, `3x3 Zellen -> ${um.length} Eintraege`)
+// Nur Zellen mit echter Bedrohung stehen in der Liste (`if (Threat > 0.0)`,
+// Cfile:1035944) — nicht alle neun des Quadrats. Sonst sortierte die KI ueber
+// Nullen, und `[1]` waere nicht mehr das Maximum.
+check(um.length === 2, `von 3x3 Zellen nur die zwei mit Bedrohung (${um.length})`)
 const [erster, zweiter] = um
 check(
   erster !== undefined && zweiter !== undefined && erster[2] === 100 && zweiter[2] === 7,
@@ -192,6 +195,27 @@ check(startThreat >= 200, `die KI-Armee hat 200 Bedrohung am Start von ARMY_1 ei
 check(
   Number(q(`local x, z = ArmyBrains[2]:GetArmyStartPos() return __influenceCellThreat(2, x, z, 'Unknown')`)) === 0,
   'und NICHTS an ihrem eigenen Start (aibrain.lua:3618 ueberspringt die eigene Armee)',
+)
+
+console.log()
+console.log('== GetThreatBetweenPositions laeuft die Linie ab, Radius 0 je Schritt ==')
+// Cfile:1035672-1035760. Der einzige Aufrufer im Spiel ist
+// `aiattackutilities.lua:1233` (GeneratePath) und uebergibt im dritten Feld nil.
+// Drei Zellen einer Reihe: 672 (Zelle 10), 736 (11), 800 (12).
+q(`__assignThreatAtPosition(1, {736, 0, 346}, 3, 0, 'Artillery')`)
+q(`__assignThreatAtPosition(1, {800, 0, 346}, 5, 0, 'Artillery')`)
+q(`__assignThreatAtPosition(1, {672, 0, 346}, 11, 0, 'Artillery')`)
+check(
+  Number(q(`return ArmyBrains[1]:GetThreatBetweenPositions({672,0,346}, {800,0,346}, nil, 'Artillery', 1)`)) === 19,
+  'die drei Zellen der Strecke aufsummiert: 11 + 3 + 5 = 19',
+)
+check(
+  Number(q(`return ArmyBrains[1]:GetThreatBetweenPositions({672,0,346}, {672,0,346}, nil, 'Artillery', 1)`)) === 11,
+  'gleiche Start- und Zielzelle: genau EIN Schritt (11)',
+)
+check(
+  Number(q(`return ArmyBrains[1]:GetThreatBetweenPositions({800,0,346}, {672,0,346}, nil, 'Artillery', 1)`)) === 19,
+  'und rueckwaerts dasselbe',
 )
 
 console.log('\n== Zerfall: alle 30 Ticks je Armee (Cfile:1018010-1018011) ==')
