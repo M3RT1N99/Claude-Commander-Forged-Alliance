@@ -1044,6 +1044,9 @@ async function startSandbox(mapFolder: string): Promise<void> {
         },
         mapPropSpawns(),
         mapWaterElevation(),
+        // Der Kartenordner MUSS mit: ohne ihn faehrt der Reset ohne Sitzung,
+        // und die zweite Sandbox steht ohne ACUs und ohne Lagerstaetten da.
+        currentMapFolder,
       )
       log('Lua-Sim zurückgesetzt (neue Karte)')
     }
@@ -2937,6 +2940,14 @@ async function spawnViaLua(id: string): Promise<void> {
 // Debug-Sicht auf die Szene (nur DEV): welcher Sim-Unit gehört welches Mesh,
 // wo steht es, ist es sichtbar — für die Fehlersuche per DevTools/CDP.
 if (import.meta.env.DEV) {
+  // Kartenwechsel OHNE Neuladen — der Weg durch `luaSim.reset()`, den ein
+  // Reload gerade nicht nimmt. Nur so laesst sich headless pruefen, dass die
+  // zweite Sandbox ihre ACUs, ihre Lagerstaetten und ihre Startpositionen
+  // bekommt.
+  ;(window as unknown as Record<string, unknown>).__cfaSandbox = (name: string) => {
+    void startSandbox(name)
+    return 'startet ' + name
+  }
   ;(window as unknown as Record<string, unknown>).__cfaSzene = () =>
     luaUnits.map((u) => ({
       id: u.id,

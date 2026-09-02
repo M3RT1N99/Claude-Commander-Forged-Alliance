@@ -206,7 +206,7 @@ type OutMsg =
   // The worker asks for the blueprints the session start can name. It waits for
   // the answer before `BeginSession()` — see luaSimWorker.ts at the call site.
   | { type: 'needUnits'; ids: string[] }
-  | { type: 'reset-done' }
+  | { type: 'reset-done'; starts?: { army: number; x: number; z: number }[] }
   | { type: 'log'; level: string; msg: string }
   | { type: 'spawned'; reqId: number; uid: number }
   | { type: 'spawnError'; reqId: number; error: string }
@@ -340,6 +340,9 @@ export class LuaSimClient {
         )
         break
       case 'reset-done':
+        // Die Startpositionen der NEUEN Karte uebernehmen — der Reset hat sie
+        // aus deren Markern gelesen.
+        this.armyStarts = m.starts ?? []
         this.resetResolve?.()
         break
       case 'log':
@@ -496,15 +499,36 @@ export class LuaSimClient {
     terrain: HeightfieldData,
     props: MapPropSpawn[] = [],
     waterElevation?: number,
+    /**
+     * Der Ordner der NEUEN Karte. Ohne ihn faehrt der Reset ohne Sitzung: keine
+     * ACUs, keine Lagerstaetten — `SetupSession()` laeuft dann gar nicht.
+     */
+    mapFolder?: string,
   ): Promise<void> {
     const done = new Promise<void>((res) => {
       this.resetResolve = res
     })
+    // Der GANZE Sitzungsschnappschuss, nicht nur die Einheiten: Projektile,
+    // Emitter, Props, der Tick und die Startpositionen gehoerten alle zur alten
+    // Karte. `armyStarts` insbesondere — sonst zeigt die Kamera der neuen
+    // Sandbox auf den Startpunkt der vorigen.
     this.statesById.clear()
     this.economy = null
     this.removedMapProps.length = 0
     this.audioRequests.length = 0
-    this.worker.postMessage({ type: 'reset', terrain, waterElevation, props })
+    this.projectileStates = []
+    this.emitterStates = []
+    this.propStates = []
+    this.gameTick = 0
+    this.armyStarts = []
+
+    const alle = this.vfs.find(() => true)
+    const session = mapFolder ? mapSession(alle, mapFolder) : undefined
+    // Die Lua der neuen Karte muss mit: der Worker hat nur die der alten.
+    const files = mapFolder
+      ? await this.vfs.readMany(simBootPaths(alle, mapFolder).map)
+      : undefined
+    this.worker.postMessage({ type: 'reset', terrain, waterElevation, props, session, files })
     await done
   }
 

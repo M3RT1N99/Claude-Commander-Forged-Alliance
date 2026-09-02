@@ -101,7 +101,17 @@ type InMsg =
   // Der Sammelpunkt einer Fabrik (IssueFactoryRallyPoint, Cfile:1008266) — KEIN
   // Bewegungsbefehl: die Fabrik bleibt stehen.
   | { type: 'rally'; id: number; x: number; y: number; z: number }
-  | { type: 'reset'; terrain: HeightfieldData; waterElevation?: number; props?: MapPropSpawn[] }
+  // Der Reset traegt dieselbe Nutzlast wie der Boot: die Lua der NEUEN Karte
+  // und ihre Sitzung. Ohne beides startete die zweite Sandbox ohne ACUs und
+  // ohne Lagerstaetten — `SetupSession()` fand die Kartendateien nicht.
+  | {
+      type: 'reset'
+      terrain: HeightfieldData
+      waterElevation?: number
+      props?: MapPropSpawn[]
+      session?: SessionInfo
+      files?: Map<string, Uint8Array>
+    }
   // Reclaim (dispatch 0x13, CUnitReclaimTask): drain the prop target —
   // either a sim prop id (wrecks) or a map-prop instance index.
   | { type: 'reclaim'; id: number; targetId?: number; mapIndex?: number; queue?: boolean }
@@ -258,9 +268,33 @@ const handleMessage = async (msg: InMsg): Promise<void> => {
   }
   if (msg.type === 'reset') {
     if (!bootFiles) return
-    await resetSession(bootFiles, msg.terrain, msg.waterElevation)
-    if (host) spawnMapProps(host, msg.props ?? [])
-    ctx.postMessage({ type: 'reset-done' })
+    // Die Karten-Lua der NEUEN Karte nachreichen, sonst faehrt `SetupSession()`
+    // gegen Dateien, die im VFS des Workers nicht liegen.
+    for (const [pfad, bytes] of msg.files ?? []) bootFiles.set(pfad, bytes)
+    starts = []
+    try {
+      await resetSession(bootFiles, msg.terrain, msg.waterElevation, msg.session)
+      if (host) spawnMapProps(host, msg.props ?? [])
+      if (host && engine && msg.session?.scenarioFile) {
+        const h = host
+        const ids = h.pull<string[]>('__sessionInitialUnitsJson()')
+        const geliefert = new Promise<UnitPrep[]>((res) => {
+          unitsResolve = res
+        })
+        ctx.postMessage({ type: 'needUnits', ids })
+        for (const u of await geliefert) prepare(h, u)
+        beginSession(h, msg.session)
+        starts = msg.session.armies.map((a) => {
+          const p = h.pull<[number, number]>(`__armyStartPosJson(${a.index})`)
+          return { army: a.index, x: p[0], z: p[1] }
+        })
+      }
+    } finally {
+      // IMMER antworten. Bricht der Reset ab, wartet `startSandbox` sonst
+      // ewig auf `reset-done` und die Karte bleibt leer, ohne dass etwas
+      // meldet, warum.
+      ctx.postMessage({ type: 'reset-done', starts })
+    }
     return
   }
   if (msg.type === 'units') {
@@ -376,15 +410,27 @@ async function resetSession(
   files: Map<string, Uint8Array>,
   terrain: HeightfieldData,
   waterElevation?: number,
+  session?: SessionInfo,
 ): Promise<void> {
-  host?.close()
+  // ERST die Referenz fallen lassen, DANN den alten State freigeben.
+  //
+  // `tickAndPost` laeuft mit 10 Hz weiter, waehrend dieser `await` haengt, und
+  // sein Waechter ist `if (!host || !engine) return`. Solange `host` noch auf
+  // den geschlossenen State zeigt, greift der Waechter nicht — der Beat ruft in
+  // einen freigegebenen Lua-State.
+  const alt = host
+  host = null
+  engine = null
+  alt?.close()
+
   const h = await LuaHost.create(files, (level, m) => ctx.postMessage({ type: 'log', level, msg: m }))
-  engine = installEngine(h)
   const hf = new Heightfield(terrain)
-  setTerrainSource(h, (x, z) => hf.at(x, z), {
-    width: terrain.width,
-    height: terrain.height,
-    waterElevation,
+  // Dieselbe Reihenfolge wie im Boot: das Gelaende steht, BEVOR die Armeen
+  // entstehen (die Bedrohungskarte wird in der Armee-Erzeugung angelegt und
+  // liest dabei das Heightfield, Cfile:1017321-1017333).
+  engine = installEngine(h, undefined, session, {
+    heightAt: (x, z) => hf.at(x, z),
+    size: { width: terrain.width, height: terrain.height, waterElevation },
   })
   loadBlueprintGroups(h, files)
   host = h
