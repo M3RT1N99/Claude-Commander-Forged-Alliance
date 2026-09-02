@@ -895,6 +895,58 @@ BuilderManagers (aibrain.lua:1137): `scenarioplatoonai.lua:66`
 (`aiBrain:HasBuilderList`). `verify-ai-platoon.ts` führt die Ratsche darüber:
 ein bekannter Halt **darf** verschwinden, aber es darf keiner dazukommen.
 
+### Die Trennung der beiden VMs war undicht — 51 Bindungen auf der falschen Seite
+
+CLAUDE.md nennt es als Invariante: jede Engine-Bindung ist über `mPrevDef` in
+genau EINER Init-Liste registriert, deshalb kennt die Sim `_c_CreateCursor`
+nicht und die UI kein `CreateUnit`. Gemessen war es anders.
+
+`installEngineGlobals` lädt `globals.lua`, und das ruft der **UI**-Boot auch —
+die Datei enthält aber nicht nur `scr_CoreInits`, sondern zu einem guten Teil
+`sim_SimInits`. Ergebnis: **51 Sim-Bindungen standen im UI-VM**
+(`CreateEmitterAtBone`, `GetArmyBrain`, `SetAlliance`, `Warp`, `_c_CreateShield`
+und so weiter). In der Gegenrichtung standen 5 UI-Bindungen in der Sim.
+
+Vierzehn Namen stehen in BEIDEN Abschnitten von `engine-api.md` — die sind
+wirklich zweimal registriert (`IsAlly`, `IsEnemy`, `GetBlueprint`, `Random`, …)
+und dürfen überall stehen. Ohne diese Unterscheidung sähe die Zahl doppelt so
+schlimm aus, wie sie ist.
+
+Behoben: `engine-lua/ui-sim-globals.lua` nimmt die Sim-Liste aus
+`engine-api.md` (generiert aus den `mPrevDef`-Ketten) und entfernt sie nach dem
+Laden wieder aus dem UI-VM. Keine der sechs UI-Suiten hing daran. Auf der
+anderen Seite sind `GameTick` und `GetSimTicksPerSecond` aus `threads.lua`
+verschwunden und `SetFocusArmy` aus `globals.lua` — alle drei sind
+`scr_UserInits` und in `ui-globals.lua` ohnehin echt implementiert.
+
+**Dabei fiel eine Suite auf, die unseren Fehler festhielt:**
+`verify-simthreads.ts` verlangte `GetSimTicksPerSecond()` in der Sim. Der
+Decomp sagt das Gegenteil —
+`luadef_GetSimTicksPerSecond.mPrevDef = Moho::scr_UserInits.mForms`
+(Cfile:1264462), genau wie `GameTick` (Cfile:1361911). Die Zeile prüft jetzt,
+dass beide in der Sim **fehlen**.
+
+Es bleiben zwei UI-Namen im Sim-VM, und nur einer ist unserer:
+`SyncPlayableRect` kommt aus der Original-Lua (`/lua/SimSync.lua` wird per
+`doscript` geladen, seine obersten Funktionen sind damit global), und
+`EntityCategoryFilterOut` steht noch in `globals.lua` statt in
+`ui-globals.lua`. `scripts/check-vm-separation.ts` nagelt beide Richtungen fest;
+die Schranke ist eine Ratsche und darf nur sinken.
+
+### Eine Prüfung gegen still überschriebene Methoden
+
+`scripts/check-shadowed-methods.ts`. Anlass war ein echter Fund: am Ende der
+`aibrain`-Tabelle in `moho.lua` standen zwei alte Attrappen
+(`GetThreatAtPosition` gab 0 zurück, `AssignThreatAtPosition` tat nichts) — und
+weiter oben in DERSELBEN Tabelle die neuen, echten Rümpfe. Der spätere Eintrag
+gewinnt, also blieb die Bedrohungskarte leer, und keine Suite konnte es sehen:
+beide Aufrufe „funktionierten" ja, sie taten nur nichts. Aufgefallen ist es
+erst, weil eine Zelle nach einem Schreibvorgang 0 blieb.
+
+Die Prüfung liest die Tabellenblöcke von `local <name> = {` bis zur schließenden
+Klammer und meldet jeden Schlüssel, der darin zweimal auf erster Ebene steht.
+51 Blöcke, 523 Schlüssel, aktuell null Funde.
+
 ### Die Boot-Nutzlast des Sim-Workers
 
 Gemessen: die Boot-Nutzlast des Sim-Workers ist heute **4 281

@@ -5,9 +5,13 @@ local nthreads = 0
 __currentThread = false
 local unpack = unpack or table.unpack
 
-function GetSimTicksPerSecond() return 10 end
+-- `SecondsPerTick` ist scr_CoreInits und steht damit in BEIDEN VMs;
+-- `GetGameTick` ist sim_SimInits. `GameTick` und `GetSimTicksPerSecond` sind
+-- dagegen scr_UserInits (engine-api.md) — sie standen hier und damit auch in
+-- der Sim, wo es sie im Original nicht gibt. Die UI hat eigene Ruempfe in
+-- `ui-globals.lua` (auf `__uiGameTick`, nicht auf dem Sim-Tick).
+-- `scripts/check-vm-separation.ts` haelt das fest.
 function SecondsPerTick() return 0.1 end
-function GameTick() return __gameTick end
 function GetGameTick() return __gameTick end
 function GetGameTimeSeconds() return __gameTick * 0.1 end
 

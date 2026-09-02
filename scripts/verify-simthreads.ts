@@ -51,7 +51,23 @@ const host = await LuaHost.create(files, (level, msg) => {
 installSimThreads(host)
 
 console.log('\n== Zeit-Globals ==')
-check(num(host, 'GetSimTicksPerSecond()') === 10, `GetSimTicksPerSecond = ${num(host, 'GetSimTicksPerSecond()')}`)
+// `GetSimTicksPerSecond` gibt es in der Sim NICHT: die Bindung ist
+// `scr_UserInits` und damit UI-only
+// (`luadef_GetSimTicksPerSecond.mPrevDef = Moho::scr_UserInits.mForms`,
+// Cfile:1264462) — genau wie `GameTick` (Cfile:1361911). Diese Zeile verlangte
+// bis eben das Gegenteil und hielt damit unseren eigenen Fehler fest: beide
+// standen in `threads.lua`, das in BEIDE VMs geht.
+//
+// Was die Sim hat, ist `SecondsPerTick` (scr_CoreInits, Cfile:702637) und
+// `GetGameTick` (sim_SimInits, Cfile:1088856).
+check(
+  host.eval('return rawget(_G, "GetSimTicksPerSecond") == nil') === true,
+  'GetSimTicksPerSecond ist NICHT in der Sim (scr_UserInits, Cfile:1264462)',
+)
+check(
+  host.eval('return rawget(_G, "GameTick") == nil') === true,
+  'GameTick ebenso wenig (scr_UserInits, Cfile:1361911)',
+)
 check(Math.abs(num(host, 'SecondsPerTick()') - 0.1) < 1e-9, `SecondsPerTick = ${num(host, 'SecondsPerTick()')}`)
 check(currentTick(host) === 0, `Start-Tick = ${currentTick(host)}`)
 

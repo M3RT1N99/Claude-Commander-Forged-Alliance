@@ -836,7 +836,10 @@ function __armyUnits(army, cat)
 end
 __focusArmy = 1
 function GetFocusArmy() return __focusArmy end
-function SetFocusArmy(a) __focusArmy = a end
+-- `SetFocusArmy` ist scr_UserInits (engine-api.md) und steht in
+-- `ui-globals.lua`; hier stand ein zweiter Rumpf, der ihn zusaetzlich in die
+-- Sim brachte. `GetFocusArmy` bleibt: der Name ist in BEIDEN Init-Listen
+-- registriert.
 
 -- Cheats flag (Sim::CheatsEnabled) — off in a normal sandbox; a cheat host would
 -- flip it to allow commanding any army.

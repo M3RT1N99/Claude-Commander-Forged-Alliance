@@ -3,6 +3,7 @@ import type { SessionInfo } from '../sim/session'
 import { installMoho } from './moho'
 import { installBlueprintPipeline } from './unitFactory'
 import { installEngineGlobals } from './engineGlobals'
+import UI_SIM_GLOBALS_LUA from '../engine-lua/ui-sim-globals.lua?raw'
 import { installSimThreads } from './simThreads'
 import UI_GLOBALS_LUA from '../engine-lua/ui-globals.lua?raw'
 import PREFS_LUA from '../engine-lua/prefs.lua?raw'
@@ -84,6 +85,10 @@ export function installUiEngine(host: LuaHost, fs: UiFileSystem): UiEngine {
   // ForkThread als Upvalue), dann die Original-Lua.
   installSimThreads(host)
   installEngineGlobals(host)
+  // …und gleich wieder heraus, was dort nicht hingehoert: `globals.lua` ist die
+  // gemeinsame Datei, enthaelt aber auch `sim_SimInits`-Bindungen. Siehe
+  // engine-lua/ui-sim-globals.lua.
+  host.eval(UI_SIM_GLOBALS_LUA)
   // GetVersion() (Core-Global, Cfile:599401) liefert die Version der ENGINE:
   // Moho::GetEngineVersion @0x4D3D30 ist `STR_Printf("%1.1f.%i", 1.5, 3764)` —
   // einkompiliert, nicht aus den Spieldaten gelesen. Die Engine hier sind wir,

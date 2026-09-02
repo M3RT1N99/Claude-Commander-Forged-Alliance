@@ -923,7 +923,10 @@ function __readAllUnitsJson()
     local r = readRow(id, u)
     local q = {}
     for i, item in ipairs(r.buildQueue) do
-      q[i] = '{"id":' .. jstr(item.id) .. ',"count":' .. jnum(item.count) .. '}'
+      -- `count` ist eine ANZAHL, also `jint`: dieselbe Regel wie fuer die
+      -- Masken darunter. Heute ist keine Warteschlange sechs Stellen lang, aber
+      -- die Regel gilt nicht „solange es passt".
+      q[i] = '{"id":' .. jstr(item.id) .. ',"count":' .. jint(item.count) .. '}'
     end
     n = n + 1
     parts[n] = '{"id":' .. jint(r.id)
@@ -967,7 +970,7 @@ function __readAllUnitsJson()
         end
         return ',"turrets":[' .. table.concat(ts, ',') .. ']'
       end)()
-      .. ',"army":' .. jnum(r.army)
+      .. ',"army":' .. jint(r.army)
       .. ',"idle":' .. tostring(r.idle)
       .. ',"buildQueue":[' .. table.concat(q, ',') .. ']'
       .. '}'
