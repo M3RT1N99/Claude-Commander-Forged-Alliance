@@ -7,8 +7,9 @@
  * hier gezählt, was WIRKLICH vorkommt, und jede Datei einmal geparst.
  *
  * Geprüft wird zusätzlich die Aufweitung nach BGRA8 an einem bekannten Pixel:
- * A1R5G5B5 hat pro Kanal 5 Bit, und 31 muss 255 werden (Bit-Replikation), nicht
- * 248 — sonst sind alle Icons dauerhaft zu dunkel.
+ * A1R5G5B5 hat pro Kanal 5 Bit, und 31 muss 255 werden — durch gleichmaessige
+ * Aufweitung `round(v * 255 / (2^bits - 1))`, nicht 248. Sonst sind alle Icons
+ * dauerhaft zu dunkel.
  *
  *   npx tsx --import ./scripts/register-lua.mjs scripts/verify-dds.ts
  */
@@ -70,7 +71,13 @@ for (let i = 0; i < px.length; i += 4) {
 check(opaque > 0, `${opaque} von ${px.length / 4} Pixeln sind sichtbar (1-Bit-Alpha)`)
 // 5 Bit voll (31) MUSS 255 ergeben. Käme hier 248 heraus, wäre jedes Icon um
 // 3 % zu dunkel — die Sorte Fehler, die man nie sieht und nie wieder findet.
-check(maxChannel === 255, `hellster Kanal = ${maxChannel} (Bit-Replikation: 31 → 255, nicht 248)`)
+// Der Name ist wichtig: BIT-REPLIKATION war der Fehler, nicht die Loesung —
+// `(v << (8-bits)) | (v >> (2*bits-8))` gilt nur ab 4 Bit und liess das 1-Bit-
+// Alpha auf 128 statt 255 laufen (src/formats/dds.ts:119-129).
+check(
+  maxChannel === 255,
+  `hellster Kanal = ${maxChannel} (gleichmaessige Aufweitung round(31*255/31) = 255, nicht 248)`,
+)
 // The 1-bit alpha of an opaque pixel MUST expand to fully opaque 255, not 128:
 // a negative low-bit shift for bits < 4 made every strategic icon render at
 // half opacity. Uniform scale round(v*255/(2^bits-1)) fixes 1..3-bit channels.

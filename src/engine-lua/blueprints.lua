@@ -175,7 +175,27 @@ __projDefaults = {
     RealisticOrdinance = false, StraightDownOrdinance = false,
   },
   Economy = { BuildTime = 10.0 },
-  Display = { UniformScale = 1.0 },
+  -- Der Display-Block, wie ihn `RProjectileBlueprint::RProjectileBlueprint`
+  -- setzt (Cfile:653726-653736). Hier stand `UniformScale = 1.0` — eine
+  -- ERFUNDENE Zahl: der Projektil-Ctor setzt 0.0. Die 1.0 gehoert zum
+  -- UNIT-Blueprint (Cfile:655665), und die beiden Strukturen wurden hier
+  -- verwechselt.
+  --
+  -- Der Wert ist additiv: `sub_51C7F0` liefert
+  -- `zufall(-MeshScaleRange, +MeshScaleRange) + mUniformScale`
+  -- (Cfile:654396-654401). Gemessen betrifft die Aenderung genau ZWEI
+  -- Blueprints: von 287 Projektil-Blueprints lassen 153 `UniformScale` weg, und
+  -- 151 davon haben ueberhaupt kein Mesh (reine Partikeleffekte).
+  Display = {
+    MeshBlueprint = '',
+    UniformScale = 0.0,
+    MeshScaleRange = 0.0,
+    MeshScaleVelocity = 0.0,
+    MeshScaleVelocityRange = 0.0,
+    CameraFollowsProjectile = false,
+    CameraFollowTimeout = 1.0,
+    StrategicIconSize = 1.0,
+  },
 }
 
 -- WAFFEN-Defaults. Jede Waffe eines Units ist ein eigenes Struct
@@ -248,6 +268,24 @@ end
 
 function RegisterUnitBlueprint(bp)
   fillDefaults(bp, __bpDefaults)
+  fillFootprint(bp.Footprint, bp.SizeX, bp.SizeZ)
+  -- `RUnitBlueprintPhysics::ComputeDerivedQuantities` (Cfile:656297-656314),
+  -- gerufen aus `OnInitBlueprint` VOR dem Luft-Block (Cfile:655931). Zwei
+  -- Ableitungen fehlten hier ganz:
+  --
+  --   * der Skirt-VERSATZ wird auf <= 0 geklemmt (Cfile:656297-656305)
+  --   * die Skirt-GROESSE wird auf den Fussabdruck angehoben:
+  --     `SkirtSizeX = max(SkirtSizeX, footprint.SizeX)` (Cfile:656306-656314)
+  --
+  -- Deshalb steht `fillFootprint` jetzt VOR diesem Block: die Klemme liest
+  -- den bereits aufgerundeten Fussabdruck, nicht den rohen.
+  local ph = bp.Physics
+  if (ph.SkirtOffsetX or 0) >= 0 then ph.SkirtOffsetX = 0.0 end
+  if (ph.SkirtOffsetZ or 0) >= 0 then ph.SkirtOffsetZ = 0.0 end
+  local fpx = (bp.Footprint and bp.Footprint.SizeX) or 0
+  local fpz = (bp.Footprint and bp.Footprint.SizeZ) or 0
+  if fpx > (ph.SkirtSizeX or 0) then ph.SkirtSizeX = fpx end
+  if fpz > (ph.SkirtSizeZ or 0) then ph.SkirtSizeZ = fpz end
   -- RUnitBlueprint::OnInitBlueprint-derived air values
   -- (Cfile:655931-655939).
   local air = bp.Air
@@ -260,7 +298,6 @@ function RegisterUnitBlueprint(bp)
   for _, w in ipairs(bp.Weapon or {}) do
     fillDefaults(w, __weaponDefaults)
   end
-  fillFootprint(bp.Footprint, bp.SizeX, bp.SizeZ)
   fillFootprint(bp.AltFootprint, bp.SizeX, bp.SizeZ)
   __registered.Unit[bp.BlueprintId or '?'] = bp
 end

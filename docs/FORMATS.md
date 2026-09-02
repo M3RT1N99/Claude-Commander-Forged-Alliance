@@ -24,8 +24,13 @@ each offset target. The complete layout is in the header comment of
 Reference UEL0001_LOD0.scm: 5807 vertices, 10458 indices (3486 triangles),
 29 bones (19 weighted).
 
-- Vertex (68 B): pos ³f · tangent ³f · normal ³f · binormal ³f · uv0 ²f ·
-  uv1 ²f · boneIdx ⁴u8
+- Vertex (68 B): pos ³f · **normal** ³f · **tangent** ³f · binormal ³f ·
+  uv0 ²f · uv1 ²f · boneIdx ⁴u8
+  (Das GPG-Mod-SDK dokumentiert Tangente VOR Normale — das ist falsch. Die
+  Engine-eigene Deklaration `VS_MESHSOFTWAREINSTANCED` (Pos/Normal/Tangent/
+  Binormal) steht wörtlich in `ForgedAlliance.exe`, und
+  `scripts/verify-scm-vertex.ts` beweist die Reihenfolge zusätzlich geometrisch
+  — siehe den Kopf von [src/formats/scm.ts](../src/formats/scm.ts).)
 - Bone (108 B): restPoseInverse 4×4f · pos ³f · rot (quaternion) ⁴f ·
   nameOffset u32 · parentIndex i32 · 8 B reserved
 - UVs follow the DirectX convention (origin at the top left) and therefore
@@ -46,7 +51,9 @@ linksOffset u32 · animDataOffset u32 · frameSize u32.
   position LERP + quaternion LERP between neighboring frames
 - The skeleton comes from the SCM file (bones + parents + bind pose)
 
-**Parser not yet implemented (M3).**
+→ [src/formats/sca.ts](../src/formats/sca.ts) (`parseSca`); von
+`src/anim/animator.ts` über `src/main.ts` benutzt. Die Zeile hier sagte
+„Parser not yet implemented (M3)" — er ist implementiert und im Produktionspfad.
 
 ## Blueprints (`*_unit.bp`, Lua)
 
