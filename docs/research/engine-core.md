@@ -41,6 +41,30 @@ The deterministic coroutine execution for Sim Lua (ForkThread/WaitTicks):
     - `TASKSTATUS_Abort` → `CTaskThread::Destroy` (:438921-438923)
     - `TASKSTATUS_Suspend` → `Stage(thrd)` (:438924-438926)
 - `cfunc_KillThread`/`cfunc_ResumeThread` (:6225,6248) control threads.
+- **`CTaskStage::DoFrame` (:439351-439395) drains the list.** It pops threads
+  off the head of `mThreads` until the list is EMPTY and ticks each; the ticked
+  threads collect on a side list that is spliced back in order. The constructor
+  appends a new thread to the tail with `mWaitTicks = 0` (:438783-438808), so a
+  thread forked DURING the frame is ticked in that same frame, after everything
+  already queued -- and so is a parked thread that `ResumeThread` appends
+  (:593112-593124). Our scheduler used a snapshot bound and ran forks one tick
+  late; fixed in `threads.lua`, pinned by `verify-simthreads.ts`.
+- **A yield of 0 does not wait.** `TASKSTATUS_0` stores `mWaitTicks = 0` and,
+  for an un-parked thread, `continue`s the tick loop (:438938-438942): the
+  coroutine is resumed again in the same call. This is also how `WaitFor`
+  (which yields 0 after pushing its wait task, :592990-592993) gets the wait
+  task executed at once.
+- **`CLuaTask::TaskTick` (:592150-592250) texts.** A Lua error: `Error running
+  lua script: %s` (:592246), and the thread ends. A yield without a value ends
+  the thread silently (LUA_TNONE -> -1, :592208/:592236). A non-number yield:
+  `Invalid args to yield(); expected tick count` (:592230); a negative one:
+  `Invalid args to yield(); tick count must be >=0` (:592216) -- both with a
+  traceback, both end the thread. The count is read with `GetInteger`, a
+  truncating cast.
+- **`KillThread` (:592555-592590)** ignores nil, rejects any other non-thread
+  with `TypeError "thread"` (`false` included -- the original always guards
+  with `if x then`), refuses the root state and otherwise unlinks the thread
+  at once.
 
 → **Engine implementation:** a Sim scheduler that traverses all Lua threads
 (wasmoon coroutines) on every 10 Hz beat, decrements `waitTicks`, and resumes

@@ -10,7 +10,7 @@
     "SIM NO-OP aufgerufen: ShakeCamera",
     "SIM NO-OP aufgerufen: ShowBone",
     "SIM __emitterBpJson liefert kein brauchbares BP für Tarmacs/Tar8x_01_albedo",
-    "UI ForkThread-Fehler: Error: UI camera bridge is unavailable for targetBox",
+    "UI Error running lua script: Error: UI camera bridge is unavailable for targetBox",
     "UI UI: minimap.lua NOCH NICHT — Error: UI camera bridge is unavailable for set",
     "UI UI: worldview.lua NOCH NICHT — Error: UI camera bridge is unavailable for set",
     "UI maui-Layout unvollstaendig, Control uebersprungen: root(frame) > GameMain ScreenGroup(group) > mapGroup(group) > worldview(worldview)",

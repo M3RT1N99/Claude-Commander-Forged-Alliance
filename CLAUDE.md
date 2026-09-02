@@ -195,7 +195,8 @@ npx tsx scripts/peek-lua.ts --grep <regex>  # search original Lua/Blueprints
   `--virtual-time-budget`). **It only logs — it cannot fail yet**; the running
   end-to-end gate is `scripts/verify-playthrough.ts`.
 - **Debugging:** errors in Lua threads are only logged — first search the WARN
-  lines for `ForkThread-Fehler:`.
+  lines for `Error running lua script:` (the engine's own text,
+  `CLuaTask::TaskTick`).
 - Commit messages are in **English**: what and why, one milestone per commit.
 
 ### Spec-driven workflow (spec-kit)

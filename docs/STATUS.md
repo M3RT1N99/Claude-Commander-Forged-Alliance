@@ -86,8 +86,8 @@ Rot-Probe: die Schild-Regression wieder eingebaut (`damage.lua:223`
 
 ### Was die Rot-Probe nebenbei gefunden hat: `math.pow`
 
-Der rote Lauf meldete `ForkThread-Fehler: /mod/lua/utilities.lua:50: attempt to
-call a nil value (field 'pow')`. FAs Lua 5.0.1 hatte `math.pow`, Lua 5.4
+Der rote Lauf meldete `Error running lua script: /mod/lua/utilities.lua:50:
+attempt to call a nil value (field 'pow')`. FAs Lua 5.0.1 hatte `math.pow`, Lua 5.4
 (wasmoon) hat es nicht mehr, und `compat.lua` shimmte es nicht. Betroffen ist
 `GetVectorLength` (`utilities.lua:50`) und `platoon.lua:983` — mehr Stellen gibt
 es in der Original-Lua nicht (alle 1316 Dateien durchsucht; `math.log10`,
@@ -1236,3 +1236,51 @@ The path to the real UI: [PLAN-UI.md](PLAN-UI.md); the complete 1:1 roadmap:
   ATI2/BC5, BC6H/BC7, DX10 headers and DDSD_PITCH — no retail asset uses them.
 - **Score numbers remain blank** (1:1: Vanilla-3599 has no `currentScores`
   producers) — the user decision between Vanilla and FAF remains open.
+
+## The thread scheduler ran forks one tick late
+
+`src/engine-lua/threads.lua` mirrors `CTaskStage` / `CTaskThread` / `CLuaTask`.
+Reading those against the file found five differences, all fixed and pinned by
+`scripts/verify-simthreads.ts` (twelve checks red on the old file):
+
+* **A thread forked during a frame runs in that frame.** `CTaskStage::DoFrame`
+  (Cfile:439351-439395) pops threads off the head of `mThreads` until the list
+  is EMPTY; the constructor appends a new thread to its tail with
+  `mWaitTicks = 0` (Cfile:438783-438808), and the pre-decrement in `DoTaskTick`
+  (Cfile:438898) makes it due at once. Our scheduler took a snapshot of the
+  list and ran forks one tick later -- and `verify-simthreads.ts` ASSERTED that
+  ("Kind läuft NICHT im selben Tick"). The original Lua knows the engine's
+  order: `platoon.lua:210` has a branch for "Platoon disbanded same tick as
+  created", reachable only when the platoon's forked AI thread runs in the
+  tick the platoon was formed.
+* **`WaitTicks(0)` does not wait.** `TASKSTATUS_0` stores `mWaitTicks = 0` and
+  re-ticks an un-parked thread at once (Cfile:438938-438942). That is also
+  how `WaitFor` gets its wait task executed immediately (it yields 0,
+  Cfile:592990-592993).
+* **The engine's own texts.** A Lua error in a thread is logged as
+  `Error running lua script: %s` (Cfile:592246) -- the log line to search for
+  now, instead of our own `ForkThread-Fehler:`. A yield that is not a number
+  logs `Invalid args to yield(); expected tick count`, a negative one
+  `Invalid args to yield(); tick count must be >=0` (Cfile:592211-592233), and
+  both end the thread; a bare `WaitTicks()` ends it silently (LUA_TNONE ->
+  -1, Cfile:592208). We used to treat all of those as `WaitTicks(1)`.
+* **`ResumeThread` appends to the tail** (Cfile:593112-593124): a parked
+  thread resumed during a frame runs in that frame, after everything queued.
+* **`KillThread(false)` is a type error**, only nil is ignored
+  (Cfile:592571-592577); the original always guards with `if x then`.
+
+What it changed in the running game: the golden master moved by one unit --
+the second engineer of the factory chain is born at tick 130 instead of 131
+(its id 19 instead of 20), because every fork chain is one tick shorter.
+
+And the AI: with forks one tick late, the engineer platoon formed at tick 10
+was disbanded at tick 11 and re-formed EVERY tick (`TaskFinished`,
+platoon.lua:219). With the engine's order it is disbanded in the tick it was
+formed and re-tried once a second (`DelayAssign`, platoon.lua:213-217). The
+suite now counts the forming (`__platoonsMade`) instead of expecting a platoon
+to survive. Why none survives is the next AI stop, now named correctly:
+`EngineerBuildAI` finds nothing to build because `FindPlaceToBuild`,
+`CanBuildStructureAt`, `CanBuildPlatoon`, `GetUnitsAroundPoint` and
+`GetNumUnitsAroundPoint` are still silent no-ops in `moho.lua` -- so
+`ProcessBuildCommand` disbands the platoon (platoon.lua:2932), and `BuildOnce`
+then runs on a platoon whose `BuilderHandle` is already nil.

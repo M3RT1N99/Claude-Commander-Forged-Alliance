@@ -134,7 +134,7 @@ because every other number depends on it.
   decomp/original Lua (Principle II), fix in the engine layer only (Principle I), then verify with
   the matching suite. One verified fix per commit; commit messages in English state what and why.
 - **Debugging entry point:** errors in Lua threads are only logged — search WARN lines for
-  `ForkThread-Fehler:` first.
+  `Error running lua script:` first.
 - **Scripts:** every script importing `src/lua/*` or `src/sim/*` runs with
   `--import ./scripts/register-lua.mjs`.
 

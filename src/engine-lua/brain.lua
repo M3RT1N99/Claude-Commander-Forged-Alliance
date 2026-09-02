@@ -93,6 +93,11 @@ end
 -- SQUADCLASS_Unassigned daran und setzt `mUniqueName = "ArmyPool"`
 -- (Cfile:1017576-1017578). `aibrain.lua:1142` holt genau dieses Platoon.
 __platoons = {}
+-- How many platoons each army has made so far (the pool included). A suite
+-- can only see a platoon while it lives, and the AI's engineer platoons are
+-- disbanded in the tick they were formed as long as nothing can be built;
+-- this counter shows the forming itself.
+__platoonsMade = {}
 
 local function platoonListe(army)
   local s = __platoons[army]
@@ -114,6 +119,7 @@ function __makePlatoon(army, name, plan)
   p.__disbanded = false
   local s = platoonListe(army)
   s.liste[#s.liste + 1] = p
+  __platoonsMade[army] = (__platoonsMade[army] or 0) + 1
   -- Der Ctor ruft OnCreate MIT dem Plan (Cfile:1048349).
   if p.OnCreate then p:OnCreate(p.__plan) end
   return p

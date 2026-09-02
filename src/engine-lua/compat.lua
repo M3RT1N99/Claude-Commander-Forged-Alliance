@@ -89,7 +89,7 @@ math.mod = math.mod or function(a, b) return a % b end
 -- only LOGGED and the thread dies silently — the caller just never gets a
 -- result. Found by the golden master: reintroducing the shield regression sent
 -- the damage effects down a path that calls it, and the run reported
--- "ForkThread-Fehler: /mod/lua/utilities.lua:50".
+-- "Error running lua script: /mod/lua/utilities.lua:50".
 math.pow = math.pow or function(a, b) return a ^ b end
 unpack = unpack or table.unpack
 loadstring = loadstring or load

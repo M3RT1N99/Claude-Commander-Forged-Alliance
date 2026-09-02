@@ -107,13 +107,92 @@ simTick(host)
 simTick(host)
 check(num(host, 'kc') === before, `Zähler eingefroren nach KillThread (${num(host, 'kc')} == ${before})`)
 
-console.log('\n== Verschachtelter ForkThread (Kind läuft im Folgetick) ==')
-host.eval('childRan = false')
-host.eval('ForkThread(function() ForkThread(function() childRan = true end) end)')
-simTick(host) // Eltern läuft, forkt Kind
-check(host.eval('return childRan') === false, 'Kind läuft NICHT im selben Tick')
-simTick(host) // Kind läuft
-check(host.eval('return childRan') === true, 'Kind läuft im Folgetick')
+console.log('\n== A nested ForkThread runs in the SAME frame, after the queue (CTaskStage::DoFrame) ==')
+// `DoFrame` (Cfile:439351-439395) pops threads off the head of `mThreads`
+// until the list is EMPTY; the constructor appends a new thread to its tail
+// (Cfile:438804-438807) with `mWaitTicks = 0`, and the pre-decrement in
+// DoTaskTick (Cfile:438898) makes it due at once. So the child runs in the
+// frame it was forked in -- after every thread that was already queued. This
+// check used to assert the opposite ("Kind läuft NICHT im selben Tick"): that
+// was our scheduler's snapshot bound, not the engine.
+host.eval('order = {}')
+host.eval(`
+  ForkThread(function()
+    order[#order + 1] = 'parent'
+    ForkThread(function() order[#order + 1] = 'child' end)
+  end)
+  ForkThread(function() order[#order + 1] = 'queued' end)
+`)
+simTick(host)
+const order = String(host.eval('return table.concat(order, ",")'))
+check(order === 'parent,queued,child', `one tick runs parent, the already-queued thread, then the child (${order})`)
+
+console.log('\n== WaitTicks(0) does not wait (DoTaskTick continues on TASKSTATUS_0) ==')
+// Cfile:438938-438942: a yield of 0 stores `mWaitTicks = 0` and, for a thread
+// that is not parked, `continue`s the tick loop -- the coroutine is resumed
+// again in the same call.
+host.eval('zero = 0')
+host.eval('ForkThread(function() zero = 1; WaitTicks(0); zero = 2; WaitTicks(1); zero = 3 end)')
+simTick(host)
+check(num(host, 'zero') === 2, `after one tick the thread is past WaitTicks(0) but not WaitTicks(1) (zero = ${num(host, 'zero')})`)
+
+console.log('\n== SuspendCurrentThread / ResumeThread: the resumed thread goes to the tail ==')
+// Cfile:593112-593124: ResumeThread sets `mWaitTicks = 0` and appends the
+// parked thread to `mThreads` -- so it runs in the current frame if one is
+// running, after everything already queued.
+host.eval('wake = -1; resumedAt = -1')
+host.eval(`
+  SLEEPER = ForkThread(function() SuspendCurrentThread(); wake = GetGameTick() end)
+  ForkThread(function()
+    WaitTicks(3)
+    resumedAt = GetGameTick()
+    ResumeThread(SLEEPER)
+  end)
+`)
+for (let i = 0; i < 6; i++) simTick(host)
+check(num(host, 'resumedAt') > 0 && num(host, 'wake') === num(host, 'resumedAt'), `the sleeper wakes in the tick it was resumed in (${num(host, 'wake')} == ${num(host, 'resumedAt')})`)
+check(
+  host.eval(`return (pcall(function() ResumeThread(false) end))`) === false &&
+    host.eval(`return (pcall(function() SuspendCurrentThread() end))`) === false,
+  'ResumeThread(false) and SuspendCurrentThread() outside a thread both throw (Cfile:593034, 593106)',
+)
+
+console.log('\n== Invalid yields end the thread with the engine warning (CLuaTask::TaskTick) ==')
+const warnAt = warnings.length
+const aliveBefore = threadCount(host)
+host.eval('bad = 0')
+host.eval(`
+  ForkThread(function() while true do bad = bad + 1; coroutine.yield('soon') end end)
+  ForkThread(function() while true do bad = bad + 1; coroutine.yield(-3) end end)
+  ForkThread(function() while true do bad = bad + 1; coroutine.yield() end end)
+  ForkThread(function() error('boom') end)
+`)
+for (let i = 0; i < 3; i++) simTick(host)
+check(num(host, 'bad') === 3, `each thread ran exactly once (bad = ${num(host, 'bad')})`)
+const fresh = warnings.slice(warnAt)
+check(fresh.some((w) => w.startsWith('Invalid args to yield(); expected tick count')), 'a string yield: "Invalid args to yield(); expected tick count" (Cfile:592230)')
+check(fresh.some((w) => w.startsWith('Invalid args to yield(); tick count must be >=0')), 'a negative yield: "tick count must be >=0" (Cfile:592216)')
+check(fresh.some((w) => w.startsWith('Error running lua script: ') && w.includes('boom')), 'a Lua error: "Error running lua script: %s" (Cfile:592246)')
+check(fresh.length === 3, `a bare yield ends the thread WITHOUT a warning (LUA_TNONE -> -1, Cfile:592208); ${fresh.length} warnings in total`)
+check(threadCount(host) === aliveBefore, `all four threads are gone again (${threadCount(host)} alive, ${aliveBefore} before)`)
+
+console.log('\n== KillThread: nil is ignored, anything else that is not a thread throws ==')
+// Cfile:592571 skips LUA_TNIL; every other non-thread hits TypeError "thread".
+check(host.eval('return (pcall(KillThread, nil))') === true, 'KillThread(nil) is a no-op')
+check(host.eval('return (pcall(KillThread, 42))') === false, 'KillThread(42) throws')
+check(host.eval('return (pcall(KillThread, false))') === false, 'KillThread(false) throws too')
+
+console.log('\n== CurrentThread survives a nested __startThread ==')
+host.eval('same = false')
+host.eval(`
+  ForkThread(function()
+    local me = CurrentThread()
+    __startThread(function() end)
+    same = (CurrentThread() == me)
+  end)
+`)
+simTick(host)
+check(host.eval('return same') === true, 'the outer thread is current again after the inner first slice')
 
 console.log('\n== threadCount: tote Threads werden entfernt ==')
 const tc0 = threadCount(host)

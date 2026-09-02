@@ -153,6 +153,7 @@ for (const army of [1, 2]) {
     `die ACU von Armee ${army} liegt im Pool (Cfile:950549 vor OnCreate)`,
   )
 }
+const madeBefore = Number(q('return __platoonsMade[2] or 0'))
 for (let i = 0; i < 60; i++) beat(engine)
 // Und die KI raeumt ihn ab: `ExecuteAIThread` bildet aus den Pool-Einheiten
 // Platoons (aibrain.lua:874-880). Die menschliche Armee tut das nicht.
@@ -160,9 +161,25 @@ check(
   Number(q(`return #ArmyBrains[1]:GetPlatoonUniquelyNamed('ArmyPool'):GetPlatoonUnits()`)) === 1,
   'nach 60 Beats liegt die ACU der MENSCHLICHEN Armee immer noch im Pool',
 )
+// The AI's engineer manager forms a platoon for the ACU at tick 10
+// (EngineerManager:AssignEngineerTask, engineermanager.lua:584-645) and forks
+// its AI threads. A forked thread runs in the SAME frame (CTaskStage::DoFrame,
+// Cfile:439351-439395), so EngineerBuildAI runs at once -- and, because the
+// build-placement bindings (FindPlaceToBuild, CanBuildStructureAt) are still
+// no-ops, it finds nothing to build and disbands the platoon in the tick it
+// was formed (ProcessBuildCommand, platoon.lua:2932). The original wrote a
+// branch for exactly that ordering: platoon.lua:210 "Platoon disbanded same
+// tick as created" -> AssignTimeout + DelayAssign, a retry every second. So
+// after 60 beats the ACU is back in the pool and the platoon LIST is short,
+// but the platoon COUNT shows the forming: six attempts, ticks 10 to 60.
+// (With forks one tick late -- our old scheduler -- the other branch ran,
+// TaskFinished, and re-formed the platoon every single tick.)
+const made = Number(q('return __platoonsMade[2] or 0')) - madeBefore
+check(made >= 2, `the AI formed a platoon for its ACU more than once in 60 beats (${made} times)`)
 check(
-  Number(q(`return #ArmyBrains[2]:GetPlatoonsList()`)) > 1,
-  `die KI-Armee hat sich Platoons gebildet (${String(q(`return #ArmyBrains[2]:GetPlatoonsList()`))})`,
+  Number(q(`return #ArmyBrains[2]:GetPlatoonUniquelyNamed('ArmyPool'):GetPlatoonUnits()`)) === 1 &&
+    Number(q(`return #ArmyBrains[2]:GetPlatoonsList()`)) === 1,
+  'and each one was disbanded in the tick it was formed -- the ACU is back in the pool (platoon.lua:210)',
 )
 
 console.log('\n== AssignUnitsToPlatoon verschiebt, es kopiert nicht ==')
@@ -197,22 +214,21 @@ check(
 check(Number(q(`return #ArmyBrains[1]:GetPlatoonsList()`)) === 1, 'die Liste ist wieder bei einem')
 
 console.log('\n== Was die KI-Armee jetzt noch bremst ==')
-// Der naechste gemessene Halt, damit er nicht in Vergessenheit geraet:
-// `GetHighestThreatPosition` ist ein No-op, also ist `insertTable.Strength` nil
-// und `GetAllianceEnemy` vergleicht nil (aibrain.lua:3466 -> :3470).
-// Eine RATSCHE: die zwei gemessenen Haltepunkte stehen namentlich da, alles
-// andere ist ein neuer Fund und macht die Suite rot.
+// The measured stops, so they are not forgotten. A RATCHET: the known stops
+// stand here by name, anything else is a new finding and turns the suite red.
 const BEKANNT = [
   {
     muster: /scenarioplatoonai\.lua:66/,
-    was: 'platoon.BuilderHandle:SetPriority — es gibt noch keine BuilderManagers (aibrain.lua:1137)',
+    was: 'BuildOnce runs after EngineerBuildAI disbanded the platoon in the same tick (no build queue: '
+      + 'FindPlaceToBuild/CanBuildStructureAt are no-ops); BuilderHandle is nil, and LuaPlus turns '
+      + 'nil:SetPriority() into "attempt to call a nil value (method SetPriority)"',
   },
   {
     muster: /aiarchetype-managerloader\.lua:51/,
-    was: 'aiBrain:HasBuilderList — dieselbe Luecke von der anderen Seite (der Builder-Manager)',
+    was: 'aiBrain.BuilderManagers.MAIN.FactoryManager:HasBuilderList -- the builder managers',
   },
 ]
-const threadFehler = warnungen.filter((w) => /ForkThread-Fehler/.test(w))
+const threadFehler = warnungen.filter((w) => /Error running lua script:/.test(w))
 // Die Ratsche ist die RICHTUNG, nicht die Anwesenheit: ein bekannter Halt DARF
 // verschwinden (dann ist er behoben), aber es darf keiner dazukommen. Welche
 // gefeuert haben, steht im Protokoll — verschwundene fallen dort auf.

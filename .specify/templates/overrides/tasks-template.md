@@ -147,7 +147,7 @@ are green.
 - A failing suite after an honesty correction is a **finding**, not a regression —
   record it, do not paper over it.
 - Debugging Lua threads: errors are only logged — search WARN lines for
-  `ForkThread-Fehler:` first.
+  `Error running lua script:` first.
 - All repository content is English (code, comments, checks, docs, commits).
 - Avoid: vague tasks, tasks without a check, tasks without evidence, two tasks
   editing one file in parallel.

@@ -418,7 +418,16 @@ World position (`__readAllEmittersJson`, globals.lua; owner+bones above
   when `<= 0`. So `WaitTicks(1)` and `WaitTicks(2)` both resume after 1 tick, and
   `WaitTicks(N)` after N-1. Storing the raw count resumed every WaitTicks(N>=2) /
   WaitSeconds **one tick late** — the mistake baked into an early scheduler test.
-  Implemented via `waitFromYield` ([threads.lua](../../src/engine-lua/threads.lua)).
+  Implemented in `settle` ([threads.lua](../../src/engine-lua/threads.lua)).
+- **A thread forked during a frame runs in that frame.** `CTaskStage::DoFrame`
+  (Cfile:439351-439395) drains `mThreads` until it is empty, and the
+  constructor appends the new thread to its tail with `mWaitTicks = 0`
+  (Cfile:438783-438808). The child therefore runs after every thread that was
+  already queued, in the same tick -- not the next one. `ResumeThread` appends
+  a parked thread the same way (Cfile:593112-593124). And `WaitTicks(0)` does
+  not wait: `TASKSTATUS_0` re-ticks an un-parked thread at once
+  (Cfile:438938-438942). The old scheduler had a snapshot bound and a check
+  that asserted the wrong order; `verify-simthreads.ts` now pins the engine's.
 
 ## Shadows (H7 groundwork — mesh.fx, read and verified, not yet built)
 
