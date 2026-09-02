@@ -15,6 +15,7 @@ import { spawnLuaUnit } from '../src/lua/unitFactory'
 import { installUiEngine } from '../src/lua/uiEngine'
 import { findFiles } from '../src/vfs/glob'
 import { GameFiles } from './gameFiles'
+import { FLAT_TEST_MAP_SIZE } from '../src/sim/terrain'
 
 let failures = 0
 const check = (ok: boolean, label: string): void => {
@@ -28,7 +29,7 @@ const game = await GameFiles.open()
 console.log('\n== readRow serializes the dead flag ==')
 const simHost = await LuaHost.create(game.luaFiles, () => {})
 const engine = installEngine(simHost)
-setTerrainSource(simHost, () => 20)
+setTerrainSource(simHost, () => 20, FLAT_TEST_MAP_SIZE)
 await game.giveUnit(simHost, 'uel0001')
 const u = spawnLuaUnit(simHost, 'uel0001', { x: 100, y: 20, z: 100 }, 1)
 for (let i = 0; i < 8; i++) beat(engine)

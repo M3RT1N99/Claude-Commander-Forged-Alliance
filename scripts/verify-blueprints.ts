@@ -11,7 +11,7 @@ import type { RandomAccessFile } from '../src/vfs/randomAccess'
 import { LuaHost } from '../src/lua/host'
 import { installEngine } from '../src/lua/engine'
 import { setTerrainSource } from '../src/lua/engineGlobals'
-import { FLAT_TEST_TERRAIN } from '../src/sim/terrain'
+import { FLAT_TEST_TERRAIN, FLAT_TEST_MAP_SIZE } from '../src/sim/terrain'
 import { bootArchives } from './gameFiles'
 
 class NodeFile implements RandomAccessFile {
@@ -86,7 +86,7 @@ host.loadGlobal('/lua/system/utils.lua')
 // Die ECHTE Pipeline — kein Nachbau im Test (sonst fehlt z. B. Sound{}).
 installEngine(host)
 // Flaches Testgelaende — EXPLIZIT, weil die Engine ohne Karte knallt (kein stiller 0-Wert).
-setTerrainSource(host, FLAT_TEST_TERRAIN)
+setTerrainSource(host, FLAT_TEST_TERRAIN, FLAT_TEST_MAP_SIZE)
 
 // Discovery-Trap: die Blueprint-DSL nutzt Engine-Konstruktoren (Sound{},
 // Vector{}, ...). Wir entdecken sie, statt zu raten.

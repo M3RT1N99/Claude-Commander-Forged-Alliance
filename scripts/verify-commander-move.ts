@@ -31,6 +31,7 @@ import { SANDBOX_SESSION } from '../src/sim/session'
 import { findFiles } from '../src/vfs/glob'
 import { parseDds } from '../src/formats/dds'
 import { FontBook } from '../src/ui/fonts'
+import { FLAT_TEST_MAP_SIZE } from '../src/sim/terrain'
 
 let failures = 0
 const check = (ok: boolean, label: string): void => {
@@ -49,7 +50,7 @@ const bpPaths = [...allPaths].filter((p) => /^units\/[^/]+\/[^/]+_unit\.bp$/.tes
 console.log('\n== Sim: spawn the ACU (uel0001, army 1) ==')
 const simHost = await LuaHost.create(files, () => {})
 const engine = installEngine(simHost)
-setTerrainSource(simHost, () => 20)
+setTerrainSource(simHost, () => 20, FLAT_TEST_MAP_SIZE)
 await game.giveUnit(simHost, 'uel0001')
 const acu = spawnLuaUnit(simHost, 'uel0001', { x: 100, y: 20, z: 100 }, 1)
 check(acu > 0, `ACU spawned (id ${acu})`)

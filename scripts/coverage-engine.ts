@@ -24,7 +24,8 @@ import { installEngine } from '../src/lua/engine'
 import { setTerrainSource } from '../src/lua/engineGlobals'
 import { installUiEngine, setupUi, createRootFrame } from '../src/lua/uiEngine'
 import { findFiles } from '../src/vfs/glob'
-import { GameFiles } from './gameFiles'
+import { GameFiles } from './gameFiles'
+import { FLAT_TEST_MAP_SIZE } from '../src/sim/terrain'
 
 const zeigeAlle = process.argv.includes('--alle')
 
@@ -82,7 +83,7 @@ const game = await GameFiles.open()
 
 const sim = await LuaHost.create(game.luaFiles, () => {})
 installEngine(sim)
-setTerrainSource(sim, () => 20)
+setTerrainSource(sim, () => 20, FLAT_TEST_MAP_SIZE)
 
 const ui = await LuaHost.create(game.luaFiles, () => {})
 installUiEngine(ui, {

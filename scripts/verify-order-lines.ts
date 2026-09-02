@@ -19,6 +19,7 @@ import { installEngine, beat } from '../src/lua/engine'
 import { setTerrainSource } from '../src/lua/engineGlobals'
 import { spawnLuaUnit } from '../src/lua/unitFactory'
 import { GameFiles } from './gameFiles'
+import { FLAT_TEST_MAP_SIZE } from '../src/sim/terrain'
 
 let failures = 0
 const check = (ok: boolean, label: string): void => {
@@ -33,7 +34,7 @@ const RENDERER_TYPES = new Set(['Move', 'Attack', 'Repair', 'BuildMobile', 'Patr
 const game = await GameFiles.open()
 const host = await LuaHost.create(game.luaFiles, () => {})
 const engine = installEngine(host)
-setTerrainSource(host, () => 20)
+setTerrainSource(host, () => 20, FLAT_TEST_MAP_SIZE)
 game.loadProps(host)
 for (const id of ['uel0001', 'uel0201', 'uel0105']) await game.giveUnit(host, id)
 

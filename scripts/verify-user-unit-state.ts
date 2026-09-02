@@ -14,7 +14,8 @@ import { installEngine } from '../src/lua/engine'
 import { setTerrainSource } from '../src/lua/engineGlobals'
 import { installUiEngine } from '../src/lua/uiEngine'
 import { findFiles } from '../src/vfs/glob'
-import { GameFiles } from './gameFiles'
+import { GameFiles } from './gameFiles'
+import { FLAT_TEST_MAP_SIZE } from '../src/sim/terrain'
 
 let failures = 0
 const check = (ok: boolean, label: string): void => {
@@ -27,7 +28,7 @@ const game = await GameFiles.open()
 console.log('\n== CreateUnit2 layer and heading ==')
 const sim = await LuaHost.create(game.luaFiles, () => {})
 installEngine(sim)
-setTerrainSource(sim, () => 20)
+setTerrainSource(sim, () => 20, FLAT_TEST_MAP_SIZE)
 await game.giveUnit(sim, 'uea0101')
 await game.giveUnit(sim, 'ues0103')
 await game.giveUnit(sim, 'ues0203')

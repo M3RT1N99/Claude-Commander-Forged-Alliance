@@ -17,7 +17,8 @@ import { installEngine, beat } from '../src/lua/engine'
 import { installMoho } from '../src/lua/moho'
 import { setTerrainSource } from '../src/lua/engineGlobals'
 import { spawnLuaUnit } from '../src/lua/unitFactory'
-import { GameFiles } from './gameFiles'
+import { GameFiles } from './gameFiles'
+import { FLAT_TEST_MAP_SIZE } from '../src/sim/terrain'
 
 let failures = 0
 const check = (ok: boolean, label: string): void => {
@@ -35,7 +36,7 @@ const host = await LuaHost.create(game.luaFiles, (level, message) => {
   if (level === 'WARN') warnings.push(message)
 })
 const engine = installEngine(host)
-setTerrainSource(host, () => 20)
+setTerrainSource(host, () => 20, FLAT_TEST_MAP_SIZE)
 
 console.log('\n== UnitWeapon target predicate and ground CanFire ==')
 host.eval(`

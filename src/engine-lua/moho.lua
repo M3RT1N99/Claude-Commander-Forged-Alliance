@@ -1498,6 +1498,32 @@ local aibrain = withNoops(AIBRAIN_NAMES, {
   AssignUnitsToPlatoon = function(self, ziel, units, squad, formation)
     return __assignUnitsToPlatoon(self.__army, ziel, units, squad, formation)
   end,
+  --- Die Bedrohungskarte. Alle fuenf Bindungen arbeiten auf der Karte der
+  --- RUFENDEN Armee (`mArmy->GetIGrid`); der optionale `armyIndex` waehlt nur,
+  --- welche Spur der Zelle gelesen wird (Cfile:740447-740449). Die Rumpfe
+  --- stehen in `influence.lua`.
+  ---
+  --- Hilfetexte der Engine, die die Argumentfolge festlegen (Cfile:740225,
+  --- 740343, 740610):
+  ---   AssignThreatAtPosition(position, threat, [decay], [threattype])
+  ---   GetThreatAtPosition(position, ring, restriction, [threatType], [armyIndex])
+  ---   GetHighestThreatPosition(ring, restriction, [threatType], [armyIndex])
+  AssignThreatAtPosition = function(self, pos, threat, decay, typ)
+    __assignThreatAtPosition(self.__army, pos, threat, decay, typ)
+  end,
+  GetThreatAtPosition = function(self, pos, ring, restriction, typ, armyIndex)
+    return __threatAtPosition(self.__army, pos, ring, restriction, typ, armyIndex)
+  end,
+  --- Zwei Rueckgabewerte: die Position als Vector-Tabelle und die Bedrohung.
+  GetHighestThreatPosition = function(self, ring, restriction, typ, armyIndex)
+    return __highestThreatPosition(self.__army, ring, restriction, typ, armyIndex)
+  end,
+  GetThreatsAroundPosition = function(self, pos, ring, restriction, typ, armyIndex)
+    return __threatsAroundPosition(self.__army, pos, ring, restriction, typ, armyIndex)
+  end,
+  GetThreatBetweenPositions = function(self, pos1, pos2, restriction, typ)
+    return __threatBetweenPositions(self.__army, pos1, pos2, restriction, typ)
+  end,
   -- `brain:GetArmyStartPos()` gibt ZWEI Zahlen zurueck, x und z
   -- (cfunc_CAiBrainGetArmyStartPosL, Cfile:735971-735976: zweimal
   -- `lua_pushnumber`, `return 2`). Die Quelle ist der 2D-Vektor, den
@@ -1544,13 +1570,6 @@ local aibrain = withNoops(AIBRAIN_NAMES, {
     return s or { Value = default }
   end,
 
-  -- Die BEDROHUNGSKARTE der Engine (ein Raster, das die KI liest). Unsere Sim
-  -- fuehrt keines — GetThreatAtPosition liefert deshalb 0: „hier ist nichts
-  -- eingetragen". Das ist keine erfundene Zahl, sondern der Zustand einer leeren
-  -- Karte, und es ist eine ZAHL: defaultunits.lua:1223 rechnet ungeprueft
-  -- `threat / 2` und riss ohne sie den ganzen Todes-Pfad mit (kein Wrack).
-  GetThreatAtPosition = function(self, pos, rings, enemy, threatType) return 0 end,
-  AssignThreatAtPosition = function(self, pos, threat, decay, threatType) end,
 })
 
 -- ---------------------------------------------------------------------

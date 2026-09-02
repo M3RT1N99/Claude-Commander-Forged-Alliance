@@ -12,7 +12,7 @@ import { GameFiles } from './gameFiles'
 import { LuaHost } from '../src/lua/host'
 import { installEngine } from '../src/lua/engine'
 import { setTerrainSource } from '../src/lua/engineGlobals'
-import { FLAT_TEST_TERRAIN } from '../src/sim/terrain'
+import { FLAT_TEST_TERRAIN, FLAT_TEST_MAP_SIZE } from '../src/sim/terrain'
 import {
   blueprintPlacement,
   canBuildStructureAt,
@@ -169,7 +169,7 @@ console.log('\n== TS placement vs. the real LoadBlueprints() pipeline (all struc
 {
   const host = await LuaHost.create(game.luaFiles, () => {})
   installEngine(host)
-  setTerrainSource(host, FLAT_TEST_TERRAIN)
+  setTerrainSource(host, FLAT_TEST_TERRAIN, FLAT_TEST_MAP_SIZE)
 
   const bpPaths = [...game.luaFiles.keys()].filter(
     (p) => p.startsWith('units/') && p.endsWith('_unit.bp'),

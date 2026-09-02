@@ -23,6 +23,7 @@ import { installEngine, beat } from '../src/lua/engine'
 import { setTerrainSource } from '../src/lua/engineGlobals'
 import { spawnLuaUnit } from '../src/lua/unitFactory'
 import { GameFiles } from './gameFiles'
+import { FLAT_TEST_MAP_SIZE } from '../src/sim/terrain'
 
 let failures = 0
 const check = (ok: boolean, label: string): void => {
@@ -48,7 +49,7 @@ async function build(
     if (level === 'WARN') warn.push(msg)
   })
   const engine = installEngine(host)
-  setTerrainSource(host, () => 20)
+  setTerrainSource(host, () => 20, FLAT_TEST_MAP_SIZE)
   // The build effects ARE projectile blueprints (/effects/entities/**) — the
   // browser loads them with LoadBlueprints(), here they come from the archive.
   game.loadProjectiles(host)
@@ -140,7 +141,7 @@ console.log('\n== The build bots are guarded onto the site (IssueGuard, Cfile:10
     if (level === 'WARN') warn.push(msg)
   })
   const engine = installEngine(host)
-  setTerrainSource(host, () => 20)
+  setTerrainSource(host, () => 20, FLAT_TEST_MAP_SIZE)
   game.loadProjectiles(host)
   for (const id of ['url0001', 'urb1101', 'ura0001']) await game.giveUnit(host, id)
   const acu = spawnLuaUnit(host, 'url0001', { x: 100, y: 20, z: 100 }, 1)

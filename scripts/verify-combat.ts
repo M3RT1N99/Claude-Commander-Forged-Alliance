@@ -26,6 +26,7 @@ import { installEngine, beat } from '../src/lua/engine'
 import { setTerrainSource } from '../src/lua/engineGlobals'
 import { spawnLuaUnit } from '../src/lua/unitFactory'
 import { GameFiles } from './gameFiles'
+import { FLAT_TEST_MAP_SIZE } from '../src/sim/terrain'
 
 /**
  * One entry of the sim->user audio queue: type, bank, cue and loop handle —
@@ -45,7 +46,7 @@ const host = await LuaHost.create(game.luaFiles, (level, msg) => {
   if (level === 'WARN') warnings.push(msg)
 })
 const engine = installEngine(host)
-setTerrainSource(host, () => 20)
+setTerrainSource(host, () => 20, FLAT_TEST_MAP_SIZE)
 
 console.log('\n== Blueprints: Projektile und Wracks ==')
 const nProj = game.loadProjectiles(host)

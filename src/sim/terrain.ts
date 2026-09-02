@@ -46,3 +46,18 @@ export class Heightfield {
  * muss immer eine echte Karte gesetzt sein, sonst knallt GetTerrainHeight.
  */
 export const FLAT_TEST_TERRAIN = (): number => 0
+
+/**
+ * Die MASSE des flachen Testgelaendes — ebenfalls nur fuer Suiten.
+ *
+ * Eine Sim ohne Kartenmasse ist keine Sim: `GetMapSize()` wirft dann, und daran
+ * haengt mehr, als es aussieht. Die Bedrohungskarte etwa (`CInfluenceMap`)
+ * leitet ihre Zellgroesse daraus ab und entsteht in der Armee-Erzeugung
+ * (Cfile:1017315-1017333); `MobileUnit.OnKilled` schreibt bei JEDEM Tod hinein
+ * (defaultunits.lua:1229-1235). Eine Suite, die nur eine Hoehe setzt, laesst
+ * den Todes-Pfad also auflaufen.
+ *
+ * 256 ist die kleinste Groesse, die das Spiel ausliefert — keine erfundene
+ * Zahl, sondern die untere echte Kante (und der 8x8-Fall der IMAP-Formel).
+ */
+export const FLAT_TEST_MAP_SIZE = { width: 256, height: 256 }

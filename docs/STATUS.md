@@ -813,6 +813,88 @@ bleiben **zwei** benannte Haltepunkte, beide als Ratsche in
 keine BuilderManagers, aibrain.lua:1137). Ein dritter Fehler waere ein neuer
 Fund und macht die Suite rot.
 
+### Die Bedrohungskarte — der letzte gemessene Halt der KI
+
+Sieben Recherchefragen, je eine Antwort und eine adversariale Gegenprüfung
+(14 Agenten, 208 bestätigte Befunde, 13 widerlegte). Was daraus in den Code kam:
+
+**Die Geometrie steht einmal fest, aus den Kartenmaßen** (Cfile:1017315-1017328):
+`gridSize = max(32, max(sizeX, sizeZ) / 16)`, ganzzahlig, dann
+`mWidth = sizeX / gridSize`. Für jede FA-Kartengröße ab 512 ergibt das ein
+**16×16**-Gitter, für 256 ein 8×8 — die Karte ist grob, und die Original-KI
+weiß das: sie übergibt `ring = 16` mit der Bedeutung „die ganze Karte"
+(aibrain.lua:3660). Jede Armee hat ihre eigene Karte (Cfile:1017321-1017333).
+
+**Drei Dinge daran waren nicht zu erraten:**
+
+1. **Schreiben und Lesen benutzen nicht dasselbe Feld.** `AssignThreatAtPosition`
+   teilt sich für `Overall` den `switch`-Fall mit `Unknown` und schreibt nach
+   `unknownInfluence` (Cfile:1035574-1035581) — `GetThreat` liest für `Overall`
+   aber `overallInfluence` (Cfile:1034567). `overallInfluence` wird von
+   `AssignThreatAtPosition` also **nie** beschrieben; es entsteht allein in
+   `CInfluenceMap::Update` aus den Aufklärungs-Blips. Praktische Folge,
+   gemessen: `AddInitialEnemyThreat` übergibt keinen Typ, landet im
+   `Overall`-Fall — und für eine Abfrage mit `'Overall'` oder `'Structures'` ist
+   diese Bedrohung unsichtbar. Nur `'Unknown'` findet sie. Wer das „geradezieht",
+   baut eine andere KI als die von FA.
+   `OverallNotAssigned` hat gar keinen Schreibfall: der Aufruf tut nichts.
+2. **Der `ring` zählt ZELLEN, nicht Welteinheiten** (Cfile:1035045-1035081), und
+   die Summe ist ungewichtet über das einschließende Quadrat.
+3. **`armyIndex` ist 1-basiert und `-1` ist ein Fehler.**
+   `aiattackutilities.lua:245` übergibt `-1` in der Absicht „alle Armeen"; die
+   Engine rechnet `-1 - 1 = -2` und wirft (Cfile:740435-740445). Der Pfad ist im
+   Original tot — und muss bei uns genauso tot sein, sonst rechnet unsere KI mit
+   Zahlen, die es im Spiel nicht gibt.
+
+`GetHighestThreatPosition` gibt **zwei** Werte zurück: eine Vector-Tabelle
+`{x, 0, z}` — die Y-Komponente ist immer exakt 0, die Engine fragt hier kein
+Gelände ab — und die Bedrohung (Cfile:740710-740718). Der Zerfall läuft aus
+`CArmyImpl::OnTick`, gestaffelt: jede Armee, wenn `mCurTick % 30 == armyIndex`
+(Cfile:1018010-1018011).
+
+**Zwei stille Zweigschalter kamen dabei ans Licht**, beide vom selben Typ wie
+die, vor denen `__defaultScenarioOptions` seit jeher warnt:
+
+* `ScenarioInfo.Options.TeamSpawn` fehlte. Ohne `'fixed'` tut
+  `AddInitialEnemyThreat` **gar nichts** (aibrain.lua:3610) — jede KI-Armee
+  startete also mit leerer Bedrohungskarte. Der Wert steht im Lobby-Satz
+  (autolobby.lua:28), und ein Skirmish kommt im Original aus der Lobby.
+* `ArmySetup` hatte kein `Team`-Feld. `aibrain.lua:3618` prüft
+  `army.Team ~= myArmy.Team or army.Team == 1`, und mit `nil` ist beides falsch.
+  Der Lobby-Standard ist `Team = 1` (lobbycomm.lua:29-31).
+
+**Und eine Reihenfolge stimmte nicht.** Die Engine lädt die Karte, **bevor** sie
+die Armeen erzeugt — die Bedrohungskarte entsteht *in* der Armee-Erzeugung und
+liest dabei das Heightfield. Bei uns kam `setTerrainSource` erst nach
+`installEngine`. `installEngine` nimmt das Gelände jetzt als vierten Parameter
+entgegen; ohne ihn bleibt der bisherige Weg gültig, solange keine KI-Armee
+mitfährt. Dazu hat das flache Testgelände jetzt benannte **Maße**
+(`FLAT_TEST_MAP_SIZE`, 256×256 — die kleinste Größe, die das Spiel ausliefert):
+eine Sim ohne Kartenmaß ist keine Sim, und `MobileUnit.OnKilled` schreibt bei
+JEDEM Tod in die Bedrohungskarte (defaultunits.lua:1229-1235).
+
+**Ein Fehler im Original, den man beim Nachbauen findet:**
+`GetAllianceEnemy` (aibrain.lua:3423) weist beide Rückgabewerte von
+`GetHighestThreatPosition` einer **einzigen** Variablen zu, `highStrength`
+bekommt also die Positionstabelle — und Zeile 3432 vergleicht sie mit einer
+Zahl. In unserem VM wirft das nicht, die Funktion findet nur nie einen
+Verbündeten-Gegner (gemessen). Das ist ein Defekt der Spiel-Lua, keiner der
+Engine, und er wird nicht „repariert".
+
+**Was fehlt:** `CInfluenceMap::Update` summiert je Zelle auch die
+Aufklärungs-Blips neu auf, gewichtet mit den vier Blueprint-Feldern
+`Defense.{Air,Surface,Sub,Economy}ThreatLevel` (Cfile:1035318-1035375). Dafür
+braucht es die ReconDB, die es bei uns nicht gibt. Die Karte enthält also genau
+das, was die Lua hineinschreibt — nichts, was aus gesichteten Einheiten
+entstünde.
+
+**Stand der KI-Armee:** `aibrain.lua:3470` ist erledigt. Es bleiben zwei
+Haltepunkte, beide dieselbe Lücke von zwei Seiten — es gibt noch keine
+BuilderManagers (aibrain.lua:1137): `scenarioplatoonai.lua:66`
+(`platoon.BuilderHandle:SetPriority`) und `aiarchetype-managerloader.lua:51`
+(`aiBrain:HasBuilderList`). `verify-ai-platoon.ts` führt die Ratsche darüber:
+ein bekannter Halt **darf** verschwinden, aber es darf keiner dazukommen.
+
 ### Die Boot-Nutzlast des Sim-Workers
 
 Gemessen: die Boot-Nutzlast des Sim-Workers ist heute **4 281

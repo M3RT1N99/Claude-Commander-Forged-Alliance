@@ -36,7 +36,8 @@ import { spawnLuaUnit } from '../src/lua/unitFactory'
 import { findFiles } from '../src/vfs/glob'
 import { parseDds } from '../src/formats/dds'
 import { FontBook } from '../src/ui/fonts'
-import { GameFiles, GAME_DIR } from './gameFiles'
+import { GameFiles, GAME_DIR } from './gameFiles'
+import { FLAT_TEST_MAP_SIZE } from '../src/sim/terrain'
 
 let failures = 0
 const check = (ok: boolean, label: string): void => {
@@ -112,7 +113,7 @@ check(snapshot.length > 50, `Der JSON-Snapshot trägt ${snapshot.length} Control
 console.log('\n== Sim-VM: 1000 Beats (der Worker zieht den Unit-Zustand) ==')
 const sim = await LuaHost.create(game.luaFiles, () => {})
 const engine = installEngine(sim)
-setTerrainSource(sim, () => 20)
+setTerrainSource(sim, () => 20, FLAT_TEST_MAP_SIZE)
 await game.giveUnit(sim, 'uel0001')
 spawnLuaUnit(sim, 'uel0001', { x: 100, y: 20, z: 100 }, 1)
 

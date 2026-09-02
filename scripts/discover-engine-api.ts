@@ -14,7 +14,7 @@ import type { RandomAccessFile } from '../src/vfs/randomAccess'
 import { LuaHost } from '../src/lua/host'
 import { installEngine, beat } from '../src/lua/engine'
 import { setTerrainSource } from '../src/lua/engineGlobals'
-import { FLAT_TEST_TERRAIN } from '../src/sim/terrain'
+import { FLAT_TEST_TERRAIN, FLAT_TEST_MAP_SIZE } from '../src/sim/terrain'
 import { loadUnitBlueprint, spawnLuaUnit } from '../src/lua/unitFactory'
 
 class NodeFile implements RandomAccessFile {
@@ -67,7 +67,7 @@ const host = await LuaHost.create(files, (level, msg) => {
 })
 const engine = installEngine(host)
 // Flaches Testgelaende — EXPLIZIT, weil die Engine ohne Karte knallt.
-setTerrainSource(host, FLAT_TEST_TERRAIN)
+setTerrainSource(host, FLAT_TEST_TERRAIN, FLAT_TEST_MAP_SIZE)
 
 const missing = new Set<string>()
 host.installStubTrap((name) => missing.add(name))

@@ -48,10 +48,28 @@ const session = {
 }
 
 console.log('== Eine KI-Armee kommt durch den Sitzungsstart ==')
+// Das Gelaende geht MIT in den Boot: die Bedrohungskarte entsteht in der
+// Armee-Erzeugung und liest dabei das Heightfield (Cfile:1017321-1017333) —
+// `AddInitialEnemyThreat` laeuft also, bevor `setTerrainSource` frueher an der
+// Reihe war.
+const scmap = parseScmap(new Uint8Array(readFileSync(`${GAME_DIR}/maps/${MAP}/${MAP}.scmap`)))
+const stride = scmap.width + 1
+const gelaende = {
+  heightAt: (x: number, z: number): number => {
+    const xi = Math.max(0, Math.min(scmap.width, Math.round(x)))
+    const zi = Math.max(0, Math.min(scmap.height, Math.round(z)))
+    return (scmap.heightmap[zi * stride + xi] ?? 0) * scmap.heightScale
+  },
+  size: {
+    width: scmap.width,
+    height: scmap.height,
+    waterElevation: scmap.water.hasWater ? scmap.water.elevation : undefined,
+  },
+}
 let bootFehler = ''
 let engine = null
 try {
-  engine = installEngine(host, undefined, session)
+  engine = installEngine(host, undefined, session, gelaende)
 } catch (e) {
   bootFehler = (e as Error).message
 }
@@ -117,21 +135,6 @@ check(
 )
 
 console.log('\n== Die Karte setzt die Einheiten, und sie landen im Pool ==')
-const scmap = parseScmap(new Uint8Array(readFileSync(`${GAME_DIR}/maps/${MAP}/${MAP}.scmap`)))
-const stride = scmap.width + 1
-setTerrainSource(
-  host,
-  (x, z) => {
-    const xi = Math.max(0, Math.min(scmap.width, Math.round(x)))
-    const zi = Math.max(0, Math.min(scmap.height, Math.round(z)))
-    return (scmap.heightmap[zi * stride + xi] ?? 0) * scmap.heightScale
-  },
-  {
-    width: scmap.width,
-    height: scmap.height,
-    waterElevation: scmap.water.hasWater ? scmap.water.elevation : undefined,
-  },
-)
 for (const id of host.pull<string[]>('__sessionInitialUnitsJson()')) await game.giveUnit(host, id)
 game.loadProps(host)
 game.loadProjectiles(host)
@@ -201,21 +204,27 @@ console.log('\n== Was die KI-Armee jetzt noch bremst ==')
 // andere ist ein neuer Fund und macht die Suite rot.
 const BEKANNT = [
   {
-    muster: /aibrain\.lua:3470/,
-    was: 'GetHighestThreatPosition ist ein No-op, also vergleicht GetAllianceEnemy nil (aibrain.lua:3466 -> :3470)',
-  },
-  {
     muster: /scenarioplatoonai\.lua:66/,
     was: 'platoon.BuilderHandle:SetPriority — es gibt noch keine BuilderManagers (aibrain.lua:1137)',
   },
+  {
+    muster: /aiarchetype-managerloader\.lua:51/,
+    was: 'aiBrain:HasBuilderList — dieselbe Luecke von der anderen Seite (der Builder-Manager)',
+  },
 ]
 const threadFehler = warnungen.filter((w) => /ForkThread-Fehler/.test(w))
+// Die Ratsche ist die RICHTUNG, nicht die Anwesenheit: ein bekannter Halt DARF
+// verschwinden (dann ist er behoben), aber es darf keiner dazukommen. Welche
+// gefeuert haben, steht im Protokoll — verschwundene fallen dort auf.
 for (const b of BEKANNT) {
-  const treffer = threadFehler.filter((w) => b.muster.test(w))
-  check(treffer.length > 0, `bekannter Halt: ${b.was} (${treffer.length}x)`)
+  console.log(`       ${threadFehler.filter((w) => b.muster.test(w)).length}x  ${b.was}`)
 }
 const neue = threadFehler.filter((w) => !BEKANNT.some((b) => b.muster.test(w)))
 check(neue.length === 0, `kein NEUER Thread-Fehler${neue[0] ? `: ${neue[0].slice(0, 180)}` : ''}`)
+check(
+  threadFehler.length > 0,
+  `die KI laeuft weit genug, um ueberhaupt anzustossen (${threadFehler.length} bekannte Fehler)`,
+)
 
 host.close()
 await game.close()

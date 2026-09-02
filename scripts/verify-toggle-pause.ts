@@ -19,7 +19,8 @@ import { LuaHost } from '../src/lua/host'
 import { installEngine, beat } from '../src/lua/engine'
 import { setTerrainSource } from '../src/lua/engineGlobals'
 import { spawnLuaUnit, spawnBuildSite } from '../src/lua/unitFactory'
-import { GameFiles } from './gameFiles'
+import { GameFiles } from './gameFiles'
+import { FLAT_TEST_MAP_SIZE } from '../src/sim/terrain'
 
 let failures = 0
 const check = (ok: boolean, label: string): void => {
@@ -30,7 +31,7 @@ const check = (ok: boolean, label: string): void => {
 const game = await GameFiles.open()
 const simHost = await LuaHost.create(game.luaFiles, () => {})
 const engine = installEngine(simHost)
-setTerrainSource(simHost, () => 20) // flat test ground at height 20
+setTerrainSource(simHost, () => 20, FLAT_TEST_MAP_SIZE) // flat test ground at height 20
 // `ueb4202` ist der Schildgenerator — die einzige der drei mit einer ToggleCap
 // im Blueprint (`General.ToggleCaps.RULEUTC_ShieldToggle`).
 for (const id of ['uel0001', 'ueb0101', 'ueb4202']) await game.giveUnit(simHost, id)

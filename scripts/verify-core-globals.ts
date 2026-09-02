@@ -11,7 +11,8 @@ import { installEngine } from '../src/lua/engine'
 import { setTerrainSource } from '../src/lua/engineGlobals'
 import { installUiEngine } from '../src/lua/uiEngine'
 import { findFiles } from '../src/vfs/glob'
-import { GameFiles } from './gameFiles'
+import { GameFiles } from './gameFiles'
+import { FLAT_TEST_MAP_SIZE } from '../src/sim/terrain'
 
 let failures = 0
 const check = (ok: boolean, label: string): void => {
@@ -24,7 +25,7 @@ const game = await GameFiles.open()
 // --- The SIM VM ---
 const sim = await LuaHost.create(game.luaFiles, () => {})
 installEngine(sim)
-setTerrainSource(sim, () => 20)
+setTerrainSource(sim, () => 20, FLAT_TEST_MAP_SIZE)
 
 console.log('\n== Path helpers (Moho::FILE_*) ==')
 // Dirname (Cfile:444657-444750): a path with NO dot after the last slash is

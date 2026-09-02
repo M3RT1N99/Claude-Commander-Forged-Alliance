@@ -11,7 +11,7 @@ import type { RandomAccessFile } from '../src/vfs/randomAccess'
 import { LuaHost } from '../src/lua/host'
 import { installEngine } from '../src/lua/engine'
 import { setTerrainSource } from '../src/lua/engineGlobals'
-import { FLAT_TEST_TERRAIN } from '../src/sim/terrain'
+import { FLAT_TEST_TERRAIN, FLAT_TEST_MAP_SIZE } from '../src/sim/terrain'
 import { bootArchives } from './gameFiles'
 
 class NodeFile implements RandomAccessFile {
@@ -62,7 +62,7 @@ const host = await LuaHost.create(files, (level, msg) => {
 
 installEngine(host)
 // Flaches Testgelaende — EXPLIZIT, weil die Engine ohne Karte knallt (kein stiller 0-Wert).
-setTerrainSource(host, FLAT_TEST_TERRAIN)
+setTerrainSource(host, FLAT_TEST_TERRAIN, FLAT_TEST_MAP_SIZE)
 
 // Discovery-Trap: fehlende Engine-Globals melden (kein Raten).
 const missing = new Set<string>()

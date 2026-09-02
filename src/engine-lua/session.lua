@@ -102,6 +102,19 @@ function __defaultScenarioOptions()
     Victory = 'sandbox',
     CheatsEnabled = 'false',
     CivilianAlliance = 'enemy',
+    -- Zwei Optionen, die es NUR im Lobby-Satz gibt (autolobby.lua:28-29) und
+    -- die ein Skirmish immer mitbringt, weil er im Original aus der Lobby
+    -- kommt. Dieselbe Wahl und dieselbe Begruendung wie bei `CheatsEnabled`.
+    --
+    -- `TeamSpawn` ist nicht kosmetisch: `AIBrain:AddInitialEnemyThreat`
+    -- (aibrain.lua:3610) und `AIBrain:AddInitialEnemyThreatToLocation`
+    -- (:3793) tun ohne `'fixed'` GAR NICHTS. `OnCreateAI` ruft die erste bei
+    -- jedem Skirmish mit 200 Bedrohung und 0,005 Zerfall (aibrain.lua:398) —
+    -- ohne diesen Wert startet jede KI-Armee also mit einer leeren
+    -- Bedrohungskarte und findet nie einen Gegner. Genau der stille
+    -- Zweigwechsel, vor dem der Kommentar oben warnt.
+    TeamSpawn = 'fixed',
+    TeamLock = 'locked',
   }
 end
 

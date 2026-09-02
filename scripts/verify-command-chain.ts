@@ -36,6 +36,7 @@ import { worldClick, getCommandMode, snapToGrid, footprintOf } from '../src/ui/w
 import { findFiles } from '../src/vfs/glob'
 import { parseDds } from '../src/formats/dds'
 import { FontBook } from '../src/ui/fonts'
+import { FLAT_TEST_MAP_SIZE } from '../src/sim/terrain'
 
 
 let failures = 0
@@ -61,7 +62,7 @@ const engine = installEngine(simHost)
 // readRow() (units.lua:757) also carries FractionComplete, which the exported
 // LuaUnitState does not declare yet — read the row through the type it really is.
 const readUnit = (id: number): LuaUnitState | null => readLuaUnit(simHost, id)
-setTerrainSource(simHost, () => 20) // flaches Testgelände auf Höhe 20
+setTerrainSource(simHost, () => 20, FLAT_TEST_MAP_SIZE) // flaches Testgelände auf Höhe 20
 // Blueprint UND Skelett — genau das, was der Worker beim Spawn mitschickt.
 for (const id of ['uel0001', 'ueb0101']) await game.giveUnit(simHost, id)
 const acu = spawnLuaUnit(simHost, 'uel0001', { x: 100, y: 20, z: 100 }, 1)

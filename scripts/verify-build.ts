@@ -14,7 +14,7 @@ import { LuaHost } from '../src/lua/host'
 import { bonesFromBlueprint, bootArchives } from './gameFiles'
 import { installEngine } from '../src/lua/engine'
 import { setTerrainSource } from '../src/lua/engineGlobals'
-import { FLAT_TEST_TERRAIN } from '../src/sim/terrain'
+import { FLAT_TEST_TERRAIN, FLAT_TEST_MAP_SIZE } from '../src/sim/terrain'
 import { installUnitFactory, installBlueprintPipeline, loadUnitBlueprint, spawnLuaUnit, spawnBuildSite, setUnitBones } from '../src/lua/unitFactory'
 import { installSimThreads, simTick } from '../src/lua/simThreads'
 import { installMotion, motionTick } from '../src/sim/motion'
@@ -60,7 +60,7 @@ const near = (a: number, b: number, eps = 0.02): boolean => Math.abs(a - b) < ep
 const host = await LuaHost.create(files, () => {})
 const { economy: eco } = installEngine(host)
 // Flaches Testgelaende — EXPLIZIT, weil die Engine ohne Karte knallt (kein stiller 0-Wert).
-setTerrainSource(host, FLAT_TEST_TERRAIN)
+setTerrainSource(host, FLAT_TEST_TERRAIN, FLAT_TEST_MAP_SIZE)
 for (const id of ['uel0001', 'ueb1101']) {
   loadUnitBlueprint(host, id, bps.get(id)!)
   // Ohne Skelett kann keine Waffe aufgebaut werden (weapon.lua:67).

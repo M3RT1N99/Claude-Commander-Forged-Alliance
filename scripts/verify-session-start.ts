@@ -35,6 +35,7 @@ import { setTerrainSource } from '../src/lua/engineGlobals'
 import { parseScmap } from '../src/formats/scmap'
 import { GameFiles } from './gameFiles'
 import { beginSession, type SessionInfo } from '../src/sim/session'
+import { FLAT_TEST_TERRAIN, FLAT_TEST_MAP_SIZE } from '../src/sim/terrain'
 
 const MAP = 'SCMP_009'
 const SCENARIO = `/maps/${MAP}/${MAP}_scenario.lua`
@@ -102,13 +103,25 @@ const q = (code: string): unknown => host.eval(code)
 console.log('\n== Ohne Szenario setzt niemand ein Bündnis ==')
 {
   const h2 = await LuaHost.create(game.luaFiles, () => {})
-  installEngine(h2, undefined, {
-    type: 'skirmish',
-    armies: [
-      { name: 'ARMY_1', index: 1, faction: 1, human: true },
-      { name: 'ARMY_2', index: 2, faction: 1, human: false },
-    ],
-  })
+  // BEIDE menschlich, und das ist hier wesentlich: eine KI-Armee OHNE Karte ist
+  // keine gueltige Sitzung. `OnCreateAI` ruft `AddInitialEnemyThreat`
+  // (aibrain.lua:398), das holt `ScenarioUtils.GetMarker('ARMY_n').position` —
+  // und ohne geladene Karte gibt es diesen Marker nicht. Die Engine kennt den
+  // Fall gar nicht, weil bei ihr die Karte vor den Armeen steht. Was dieser
+  // Block zeigt, haengt ohnehin nicht am Human-Flag: dass ohne Szenario
+  // NIEMAND ein Buendnis setzt.
+  installEngine(
+    h2,
+    undefined,
+    {
+      type: 'skirmish',
+      armies: [
+        { name: 'ARMY_1', index: 1, faction: 1, human: true },
+        { name: 'ARMY_2', index: 2, faction: 1, human: true },
+      ],
+    },
+    { heightAt: FLAT_TEST_TERRAIN, size: FLAT_TEST_MAP_SIZE },
+  )
   // Das Gerüst in session.ts setzt es für den kartenlosen Fall — deshalb ist
   // hier `true` erwartet, und der Vergleich unten zeigt den Unterschied.
   check(

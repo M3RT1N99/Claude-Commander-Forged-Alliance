@@ -12,7 +12,7 @@ import { LuaHost } from '../src/lua/host'
 import { bonesFromBlueprint, bootArchives } from './gameFiles'
 import { installEngine } from '../src/lua/engine'
 import { setTerrainSource } from '../src/lua/engineGlobals'
-import { FLAT_TEST_TERRAIN } from '../src/sim/terrain'
+import { FLAT_TEST_TERRAIN, FLAT_TEST_MAP_SIZE } from '../src/sim/terrain'
 import { installUnitFactory, installBlueprintPipeline, loadUnitBlueprint, spawnLuaUnit, readLuaUnit, setUnitBones } from '../src/lua/unitFactory'
 import { installSimThreads, simTick, currentTick } from '../src/lua/simThreads'
 
@@ -65,7 +65,7 @@ const warnings: string[] = []
 const host = await LuaHost.create(files, (level, msg) => { if (level === 'WARN') warnings.push(msg) })
 installEngine(host)
 // Flaches Testgelaende — EXPLIZIT, weil die Engine ohne Karte knallt (kein stiller 0-Wert).
-setTerrainSource(host, FLAT_TEST_TERRAIN)
+setTerrainSource(host, FLAT_TEST_TERRAIN, FLAT_TEST_MAP_SIZE)
 loadUnitBlueprint(host, 'uel0001', uel0001bp)
 setUnitBones(host, 'uel0001', await bonesFromBlueprint('uel0001', uel0001bp, readAsset, assetExists))
 

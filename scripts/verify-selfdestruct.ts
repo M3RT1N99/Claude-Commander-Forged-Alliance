@@ -12,6 +12,7 @@ import { installEngine, beat } from '../src/lua/engine'
 import { setTerrainSource } from '../src/lua/engineGlobals'
 import { spawnLuaUnit } from '../src/lua/unitFactory'
 import { GameFiles } from './gameFiles'
+import { FLAT_TEST_MAP_SIZE } from '../src/sim/terrain'
 
 let failures = 0
 const check = (ok: boolean, label: string): void => {
@@ -22,7 +23,7 @@ const check = (ok: boolean, label: string): void => {
 const game = await GameFiles.open()
 const host = await LuaHost.create(game.luaFiles, () => {})
 const engine = installEngine(host)
-setTerrainSource(host, () => 20)
+setTerrainSource(host, () => 20, FLAT_TEST_MAP_SIZE)
 await game.giveUnit(host, 'uel0201')
 
 const fire = (id: number): void => {

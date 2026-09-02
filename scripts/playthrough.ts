@@ -40,6 +40,7 @@ import { worldClick, getCommandMode, type WorldCommandSim } from '../src/ui/worl
 import { findFiles } from '../src/vfs/glob'
 import { GameFiles } from './gameFiles'
 import { SANDBOX_SESSION } from '../src/sim/session'
+import { FLAT_TEST_MAP_SIZE } from '../src/sim/terrain'
 
 // --- Alles, was schiefgeht, landet hier ------------------------------------
 interface Fund {
@@ -73,7 +74,7 @@ const engine = installEngine(sim)
 // in dieselbe Fund-Liste und sind damit gedeckelt: ein NEU aufgerufener No-op
 // faellt auf.
 sim.eval('__mohoNoopWarn = true')
-setTerrainSource(sim, () => 20)
+setTerrainSource(sim, () => 20, FLAT_TEST_MAP_SIZE)
 const nProj = game.loadProjectiles(sim)
 const nProps = game.loadProps(sim)
 console.log(`   ${nProj} Projektil-, ${nProps} Prop-Blueprints`)

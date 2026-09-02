@@ -25,6 +25,7 @@ import { installEngine, beat } from '../src/lua/engine'
 import { setTerrainSource } from '../src/lua/engineGlobals'
 import { spawnLuaUnit, readLuaUnit, type LuaUnitState } from '../src/lua/unitFactory'
 import { GameFiles } from './gameFiles'
+import { FLAT_TEST_MAP_SIZE } from '../src/sim/terrain'
 
 // `__readUnit` returns the full row from readRow (units.lua:747-757), which
 // includes the construction `fraction` (`u.__fraction or 1`); the exported
@@ -43,7 +44,7 @@ const host = await LuaHost.create(game.luaFiles, (level, msg) => {
   if (level === 'WARN') warnings.push(msg)
 })
 const engine = installEngine(host)
-setTerrainSource(host, () => 20)
+setTerrainSource(host, () => 20, FLAT_TEST_MAP_SIZE)
 for (const id of ['uel0001', 'ueb1103', 'ueb1202']) await game.giveUnit(host, id)
 
 // The ACU gives the army its starting resources (GiveInitialResources) — an

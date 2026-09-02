@@ -28,6 +28,19 @@ export interface SessionArmy {
   human: boolean
   /** Player name from the lobby. Reaches `LocGlobals.PlayerName` only. */
   nickname?: string
+  /**
+   * Team number, as the lobby carries it. `GetDefaultPlayerOptions` defaults it
+   * to 1 (lobbycomm.lua:29-31), and 1 means "no team" — every army is everyone
+   * else's enemy.
+   *
+   * It is not decoration. `BeginSession` groups armies with `army.Team > 1`
+   * (siminit.lua:150-157), and `AIBrain:AddInitialEnemyThreat` writes threat at
+   * an army's start marker only when
+   * `army.Team ~= myArmy.Team or army.Team == 1` (aibrain.lua:3618). With no
+   * Team field at all both silently do nothing — LuaPlus lets `nil > 1` and
+   * `nil ~= nil` pass without an error, so the branch is simply never taken.
+   */
+  team?: number
   /** 1-based command-source indices allowed to issue orders for this army. */
   authorizedCommandSources?: number[]
   /** Start resources are NOT set here — the ACU grants them via GiveInitialResources. */
@@ -87,6 +100,7 @@ export function setupSession(host: LuaHost, info: SessionInfo): void {
         Civilian = false,
         Faction = ${a.faction},
         AIPersonality = '',
+        Team = ${a.team ?? 1},
       },`,
     )
     .join('\n')
@@ -127,6 +141,15 @@ ${armySetup}
     // table — and the schook hook puts `TriggerManager` in front of it
     // (schook/lua/simInit.lua:10-14).
     host.eval('SetupSession()')
+  } else {
+    // OHNE Karte: das Geruest muss stehen, BEVOR die Brains entstehen.
+    //
+    // Die Engine kennt diesen Fall nicht — bei ihr laedt die Karte vor der
+    // Armee-Erzeugung. Bei uns liest `OnCreateAI` einer KI-Armee schon waehrend
+    // `OnCreateArmyBrain` das globale `Scenario`
+    // (AddInitialEnemyThreat -> ScenarioUtils.GetMarker, aibrain.lua:3619 ->
+    // scenarioutilities.lua:58), und ohne `Scenario` wirft das strikte `_G`.
+    host.eval('__harnessScenario()')
   }
 
   // Step 5a: `Sim::CreateArmies` creates one brain per army and reports each
@@ -164,9 +187,8 @@ ${armySetup}
   // The original Lua still reaches for the map: MassCollectionUnit.OnCreate
   // calls ScenarioUtils.GetMarkers() (defaultunits.lua:776) to see whether the
   // extractor stands on a mass point. Without `Scenario` that is `pairs(nil)`.
-  // `__harnessScenario()` puts an empty one there — see its comment for why
-  // that is not the same thing as the global it replaced.
-  host.eval('__harnessScenario()')
+  // `__harnessScenario()` (oben, vor den Brains) puts an empty one there — see
+  // its comment for why that is not the same thing as the global it replaced.
   //
   // Without a map there is no map script, so nothing runs `InitializeArmies()`
   // and nobody sets an alliance. The sandbox and most suites live here. This

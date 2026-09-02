@@ -13,7 +13,7 @@ import { LuaHost } from '../src/lua/host'
 import { bonesFromBlueprint, bootArchives } from './gameFiles'
 import { installEngine } from '../src/lua/engine'
 import { setTerrainSource } from '../src/lua/engineGlobals'
-import { FLAT_TEST_TERRAIN } from '../src/sim/terrain'
+import { FLAT_TEST_TERRAIN, FLAT_TEST_MAP_SIZE } from '../src/sim/terrain'
 import { installUnitFactory, installBlueprintPipeline, loadUnitBlueprint, spawnLuaUnit, readLuaUnit, setUnitBones } from '../src/lua/unitFactory'
 import { installSimThreads } from '../src/lua/simThreads'
 import { EconomyManager, installEconomy } from '../src/sim/economy'
@@ -69,7 +69,7 @@ const check = (ok: boolean, label: string): void => { console.log(`  ${ok ? 'OK 
 const host = await LuaHost.create(files, () => {})
 installEngine(host)
 // Flaches Testgelaende — EXPLIZIT, weil die Engine ohne Karte knallt (kein stiller 0-Wert).
-setTerrainSource(host, FLAT_TEST_TERRAIN)
+setTerrainSource(host, FLAT_TEST_TERRAIN, FLAT_TEST_MAP_SIZE)
 
 console.log('\n== Spawn aller Sandbox-Units über die echte Unit.lua ==')
 for (const [id, name] of UNITS) {

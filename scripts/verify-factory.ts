@@ -24,6 +24,7 @@ import { spawnLuaUnit, readLuaUnit } from '../src/lua/unitFactory'
 import type { LuaUnitState } from '../src/lua/unitFactory'
 import { GameFiles } from './gameFiles'
 import { queueFactoryBuild } from '../src/sim/build'
+import { FLAT_TEST_MAP_SIZE } from '../src/sim/terrain'
 
 /**
  * `__readUnit` hands back the FULL row that `readRow` builds (units.lua:744-814),
@@ -48,7 +49,7 @@ const host = await LuaHost.create(files, (level, msg) => {
 })
 const engine = installEngine(host)
 const readUnit = (id: number): LuaUnitState | null => readLuaUnit(host, id)
-setTerrainSource(host, () => 20)
+setTerrainSource(host, () => 20, FLAT_TEST_MAP_SIZE)
 // Blueprint UND Skelett — beides braucht die Sim, bevor die erste Unit entsteht.
 for (const id of ['uel0001', 'ueb0101', 'uel0101']) await game.giveUnit(host, id)
 

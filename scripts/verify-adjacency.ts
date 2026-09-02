@@ -25,6 +25,7 @@ import { installEngine, beat } from '../src/lua/engine'
 import { setTerrainSource } from '../src/lua/engineGlobals'
 import { spawnLuaUnit } from '../src/lua/unitFactory'
 import { GameFiles } from './gameFiles'
+import { FLAT_TEST_MAP_SIZE } from '../src/sim/terrain'
 
 let failures = 0
 const check = (ok: boolean, label: string): void => {
@@ -38,7 +39,7 @@ const host = await LuaHost.create(game.luaFiles, (level, msg) => {
   if (level === 'WARN') warnings.push(msg)
 })
 const engine = installEngine(host)
-setTerrainSource(host, () => 20)
+setTerrainSource(host, () => 20, FLAT_TEST_MAP_SIZE)
 for (const id of ['uel0001', 'ueb1101', 'ueb0101']) await game.giveUnit(host, id)
 
 console.log('\n== The footprint the engine derives (Cfile:647164-647177) ==')

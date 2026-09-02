@@ -25,7 +25,7 @@
 import { LuaHost } from '../src/lua/host'
 import { installEngine } from '../src/lua/engine'
 import { setTerrainSource } from '../src/lua/engineGlobals'
-import { FLAT_TEST_TERRAIN } from '../src/sim/terrain'
+import { FLAT_TEST_TERRAIN, FLAT_TEST_MAP_SIZE } from '../src/sim/terrain'
 import { GameFiles } from './gameFiles'
 import {
   EMITTER_CURVE_NAMES,
@@ -54,7 +54,7 @@ const host = await LuaHost.create(game.luaFiles, (level, msg) => {
 installEngine(host)
 // Flaches Testgelände — explizit, wie in verify-blueprints.ts (die Engine
 // knallt ohne Karte, kein stiller 0-Wert).
-setTerrainSource(host, FLAT_TEST_TERRAIN)
+setTerrainSource(host, FLAT_TEST_TERRAIN, FLAT_TEST_MAP_SIZE)
 
 // --- Unabhängige Text-Klassifikation der effects-.bp-Dateien -------------------
 // Erster Konstruktor-Aufruf in der Datei entscheidet den Typ. „EmitterBlueprint"

@@ -1,5 +1,6 @@
 import type { LuaHost } from './host'
 import ENGINE_LUA from '../engine-lua/globals.lua?raw'
+import INFLUENCE_LUA from '../engine-lua/influence.lua?raw'
 
 /**
  * Echte Engine-Globals, die die Original-Lua aufruft.
@@ -19,6 +20,31 @@ import ENGINE_LUA from '../engine-lua/globals.lua?raw'
 /** Installiert die echten Engine-Globals (Vektoren, Kategorien, Manipulatoren …). */
 export function installEngineGlobals(host: LuaHost): void {
   host.eval(ENGINE_LUA)
+  // Die Bedrohungskarte. Eigene Datei, weil sie ein eigenes Subsystem ist
+  // (Moho::CInfluenceMap, eine Karte je Armee) und globals.lua ohnehin schon
+  // gross genug ist.
+  host.eval(INFLUENCE_LUA)
+}
+
+/**
+ * Die Masse der geladenen Karte, wie `setTerrainSource` sie erwartet. Als
+ * eigener Typ, weil `installEngine` sie durchreicht: die Engine kennt die
+ * Karte, BEVOR sie die Armeen erzeugt (Cfile:1017315-1017333).
+ */
+export interface TerrainSize {
+  width: number
+  height: number
+  waterElevation?: number
+  /**
+   * Der TYPCODE der Terrain-Typ-Ebene an einer Zelle
+   * (`scmap.terrainTypeData`, ein Byte je Zelle).
+   *
+   * Ohne ihn beantwortet `GetTerrainType` jede Position mit 'Default'
+   * (`STIMap::GetTerrainType`, Cfile:1087705 liest genau diese Ebene) — und
+   * damit sind Bewegungs-, Effekt- und Geräuschentscheidungen, die daran
+   * hängen, auf jeder Karte gleich.
+   */
+  terrainTypeAt?: (x: number, z: number) => number
 }
 
 /**
@@ -30,21 +56,7 @@ export function installEngineGlobals(host: LuaHost): void {
 export function setTerrainSource(
   host: LuaHost,
   heightAt: (x: number, z: number) => number,
-  size?: {
-    width: number
-    height: number
-    waterElevation?: number
-    /**
-     * Der TYPCODE der Terrain-Typ-Ebene an einer Zelle
-     * (`scmap.terrainTypeData`, ein Byte je Zelle).
-     *
-     * Ohne ihn beantwortet `GetTerrainType` jede Position mit 'Default'
-     * (`STIMap::GetTerrainType`, Cfile:1087705 liest genau diese Ebene) — und
-     * damit sind Bewegungs-, Effekt- und Geräuschentscheidungen, die daran
-     * hängen, auf jeder Karte gleich.
-     */
-    terrainTypeAt?: (x: number, z: number) => number
-  },
+  size?: TerrainSize,
 ): void {
   host.setGlobal('__terrainHeight', heightAt)
   if (size) {

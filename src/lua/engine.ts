@@ -1,6 +1,6 @@
 import type { LuaHost } from './host'
 import { installMoho } from './moho'
-import { installEngineGlobals } from './engineGlobals'
+import { installEngineGlobals, setTerrainSource, type TerrainSize } from './engineGlobals'
 import { installBlueprintPipeline, installUnitFactory } from './unitFactory'
 import { installSimThreads } from './simThreads'
 import { EconomyManager, installEconomy } from '../sim/economy'
@@ -46,6 +46,21 @@ export function installEngine(
   host: LuaHost,
   economy = new EconomyManager(),
   session: SessionInfo = SANDBOX_SESSION,
+  /**
+   * Das Gelaende der Karte, GLEICH nach den Engine-Primitiven gesetzt.
+   *
+   * Die Engine laedt die Karte, bevor sie die Armeen erzeugt: `CInfluenceMap`
+   * entsteht IN der Armee-Erzeugung und liest dabei das Heightfield
+   * (Cfile:1017315-1017333). Wer die Sitzung mit einer KI-Armee faehrt, muss
+   * das Gelaende deshalb hier uebergeben — sonst laeuft
+   * `AIBrain:AddInitialEnemyThreat` (aibrain.lua:398, im `OnCreateAI` waehrend
+   * `OnCreateArmyBrain`) gegen ein `GetMapSize()`, das noch nichts weiss, und
+   * die Bedrohungskarte scheitert laut.
+   *
+   * Ohne KI-Armee bleibt der bisherige Weg gueltig: `setTerrainSource` nach
+   * `installEngine` und vor `beginSession`.
+   */
+  terrain?: { heightAt: (x: number, z: number) => number; size?: TerrainSize },
 ): Engine {
   // Engine primitives (the C functions) go in FIRST, before a single line of
   // original Lua runs — same as the real engine, which registers every
@@ -56,6 +71,7 @@ export function installEngine(
   // class.lua:377 (start the state's Main thread) dies on every state change.
   installSimThreads(host)
   installEngineGlobals(host)
+  if (terrain) setTerrainSource(host, terrain.heightAt, terrain.size)
   installEconomy(host, economy)
   installMotion(host)
   installBuild(host)
@@ -127,6 +143,11 @@ export function beat(engine: Engine): void {
   // Sie laufen VOR der Thread-Stage: `OnFire` wechselt nur den Zustand der
   // Salven-FSM — geschossen wird im Coroutinen-Slice desselben Beats.
   weaponTick(h)
+  // Phase 4b — der Zerfall der Bedrohungskarte. Die Engine faehrt ihn aus
+  // `CArmyImpl::OnTick`, gestaffelt: jede Armee ist dran, wenn
+  // `mSim->mCurTick % 30 == mConstDat.mIndex` (Cfile:1018010-1018011). Er
+  // gehoert in denselben Abschnitt wie die uebrigen OnTick-Arbeiten der Armee.
+  h.eval('__influenceTick(__gameTick or 0)')
   // Phase 5 — Lua coroutines (CTaskStage::DoFrame), then movement.
   simTick(h)
   motionTick(h)
