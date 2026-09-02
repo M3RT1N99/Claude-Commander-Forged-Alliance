@@ -585,8 +585,22 @@ export class GameUi {
   }
 
   /** Die Naht für Befehle, die direkt an eine Unit gehen (SetFireState, SetPaused …). */
+  // (normalisiereIds steht unter der Klasse, siehe dort.)
   connectSim(send: (name: string, ids: number[], value: unknown) => void): void {
-    this.host.setGlobal('__uiSimCommand', send)
+    // Die Id-Liste kommt als LUA-TABELLE herüber, und eine LEERE Lua-Tabelle
+    // wird von wasmoon zu `{}` — einem Objekt, nicht einem Array
+    // (`TableTypeExtension.getValue` entscheidet über `keys.every(...)`, und
+    // ohne Schlüssel ist das kein Array). Der Empfänger iteriert aber mit
+    // `for…of`, und das wirft dann „ids is not iterable"; wasmoon macht daraus
+    // ein `lua_error`, das den ganzen Tastendruck in der UI-VM abbricht.
+    //
+    // Auslösen lässt sich das ohne Zutun: die Pause-Taste ohne Auswahl schickt
+    // über `construction.lua:1309-1314` -> `SetPaused(selection, …)` eine leere
+    // Liste. Deshalb wird hier EINMAL normalisiert, an der Naht, statt an acht
+    // Schleifen im Empfänger.
+    this.host.setGlobal('__uiSimCommand', (name: string, ids: unknown, value: unknown) => {
+      send(name, normalisiereIds(ids), value)
+    })
   }
 
   /**
@@ -859,4 +873,23 @@ function registerBrowserFont(family: string, bytes: Uint8Array): void {
   const buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
   const face = new FontFace(family, buf as ArrayBuffer)
   void face.load().then((f) => document.fonts.add(f))
+}
+
+/**
+ * Eine Id-Liste, die aus der UI-Lua kommt, als JS-Array.
+ *
+ * Der Grund ist die wasmoon-Grenze: eine LEERE Lua-Tabelle wird zu `{}` — einem
+ * Objekt, nicht einem Array. `TableTypeExtension.getValue` entscheidet das über
+ * `keys.length > 0 && keys.every(…)`, und ohne Schlüssel ist die Antwort „kein
+ * Array". Der Empfänger im Hauptthread iteriert aber mit `for…of` und wirft
+ * dann „ids is not iterable"; wasmoon macht daraus ein `lua_error`, und das
+ * bricht den ganzen Tastendruck in der UI-VM ab statt nichts zu tun.
+ *
+ * Auslösen lässt sich das ohne Zutun: die Pause-Taste OHNE Auswahl schickt über
+ * `construction.lua:1309-1314` → `SetPaused(selection, …)` eine leere Liste.
+ */
+export function normalisiereIds(ids: unknown): number[] {
+  if (Array.isArray(ids)) return ids as number[]
+  if (ids && typeof ids === 'object') return Object.values(ids as object) as number[]
+  return []
 }

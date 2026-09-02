@@ -1058,7 +1058,7 @@ export class UnitViewer {
   }
 
   /** The CameraImpl scalar getters exposed to UI Lua. */
-  rtsCameraValue(what: string): number | [number, number, number] | undefined {
+  rtsCameraValue(what: string): number | undefined {
     const r = this.rts
     if (!r.enabled) return undefined
     switch (what) {
@@ -1070,8 +1070,21 @@ export class UnitViewer {
         return this.conVarNumber('cam_NearZoom')
       case 'maxZoom':
         return this.rtsMaxZoom()
-      case 'focus':
-        return [r.target.x, r.target.y, r.target.z]
+      // Der Brennpunkt kommt in DREI Abfragen, je eine Zahl.
+      //
+      // Alles, was kein Primitivwert ist, kommt in dieser wasmoon-Fassung als
+      // `js_proxy`-USERDATA in Lua an — nachgemessen: ein Array UND ein
+      // einfaches Objekt, beide userdata (ProxyTypeExtension hat Prioritaet 3,
+      // TableTypeExtension 0). Auf userdata laufen `#p`, `ipairs(p)` und der
+      // FA-Dialekt `for i, v in p do` ins Leere, und `pairs(p)` reisst die
+      // UI-VM um. Zahlen kommen dagegen sauber an — also drei davon, und die
+      // Tabelle baut die Lua-Seite selbst (moho.lua, GetFocusPosition).
+      case 'focusX':
+        return r.target.x
+      case 'focusY':
+        return r.target.y
+      case 'focusZ':
+        return r.target.z
       default:
         return undefined
     }

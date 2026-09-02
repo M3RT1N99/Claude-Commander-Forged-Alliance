@@ -2852,7 +2852,19 @@ local camera = withNoops(CAMERA_NAMES, {
   GetTargetZoom = function(self) return __uiCameraGet(self.__name, 'targetZoom') end,
   GetMinZoom = function(self) return __uiCameraGet(self.__name, 'minZoom') end,
   GetMaxZoom = function(self) return __uiCameraGet(self.__name, 'maxZoom') end,
-  GetFocusPosition = function(self) return __uiCameraGet(self.__name, 'focus') end,
+  --- Die Brennpunkt-POSITION ist eine Vector-Tabelle, keine userdata.
+  ---
+  --- Die 3D-Seite liefert sie als JS-Array, und ein JS-Array kommt in dieser
+  --- wasmoon-Fassung als `js_proxy`-USERDATA an, nicht als Tabelle
+  --- (`ProxyTypeExtension` hat Prioritaet 3, `TableTypeExtension` 0). Darauf
+  --- laufen `#p`, `ipairs(p)` und der FA-Dialekt `for i, v in p do` ins Leere,
+  --- und `pairs(p)` reisst die UI-VM ganz um. Dieselbe Falle hat schon zweimal
+  --- `DiskFindFiles` erwischt — deshalb wird hier kopiert.
+  GetFocusPosition = function(self)
+    local x = __uiCameraGet(self.__name, 'focusX')
+    if type(x) ~= 'number' then return nil end
+    return Vector(x, __uiCameraGet(self.__name, 'focusY'), __uiCameraGet(self.__name, 'focusZ'))
+  end,
   SetZoom = function(self, zoom, seconds) __uiCameraSet(self.__name, 'zoom', zoom, seconds) end,
   SetTargetZoom = function(self, zoom) __uiCameraSet(self.__name, 'targetZoom', zoom) end,
   SetMaxZoomMult = function(self, mult) __uiCameraSet(self.__name, 'maxZoomMult', mult) end,

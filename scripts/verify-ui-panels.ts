@@ -34,6 +34,7 @@ import { SANDBOX_SESSION } from '../src/sim/session'
 import { findFiles } from '../src/vfs/glob'
 import { parseDds } from '../src/formats/dds'
 import { FontBook } from '../src/ui/fonts'
+import { normalisiereIds } from '../src/ui/gameUi'
 
 class NodeFile implements RandomAccessFile {
   private constructor(
@@ -341,6 +342,42 @@ console.log('\n== Auswahl: __uiSetUnit → SelectUnits → OnSelectionChanged ==
 // Die Naht zur Sim: ohne sie KNALLT jeder Befehl (statt still zu verpuffen).
 // Hier wird nur mitgeschrieben, was die UI schicken WÜRDE.
 host.eval('__t = { simCommands = {} }')
+console.log()
+console.log('== Eine LEERE Id-Liste ueberlebt die wasmoon-Grenze ==')
+{
+  // Die Falle: eine leere Lua-Tabelle kommt als `{}` (Objekt) an, nicht als
+  // Array — `TableTypeExtension.getValue` entscheidet ueber
+  // `keys.length > 0 && keys.every(…)`. Ein `for…of` darauf wirft, wasmoon
+  // macht daraus ein `lua_error`, und der ganze Tastendruck stirbt.
+  //
+  // Auslösen kann das jeder: die Pause-Taste OHNE Auswahl schickt ueber
+  // `construction.lua:1309-1314` -> `SetPaused(selection, …)` eine leere Liste.
+  const empfangen: { roh: unknown; ids: number[] }[] = []
+  host.setGlobal('__uiSimCommand', (_name: string, ids: unknown) => {
+    empfangen.push({ roh: ids, ids: normalisiereIds(ids) })
+  })
+  host.eval(`__uiSimCommand('SetPaused', {}, true)`)
+  host.eval(`__uiSimCommand('SetPaused', {7, 9}, true)`)
+  check(empfangen.length === 2, `beide Aufrufe kamen an (${empfangen.length})`)
+  check(
+    !Array.isArray(empfangen[0]?.roh),
+    'die LEERE Tabelle kommt roh als Objekt an — genau die Falle',
+  )
+  check(empfangen[0]?.ids.length === 0, 'normalisiereIds macht daraus ein leeres Array')
+  check(
+    empfangen[1]?.ids.length === 2 && empfangen[1]?.ids[0] === 7 && empfangen[1]?.ids[1] === 9,
+    'und eine gefuellte Liste bleibt unveraendert',
+  )
+  // Der Beweis, dass es ohne die Normalisierung wirklich wirft:
+  let warf = false
+  try {
+    for (const _ of empfangen[0]?.roh as number[]) void _
+  } catch {
+    warf = true
+  }
+  check(warf, 'ein for…of auf der rohen Tabelle wirft (ids is not iterable)')
+}
+
 host.setGlobal('__uiSimCommand', (name: string) => {
   host.eval(`table.insert(__t.simCommands, '${name}')`)
 })

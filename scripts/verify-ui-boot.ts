@@ -167,6 +167,42 @@ if (warnings.length > 0) {
   for (const w of warnings.slice(0, 3)) console.log(`  ${w.slice(0, 120)}`)
 }
 
+console.log()
+console.log('== GetFocusPosition liefert eine TABELLE, keine userdata ==')
+{
+  // Die 3D-Seite gibt den Brennpunkt als Objekt zurueck, nicht als Array: ein
+  // JS-Array kommt in dieser wasmoon-Fassung als `js_proxy`-userdata an
+  // (ProxyTypeExtension Prioritaet 3 vor TableTypeExtension 0), und darauf
+  // laufen `#p`, `ipairs(p)` und der FA-Dialekt `for i, v in p do` ins Leere.
+  const achsen: Record<string, number> = { focusX: 11, focusY: 22, focusZ: 33 }
+  host.setGlobal('__uiCameraBridge', (op: string, _name: string, what: string) =>
+    op === 'get' ? achsen[what] : undefined,
+  )
+  const art = String(host.eval(`return type(GetCamera('WorldCamera'):GetFocusPosition())`))
+  check(art === 'table', `der Typ ist table (${art})`)
+  check(
+    String(host.eval(`local p = GetCamera('WorldCamera'):GetFocusPosition()
+      return string.format('%g,%g,%g|%d', p[1], p[2], p[3], #p)`)) === '11,22,33|3',
+    'sie ist indizierbar und hat die Laenge 3',
+  )
+  check(
+    host.eval(`local p = GetCamera('WorldCamera'):GetFocusPosition()
+      return p.x == 11 and p.y == 22 and p.z == 33`) === true,
+    'und .x/.y/.z lesen dieselben Felder (Vector-Metatabelle)',
+  )
+  // Und sie ist KEINE userdata — das war der Fehler: die 3D-Seite gab ein
+  // Array zurueck, und alles, was kein Primitivwert ist, kommt in dieser
+  // wasmoon-Fassung als js_proxy-userdata an (nachgemessen: Array UND
+  // einfaches Objekt). Deshalb holt die Lua-Seite jetzt drei ZAHLEN.
+  check(
+    String(host.eval(`return type(__uiCameraGet('WorldCamera', 'focusX'))`)) === 'number',
+    'die Bruecke liefert Zahlen, keine zusammengesetzten Werte',
+  )
+  // `ipairs` wird hier bewusst NICHT verlangt: die Vector-Metatabelle wirft
+  // fuer jeden Schluessel ausser x/y/z ("'x', 'y', or 'z' expected"), und das
+  // tut sie im Original genauso (Cfile:596716-596732). Eine Pruefung, die
+  // ipairs fordert, verlangte etwas, das die Engine auch nicht kann.
+}
 host.close()
 for (const f of openFiles) await f.close()
 console.log(failures === 0 ? '\nUI-BOOT BESTANDEN' : `\n${failures} CHECK(S) FEHLGESCHLAGEN`)
