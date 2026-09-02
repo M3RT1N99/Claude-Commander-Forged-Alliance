@@ -764,20 +764,34 @@ export class GameUi {
     this.host.setGlobal('__uiBlipSink', sink)
   }
 
+  /**
+   * Die Lebensdauer der Fenster-Ereignisse, an den VM gebunden.
+   *
+   * `attachEvents` haengt sich mit CAPTURE ans Fenster und verschluckt jedes
+   * Ereignis, das die UI-Lua konsumiert. `dispose()` schloss aber nur den
+   * Lua-State und den Renderer — die Zuhoerer blieben. Nach einem
+   * Sandbox-Wechsel lagen also ZWEI GameUi auf demselben Fenster, und die tote
+   * bekam die Ereignisse zuerst: sie rief in einen geschlossenen VM und
+   * schluckte Maus und Tastatur der neuen Sitzung.
+   */
+  private readonly events = new AbortController()
+
   attachEvents(target: Window = window): void {
+    const { signal } = this.events
     const consume = (type: string) => (e: MouseEvent | WheelEvent) => {
       if (this.handleMouse(type, e)) {
         e.stopPropagation()
         e.preventDefault()
       }
     }
-    target.addEventListener('pointermove', consume('MouseMotion') as EventListener, true)
-    target.addEventListener('pointerdown', consume('ButtonPress') as EventListener, true)
-    target.addEventListener('pointerup', consume('ButtonRelease') as EventListener, true)
-    target.addEventListener('dblclick', consume('ButtonDClick') as EventListener, true)
+    target.addEventListener('pointermove', consume('MouseMotion') as EventListener, { capture: true, signal })
+    target.addEventListener('pointerdown', consume('ButtonPress') as EventListener, { capture: true, signal })
+    target.addEventListener('pointerup', consume('ButtonRelease') as EventListener, { capture: true, signal })
+    target.addEventListener('dblclick', consume('ButtonDClick') as EventListener, { capture: true, signal })
     target.addEventListener('wheel', consume('WheelRotation') as EventListener, {
       capture: true,
       passive: false,
+      signal,
     })
     // Die Modifier-Tasten für IsKeyDown (mHelp Cfile:1141963) — die
     // Original-UI fragt 'Shift' (commandmode.lua:82: Shift hält den
@@ -839,7 +853,7 @@ export class GameUi {
           e.stopPropagation()
         }
       },
-      true,
+      { capture: true, signal },
     )
     target.addEventListener(
       'keyup',
@@ -848,16 +862,24 @@ export class GameUi {
         const k = translateKey(e)
         if (k) this.host.eval(`__mauiKey('KeyUp', ${k.wx}, ${k.vk}, ${mods(e)})`)
       },
-      true,
+      { capture: true, signal },
     )
     // Fenster verlässt den Fokus → keine Taste gilt mehr als gehalten (sonst
     // klemmt Shift nach Alt+Tab dauerhaft).
-    target.addEventListener('blur', () => {
-      this.host.eval(`__uiSetKeyDown('Shift', false) __uiSetKeyDown('Control', false) __uiSetKeyDown('Alt', false)`)
-    })
+    target.addEventListener(
+      'blur',
+      () => {
+        this.host.eval(`__uiSetKeyDown('Shift', false) __uiSetKeyDown('Control', false) __uiSetKeyDown('Alt', false)`)
+      },
+      { signal },
+    )
   }
 
   dispose(): void {
+    // ZUERST die Ereignisse abmelden, dann den VM schliessen: sonst kann ein
+    // Ereignis, das noch in der Warteschlange steht, in einen geschlossenen
+    // Lua-State rufen.
+    this.events.abort()
     this.renderer.dispose()
     this.host.close()
   }

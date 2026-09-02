@@ -740,8 +740,26 @@ let lastEmitterTick = -1
 let lastTickWall = 0
 
 async function prepareEmitterBatch(bpId: string): Promise<void> {
-  if (emitterBpPending.has(bpId) || !luaSim || !particles) return
+  // `emitterBpPending` ist eine LAUFZEIT-Sperre gegen doppelte Ladevorgaenge,
+  // kein Gedaechtnis. Sie wurde nie wieder geleert: ein fehlgeschlagener Ladeweg
+  // (kein Blueprint, fehlende Textur) sperrte diese Id fuer den Rest der
+  // Sitzung, und nach einem Kartenwechsel — bei dem `particles` neu entsteht —
+  // galten ALLE frueher geladenen Ids weiter als „schon erledigt". Ergebnis:
+  // ab der zweiten Sandbox keine Partikel, keine Trails, keine Strahlen.
+  //
+  // Deshalb: der Merker wird im `finally` wieder freigegeben, und die
+  // Wiederholungssperre haengt am POSITIVEN Ergebnis (`emitterBpData`).
+  if (emitterBpData.has(bpId) || emitterBpPending.has(bpId) || !luaSim || !particles) return
   emitterBpPending.add(bpId)
+  try {
+    await ladeEmitterBatch(bpId)
+  } finally {
+    emitterBpPending.delete(bpId)
+  }
+}
+
+async function ladeEmitterBatch(bpId: string): Promise<void> {
+  if (!luaSim || !particles) return
   const bp = (await luaSim.emitterBlueprint(bpId)) as
     | (EmitterBpData & { RepeatTexture?: string; TextureName?: string })
     | null
@@ -1055,6 +1073,13 @@ async function startSandbox(mapFolder: string): Promise<void> {
     // Die ECHTE lua/ui in einer zweiten Lua-VM (wie im Original: Sim und UI
     // haben getrennte States). Sie baut das Eco-Panel aus economy.lua — der
     // TS-Nachbau in hud.ts ist dafür raus.
+    // Die Bildschleife des Hauptmenues anhalten, BEVOR die Sitzung ihre eigene
+    // bekommt: sonst laufen beide, und `gameUi.render()` wird zweimal pro Bild
+    // gerufen (einmal aus dieser rAF-Schleife, einmal aus `viewer.onUpdate`).
+    if (frontEndFrame) {
+      cancelAnimationFrame(frontEndFrame)
+      frontEndFrame = 0
+    }
     gameUi?.dispose()
     // Die SESSION geht in beide VMs: die Sim bekommt sie über setupSession
     // (ScenarioInfo + Brains), die UI über dieselben Angaben — GetArmiesTable()
@@ -1188,7 +1213,14 @@ async function startSandbox(mapFolder: string): Promise<void> {
         ol.setTextures(line, arrow, wps)
       })()
     }
+    // ALLE Emitter-Zwischenspeicher, nicht nur die Laufzeitzustaende: die
+    // Partikel-Systeme entstehen mit der neuen Karte neu, also stehen die
+    // Batches dort nicht mehr — ein `emitterBpData`-Treffer wuerde dann auf
+    // etwas verweisen, das es nicht mehr gibt, und `emitterBpPending` wuerde
+    // das Nachladen fuer immer verhindern.
     emitterRuntimes.clear()
+    emitterBpData.clear()
+    emitterBpPending.clear()
     lastEmitterTick = -1
     // Die Naht, über die Befehle der UI in die Sim gehen. Ohne sie KNALLT jeder
     // Befehl — statt still zu verpuffen (ui-globals.lua: __uiSimCommand).

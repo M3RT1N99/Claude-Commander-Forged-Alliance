@@ -35,15 +35,19 @@ const TINT: Record<Validity, THREE.Color> = {
  * snapToGrid). Erfunden ist hier nichts außer der Tatsache, dass ein Geist
  * durchscheinend gezeichnet wird.
  *
- * DOKUMENTIERTE LÜCKE — Rot/Grün-Validität: die Engine färbt den Geist ungültig,
- * wenn dort nicht gebaut werden darf. Der maßgebliche Test ist
- * `CAiBrain::CanBuildStructureAt` (@0x57cbb0), und dessen Kern ist
- * `func_LocationIsFree(bp, mOGrid, pos)` — eine Abfrage des OCCUPANCY-GRID
- * (`COGrid`, pro Zelle Layer + Belegung), dazu Skirt-Overlap mit unbeweglichen
- * Strukturen und reservierte Bau-Positionen. Der OGrid ist eine echte
- * Engine-Struktur, die es hier noch nicht gibt; eine Teil-Näherung (Overlap +
- * Wasser-Layer) würde bei Randfällen falsches Feedback geben. Deshalb bleibt der
- * Geist bis zum OGrid einfarbig — kein erfundener Validitäts-Check.
+ * Rot/Grün-Validität: das Urteil kommt aus `canBuildStructureAt`
+ * (src/sim/ogrid.ts) und wird oben eingehängt — der Geist ist also NICHT
+ * einfarbig. Dieser Absatz behauptete bis eben das Gegenteil, direkt über dem
+ * Code, der die Prüfung verdrahtet.
+ *
+ * Was daran noch NÄHERUNG ist, und zwar benannt: der maßgebliche Test der
+ * Engine ist `CAiBrain::CanBuildStructureAt` (@0x57cbb0) mit
+ * `func_LocationIsFree(bp, mOGrid, pos)` — eine Abfrage des echten
+ * OCCUPANCY-GRID (`COGrid`, pro Zelle Layer UND Belegung), dazu reservierte
+ * Bau-Positionen. Beides gibt es hier nicht: unsere Prüfung arbeitet mit
+ * Skirt-Overlap und der Wasser-/Land-Ebene aus der Karte. In Randfällen kann
+ * das Urteil deshalb vom Spiel abweichen — nicht aber im Regelfall, und die
+ * Abweichung ist eine benannte Näherung, keine erfundene Zusage.
  */
 export class BuildPreview {
   private mesh: THREE.Mesh | null = null
