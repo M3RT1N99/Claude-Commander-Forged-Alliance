@@ -667,6 +667,43 @@ console.log('\n== Script-Bits gegen die Laufzeit-Maske (Cfile:951398) ==')
 // a NEW table, the getmetatable(cclass)==Class short-circuit (class.lua:389)
 // misses, and the conversion runs a second time over a table whose old Class
 // metatable carries the __newindex guard.
+console.log()
+console.log('== Entity:SetScale und Entity:SetHealth halten die Vertraege der Bindung ==')
+{
+  const id = spawnLuaUnit(host, 'uel0201', { x: 380, y: 20, z: 380 }, 1)
+  const e = (code: string): unknown => host.eval(`local u = __units[${id}] ${code}`)
+  // `cfunc_EntitySetScaleL` gibt die Entity zurueck (PushStack + return 1,
+  // Cfile:935374-935375) — ohne das laeuft jede Kette ins Leere.
+  check(e('return u:SetScale(2) == u') === true, 'SetScale gibt self zurueck (Cfile:935374)')
+  check(
+    String(e(`u:SetScale(1, 2, 3) return string.format('%g,%g,%g', u.__scale[1], u.__scale[2], u.__scale[3])`)) === '1,2,3',
+    'die Vier-Argument-Form setzt alle drei Achsen',
+  )
+  // Und sie WIRFT bei drei Argumenten (lua_gettop != 4 && != 2, Cfile:935304).
+  check(
+    e(`return (pcall(function() u:SetScale(1, 2) end))`) === false,
+    'drei Argumente werfen — sonst entstuende eine Skalierung mit nil in z',
+  )
+
+  // `SetHealth` ist die abgeleitete Bindung: delta = argument - mHealth, dann
+  // `AdjustHealth` (Cfile:932968-932971). Und `AdjustHealth` laesst eine TOTE
+  // Entity nicht heilen (Cfile:915983-915987).
+  const maxHp = Number(e('return u:GetMaxHealth()'))
+  e(`u:SetHealth(nil, ${maxHp / 2})`)
+  check(Number(e('return u:GetHealth()')) === maxHp / 2, 'SetHealth setzt auf einem lebenden Ziel')
+  e('u.__dead = true')
+  e(`u:SetHealth(nil, ${maxHp})`)
+  check(
+    Number(e('return u:GetHealth()')) === maxHp / 2,
+    'auf einer TOTEN Entity tut ein positives Delta nichts (Cfile:915987)',
+  )
+  e(`u:SetHealth(nil, ${maxHp / 4})`)
+  check(
+    Number(e('return u:GetHealth()')) === maxHp / 4,
+    'ein negatives Delta geht auch auf einer toten Entity durch',
+  )
+}
+
 console.log('\n== moho kommt in der Retail-C-Form (globalInit.lua:27-34) ==')
 {
   // Measured on a BARE host — installMoho and nothing else. After the boot the

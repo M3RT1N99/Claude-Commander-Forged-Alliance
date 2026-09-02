@@ -88,22 +88,43 @@ local function feldFuer(typ, wo)
   return feld
 end
 
+--- `OverallNotAssigned` laesst die geteilte `threat`-Spur in BEIDEN Zweigen
+--- weg (Cfile:1034599-1034612), anders als `Overall` (Cfile:1034584-1034597).
+--- Die Erkennung muss dasselbe Praefix abschneiden wie `feldFuer`, sonst
+--- verhalten sich `'OverallNotAssigned'` und `'THREATTYPE_OverallNotAssigned'`
+--- verschieden — und das sind derselbe Aufzaehlungswert.
+local function istNichtZugewiesen(typ)
+  if type(typ) ~= 'string' then return false end
+  local s = string.lower(typ)
+  if string.sub(s, 1, 11) == 'threattype_' then s = string.sub(s, 12) end
+  return s == 'overallnotassigned'
+end
+
 local function neueSThreat()
   local t = {}
   for _, f in ipairs(SCHWELLENFELDER) do t[f] = 0.0 end
   return t
 end
 
---- Der spielbare Ausschnitt der Karte. `STIMap` setzt ihn auf die GANZE Karte
---- (`x0 = 0`, `z0 = 0`, `x1 = width - 1`, `z1 = height - 1`,
---- Cfile:722515-722518); nur Kampagnenskripte verengen ihn ueber
---- `SetPlayableArea`. Deklariert, weil das strikte `_G` sonst wirft.
+--- Der spielbare Ausschnitt der Karte. `STIMap` setzt ihn auf die GANZE Karte;
+--- nur Kampagnenskripte verengen ihn ueber `SetPlayableArea`. Deklariert, weil
+--- das strikte `_G` sonst wirft.
+---
+--- Die Kante ist um eins verschoben, und zwar in DIESE Richtung — die Kette
+--- steht in drei Schritten im Decomp:
+---   * `mPlayableRect.x1 = quellHeightfield.width - 1`         (Cfile:722515)
+---   * das LAUFZEIT-Heightfield entsteht als
+---     `CHeightField(quell.width - 1, quell.height - 1)`       (Cfile:722527)
+---     und dessen Konstruktor ruft `InitField(width + 1, …)`   (Cfile:525532),
+---     setzt also `this->width` wieder auf `quell.width`       (Cfile:527345)
+---   * `GetMapSize()` liefert `laufzeit.width - 1`             (Cfile:1089736)
+--- Also ist `mPlayableRect.x1` genau `GetMapSize()` — nicht eins weniger.
 __playableRect = false
 
 local function playableRect()
   if __playableRect then return __playableRect end
   local sx, sz = GetMapSize()
-  return { x0 = 0, z0 = 0, x1 = sx - 1, z1 = sz - 1 }
+  return { x0 = 0, z0 = 0, x1 = sx, z1 = sz }
 end
 
 --- Setzt den spielbaren Ausschnitt (Cfile:722554-722557 ist derselbe Schreibweg
@@ -231,7 +252,7 @@ end
 --- wird.
 function __threatAtPosition(eigenArmee, pos, ring, restriction, typ, armyArg)
   local feld = feldFuer(typ, 'GetThreatAtPosition')
-  local ohneGeteilt = typ ~= nil and string.lower(typ) == 'overallnotassigned'
+  local ohneGeteilt = istNichtZugewiesen(typ)
   local m = karte(eigenArmee)
   local cx, cz = zelleAus(m, pos[1], pos[3])
   return rechteck(m, cx, cz, math.floor(ring), restriction == true, feld, ohneGeteilt,
@@ -245,15 +266,26 @@ end
 --- (Cfile:740710-740718).
 function __highestThreatPosition(eigenArmee, ring, restriction, typ, armyArg)
   local feld = feldFuer(typ, 'GetHighestThreatPosition')
-  local ohneGeteilt = typ ~= nil and string.lower(typ) == 'overallnotassigned'
+  local ohneGeteilt = istNichtZugewiesen(typ)
   local m = karte(eigenArmee)
   local army = armeeIndex(armyArg, 'GetHighestThreatPosition')
   local radius = math.floor(ring)
   local sx, sz = __getBrain(eigenArmee):GetArmyStartPos()
   local besteX, besteZ, besteBedrohung, besterAbstand = 0, 0, -1.0, nil
+  -- `if (radius)` — nur mit Radius geht die Engine ueber `GetThreatRect` und
+  -- sieht damit `onMap`; sonst liest sie die Zelle DIREKT
+  -- (`InfluenceGrid::GetThreat`) und der Ausschnitt spielt keine Rolle
+  -- (Cfile:1035804-1035822). Bei `ring = 0` ist das `restriction`-Argument im
+  -- Original also wirkungslos.
+  local onMap = restriction == true
   for cz = 0, m.height - 1 do
     for cx = 0, m.width - 1 do
-      local wert = rechteck(m, cx, cz, radius, restriction == true, feld, ohneGeteilt, army)
+      local wert
+      if radius ~= 0 then
+        wert = rechteck(m, cx, cz, radius, onMap, feld, ohneGeteilt, army)
+      else
+        wert = zellenBedrohung(m.zellen[cx + cz * m.width], feld, ohneGeteilt, army)
+      end
       local mx, _, mz = zellenMitte(m, cx, cz)
       local dx, dz = mx - sx, mz - sz
       local abstand = dx * dx + dz * dz
@@ -327,9 +359,29 @@ function __assignThreatAtPosition(eigenArmee, pos, threat, decay, typ)
   local m = karte(eigenArmee)
   local cx, cz = zelleAus(m, pos[1], pos[3])
   local zelle = m.zellen[cx + cz * m.width]
+  -- Arbeitsteilung zwischen Bindung und Umsetzung, und beide Haelften zaehlen:
+  --
+  --   `cfunc_CAiBrainAssignThreatAtPositionL` setzt `decay = -1.0` als
+  --   Ausgangswert; NUR wenn Argument 4 da ist, verlangt es `lua_type == 3`
+  --   (sonst TypeError "number", Cfile:740295-740297) und klemmt den Wert auf
+  --   [0,1] — `>= 1 -> 1`, `< 0 -> 0` (Cfile:740300-740306).
+  --
+  --   `CInfluenceMap::AssignThreatAtPosition` ersetzt erst danach ein
+  --   NEGATIVES decay durch 0.0099999998 (Cfile:1035568-1035570).
+  --
+  -- Zusammen heisst das: ein FEHLENDES decay wird 0.01, ein ausdruecklich
+  -- negatives wird 0 (die Bindung hat es vorher hochgeklemmt), und etwas, das
+  -- keine Zahl ist, wirft. Hier stand vorher eine Zeile, die alle drei Faelle
+  -- zu 0.01 zusammenzog.
   local d = decay
-  if type(d) ~= 'number' or d < 0 then d = 0.0099999998 end
-  if d > 1 then d = 1 end
+  if d == nil then
+    d = -1.0
+  elseif type(d) ~= 'number' then
+    error('AssignThreatAtPosition: number expected', 2)
+  else
+    if d >= 1 then d = 1.0 elseif d < 0 then d = 0.0 end
+  end
+  if d < 0 then d = 0.0099999998 end
   zelle.threat[feld] = zelle.threat[feld] + threat
   zelle.decay[feld] = zelle.threat[feld] * d
 end
@@ -341,7 +393,7 @@ end
 --- zurueck.
 function __threatsAroundPosition(eigenArmee, pos, ring, restriction, typ, armyArg)
   local feld = feldFuer(typ, 'GetThreatsAroundPosition')
-  local ohneGeteilt = typ ~= nil and string.lower(typ) == 'overallnotassigned'
+  local ohneGeteilt = istNichtZugewiesen(typ)
   local m = karte(eigenArmee)
   local army = armeeIndex(armyArg, 'GetThreatsAroundPosition')
   local cx, cz = zelleAus(m, pos[1], pos[3])
@@ -397,7 +449,7 @@ end
 --- Zelle abweichen.
 function __threatBetweenPositions(eigenArmee, pos1, pos2, restriction, typ, armyArg)
   local feld = feldFuer(typ, 'GetThreatBetweenPositions')
-  local ohneGeteilt = typ ~= nil and string.lower(typ) == 'overallnotassigned'
+  local ohneGeteilt = istNichtZugewiesen(typ)
   local m = karte(eigenArmee)
   local army = armeeIndex(armyArg, 'GetThreatBetweenPositions')
   local onMap = restriction == true
@@ -435,24 +487,52 @@ end
 --- nichtnegativem Decay. Es zerfaellt NUR die geteilte `threat`-Spur, nie die
 --- Spuren der einzelnen Armeen.
 ---
+--- Und dann die LETZTE Anweisung der Funktion, die keine Zerfallszeile ist:
+--- `overallInfluence` wird nicht zerfallen, sondern NEU BERECHNET — als
+--- ungewichtete Summe der 13 anderen Felder, in genau dieser Reihenfolge
+--- (Cfile:1034420-1034429). Der `Overall`-Kanal ist damit keine eigene Spur,
+--- sondern die Gesamtsicht auf alle anderen, und er entsteht ohne jede
+--- Aufklaerung.
+---
+--- Hier stand vorher das Gegenteil: der Kommentar behauptete, `overallInfluence`
+--- entstehe allein aus den Aufklaerungs-Blips und sei deshalb bei uns tot. Die
+--- Folge war real — `aiattackutilities.lua:250` baut seine Zielliste mit
+--- `GetThreatsAroundPosition(pos, 16, true, 'Overall', enemyIndex)`, und die
+--- blieb immer leer.
+---
+--- Die Reihenfolge der Summanden ist nicht kosmetisch: Gleitkomma-Addition ist
+--- nicht assoziativ, und diese Sim soll deterministisch sein.
+local OVERALL_SUMMANDEN = {
+  'antiSurfaceInfluence', 'experimentalInfluence', 'influenceStructures',
+  'antiSubInfluence', 'commanderInfluence', 'navalInfluence',
+  'economyInfluence', 'artilleryInfluence', 'airInfluence',
+  'unknownInfluence', 'antiAirInfluence', 'landInfluence',
+  'influenceStructuresNotMex',
+}
+
 --- Was `Update` ausserdem tut — die `entries` je Zelle aus den Aufklaerungs-
---- Blips neu aufsummieren (Cfile:1035318-1035375) — steht hier NICHT: dafuer
---- braucht es die ReconDB, die es bei uns nicht gibt. Die Karte enthaelt also
---- genau das, was die Lua hineinschreibt, und nichts, was aus gesichteten
---- Einheiten entstuende. Siehe docs/STATUS.md.
+--- Blips neu aufsummieren (Cfile:1035325-1035375) — steht hier NICHT: dafuer
+--- braucht es die ReconDB, die es bei uns nicht gibt. Betroffen sind damit die
+--- Spuren der EINZELNEN Armeen (`threats[army]`), nicht die geteilte.
+--- Siehe docs/STATUS.md.
 function __influenceTick(tick)
   for army, m in pairs(__influenceMaps) do
     if tick % 30 == army - 1 then
       for i = 0, m.total - 1 do
         local zelle = m.zellen[i]
         for _, f in ipairs(SCHWELLENFELDER) do
-          local t = zelle.threat[f]
-          if t > 0 then
-            local n = t - zelle.decay[f]
-            if n < 0 then n = 0.0 end
-            zelle.threat[f] = n
+          if f ~= 'overallInfluence' then
+            local t = zelle.threat[f]
+            if t > 0 then
+              local n = t - zelle.decay[f]
+              if n < 0 then n = 0.0 end
+              zelle.threat[f] = n
+            end
           end
         end
+        local summe = 0.0
+        for _, f in ipairs(OVERALL_SUMMANDEN) do summe = summe + zelle.threat[f] end
+        zelle.threat.overallInfluence = summe
       end
     end
   end

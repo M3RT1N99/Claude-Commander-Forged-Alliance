@@ -201,9 +201,25 @@ local entity = withNoops(ENTITY_NAMES, {
   -- Anteil aendert (round(ratio*4)/4, Cfile:916030-916050). Genau deshalb
   -- kommentiert unit.lua:823 „Health values come in at fixed 25% intervals" —
   -- daran haengen die Schadensraucher (ManageDamageEffects).
+  --
+  -- `SetHealth` ist in der Engine NICHT der rohe Schreibzugriff: die Bindung
+  -- rechnet `delta = argument - mHealth` und ruft damit `AdjustHealth`
+  -- (cfunc_EntitySetHealthL, Cfile:932968-932971). Und `Entity::AdjustHealth`
+  -- hat zwei Waechter, bevor es ueberhaupt klemmt (Cfile:915983-915987):
+  --
+  --     if (delta != 0.0)
+  --       if ((!NoDamage || delta >= 0) && (!mIsDead || delta <= 0))
+  --
+  -- Auf einer TOTEN Entity mit positivem Delta tut `SetHealth` also gar nichts
+  -- — eine Leiche laesst sich nicht heilen. Das stand hier nicht, und damit
+  -- konnte jeder Aufruf eine tote Einheit wiederbeleben.
   SetHealth = function(self, instigator, hp)
     local max = self:GetMaxHealth()
     local old = self.__health or 0
+    local delta = hp - old
+    if delta == 0 then return end
+    if __simConVar_NoDamage and delta < 0 then return end
+    if (self.__dead or self.__destroyed) and delta > 0 then return end
     local new = math.max(0, math.min(hp, max))
     self.__health = new
     if max > 0 and self.OnHealthChanged then
@@ -413,14 +429,26 @@ local entity = withNoops(ENTITY_NAMES, {
   -- alle drei Achsen gleich (Cfile:935334-935337). Nur EIN Wert zu speichern
   -- verlor die Achsenmasse der Bau-Box: effectutilities.lua:100/109 skaliert
   -- sie mit dem Fussabdruck des Gebaeudes (x*1.05, y*0.2, z*1.05).
+  --
+  -- Zwei Dinge standen hier nicht, obwohl der Kommentar darueber sie zitiert:
+  -- die Engine WIRFT bei einer anderen Argumentzahl (`lua_gettop != 4 &&
+  -- != 2`, Cfile:935304-935309) — drei Argumente ergaben bei uns still eine
+  -- Skalierung mit nil in z — und sie gibt die Entity ZURUECK
+  -- (`PushStack(&v5->mLuaObj, …); return 1`, Cfile:935374-935375). Ohne die
+  -- Rueckgabe laeuft jede Kette wie `CreateEmitterAtEntity(…):SetScale(…)` ins
+  -- Leere; dieselbe Regel steht in der Projektil-Sektion dieser Datei.
   SetScale = function(self, x, y, z)
-    if y == nil and z == nil then
+    if z == nil and y ~= nil then
+      error('Wrong number of arguments to Entity:SetScale, expected 2 or 4 but got 3', 2)
+    end
+    if y == nil then
       self.__drawScale = x
       self.__scale = { x, x, x }
     else
       self.__drawScale = x
       self.__scale = { x, y, z }
     end
+    return self
   end,
   GetScale = function(self)
     local s = self.__scale
@@ -1264,13 +1292,25 @@ local weapon = withNoops(WEAPON_NAMES, {
     return nil
   end,
 
-  -- GetFireClockPct = 1 - mFireClock / (10/RoF) (Cfile:988512-988531).
+  -- `GetFireClockPct` = `1 - mFireClock / (10 / RoF)` (Cfile:988528-988531).
+  --
+  -- Zwei Abweichungen standen hier, beide in derselben Zeile:
+  --
+  --   * Die Feuerrate ist die LAUFZEIT-Rate, nicht die des Blueprints: die
+  --     Bindung liest `mAttributes.mRateOfFire` und nimmt den Blueprint-Wert
+  --     nur, wenn die Laufzeit-Rate negativ ist (Cfile:988528-988530; der
+  --     Konstruktor setzt sie auf -1.0, Cfile:983286). `ChangeRateOfFire`
+  --     schreibt genau dieses Attribut — und wurde hier ignoriert.
+  --   * Der Divisor ist UNGERUNDET. Abgeschnitten wird der ZAEHLER, also der
+  --     Taktzaehler selbst (`(int)(10.0/rof)`, Cfile:983953) — nicht der
+  --     Nenner dieser Division.
   GetFireClockPct = function(self)
-    local bp = self.__bp or {}
-    local rof = bp.RateOfFire or 1
-    local full = math.floor(10 / rof)
-    if full <= 0 then return 1 end
-    return 1 - ((self.__fireClock or 0) / full)
+    local rof = self.__rateOfFire
+    if type(rof) ~= 'number' or rof < 0 then
+      rof = (self.__bp or {}).RateOfFire or 1
+    end
+    if rof <= 0 then return 1 end
+    return 1 - ((self.__fireClock or 0) / (10 / rof))
   end,
 
   -- Runtime-Overrides: Radiuswerte werden nativ quadriert, daher wirkt auch

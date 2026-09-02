@@ -221,10 +221,14 @@ for (const b of BEKANNT) {
 }
 const neue = threadFehler.filter((w) => !BEKANNT.some((b) => b.muster.test(w)))
 check(neue.length === 0, `kein NEUER Thread-Fehler${neue[0] ? `: ${neue[0].slice(0, 180)}` : ''}`)
-check(
-  threadFehler.length > 0,
-  `die KI laeuft weit genug, um ueberhaupt anzustossen (${threadFehler.length} bekannte Fehler)`,
-)
+// KEINE Untergrenze auf der Fehlerzahl. Hier stand
+// `check(threadFehler.length > 0, …)` — das ist das Gegenteil der Ratsche, die
+// der Kommentar oben verspricht: sobald jemand die BuilderManagers baut und
+// beide Haltepunkte verschwinden, waere die Suite rot geworden, und der
+// naechstliegende Ausweg waere gewesen, sie abzuschwaechen.
+//
+// Dass die KI ueberhaupt laeuft, zeigen die Pruefungen oben — sie bildet aus
+// ihrem Pool eigene Platoons.
 
 host.close()
 await game.close()

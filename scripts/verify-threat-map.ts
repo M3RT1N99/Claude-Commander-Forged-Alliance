@@ -183,6 +183,63 @@ check(
   'und die Eintraege sind veraenderbar (aiattackutilities.lua:327 schreibt zurueck)',
 )
 
+console.log()
+console.log('== overallInfluence wird HERGELEITET, nicht zerfallen ==')
+// `DecayInfluence` zerfaellt 13 Felder und setzt danach als LETZTE Anweisung
+// `threat.overallInfluence` auf deren ungewichtete Summe (Cfile:1034420-1034429).
+// Der Overall-Kanal ist damit die Gesamtsicht, und er braucht keine Aufklaerung.
+q(`__assignThreatAtPosition(1, {900, 0, 900}, 30, 0, 'Structures')`)
+q(`__assignThreatAtPosition(1, {900, 0, 900}, 12, 0, 'AntiAir')`)
+check(
+  Number(q(`return __influenceCellThreat(1, 900, 900, 'Overall')`)) === 0,
+  'vor dem Tick ist Overall noch 0 — die Summe entsteht erst im Update',
+)
+q(`__influenceTick(0)`)
+check(
+  Number(q(`return __influenceCellThreat(1, 900, 900, 'Overall')`)) === 42,
+  'nach dem Tick ist Overall die Summe der anderen Felder (30 + 12)',
+)
+// Und genau das ist der Kanal, aus dem die KI ihre Ziele holt
+// (aiattackutilities.lua:250 fragt GetThreatsAroundPosition mit 'Overall').
+const overallUm = host.pull<[number, number, number][]>(`(function()
+  local t = ArmyBrains[1]:GetThreatsAroundPosition({900,0,900}, 16, true, 'Overall', 1)
+  local teile = {}
+  for _, v in ipairs(t) do teile[#teile+1] = string.format('[%d,%d,%.9g]', v[1], v[2], v[3]) end
+  return '[' .. table.concat(teile, ',') .. ']'
+end)()`)
+check(overallUm.length > 0, `GetThreatsAroundPosition('Overall') liefert Eintraege (${overallUm.length})`)
+
+console.log()
+console.log('== Die Feinheiten der Bindung ==')
+// `THREATTYPE_`-Praefix und Schreibweise duerfen das Verhalten nicht aendern —
+// es ist derselbe Aufzaehlungswert (SetLexical, Cfile:1381900).
+check(
+  Number(q(`return ArmyBrains[1]:GetThreatAtPosition({900,0,900}, 0, true, 'OverallNotAssigned', 1)`))
+    === Number(q(`return ArmyBrains[1]:GetThreatAtPosition({900,0,900}, 0, true, 'THREATTYPE_overallnotassigned', 1)`)),
+  'OverallNotAssigned verhaelt sich mit und ohne Praefix gleich',
+)
+// Der Zerfallswert: fehlend -> 0.01, ausdruecklich negativ -> 0 (die Bindung
+// klemmt auf [0,1], Cfile:740300-740306), keine Zahl -> Fehler.
+q(`__assignThreatAtPosition(1, {100, 0, 900}, 50, -5, 'Commander')`)
+q(`__influenceTick(0)`)
+check(
+  Number(q(`return __influenceCellThreat(1, 100, 900, 'Commander')`)) === 50,
+  'ein ausdruecklich negatives decay wird 0, nicht 0.01 — der Wert zerfaellt nicht',
+)
+check(
+  q(`return (pcall(function()
+       ArmyBrains[1]:AssignThreatAtPosition({100,0,900}, 5, 'viel', 'Commander')
+     end))`) === false,
+  'ein decay, das keine Zahl ist, wirft (TypeError "number", Cfile:740295)',
+)
+// Bei ring 0 geht die Engine gar nicht ueber GetThreatRect und sieht den
+// spielbaren Ausschnitt nicht (Cfile:1035804-1035822).
+check(
+  Number(q(`local _, t = ArmyBrains[1]:GetHighestThreatPosition(0, false, 'Structures', 1) return t`))
+    === Number(q(`local _, t = ArmyBrains[1]:GetHighestThreatPosition(0, true, 'Structures', 1) return t`)),
+  'bei ring 0 ist das restriction-Argument wirkungslos',
+)
+
 console.log('\n== Und die KI schreibt beim Start selbst hinein ==')
 // `AIBrain:OnCreateAI` ruft `AddInitialEnemyThreat(200, 0.005)` fuer jedes
 // Skirmish (aibrain.lua:398). Das lief bei der ARMEE-ERZEUGUNG, also lange vor

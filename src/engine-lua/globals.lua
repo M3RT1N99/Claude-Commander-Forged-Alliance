@@ -2562,3 +2562,8 @@ __simConVar_AI_RunOpponentAI = true
 -- `/noai`: `CFG_GetArgOption("/noai", …)` (Cfile:733491). Wir haben keine
 -- Kommandozeile, also steht die Option nicht.
 __argNoAi = false
+
+-- `NoDamage`: `Moho::TSimConVar_bool`, Standardwert 0
+-- (register_NoDamage_SimConVarDef, Cfile:1951994-1951997). `Entity::AdjustHealth`
+-- fragt ihn ab, bevor es Schaden zulaesst (Cfile:915985-915986).
+__simConVar_NoDamage = false

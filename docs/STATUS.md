@@ -831,13 +831,20 @@ weiß das: sie übergibt `ring = 16` mit der Bedeutung „die ganze Karte"
    teilt sich für `Overall` den `switch`-Fall mit `Unknown` und schreibt nach
    `unknownInfluence` (Cfile:1035574-1035581) — `GetThreat` liest für `Overall`
    aber `overallInfluence` (Cfile:1034567). `overallInfluence` wird von
-   `AssignThreatAtPosition` also **nie** beschrieben; es entsteht allein in
-   `CInfluenceMap::Update` aus den Aufklärungs-Blips. Praktische Folge,
-   gemessen: `AddInitialEnemyThreat` übergibt keinen Typ, landet im
-   `Overall`-Fall — und für eine Abfrage mit `'Overall'` oder `'Structures'` ist
-   diese Bedrohung unsichtbar. Nur `'Unknown'` findet sie. Wer das „geradezieht",
-   baut eine andere KI als die von FA.
+   `AssignThreatAtPosition` also **nie** beschrieben.
    `OverallNotAssigned` hat gar keinen Schreibfall: der Aufruf tut nichts.
+
+   **Korrektur (der erste Stand dieses Absatzes war falsch):** daraus folgt
+   NICHT, dass der `Overall`-Kanal ohne Aufklärung tot ist. `DecayInfluence`
+   zerfällt 13 Felder und setzt danach als **letzte Anweisung**
+   `threat.overallInfluence` auf deren ungewichtete Summe
+   (Cfile:1034420-1034429). Der Kanal ist also die Gesamtsicht auf alle anderen
+   und entsteht bei jedem Update — ohne ReconDB. Wir hatten diese Herleitung
+   nicht, und damit war genau der Kanal leer, aus dem die KI ihre Ziele holt:
+   `aiattackutilities.lua:250` fragt `GetThreatsAroundPosition(pos, 16, true,
+   'Overall', enemyIndex)` und gibt bei leerer Liste auf. Behoben; die
+   Reihenfolge der 13 Summanden ist übernommen, weil Gleitkomma-Addition nicht
+   assoziativ ist.
 2. **Der `ring` zählt ZELLEN, nicht Welteinheiten** (Cfile:1035045-1035081), und
    die Summe ist ungewichtet über das einschließende Quadrat.
 3. **`armyIndex` ist 1-basiert und `-1` ist ein Fehler.**
