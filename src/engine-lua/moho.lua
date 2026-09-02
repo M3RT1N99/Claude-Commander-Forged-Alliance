@@ -492,7 +492,7 @@ local UNIT_NAMES = {
   'IsUnitState', 'IsValidTarget', 'KillManipulator', 'KillManipulators',
   'PlayUnitAmbientSound', 'PlayUnitSound', 'RemoveBuildRestriction',
   'RemoveCommandCap', 'RemoveToggleCap', 'RestoreBuildRestrictions',
-  'RestoreCommandCaps', 'RestoreToggleCaps', 'RevertElevation', 'RevertRegenRate',
+  'RestoreCommandCaps', 'RestoreToggleCaps', 'RevertElevation',
   'ScaleGetBuiltEmitter', 'SetAccMult', 'SetAutoMode', 'SetBlockCommandQueue',
   'SetBreakOffDistanceMult', 'SetBreakOffTriggerMult', 'SetBuildRate', 'SetBusy',
   'SetCanBeKilled', 'SetCanTakeDamage', 'SetCapturable', 'SetConsumptionActive',
@@ -500,7 +500,7 @@ local UNIT_NAMES = {
   'SetCustomName', 'SetDoNotTarget', 'SetElevation', 'SetFireState', 'SetFocusEntity',
   'SetImmobile', 'SetIsValidTarget', 'SetPaused', 'SetProductionActive',
   'SetProductionPerSecondEnergy', 'SetProductionPerSecondMass', 'SetReclaimable',
-  'SetRegenRate', 'SetScriptBit', 'SetShieldRatio', 'SetSpeedMult',
+  'SetScriptBit', 'SetShieldRatio', 'SetSpeedMult',
   'SetStrategicUnderlay', 'SetStunned', 'SetTurnMult', 'SetUnSelectable',
   'SetUnitState', 'SetWorkProgress', 'StopSiloBuild', 'StopUnitAmbientSound',
   'TestCommandCaps', 'TestToggleCaps', 'ToggleFireState', 'ToggleScriptBit',
@@ -538,6 +538,20 @@ local function scriptBitIndex(bit)
 end
 
 local unit = withNoops(UNIT_NAMES, {
+  --- Die Regenerationsrate der Einheit (`UnitAttributes.mRegenRate`), PRO
+  --- SEKUNDE. `Unit::OnTick` verrechnet sie mit `* 0.1` je Tick
+  --- (Cfile:952810-952817); `SetRegenRate` schreibt sie (Cfile:975981-975986),
+  --- `RevertRegenRate` holt den Blueprint-Wert zurueck (Cfile:976038).
+  --- Veteranenstufen und Buffs gehen genau hierueber.
+  SetRegenRate = function(self, r)
+    local n = tonumber(r) or 0
+    if n < 0 then n = 0 end
+    self.__regenRate = n
+  end,
+  RevertRegenRate = function(self)
+    self.__regenRate = (((self.__bp or {}).Defense) or {}).RegenRate or 0
+  end,
+
   GetUnitId = function(self)
     return (self.__bp and self.__bp.BlueprintId) or self.__id
   end,

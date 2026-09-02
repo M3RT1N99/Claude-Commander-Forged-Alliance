@@ -199,6 +199,13 @@ console.log('\n== Splash on a unit that owns the shield: it takes the remainder 
   check(domeHp === 200, `the owner's dome is up at 200 (${domeHp})`)
   // ShieldRegenRate 0 above: the dome cannot move on its own, so the drop we
   // measure is exactly the absorption.
+  //
+  // Und die UNIT-Regeneration ebenfalls aus: `Unit::OnTick` heilt jede Einheit
+  // unter ihrem Maximum um `Defense.RegenRate * 0.1` pro Tick
+  // (Cfile:952810-952817). Der Beat zwischen Schaden und Messung heilte 1 Leben
+  // zurueck, und die Differenz war 149 statt 150 — nicht der Schild war falsch,
+  // sondern die Messung mass zwei Dinge auf einmal.
+  host.eval(`__units[${owner}].__regenRate = 0`)
   const hp0 = hpOf(owner)
   const splash = domeHp + 150
 

@@ -111,14 +111,47 @@ console.log('\n== Die Speed-Cap-Kaskade (sub_699760 @0x699760, Cfile:942291-9423
   const bpRadius = num(host, `__units[${kid}].__bp.Physics.TurnRadius`)
   const d = Math.min(bpRadius, 4) // r = d/2 < TurnRadius → Gate greift sicher
   host.eval(`__units[${kid}]:GetNavigator():SetGoal({ ${200 + d}, 20, 200 })`)
-  beat()
-  beat()
-  const v = num(host, `__units[${kid}].__speed or 0`)
+  // MIT VOLLER FAHRT hinein. Vorher stand hier nur `beat(); beat()` und danach
+  // `v <= cap` — nach zwei Beats begrenzt aber die BESCHLEUNIGUNG auf 2·accel,
+  // und das liegt weit unter dem Cap. Die Zeile war damit wahr, ob das Gate
+  // greift oder nicht: eine Prüfung, die nicht scheitern kann.
+  //
+  // Von der Höchstgeschwindigkeit aus ist das Cap die bindende Schranke, und
+  // die Prüfung wird eine GLEICHHEIT statt einer Schranke.
+  const maxSpeed = num(host, `__units[${kid}].__bp.Physics.MaxSpeed or 0`)
+  host.eval(`__units[${kid}].__speed = ${maxSpeed}`)
+  for (let i = 0; i < 12; i++) beat()
+  const vBogen = num(host, `__units[${kid}].__speed or 0`)
   const turnRateTick = num(host, `(__units[${kid}].__bp.Physics.TurnRate or 0) * 0.0017453292`)
   const capErwartet = turnRateTick * (d / 2) * 0.5
-  check(
-    v <= capErwartet + 1e-6,
-    `(a) 90°-Ziel in ${d} m: v=${v.toFixed(4)} ≤ turnRate·(d/2)·0.5 = ${capErwartet.toFixed(4)} m/Tick`,
+
+  // GEGENPROBE: dieselbe Einheit, dieselbe Anfangsgeschwindigkeit, Ziel
+  // GERADEAUS. Ohne Bogen gibt es kein Cap — greift GATE 2, muss der Bogen-Lauf
+  // langsamer sein.
+  const gid = spawnLuaUnit(host, 'uel0001', { x: 260, y: 20, z: 200 }, 1)
+  host.eval(`__units[${gid}]:GetNavigator():SetGoal({ 260, 20, 400 })`)
+  host.eval(`__units[${gid}].__speed = ${maxSpeed}`)
+  for (let i = 0; i < 12; i++) beat()
+  const vGerade = num(host, `__units[${gid}].__speed or 0`)
+  host.eval(`__units[${gid}]:GetNavigator():AbortMove()`)
+
+  // OFFENER BEFUND — hier steht mit Absicht KEINE Behauptung.
+  //
+  // Gemessen (uel0001, MaxSpeed 1.7, MaxBrake 0, TurnRate 90): der 90°-Lauf auf
+  // 4 m, der 90°-Lauf auf 200 m und der Lauf geradeaus ergeben Tick für Tick
+  // DIESELBE Kurve — 1.683, 1.666, 1.649, … also −1 % je Tick, unabhängig vom
+  // Bogen. GATE 2 (`sub_699760`, Cfile:942313-942321) ist bei uns also nicht
+  // wirksam, und was die Geschwindigkeit stattdessen abbaut, ist ungeklärt.
+  //
+  // Vorher stand hier `check(v <= cap)` nach zwei Beats AUS DEM STAND. Da
+  // begrenzt die Beschleunigung auf 2·accel, weit unter dem Cap — die Zeile war
+  // wahr, ob das Gate greift oder nicht, und hat den Befund elf Monate lang
+  // zugedeckt. Sie ist entfernt; die Zahlen stehen im Protokoll, und der Punkt
+  // steht in docs/STATUS.md. Eine Behauptung kommt zurück, wenn das
+  // Bewegungsmodell geklärt ist.
+  console.log(
+    `       (a) OFFEN: Bogen ${vBogen.toFixed(3)} vs. geradeaus ${vGerade.toFixed(3)} ` +
+      `(Cap wäre ${capErwartet.toFixed(3)}) — GATE 2 ist nicht wirksam, siehe docs/STATUS.md`,
   )
   host.eval(`__units[${kid}]:GetNavigator():AbortMove()`)
 }

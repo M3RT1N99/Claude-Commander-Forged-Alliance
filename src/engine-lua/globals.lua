@@ -2300,9 +2300,14 @@ end
 -- (GetReclaimCosts(reclaimer) -> time, energy, mass; Cfile:848452-848455,
 -- prop.lua:153-162 — the formula stays in the original Lua), then drains
 -- fraction by 1/ticks per tick with ticks = max(1, time*10)
--- (Cfile:848456-848465). The grant is total * |fraction delta|, added
--- DIRECTLY to the army storage (Cfile:848612-848638) — reclaim is never
--- economy-throttled (the request stays 0/0, LimitingRate = 1,
+-- (Cfile:848456-848465). The grant is total * |fraction delta|, added to THIS
+-- BEAT'S INCOME — the engine writes into `mResources` (Cfile:848617-848620),
+-- the same accumulator `GiveResource` feeds (Cfile:735044-735053), and
+-- `ArmyProcessEconomy` folds that into `available` and reports it as
+-- `mTotals.mIncome` (Cfile:1106644-1106673). NOT into `mTotals.mStored`; the
+-- comment here said "directly to the army storage" and contradicted both the
+-- Cfile lines it cited and the `GiveResource` call below. Reclaim is never
+-- economy-throttled either way (the request stays 0/0, LimitingRate = 1,
 -- Cfile:1107891-1107909). At fraction 0 the target runs OnReclaimed and
 -- dies (Prop::Materialize, Cfile:1013985-1014040).
 __reclaimTasks = {}
@@ -2394,8 +2399,8 @@ function __reclaimTick()
           brain:GiveResource('MASS', live.mass * delta)
           brain:GiveResource('ENERGY', live.energy * delta)
           -- Reclaim is a SEPARATE display counter in the original (mTotals.
-          -- mReclaimed), ON TOP OF the storage credit above — the engine writes
-          -- to both places (Cfile:848614-848639). __econReclaim feeds
+          -- mReclaimed), ON TOP OF the income credit above — the engine writes
+          -- to both places (Cfile:848617-848637). __econReclaim feeds
           -- GetEconomyTotals().reclaimed; income stays untouched.
           __econReclaim(u.__army or 1, live.mass * delta, live.energy * delta)
           if t.__fraction <= 0 then

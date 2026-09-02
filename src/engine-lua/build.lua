@@ -74,6 +74,36 @@ function __abortBuildTasks(builderId)
   if b then b.UnitBeingBuilt = nil end
 end
 
+--- Regeneration (Unit::OnTick, Cfile:952810-952817) — der ANDERE Zweig
+--- derselben Anweisung, deren `else` unten den Bauplatz zerfallen laesst. Hier
+--- stand bisher nur der `else`-Teil, obwohl der Kommentar den ganzen Bereich
+--- zitierte:
+---
+---     if (!mIsBeingBuilt) {
+---       if (maxHealth > health && GetAttributes1()->mRegenRate > 0.0)
+---         AdjustHealth(this, this, mRegenRate * 0.1);
+---     } else if (curTick - creationTick > 1) { … Zerfall … }
+---
+--- `RegenRate` ist also ein Wert PRO SEKUNDE, verteilt auf zehn Ticks. Er kommt
+--- aus `Defense.RegenRate` des Blueprints und wird zur Laufzeit von
+--- `SetRegenRate`/`RevertRegenRate` veraendert (Veteranenstufen, Buffs).
+---
+--- Der Weg ist `AdjustHealth`, nicht ein roher Schreibzugriff: das haelt die
+--- 25%-Quantisierung von `OnHealthChanged` und den Toten-Waechter ein.
+function __regenTick()
+  for _, u in pairs(__units) do
+    if not u.__beingBuilt and not u.__dead and not u.__destroyQueued then
+      local rate = u.__regenRate or 0
+      if rate > 0 then
+        local max = u:GetMaxHealth()
+        if max > (u.__health or 0) then
+          u:SetHealth(u, (u.__health or 0) + rate * 0.1)
+        end
+      end
+    end
+  end
+end
+
 --- Site decay (Unit::OnTick, Cfile:952808-952840): every unit that is
 --- still being built loses 0.1 / max(BuildCostEnergy, BuildCostMass,
 --- BuildTime) of its build fraction PER TICK, starting 2 ticks after

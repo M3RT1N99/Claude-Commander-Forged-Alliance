@@ -10,7 +10,7 @@ import { ZipArchive } from '../src/vfs/zipArchive'
 import type { RandomAccessFile } from '../src/vfs/randomAccess'
 import { LuaHost } from '../src/lua/host'
 import { bonesFromBlueprint, bootArchives } from './gameFiles'
-import { installEngine } from '../src/lua/engine'
+import { installEngine, beat } from '../src/lua/engine'
 import { setTerrainSource } from '../src/lua/engineGlobals'
 import { FLAT_TEST_TERRAIN, FLAT_TEST_MAP_SIZE } from '../src/sim/terrain'
 import { installUnitFactory, installBlueprintPipeline, loadUnitBlueprint, spawnLuaUnit, readLuaUnit, setUnitBones } from '../src/lua/unitFactory'
@@ -63,7 +63,7 @@ const num = (h: LuaHost, e: string): number => Number(h.eval(`return ${e}`))
 
 const warnings: string[] = []
 const host = await LuaHost.create(files, (level, msg) => { if (level === 'WARN') warnings.push(msg) })
-installEngine(host)
+const engine = installEngine(host)
 // Flaches Testgelaende — EXPLIZIT, weil die Engine ohne Karte knallt (kein stiller 0-Wert).
 setTerrainSource(host, FLAT_TEST_TERRAIN, FLAT_TEST_MAP_SIZE)
 loadUnitBlueprint(host, 'uel0001', uel0001bp)
@@ -96,6 +96,36 @@ if (warnings.length > 0) {
   for (const w of warnings.slice(0, 4)) console.log(`  ${w.slice(0, 110)}`)
 }
 
+console.log()
+console.log('== Regeneration: der andere Zweig von Unit::OnTick (Cfile:952810-952817) ==')
+{
+  // `if (!mIsBeingBuilt) { if (max > health && regenRate > 0)
+  //    AdjustHealth(this, regenRate * 0.1) }` — `RegenRate` ist PRO SEKUNDE und
+  // wird auf zehn Ticks verteilt. Der ACU (uel0001) hat Defense.RegenRate = 10.
+  const id = spawnLuaUnit(host, 'uel0001', { x: 260, y: 20, z: 260 }, 1)
+  const u = (code: string): unknown => host.eval(`local u = __units[${id}] ${code}`)
+  const rate = Number(u('return u.__regenRate'))
+  check(rate > 0, `die Rate kommt aus dem Blueprint (Defense.RegenRate = ${rate})`)
+  const max = Number(u('return u:GetMaxHealth()'))
+  u(`u.__health = ${max - 100}`)
+  for (let i = 0; i < 10; i++) beat(engine)
+  const nach = Number(u('return u:GetHealth()'))
+  check(
+    Math.abs(nach - (max - 100 + rate * 10 * 0.1)) < 1e-6,
+    `nach 10 Beats +${(rate * 10 * 0.1).toFixed(1)} Leben (${(max - 100).toFixed(0)} -> ${nach.toFixed(1)})`,
+  )
+  // Und NICHT ueber das Maximum hinaus.
+  u(`u.__health = ${max}`)
+  for (let i = 0; i < 10; i++) beat(engine)
+  check(Number(u('return u:GetHealth()')) === max, 'bei vollem Leben passiert nichts (max > health ist die Bedingung)')
+  // `SetRegenRate` und `RevertRegenRate` sind der Weg fuer Veteranen und Buffs.
+  u('u:SetRegenRate(0)')
+  u(`u.__health = ${max - 50}`)
+  for (let i = 0; i < 10; i++) beat(engine)
+  check(Number(u('return u:GetHealth()')) === max - 50, 'SetRegenRate(0) haelt die Regeneration an')
+  u('u:RevertRegenRate()')
+  check(Number(u('return u.__regenRate')) === rate, 'RevertRegenRate holt den Blueprint-Wert zurueck')
+}
 host.close()
 for (const f of openFiles) await f.close()
 console.log(failures === 0 ? '\nUNIT-TICK BESTANDEN' : `\n${failures} CHECK(S) FEHLGESCHLAGEN`)

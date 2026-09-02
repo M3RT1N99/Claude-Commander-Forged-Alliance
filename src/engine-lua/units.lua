@@ -268,6 +268,11 @@ function __spawnUnit(scriptPath, bpId, x, y, z, army, complete, requestedLayer)
   -- Erstellungs-Tick: die Build-/Wreckage-Shader zaehlen ihr Alter darueber
   -- (mesh.fx: material.x = time - creationTime).
   u.__spawnTick = __gameTick or 0
+  -- `UnitAttributes.mRegenRate` kommt aus `Defense.RegenRate` des Blueprints
+  -- (Cfile:949124) und wird zur Laufzeit von `SetRegenRate`/`RevertRegenRate`
+  -- veraendert. `Unit::OnTick` regeneriert damit jeden Tick um `rate * 0.1`
+  -- (Cfile:952810-952817).
+  u.__regenRate = ((bp.Defense or {}).RegenRate) or 0
   -- Die frische Einheit landet im Pool ihrer Armee — und zwar BEVOR ihr
   -- `OnCreate` laeuft: `Sim::CreateUnit` macht erst
   -- `mArmy->Func9(…, "ArmyPool")` (Cfile:950549) und dann

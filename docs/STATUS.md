@@ -954,6 +954,42 @@ Die Prüfung liest die Tabellenblöcke von `local <name> = {` bis zur schließen
 Klammer und meldet jeden Schlüssel, der darin zweimal auf erster Ebene steht.
 51 Blöcke, 523 Schlüssel, aktuell null Funde.
 
+### Regeneration lief nie — und das Bogen-Cap tut es bis heute nicht
+
+Zwei Funde aus derselben Ecke, einer behoben, einer offen.
+
+**`Unit::OnTick` hat zwei Zweige, und wir hatten nur einen.** Der Kommentar in
+`build.lua` zitierte den ganzen Bereich (Cfile:952808-952840), umgesetzt war nur
+das `else`:
+
+```
+if (!mIsBeingBuilt) {
+  if (maxHealth > health && GetAttributes1()->mRegenRate > 0.0)
+    AdjustHealth(this, this, mRegenRate * 0.1);      // <- fehlte komplett
+} else if (curTick - creationTick > 1) { … Zerfall … } // <- war da
+```
+
+`Defense.RegenRate` ist ein Wert **pro Sekunde**, verteilt auf zehn Ticks. Keine
+Einheit im Spiel hat je Leben zurückbekommen — der ACU regeneriert 10/s, jedes
+Gebäude und jede Veteranenstufe hängen daran. `SetRegenRate` und
+`RevertRegenRate` waren dazu passend zwei stille No-ops. Alles drei ist jetzt
+echt, und der Weg ist `AdjustHealth`, nicht ein roher Schreibzugriff — damit
+gelten die 25-%-Quantisierung von `OnHealthChanged` und der Toten-Wächter.
+`verify-unit-tick.ts` misst es.
+
+**Offen: GATE 2, das Bogen-Geschwindigkeitslimit.** `verify-motion.ts` prüfte es
+mit `v <= cap` nach zwei Beats **aus dem Stand** — da begrenzt die
+Beschleunigung auf 2·accel, weit unter dem Cap. Die Zeile war wahr, ob das Gate
+greift oder nicht.
+
+Gemessen (uel0001, MaxSpeed 1,7, MaxBrake 0, TurnRate 90): ein 90°-Ziel auf 4 m,
+ein 90°-Ziel auf 200 m und ein Ziel geradeaus ergeben Tick für Tick **dieselbe**
+Kurve — 1,683 / 1,666 / 1,649 / … also −1 % je Tick, unabhängig vom Bogen.
+`sub_699760` (Cfile:942313-942321) ist bei uns also **nicht wirksam**, und was
+die Geschwindigkeit stattdessen abbaut, ist ungeklärt. Die falsche Zusicherung
+ist entfernt; die Suite druckt die Zahlen und behauptet nichts. Eine Behauptung
+kommt zurück, wenn das Bewegungsmodell geklärt ist.
+
 ### Die Boot-Nutzlast des Sim-Workers
 
 Gemessen: die Boot-Nutzlast des Sim-Workers ist heute **4 281

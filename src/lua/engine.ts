@@ -153,6 +153,9 @@ export function beat(engine: Engine): void {
   motionTick(h)
   // Site decay is part of Unit::OnTick (same engine phase as motion,
   // Cfile:952824-952840): unfinished units lose build fraction every tick.
+  // Beide Zweige von `Unit::OnTick` (Cfile:952810-952840): wer NICHT im Bau
+  // ist, regeneriert; wer im Bau ist und nicht bedient wird, zerfaellt.
+  h.eval('__regenTick()')
   h.eval('__decayTick()')
   // Phase 6 — Projektile fliegen (Projectile::MotionTick) und schlagen ein.
   projectileTick(h)
