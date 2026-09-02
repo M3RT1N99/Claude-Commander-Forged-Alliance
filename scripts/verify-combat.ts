@@ -265,6 +265,19 @@ console.log('\n== CollisionBeam: der Dauerstrahl des Cybran-T2-Turms ==')
   // before the fire gate (weapon->mCanFire) lets the beam start.
   const victim = spawnLuaUnit(host, 'uel0201', { x: 312, y: 20, z: 100 }, 2)
   check(turm > 0 && victim > 0, `Turm ${turm} (Cybran T2 PD) und Opfer ${victim}, 12 m seitlich`)
+  // CAimManipulator::Track calls the weapon's OnStartTracking(label) on the
+  // edge where the heading starts to move (Cfile:861862-861870). Wrap the
+  // instance method to witness it; the original still runs.
+  host.eval(`
+    __trackStarts, __trackLabel = 0, false -- false, not nil: the strict _G would not create the key
+    local w = __units[${turm}]:GetWeapon(1)
+    local orig = w.OnStartTracking
+    w.OnStartTracking = function(self, label)
+      __trackStarts = __trackStarts + 1
+      __trackLabel = label
+      return orig(self, label)
+    end
+  `)
   const beams = Number(host.eval('return #__collisionBeams'))
   check(beams >= 1, `${beams} CollisionBeam-Entity(s) beim Waffen-OnCreate erzeugt`)
   let beamAn = false
@@ -297,6 +310,10 @@ console.log('\n== CollisionBeam: der Dauerstrahl des Cybran-T2-Turms ==')
   check(
     aim !== null && aim.on && Math.abs(aim.yaw - Math.PI / 2) < 0.15,
     `Der Turm hat auf das Ziel gedreht (yaw ${aim ? aim.yaw.toFixed(3) : '—'} ≈ π/2, onTarget=${aim?.on})`,
+  )
+  check(
+    Number(host.eval('return __trackStarts')) === 1 && host.eval('return __trackLabel') === 'Default',
+    `OnStartTracking fired once, with the manipulator label 'Default' (${String(host.eval('return __trackStarts'))}x, ${String(host.eval('return tostring(__trackLabel)'))})`,
   )
   // Der SICHTBARE Strahl: CreateBeamEmitter + AttachBeamToEntity hängen den
   // Beam-Emitter an die CollisionBeam-Entity — die Meldung trägt beide Enden.
@@ -1062,6 +1079,47 @@ console.log('\n== Target priorities beat distance (FindBestEnemy) ==')
     )
   }
   check(picked2 !== 0 && picked2 !== farTank2, `without priorities the nearest wins again (picked ${picked2}, far tank ${farTank2})`)
+}
+
+console.log('\n== The first target check is the weapon\'s first tick, not the next multiple of the interval ==')
+{
+  // CAcquireTargetTask is a task on the attacker's stage: its CTaskThread
+  // starts with mWaitTicks = 0 (Cfile:438797), so the first TaskTick comes at
+  // the weapon's first tick, and every later one `interval` ticks after that
+  // (the task returns interval + 1, Cfile:792908-792912; DoTaskTick stores
+  // interval, Cfile:438947). The rhythm belongs to the weapon, not to the
+  // game clock. Our tick used `__gameTick % interval == 0`: a tank finished at
+  // tick 17 waited until tick 30 for its first look around.
+  const interval = 5 // uel0201: TargetCheckInterval 0.5
+  while (Number(host.eval('return __gameTick')) % interval !== interval - 3) beat(engine)
+  const late = spawnLuaUnit(host, 'uel0201', { x: 700, y: 20, z: 700 }, 1)
+  spawnLuaUnit(host, 'uel0201', { x: 700, y: 20, z: 712 }, 2)
+  beat(engine)
+  const tick = Number(host.eval('return __gameTick'))
+  check(
+    tick % interval !== 0 && host.eval(`return __units[${late}]:GetWeapon(1):GetCurrentTarget() ~= nil`) === true,
+    `a tank spawned mid-interval has its target after ONE beat (tick ${tick}, ${tick % interval} past the multiple)`,
+  )
+}
+
+console.log('\n== Fire control on a dual turret: only the manipulator with the weapon\'s label opens the gate ==')
+{
+  // UnitWeapon::mLabel starts as "Default" (Cfile:984161); SetFireControl
+  // replaces it (Cfile:987460) and IsFireControl compares with stricmp
+  // (Cfile:987526). The aim manipulator writes mCanFire only when its own
+  // label equals that string (CAimManipulator::AimManip, Cfile:862060-862085).
+  // uel0106 (TurretDualManipulators) builds Torso/Right/Left and hands fire
+  // control to 'Right' (weapon.lua:78-87). Both bindings were silent no-ops.
+  await game.giveUnit(host, 'uel0106')
+  const marine = spawnLuaUnit(host, 'uel0106', { x: 700, y: 20, z: 760 }, 1)
+  const w = `__units[${marine}]:GetWeapon(1)`
+  check(host.eval(`return ${w}:IsFireControl('Right')`) === true, "IsFireControl('Right') after SetupTurret (weapon.lua:87)")
+  check(host.eval(`return ${w}:IsFireControl('right')`) === true, 'the comparison is stricmp')
+  check(host.eval(`return ${w}:IsFireControl('Default')`) === false, "and 'Default' is no longer the fire control")
+  const labels = String(host.eval(`local t = {} for i, a in ipairs(${w}.__aims or {}) do t[i] = a.__label end return table.concat(t, ',')`))
+  check(labels === 'Torso,Right,Left', `three manipulators on the weapon (${labels})`)
+  check(host.eval(`local a = __weaponFireControlAim(${w}) return a and a.__label`) === 'Right', "the gate belongs to 'Right'")
+  check(host.eval(`return (pcall(function() ${w}:IsFireControl(7) end))`) === false, 'a non-string label is a type error')
 }
 
 console.log('\n== Was die Sim dabei gemeldet hat ==')

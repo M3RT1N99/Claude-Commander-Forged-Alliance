@@ -299,30 +299,37 @@ local function aimAxis(current, wanted, center, range, slew)
   if slew and slew > 0 then
     if step > slew then step = slew elseif step < -slew then step = -slew end
   end
-  return normalizeAngle(current + step), normalizeAngle(current + step - wanted)
+  return normalizeAngle(current + step), normalizeAngle(current + step - wanted), step
 end
 
 local function aimControlsWeapon(w, aim)
-  -- The aim manipulator drives exactly the weapon it was constructed for:
-  -- CreateAimController stores the back-pointer m.__weapon = weapon and mirrors
-  -- weapon.__aim = m (globals.lua:718/727), 1:1 like the engine's CAimManipulator
-  -- holding a direct pointer to its weapon and writing that weapon's mCanFire.
-  -- The aim's __label ('Default'/'Turret', passed by weapon.lua:63) is a lookup
-  -- name, NOT the weapon's blueprint Label ('maingun') — comparing the two never
-  -- matched, so on-target never reached mCanFire and turreted weapons never fired.
-  return aim.__weapon == w
+  -- The manipulator writes the weapon's mCanFire only when its label equals
+  -- the weapon's FIRE-CONTROL label, compared with stricmp (CAimManipulator::
+  -- AimManip, Cfile:862060-862085). That label is UnitWeapon::mLabel --
+  -- "Default" from the ctor (Cfile:984161), changed by SetFireControl
+  -- (Cfile:987460) -- not the blueprint's Label. weapon.lua:92 creates the
+  -- single turret as 'Default', which matches the ctor value; the dual-turret
+  -- units (weapon.lua:78-87) create Torso/Right/Left and hand fire control to
+  -- 'Right', so the torso and the left arm never open the gate.
+  if aim.__weapon ~= w then return false end
+  return string.lower(aim.__label or '') == string.lower(w.__fireControl or 'Default')
 end
 
-local function aimTick(w, u)
-  local aim = w.__aim
-  if not aim or aim.__destroyed then return end
-  local t = w.__target
-  local tp = nil
-  if t and not t.__dead and not t.__destroyQueued then
-    tp = __unitCollision(t)
-  elseif w.__targetGround then
-    tp = w.__targetGround
+--- The manipulator that may write the weapon's fire gate: the one whose label
+--- is the weapon's fire-control label (stricmp, Cfile:862060-862085). nil when
+--- the weapon has none, or none matches.
+function __weaponFireControlAim(w)
+  local want = string.lower(w.__fireControl or 'Default')
+  for _, aim in ipairs(w.__aims or {}) do
+    if not aim.__destroyed and string.lower(aim.__label or '') == want then return aim end
   end
+  return nil
+end
+
+--- One manipulator's tick (CAimManipulator::AimManip, Cfile:861922-862100).
+--- A weapon owns up to three of them (weapon.lua:78-80); each aims its own
+--- bones at the same target, and only the fire-control one opens the gate.
+local function aimOne(w, u, aim, tp)
   if not tp then
     aim.__onTarget = false
     if aimControlsWeapon(w, aim) then w.__canFire = false end
@@ -337,7 +344,7 @@ local function aimTick(w, u)
   local wantedPitch = math.atan(dy, dxz)
 
   local tol = (bp.FiringTolerance or 0.01) * 0.017453292
-  local yaw, yawErr = aimAxis(aim.__yaw or 0, wantedYaw,
+  local yaw, yawErr, yawStep = aimAxis(aim.__yaw or 0, wantedYaw,
     aim.__yawCenter or 0, aim.__yawRange, aim.__yawSlew)
   aim.__yaw = yaw
   local onTarget = math.abs(yawErr) <= tol
@@ -349,6 +356,42 @@ local function aimTick(w, u)
   end
   aim.__onTarget = onTarget
   if aimControlsWeapon(w, aim) then w.__canFire = onTarget end
+
+  -- Tracking is "the heading moved this tick" -- CheckTracking sets the bit
+  -- only for the heading axis and only when the clamped step exceeds 0.001
+  -- (Cfile:861850-861851). Track then calls the weapon's OnStartTracking on
+  -- the off->on edge and OnStopTracking on the on->off edge, each with the
+  -- manipulator's label (Cfile:861862-861880). weapon.lua:232-243 plays the
+  -- barrel sounds there and freezes a structure's reset pose.
+  local moving = math.abs(yawStep) > 0.001
+  if moving and not aim.__isTracking then
+    aim.__isTracking = true
+    if w.OnStartTracking then
+      local ok, err = pcall(function() w:OnStartTracking(aim.__label) end)
+      if not ok then WARN('OnStartTracking: ' .. tostring(err)) end
+    end
+  elseif not moving and aim.__isTracking then
+    aim.__isTracking = false
+    if w.OnStopTracking then
+      local ok, err = pcall(function() w:OnStopTracking(aim.__label) end)
+      if not ok then WARN('OnStopTracking: ' .. tostring(err)) end
+    end
+  end
+end
+
+local function aimTick(w, u)
+  local aims = w.__aims
+  if not aims or aims[1] == nil then return end
+  local t = w.__target
+  local tp = nil
+  if t and not t.__dead and not t.__destroyQueued then
+    tp = __unitCollision(t)
+  elseif w.__targetGround then
+    tp = w.__targetGround
+  end
+  for _, aim in ipairs(aims) do
+    if not aim.__destroyed then aimOne(w, u, aim, tp) end
+  end
 end
 
 -- ---------------------------------------------------------------------
@@ -576,11 +619,23 @@ function __weaponTick()
             -- mit CEIL (Cfile:792904-792908: `round(x) + (x>round(x))` = ceil,
             -- Minimum 1). Mit round-half-up prueften wir bei x.4x einen Tick zu
             -- oft.
+            --
+            -- The rhythm is the TASK's, not the clock's: CAcquireTargetTask
+            -- returns `interval + 1` (Cfile:792908-792912), DoTaskTick stores
+            -- `mWaitTicks = interval` (Cfile:438947) and pre-decrements it
+            -- every tick (Cfile:438898) -- so the check repeats every
+            -- `interval` ticks counted from the weapon's FIRST tick, which
+            -- comes at once (`mWaitTicks = 0` in the CTaskThread ctor,
+            -- Cfile:438797). Aligning it to `__gameTick % interval` made a
+            -- unit built at tick 17 wait until tick 30 for its first look.
             local interval = math.max(1, math.ceil((bp.TargetCheckInterval or 3.0) * 10))
-            if (__gameTick % interval) == 0 then
+            local wait = (w.__acquireWait or 0) - 1
+            if wait <= 0 then
               local ok, err = pcall(function() acquireTarget(w, u) end)
               if not ok then WARN('Zielerfassung: ' .. tostring(err)) end
+              wait = interval
             end
+            w.__acquireWait = wait
             local okA, errA = pcall(function() aimTick(w, u) end)
             if not okA then WARN('Turret aim: ' .. tostring(errA)) end
             local ok, err = pcall(function() fireTick(w, u) end)

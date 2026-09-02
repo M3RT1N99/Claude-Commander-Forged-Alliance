@@ -217,6 +217,11 @@ radiansArc.mHeadingMaxSlew = luaValue * DEG2RAD;          // 0.017453292
 runtimeArc.mHeadingMaxSlew = radiansArc.mHeadingMaxSlew * 0.1f;   // kSlewScale
 ```
 → **`slewPerTick = TurretYawSpeed [deg/s] * DEG2RAD * 0.1`**. So TurretYawSpeed ​​is degrees **per second**.
+Verified in the decompilation: `cfunc_CAimManipulatorSetFiringArcL` multiplies all six arguments by
+0.017453292 (Cfile:862766-862790) and then the two slews by 0.1 (Cfile:862796-862802) before
+`CAimManipulator::SetFiringArc` stores them unchanged (Cfile:861886-861920); `CheckTracking` caps
+the per-tick step to that value (Cfile:861838-861842), and `CAniActor::UpdateManipulators` runs once
+per `Unit::MotionTick` (Cfile:869201-869237).
 
 `SetFiringArc` speichert zentriert:
 - `mMinHeading = NormalizeCenteredAngle(min, max)` (= Arc-Mitte)
@@ -257,6 +262,10 @@ mit `tolerance = FiringTolerance [Grad] * DEG2RAD` (Default `FiringTolerance = 0
 `Track()` (CAimManipulator.cpp:1386): `onTarget = !(result & OUTSIDE_TOLERANCE)` over both axes. Then:
 ```cpp
 weapon->mCanFire = onTarget ? 1 : 0;    // nur wenn Label matcht (SetFireControl)
+// Verified: stricmp(UnitWeapon::GetLabel(), manip->mLabel) == 0 (Cfile:862060-862085);
+// the weapon label starts as "Default" (ctor, Cfile:984161), SetFireControl replaces it
+// (Cfile:987460), IsFireControl is the same stricmp (Cfile:987526). weapon.lua:78-87
+// creates Torso/Right/Left for TurretDualManipulators and hands fire control to 'Right'.
 taskEvent->EventSetSignaled(onTarget);  // gibt CFireWeaponTask frei
 ```
 `YawOnlyOnTarget = true` → Pitch is skipped during the tolerance check (weapon fires as soon as Yaw is correct).
@@ -327,7 +336,12 @@ Only `TRS_Available` allows firing (CFireWeaponTask checks `TargetIsTooClose(...
 ### 2f. Zielerfassung / Priorisierung
 
 - **Detection Radius = `TrackingRadius * MaxRadius`** (CAiAttackerImpl.cpp:1256-1270) — TrackingRadius is a **multiplier**, not an absolute value (e.g. UEL0201: 1.15 → 18 * 1.15 = 20.7)
-- **Check Interval:** `frames = max(1, ceil(TargetCheckInterval * 10))` Ticks (CAiAttackerImpl.cpp:468-472); `NeedPrep` → fix 2 frames
+- **Check Interval:** `frames = max(1, ceil(TargetCheckInterval * 10))` Ticks (CAiAttackerImpl.cpp:468-472); `NeedPrep` → fix 2 frames.
+  Verified: `CAcquireTargetTask::TaskTick` computes it (Cfile:792900-792908) and RETURNS `frames + 1`
+  (Cfile:792912, 793226); `DoTaskTick` stores `frames` (Cfile:438947) and pre-decrements every tick
+  (Cfile:438898). The rhythm is the task's own: its `CTaskThread` starts at `mWaitTicks = 0`
+  (Cfile:438797), so the FIRST check is the weapon's first tick, then every `frames` ticks -- not
+  the multiples of `frames` on the game clock.
 - **Priorities:** `TargetPriorities` (list of category strings) → `weapon:SetTargetingPriorities(parsedCategories)`. The engine iterates the list **from index 0 up** (0 = highest priority) and stops as soon as a better candidate is found; Already seen targets (`RECON_LOSEver`) are given priority (CAiAttackerImpl.cpp:1147-1170)
 - **Filter:** `TargetRestrictOnlyAllow` / `TargetRestrictDisallow` (categories) → `mCat1`/`mCat2`; `FireTargetLayerCapsTable[layer]` → `SetFireTargetLayerCaps` (Land/Water/Seabed/Air mask, is reset when changing layers, weapon.lua:347-359)
 - More gates in `UnitWeapon::CanFire` (UnitWeapon.cpp:3172): Stun, `UNITSTATE_Busy`, flyer not in the air layer, `NeedUnpack` without immobile, `AboveWaterFireOnly`/`BelowWaterFireOnly` (muzzle height vs. water level), bomb drop timing (`NeedToComputeBombDrop`, `BombDropThreshold`)

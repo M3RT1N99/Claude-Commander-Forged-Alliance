@@ -1284,3 +1284,46 @@ to survive. Why none survives is the next AI stop, now named correctly:
 `GetNumUnitsAroundPoint` are still silent no-ops in `moho.lua` -- so
 `ProcessBuildCommand` disbands the platoon (platoon.lua:2932), and `BuildOnce`
 then runs on a platoon whose `BuilderHandle` is already nil.
+
+## Three weapon-task facts the code contradicted
+
+Read against `CAcquireTargetTask`, `CFireWeaponTask` and `CAimManipulator`;
+each fix has a check in `scripts/verify-combat.ts` that was red before it.
+
+* **The target check runs on the weapon's own rhythm.** The acquire task
+  returns `interval + 1` (Cfile:792908-792912), `DoTaskTick` stores
+  `interval` and pre-decrements it (Cfile:438947, 438898), and the task
+  thread starts due (`mWaitTicks = 0`, Cfile:438797): first check on the
+  weapon's first tick, then every `interval` ticks. Ours checked on
+  `__gameTick % interval == 0` -- a tank finished at tick 17 waited until
+  tick 30 for its first look around. Now a per-weapon countdown
+  (`__acquireWait`).
+* **Fire control is a label on the weapon.** `UnitWeapon::mLabel` starts as
+  "Default" (Cfile:984161); `SetFireControl` replaces it (Cfile:987460),
+  `IsFireControl` is `stricmp` against it (Cfile:987526), and an aim
+  manipulator writes the weapon's fire gate ONLY when its own label matches
+  (Cfile:862060-862085). Both bindings were silent no-ops, and a weapon kept
+  a single `__aim` -- for the seven `TurretDualManipulators` units
+  (weapon.lua:78-87: Torso, Right, Left; fire control 'Right') the LAST
+  manipulator created overwrote the others and wrote the gate. Now a weapon
+  owns `__aims`, all of them tick, and `__weaponFireControlAim` names the
+  one that may open the gate. The old comment claimed the engine compares no
+  labels at all; it does.
+* **`OnStartTracking` / `OnStopTracking` were never called.** `Track` fires
+  them on the edges of "the heading moved this tick" (Cfile:861850-861880)
+  with the manipulator's label; weapon.lua:232-243 plays the barrel sounds
+  there and freezes a structure's reset pose.
+
+Confirmed on the way, against a wrong suspicion of mine: the turret slew IS
+`deg/s * DEG2RAD * 0.1` per tick -- the binding scales the two slews by 0.1
+after the degree conversion (Cfile:862796-862802). `docs/research/weapons.md`
+now carries the decompilation lines next to its faf-re ones.
+
+Still open in the same area, named: the frame in which `CheckTracking`
+measures the remaining angle (Cfile:861760-861880 reads the bone's composite
+transform; whether that includes the manipulator's own rotation from the
+previous tick decides how the unlimited-arc branch converges) -- our
+`aimAxis` is a working model, not a transcription. And `func_PickTargetPoint`
+(Cfile:984750-984845) rejects Seabed targets for `AboveWaterTargetsOnly` /
+`BelowWaterTargetsonly` weapons through `PickTargetPointAbove/BelowWater`;
+we do not implement that pair yet.

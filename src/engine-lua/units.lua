@@ -71,6 +71,13 @@ function __createWeapons(u, bp)
     w.__index = i
     w.__army = u.__army
     w.__enabled = true
+    -- The acquire task's `mWaitTicks`: a CTaskThread starts at 0
+    -- (Cfile:438797), so the first target check is the weapon's FIRST tick,
+    -- not the next multiple of TargetCheckInterval (weapons.lua __weaponTick).
+    w.__acquireWait = 0
+    -- The fire-control label starts as "Default" (Cfile:984161); only the aim
+    -- manipulator carrying the same label may write the fire gate.
+    w.__fireControl = 'Default'
     -- UnitWeapon starts with no valid target layers. Weapon.OnCreate selects
     -- the blueprint mask for the unit's current layer.
     w.__fireTargetLayerCaps = 'None'
@@ -806,14 +813,15 @@ end
 local function readTurrets(u)
   local out = nil
   for _, w in ipairs(u.__weapons or {}) do
-    local aim = w.__aim
-    if aim and not aim.__destroyed and aim.__yawBone
-      and (math.abs(aim.__yaw or 0) > 0.0001 or math.abs(aim.__pitch or 0) > 0.0001) then
-      out = out or {}
-      out[#out + 1] = {
-        b = aim.__yawBone, y = aim.__yaw or 0,
-        pb = aim.__pitchBone, p = aim.__pitch or 0,
-      }
+    for _, aim in ipairs(w.__aims or {}) do
+      if not aim.__destroyed and aim.__yawBone
+        and (math.abs(aim.__yaw or 0) > 0.0001 or math.abs(aim.__pitch or 0) > 0.0001) then
+        out = out or {}
+        out[#out + 1] = {
+          b = aim.__yawBone, y = aim.__yaw or 0,
+          pb = aim.__pitchBone, p = aim.__pitch or 0,
+        }
+      end
     end
   end
   return out

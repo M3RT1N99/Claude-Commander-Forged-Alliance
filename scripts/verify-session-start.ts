@@ -391,6 +391,15 @@ check(
   [...ttNamen].some((n) => n !== 'Default'),
   'und mindestens einer ist nicht Default — die Typ-Ebene wird wirklich gelesen',
 )
+// GetTerrainTypeOffset reads the type's HeightOffset field
+// (STIMap::GetTerrainTypeOffset, Cfile:1087711-1087735) -- terrainTypes.lua:2147
+// gives Lava01 -0.15, everything else has no field and reads as 0. The map has
+// no lava, so the field is planted on the default type for the check and
+// removed again. This returned a constant 0 before.
+check(Number(q('return GetTerrainTypeOffset(8, 8)')) === 0, 'GetTerrainTypeOffset is 0 for a type without HeightOffset')
+q('GetTerrainType(-1, -1).HeightOffset = -0.15')
+check(Number(q('return GetTerrainTypeOffset(-1, -1)')) === -0.15, 'and the HeightOffset field of the type when it has one (-0.15)')
+q('GetTerrainType(-1, -1).HeightOffset = nil')
 
 // ── Der Sitzungsstart lief in der Retail-Lua, nicht in unserem Nachbau ──
 //

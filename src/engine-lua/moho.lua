@@ -1024,7 +1024,9 @@ end
 
 local function weaponMuzzleBone(w)
   if w.__bone ~= nil then return w.__bone end
-  local aim = w.__aim
+  -- The fire-control manipulator carries the muzzle of a dual turret
+  -- (weapon.lua:79: 'Right' gets pitchBone + muzzleBone, the torso none).
+  local aim = (__weaponFireControlAim and __weaponFireControlAim(w)) or w.__aim
   return aim and aim.__muzzleBone or nil
 end
 
@@ -1032,7 +1034,7 @@ local function weaponMCanFire(w)
   if w.__canFire ~= nil then return w.__canFire == true end
   -- Compatibility for weapons/aim controllers created before mCanFire became
   -- an explicit mirrored field.
-  local aim = w.__aim
+  local aim = (__weaponFireControlAim and __weaponFireControlAim(w)) or w.__aim
   return not aim or aim.__destroyed == true or aim.__onTarget == true
 end
 
@@ -1271,6 +1273,24 @@ local weapon = withNoops(WEAPON_NAMES, {
       error('UnitWeapon:SetFireTargetLayerCaps(mask) requires a layer mask string', 2)
     end
     self.__fireTargetLayerCaps = caps
+  end,
+
+  -- The fire-control label: `UnitWeapon::mLabel`, "Default" from the ctor
+  -- (Cfile:984161). An aim manipulator writes the weapon's mCanFire ONLY when
+  -- its own label matches this one, case-insensitively (CAimManipulator::
+  -- AimManip, Cfile:862060-862085). weapon.lua:78-87 builds the dual-turret
+  -- units with three manipulators (Torso/Right/Left) and hands fire control
+  -- to 'Right'; every other turret is created as 'Default' and matches the
+  -- ctor value. Both were silent no-ops here, so all three manipulators of
+  -- a dual turret wrote the fire gate and the LAST one won.
+  SetFireControl = function(self, label)
+    if type(label) ~= 'string' then error("bad argument #1 to 'SetFireControl' (string expected)", 2) end
+    self.__fireControl = label -- cfunc_UnitWeaponSetFireControlL, Cfile:987460
+  end,
+  IsFireControl = function(self, label)
+    if type(label) ~= 'string' then error("bad argument #1 to 'IsFireControl' (string expected)", 2) end
+    -- stricmp (Cfile:987526)
+    return string.lower(label) == string.lower(self.__fireControl or 'Default')
   end,
 
   -- Weapon:CanFire() (Cfile:987703-987735): HasTarget && UnitWeapon::CanFire &&

@@ -519,10 +519,13 @@ function __projectileTick()
         v[3] = v[3] + f[3] * p.__accel * 0.1
       end
       if p.__velocityAlign then
-        -- MotionTick aligns orientation with func_QuatFromVecRot(orient,
-        -- velocity, turnRateRad) in BOTH the tracking and non-tracking branches
-        -- (Cfile:944180-944184) — the same routine UpdateTracking uses above, not
-        -- a separate slerp toward an absolute orientation.
+        -- MotionTick aligns the orientation with func_QuatFromVecRot(orient,
+        -- velocity, turnRateRad) in the NON-tracking branch only
+        -- (Cfile:944180-944184, inside `if (!mTrackTarget)`). A tracking
+        -- projectile leaves this branch with its velocity already along the
+        -- nose (UpdateTracking, func_VecSetLength) and accelerates along it,
+        -- so the same call is a no-op there -- which is why one call after
+        -- both branches is equivalent, not because the engine makes it twice.
         p.__orient = quatFromVecRot(
           p.__orient, v[1], v[2], v[3], (p.__turnRate or 0) * DEG_PER_SEC_TO_RAD_PER_TICK
         )

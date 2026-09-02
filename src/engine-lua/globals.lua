@@ -787,7 +787,13 @@ function CreateAimController(weapon, label, yawBone, pitchBone, muzzleBone)
   m.__pitch = 0
   m.__onTarget = false
   if weapon then
-    weapon.__aim = m
+    -- A weapon may own several (weapon.lua:78-80: Torso, Right, Left); all of
+    -- them tick, and the one whose label is the weapon's fire-control label
+    -- writes the fire gate (weapons.lua __weaponFireControlAim). `__aim` stays
+    -- the first one for the callers that want "the" turret.
+    weapon.__aims = weapon.__aims or {}
+    weapon.__aims[#weapon.__aims + 1] = m
+    weapon.__aim = weapon.__aim or m
     -- Constructing an aim manipulator clears mCanFire until tracking reports
     -- OnTarget (Cfile:861326-861510, 862080-862097).
     weapon.__canFire = false

@@ -59,7 +59,10 @@ function CreateProp(location, bpId)
   -- (mesh.fx WreckageVS: material.x = creation time, PS: frac(0.01*depth.y)).
   p.__spawnTick = __gameTick or 0
   p.__bones = { names = {}, xform = {}, index = {} }
-  p.__health = (bp.Defense and bp.Defense.MaxHealth) or 1
+  -- The ctor takes Defense.Health (Cfile:1013900), not MaxHealth; the struct
+  -- default for both is 1.0 (blueprints.lua __propDefaults). prop.lua:36-42
+  -- then raises both to max(50, Defense.MaxHealth) in OnCreate.
+  p.__health = bp.Defense.Health
   p.__fraction = 1
   p.Trash = TrashBag()
   __props[id] = p
@@ -128,7 +131,12 @@ end
 
 --- GetTerrainTypeOffset(x, z) — the terrain-type height offset
 --- (unit.lua:1100 uses it to place the wreck on the ground).
+--- `STIMap::GetTerrainTypeOffset` (Cfile:1087711-1087735): the terrain type
+--- of the cell, then its `HeightOffset` field, 0 when the type has none.
+--- terrainTypes.lua:2147 gives Lava01 -0.15; this used to return 0 for it.
 function GetTerrainTypeOffset(x, z)
+  local t = GetTerrainType(x, z)
+  if type(t) == 'table' and t.HeightOffset ~= nil then return t.HeightOffset end
   return 0
 end
 
