@@ -89,7 +89,6 @@ host.eval(`
 `)
 host.loadGlobal('/lua/system/Blueprints.lua')
 
-const missing = new Set<string>()
 host.eval(`LoadBlueprints()`)
 
 console.log('\n== Unit über echte Unit.lua instanziieren + OnCreate ==')
@@ -103,16 +102,29 @@ try {
     u.__brain = {}
     u.__health = u.__bp.Defense.MaxHealth
     u:OnCreate()
-    return { name = u.__bp.BlueprintId, hp = u:GetMaxHealth(), created = (u.__onCreateRan ~= nil) }
-  `) as { name?: string; hp?: number } | undefined
-  check(!!result, 'OnCreate() lief ohne Fehler durch')
+    -- ZEUGEN aus dem Rumpf von OnCreate (unit.lua:146-164), nicht ein Feld,
+    -- das die Original-Lua gar nicht kennt: hier stand
+    -- created = (u.__onCreateRan ~= nil), ein Wert, den niemand setzt und den
+    -- die Pruefung darunter auch nie ansah. Das check(!!result, ...) bewies
+    -- nur, dass das eval etwas zurueckgab.
+    return {
+      name = u.__bp.BlueprintId,
+      hp = u:GetMaxHealth(),
+      created = (u.HasFuel == true
+        and type(u.DamageEffectsBag) == 'table' and #u.DamageEffectsBag == 3
+        and type(u.BuildEffectsBag) == 'table'
+        and type(u.IdleEffectsBag) == 'table'),
+    }
+  `) as { name?: string; hp?: number; created?: boolean } | undefined
+  check(
+    result?.created === true,
+    'OnCreate() setzte HasFuel, die drei DamageEffectsBag-Fächer und die Trashbags (unit.lua:146-164)',
+  )
   check(result?.name === 'uel0001', `Instanz kennt ihr Blueprint: ${result?.name}`)
   check(result?.hp === 12000, `GetMaxHealth() aus Original-bp: ${result?.hp}`)
 } catch (err) {
   check(false, `OnCreate: ${(err as Error).message.slice(0, 200)}`)
 }
-
-console.log(`\nEntdeckte Engine-Globals in OnCreate (${missing.size}): ${[...missing].sort().slice(0, 40).join(', ')}`)
 if (warnings.length > 0) {
   console.log(`\n${warnings.length} WARN (erste 4):`)
   for (const w of warnings.slice(0, 4)) console.log(`  ${w.slice(0, 110)}`)

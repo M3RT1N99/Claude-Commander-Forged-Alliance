@@ -26,7 +26,7 @@ export interface OrderLineEntry {
 }
 
 /** commandgraphparams.lua — selected colors (ARGB) per order type. */
-const PARAMS: Record<
+export const PARAMS: Record<
   OrderLineEntry['type'],
   { color: number; alpha: number; waypoint: string }
 > = {

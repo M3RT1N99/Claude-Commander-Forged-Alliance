@@ -88,9 +88,6 @@ installEngine(host)
 // Flaches Testgelaende — EXPLIZIT, weil die Engine ohne Karte knallt (kein stiller 0-Wert).
 setTerrainSource(host, FLAT_TEST_TERRAIN, FLAT_TEST_MAP_SIZE)
 
-// Discovery-Trap: die Blueprint-DSL nutzt Engine-Konstruktoren (Sound{},
-// Vector{}, ...). Wir entdecken sie, statt zu raten.
-const missing = new Set<string>()
 
 console.log('\n== Original-Pipeline: LoadBlueprints() ==')
 // Die echte LoadBlueprints() fährt Init -> doscript(bp) -> ExtractAllMesh ->
@@ -113,10 +110,6 @@ const meshBp = host.eval(`return __registered.Unit['${storedId}'].Display.MeshBl
 check(typeof meshBp === 'string' && meshBp.includes('uel0001'), `ExtractMeshBlueprint setzte MeshBlueprint: ${meshBp}`)
 const meshCount = host.eval(`local n=0 for _ in pairs(__registered.Mesh) do n=n+1 end return n`)
 check(typeof meshCount === 'number' && meshCount >= 1, `${meshCount} Mesh-Blueprint(s) extrahiert+registriert`)
-
-console.log(
-  `\nEntdeckte Engine-Globals (Blueprint-DSL + Pipeline): ${[...missing].sort().join(', ')}`,
-)
 if (warnings.length > 0) {
   console.log(`\n${warnings.length} WARN (erste 4):`)
   for (const w of warnings.slice(0, 4)) console.log(`  ${w.slice(0, 100)}`)

@@ -85,7 +85,6 @@ const host = await LuaHost.create(files, (level, msg) => {
 installEngine(host)
 // Flaches Testgelaende — EXPLIZIT, weil die Engine ohne Karte knallt (kein stiller 0-Wert).
 setTerrainSource(host, FLAT_TEST_TERRAIN, FLAT_TEST_MAP_SIZE)
-const missing = new Set<string>()
 loadUnitBlueprint(host, 'uel0001', uel0001bp)
 setUnitBones(host, 'uel0001', await bonesFromBlueprint('uel0001', uel0001bp, readAsset, assetExists))
 
@@ -104,8 +103,6 @@ try {
 } catch (err) {
   check(false, `spawn: ${(err as Error).message.slice(0, 200)}`)
 }
-
-console.log(`\nEngine-Globals in Spawn/OnCreate (${missing.size}): ${[...missing].sort().slice(0, 40).join(', ')}`)
 if (warnings.length > 0) {
   console.log(`\n${warnings.length} WARN (erste 4):`)
   for (const w of warnings.slice(0, 4)) console.log(`  ${w.slice(0, 110)}`)

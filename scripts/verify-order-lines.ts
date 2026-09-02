@@ -19,6 +19,7 @@ import { installEngine, beat } from '../src/lua/engine'
 import { setTerrainSource } from '../src/lua/engineGlobals'
 import { spawnLuaUnit } from '../src/lua/unitFactory'
 import { GameFiles } from './gameFiles'
+import { PARAMS } from '../src/viewer/orderLines'
 import { FLAT_TEST_MAP_SIZE } from '../src/sim/terrain'
 
 let failures = 0
@@ -27,9 +28,11 @@ const check = (ok: boolean, label: string): void => {
   if (!ok) failures++
 }
 
-// The order-line types the renderer draws (src/viewer/orderLines.ts PARAMS).
-// The sim must never emit a type outside this set, or the render frame crashes.
-const RENDERER_TYPES = new Set(['Move', 'Attack', 'Repair', 'BuildMobile', 'Patrol', 'Guard', 'Reclaim'])
+// The order-line types the renderer draws — read from the RENDERER, not copied.
+// A hand-written Set here compared two literals in this file and could never
+// fail: deleting a type from orderLines.ts left the suite green while the
+// render frame lost the line.
+const RENDERER_TYPES = new Set(Object.keys(PARAMS))
 
 const game = await GameFiles.open()
 const host = await LuaHost.create(game.luaFiles, () => {})

@@ -64,8 +64,6 @@ installEngine(host)
 // Flaches Testgelaende — EXPLIZIT, weil die Engine ohne Karte knallt (kein stiller 0-Wert).
 setTerrainSource(host, FLAT_TEST_TERRAIN, FLAT_TEST_MAP_SIZE)
 
-// Discovery-Trap: fehlende Engine-Globals melden (kein Raten).
-const missing = new Set<string>()
 
 console.log('\n== Import-Kaskade: Unit.lua + defaultunits.lua ==')
 try {
@@ -103,8 +101,6 @@ try {
 } catch (err) {
   check(false, `defaultunits.lua: ${(err as Error).message.slice(0, 140)}`)
 }
-
-console.log(`\nEntdeckte Engine-Globals (${missing.size}): ${[...missing].sort().slice(0, 40).join(', ')}`)
 if (warnings.length > 0) {
   console.log(`\n${warnings.length} WARN (erste 5):`)
   for (const w of warnings.slice(0, 5)) console.log(`  ${w.slice(0, 110)}`)

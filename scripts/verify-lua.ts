@@ -41,6 +41,8 @@ const GAME =
 
 let total = 0
 let ok = 0
+let gesamt = 0
+let zuWenig = false
 let bytecode = 0
 const failures: string[] = []
 const stats = { hashComments: 0, notEquals: 0, forInTable: 0, continues: 0, varargArg: 0 }
@@ -78,6 +80,23 @@ for (const archive of ['lua.scd', 'mohodata.scd', 'units.scd', 'projectiles.scd'
     }
   }
   console.log(`${archive}: ${archiveOk}/${luaFiles.length} Lua-Dateien sind gültiges Lua`)
+  gesamt += archiveOk
+}
+
+// Eine UNTERGRENZE, sonst prüft diese Suite im Zweifel nichts: findet sie kein
+// einziges Archiv oder keine einzige Datei, ist `failures` leer und der Lauf
+// endet grün — „0 von 0 Dateien sind gültiges Lua".
+//
+// Gemessen sind es 1325 Dateien (lua.scd + mohodata.scd + units.scd +
+// projectiles.scd). Die Schranke steht bei 1000 und nicht bei 1325: sie soll
+// den ZUSAMMENBRUCH fangen (ein Archiv fehlt, der Filter greift nicht mehr),
+// nicht die Zahl festnageln — sonst wird sie beim nächsten Spielpatch rot,
+// ohne dass etwas kaputt ist.
+console.log(`
+Insgesamt ${gesamt} Lua-Dateien geparst`)
+if (gesamt < 1000) {
+  console.log(`  FAIL nur ${gesamt} Lua-Dateien geparst — die Suite hat fast nichts gelesen`)
+  zuWenig = true
 }
 
 console.log(
@@ -183,4 +202,5 @@ for (const f of openFiles) await f.close()
 // check had already passed — turning a green run red at random. Setting
 // exitCode and returning lets the event loop finish that close cleanly.
 lua.global.close()
-process.exitCode = failures.length === 0 && compatOk && powOk && formatOk && forInOk ? 0 : 1
+process.exitCode =
+  failures.length === 0 && !zuWenig && compatOk && powOk && formatOk && forInOk ? 0 : 1

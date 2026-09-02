@@ -64,13 +64,40 @@ console.log('\n== Stall: Vorrat klemmt bei 0, LimitingRate < 1 ==')
 // ── Determinismus ──
 console.log('\n== Determinismus (float32, stabile Iteration) ==')
 {
-  const run = (): string => {
+  // Hier stand `check(run() === run(), …)`. Das ist eine Tautologie: derselbe
+  // Code auf denselben Eingaben liefert dasselbe, egal ob die Oekonomie
+  // deterministisch ist oder nicht — die Pruefung konnte nicht scheitern und
+  // hat von float32 und Iterationsreihenfolge nichts angefasst.
+  //
+  // Was Determinismus hier heisst: die Reihenfolge, in der die Verbraucher
+  // registriert werden, darf das Ergebnis nicht aendern.
+  const run = (reihenfolge: number[]): string => {
     const a = new ArmyEconomy()
-    a.register(1, { prodM: 3, prodE: 25, consM: 0, consE: 2, storeM: 100, storeE: 200, complete: true, prodActive: true, consActive: true })
+    // Ein echter STALL, denn nur dort verteilt die Oekonomie ueberhaupt: bei
+    // Ueberschuss bekommt jeder alles und die Reihenfolge kann nichts aendern.
+    // Ein Erzeuger mit 10 Energie, drei Verbraucher mit 8/7/6.
+    //
+    // Die Groessenordnungen liegen bewusst NAH beieinander. Mit 1e7 gegen 0.5
+    // wird der Lauf tatsaechlich reihenfolgeabhaengig — aber das ist die
+    // float32-Summation selbst, und die hat die Engine genauso
+    // (`SEconTotals` sind Floats). Das hier zu verlangen hiesse, etwas zu
+    // pruefen, was das Original auch nicht einhaelt.
+    const einheiten: Record<number, Parameters<ArmyEconomy['register']>[1]> = {
+      1: { prodM: 2, prodE: 10, consM: 0, consE: 0, storeM: 100, storeE: 100, complete: true, prodActive: true, consActive: true },
+      2: { prodM: 0, prodE: 0, consM: 1, consE: 8, storeM: 0, storeE: 0, complete: true, prodActive: true, consActive: true },
+      3: { prodM: 0, prodE: 0, consM: 1, consE: 7, storeM: 0, storeE: 0, complete: true, prodActive: true, consActive: true },
+      4: { prodM: 0, prodE: 0, consM: 1, consE: 6, storeM: 0, storeE: 0, complete: true, prodActive: true, consActive: true },
+    }
+    for (const id of reihenfolge) a.register(id, einheiten[id]!)
     for (let i = 0; i < 100; i++) a.tick()
     return `${a.mass}|${a.energy}`
   }
-  check(run() === run(), `identische Läufe (${run()})`)
+  const vorwaerts = run([1, 2, 3, 4])
+  const rueckwaerts = run([4, 3, 2, 1])
+  check(
+    vorwaerts === rueckwaerts,
+    `die Registrierungsreihenfolge aendert das Ergebnis nicht (${vorwaerts} / ${rueckwaerts})`,
+  )
 }
 
 // ── Mex-Stall: production × LimitingRate of own consumption ─────────────
