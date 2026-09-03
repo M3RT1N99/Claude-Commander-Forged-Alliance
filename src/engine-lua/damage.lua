@@ -428,6 +428,10 @@ function __flushDeletions()
         local ok, err = pcall(function() e:OnDestroy() end)
         if not ok then WARN('OnDestroy: ' .. tostring(err)) end
       end
+      -- Entity::OnDestroy goes on with the attachment callbacks
+      -- (Cfile:916143-916162): OnAttachedDestroyed on the parent, the
+      -- detach, OnParentDestroyed on every attached entity.
+      __attachOnDestroyed(e)
       e.__destroyed = true
       -- A dying entity's ambient loop stops (the engine releases the HSound
       -- with the entity — CSimSoundManager loop handles).

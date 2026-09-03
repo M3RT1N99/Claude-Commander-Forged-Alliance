@@ -85,9 +85,49 @@ const tank1 = Number(
 check(tank1 > 0, `Die Fabrik hat den ersten Panzer aufgesetzt (id ${tank1})`)
 const t0 = readUnit(tank1)
 check(t0 !== null && t0.fraction < 1, `Er ist eine Baustelle (${((t0?.fraction ?? 0) * 100).toFixed(0)} %)`)
+// BuildingState (defaultunits.lua:669-670) hangs the site on the factory:
+// `unitBuilding:AttachBoneTo(-2, self, bp.Display.BuildAttachBone)` -- the
+// site's own origin (-2) on the factory's 'Attachpoint' bone
+// (ueb0101_unit.bp:95). From then on the site is wherever that bone is
+// (Entity::TaskTick -> CalculateAttachedTransform, Cfile:916175-916190), not
+// at the factory's origin.
+const attachWorld = host.eval(`
+  local f = __units[${factory}]
+  local p = __boneWorld(f, 'Attachpoint')
+  return p[1] .. ',' .. p[2] .. ',' .. p[3]
+`) as string
+const [ax, ay, az] = attachWorld.split(',').map(Number) as [number, number, number]
 check(
-  Math.abs((t0?.x ?? 0) - 120) < 0.01 && Math.abs((t0?.z ?? 0) - 120) < 0.01,
-  'Er entsteht AN der Fabrik (120, 120)',
+  Math.abs((t0?.x ?? 0) - ax) < 1e-6 && Math.abs((t0?.y ?? 0) - ay) < 1e-6 && Math.abs((t0?.z ?? 0) - az) < 1e-6,
+  `it hangs on the factory's Attachpoint (${ax.toFixed(3)}, ${ay.toFixed(3)}, ${az.toFixed(3)}), not at the factory origin`,
+)
+check(
+  host.eval(`return __units[${tank1}]:GetParent() == __units[${factory}]`) === true,
+  'GetParent() is the factory while attached (Cfile:932420-932423)',
+)
+check(
+  host.eval(`return __units[${tank1}]:IsUnitState('Attached')`) === true,
+  "IsUnitState('Attached') -- Unit::AttachTo sets UNITSTATEMASK_Attached (Cfile:954389)",
+)
+// The factory's list also carries its ambient-sound entity (unit.lua:2789
+// `sndEnt:AttachTo(self, -1)`), so the site is looked up, not assumed alone.
+const listing = host.eval(`
+  local f = __units[${factory}]
+  local out = {}
+  for _, c in ipairs(f.__attachedEntities or {}) do
+    local tag = c == __units[${tank1}] and 'site' or (c.__isUnit and 'unit' or 'entity')
+    table.insert(out, tag .. '@' .. tostring(c.__attachParentBone) .. '/' .. tostring(c.__attachSelfBone))
+  end
+  return table.concat(out, ' ')
+`) as string
+const attachBone = Number(host.eval(`return __boneIndex(__units[${factory}], 'Attachpoint') - 1`))
+check(
+  listing.split(' ').includes(`site@${attachBone}/-2`),
+  `the factory lists the site on its Attachpoint bone ${attachBone}, own reference bone -2 (list: ${listing})`,
+)
+check(
+  host.eval(`return __units[${factory}]:GetParent() == __units[${factory}]`) === true,
+  'an unattached entity is its own GetParent() (Cfile:932423)',
 )
 check(
   Number(host.eval(`return table.getn(__units[${factory}].__buildQueue) > 0 and __units[${factory}].__buildQueue[1].count or 0`)) === 2,
@@ -106,6 +146,22 @@ while (readUnit(tank1)!.fraction < 1 && ticks < 3000) {
 const t1 = readUnit(tank1)!
 check(t1.fraction >= 1, `Panzer fertig nach ${ticks} Beats (${(ticks / 10).toFixed(1)} s)`)
 check(t1.health === t1.maxHealth, `Volles Leben: ${t1.health}`)
+// FinishBuildThread (defaultunits.lua:540-542): `unitBeingBuilt:DetachFrom(true)`
+// and `self:DetachAll(bp.Display.BuildAttachBone)` -- the finished tank is on
+// its own again (Unit::DetachFrom clears the Attached bit, Cfile:954404) and
+// the factory's attach list is empty.
+check(
+  host.eval(`return __units[${tank1}]:GetParent() == __units[${tank1}]`) === true,
+  'after FinishBuildThread the tank is its own parent again (DetachFrom(true))',
+)
+check(
+  host.eval(`return __units[${tank1}]:IsUnitState('Attached')`) === false,
+  'and no longer Attached',
+)
+check(
+  host.eval(`return table.getn(__units[${factory}].__attachedEntities or {}) == 0`) === true,
+  'DetachAll(BuildAttachBone) emptied the factory list',
+)
 // COMPLETION decrements the queue (Cfile:838029: count>1 -> DecreaseCount(1)):
 // 2 -> 1 now that the first tank is done, so the second still waits at count 1.
 check(

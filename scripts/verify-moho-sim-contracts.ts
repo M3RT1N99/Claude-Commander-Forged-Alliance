@@ -410,6 +410,121 @@ check(
   'an unsupported argument count raises an error',
 )
 
+console.log('\n== The attach family: Entity::AttachTo and its bindings ==')
+{
+  await game.giveUnit(host, 'uel0001')
+  await game.giveUnit(host, 'uel0201')
+  const carrier = spawnLuaUnit(host, 'uel0001', { x: 300, y: 20, z: 300 }, 1)
+  const rider = spawnLuaUnit(host, 'uel0201', { x: 320, y: 20, z: 300 }, 1)
+  const err = (expression: string): string =>
+    host.eval(`local ok, e = pcall(function() ${expression} end); return ok and '' or tostring(e)`) as string
+  // Argument counts are the binding's own check (cfunc_Entity*L, "expected N args").
+  check(err(`__units[${rider}]:AttachTo(__units[${carrier}])`).includes('expected 3 args, but got 2'), 'AttachTo with one argument is the arg-count error (Cfile:931904)')
+  check(err(`__units[${rider}]:AttachBoneTo(0, __units[${carrier}])`).includes('expected 4 args, but got 3'), 'AttachBoneTo with two arguments is the arg-count error (Cfile:932024)')
+  check(err(`__units[${rider}]:DetachAll()`).includes('expected between 2 and 3 args, but got 1'), 'DetachAll without a bone is the arg-count error (Cfile:932297)')
+  check(err(`__units[${rider}]:DetachFrom(true, 1)`).includes('expected between 1 and 2 args, but got 3'), 'DetachFrom with two arguments is the arg-count error (Cfile:932208)')
+  // ResolveBoneIndex: Attach* admit the pseudo bones (-2 minimum), DetachAll does not.
+  check(err(`__units[${rider}]:AttachBoneTo(-3, __units[${carrier}], 0)`).includes('must be bettern -2 (inclusive)'), 'AttachBoneTo: -3 is below the pseudo-bone minimum -2 (Cfile:936295)')
+  check(err(`__units[${rider}]:DetachAll(-1)`).includes('must be bettern 0 (inclusive)'), 'DetachAll: the minimum is 0 -- no pseudo bones (Cfile:932312)')
+  check(err(`__units[${rider}]:AttachTo(__units[${carrier}], 'NoSuchBone')`).includes('Invalid bone name'), 'an unknown parent bone name is the engine error')
+  // The unattached state.
+  check(bool(host, `__units[${rider}]:GetParent() == __units[${rider}]`), 'GetParent() of an unattached entity is the entity itself (Cfile:932423)')
+  check(err(`__units[${rider}]:SetParentOffset(Vector(0, 1, 0))`).includes('SetParentOffset: Entity has no parent.'), 'SetParentOffset without a parent is the engine error (Cfile:932147)')
+  check(bool(host, `__units[${rider}]:DetachFrom(true) == false`), 'DetachFrom on an unattached entity returns false')
+  // A successful attach: pseudo bone -2 (the rider itself) on the carrier's bone 0.
+  check(err(`__units[${rider}]:AttachBoneTo(-2, __units[${carrier}], 0)`) === '', 'AttachBoneTo(-2, carrier, 0) succeeds')
+  check(bool(host, `__units[${rider}]:GetParent() == __units[${carrier}]`), 'GetParent() is now the carrier')
+  check(bool(host, `__units[${rider}]:IsUnitState('Attached')`), "and the rider IsUnitState('Attached')")
+  check(bool(host, `__units[${rider}].__motionState == 'Attached'`), "NotifyAttached: the motion state is 'Attached' (Cfile:965759)")
+  check(
+    bool(host, `(function() local p = __units[${rider}]:GetPosition(); local b = __boneWorld(__units[${carrier}], 0); return math.abs(p[1]-b[1]) < 1e-6 and math.abs(p[2]-b[2]) < 1e-6 and math.abs(p[3]-b[3]) < 1e-6 end)()`),
+    'the rider moved onto the carrier bone in the same frame (the woken task thread, Cfile:915862-915878)',
+  )
+  // Refusals (Entity::AttachTo returns 0 -> the binding's error text).
+  check(err(`__units[${rider}]:AttachTo(__units[${carrier}], 0)`).includes('Failed to attach entity uel0201 to uel0001 on bone 0'), 'a second attach of an attached entity is refused with the engine text (Cfile:915797, 931960)')
+  check(err(`__units[${carrier}]:AttachTo(__units[${rider}], 0)`).includes('Failed to attach entity uel0001 to uel0201 on bone 0'), 'attaching the carrier to its own rider (a cycle) is refused (Cfile:915800-915818)')
+  // The follow: the carrier moves, the rider stays on the bone and does not move on its own.
+  host.eval(`__units[${rider}]:GetNavigator():SetGoal({ 400, 20, 300 })`)
+  host.eval(`IssueMove({ __units[${carrier}] }, { 330, 20, 300 })`)
+  for (let i = 0; i < 12; i++) beat(engine)
+  check(
+    bool(host, `(function() local p = __units[${rider}]:GetPosition(); local b = __boneWorld(__units[${carrier}], 0); return math.abs(p[1]-b[1]) < 1e-6 and math.abs(p[3]-b[3]) < 1e-6 and b[1] > 301 end)()`),
+    'the rider follows the carrier bone beat by beat and ignores its own goal (UMS_Attached, Cfile:966205-966229)',
+  )
+  // Detach: a land unit without skipBallistic would fall -- refused loudly; with it, released in place.
+  check(err(`__units[${rider}]:DetachFrom()`).includes('ballistic drop'), 'DetachFrom() of a land unit is refused: the ballistic drop is not implemented (recorded, not faked)')
+  check(bool(host, `__units[${rider}]:GetParent() == __units[${carrier}]`), 'and the refusal left the attachment in place')
+  check(bool(host, `__units[${rider}]:DetachFrom(true) == true`), 'DetachFrom(true) returns true')
+  check(bool(host, `__units[${rider}]:GetParent() == __units[${rider}] and not __units[${rider}]:IsUnitState('Attached') and __units[${rider}].__motionState == 'None'`), 'the rider is on its own again: no parent, no Attached bit, motion state None (Cfile:954404, 965857)')
+  check(bool(host, `table.getn(__units[${carrier}].__attachedEntities) == 0`), "the carrier's list is empty")
+  // DetachAll detaches only the entities on the given bone.
+  host.eval(`__units[${rider}]:AttachBoneTo(-2, __units[${carrier}], 1)`)
+  host.eval(`__units[${carrier}]:DetachAll(0, true)`)
+  check(bool(host, `__units[${rider}]:GetParent() == __units[${carrier}]`), 'DetachAll(0) leaves an entity attached to bone 1 alone (Cfile:932359)')
+  host.eval(`__units[${carrier}]:DetachAll(1, true)`)
+  check(bool(host, `__units[${rider}]:GetParent() == __units[${rider}]`), 'DetachAll(1) releases it')
+  // Kill and destroy callbacks reach both sides (Cfile:916064-916084, 916143-916162).
+  host.eval(`
+    __units[${rider}]:AttachBoneTo(-2, __units[${carrier}], 0)
+    __attachLog = {}
+    __units[${carrier}].OnAttachedKilled = function(self, e) table.insert(__attachLog, 'carrier:OnAttachedKilled') end
+    __units[${carrier}].OnAttachedDestroyed = function(self, e) table.insert(__attachLog, 'carrier:OnAttachedDestroyed') end
+    __units[${rider}]:Kill()
+  `)
+  check(bool(host, `__attachLog[1] == 'carrier:OnAttachedKilled'`), 'Kill of the rider: the carrier hears OnAttachedKilled')
+  host.eval(`__units[${rider}]:Destroy()`)
+  beat(engine)
+  check(bool(host, `__attachLog[2] == 'carrier:OnAttachedDestroyed' and table.getn(__units[${carrier}].__attachedEntities) == 0`), 'Destroy of the rider: OnAttachedDestroyed, and it left the carrier list (Cfile:916152-916158)')
+  // SetParentOffset takes exactly one vector (Cfile:932132-932133, 932152).
+  check(err(`__units[${carrier}]:SetParentOffset()`).includes('expected 2 args, but got 1'), 'SetParentOffset without a vector is the arg-count error')
+  // A real own bone: the rider's 'Turret' bone lands on the carrier's bone 0
+  // (W o R = A -- the inverse of the own bone in __attachedTransform).
+  const rider2 = spawnLuaUnit(host, 'uel0201', { x: 340, y: 20, z: 300 }, 1)
+  check(err(`__units[${rider2}]:AttachBoneTo('Turret', __units[${carrier}], 0)`) === '', "AttachBoneTo('Turret', carrier, 0) succeeds with a real own bone")
+  check(
+    bool(host, `(function() local p = __units[${rider2}]:GetPosition('Turret'); local b = __boneWorld(__units[${carrier}], 0); return math.abs(p[1]-b[1]) < 1e-6 and math.abs(p[2]-b[2]) < 1e-6 and math.abs(p[3]-b[3]) < 1e-6 end)()`),
+    "the rider's Turret bone -- not its origin -- sits on the carrier bone (inverse own bone, Cfile:916372-916375)",
+  )
+  check(
+    bool(host, `(function() local p = __units[${rider2}]:GetPosition(); local b = __boneWorld(__units[${carrier}], 0); return math.abs(p[2]-b[2]) > 0.05 end)()`),
+    'so its origin is displaced by the Turret rest pose (the check is not vacuous)',
+  )
+  // The offset lives in the parent bone's frame: an X offset under the
+  // carrier's heading turns with it (a world-frame offset would move in x).
+  host.eval(`__units[${rider2}]:SetParentOffset(Vector(2, 0, 0))`)
+  beat(engine)
+  check(
+    bool(host, `(function() local p = __units[${rider2}]:GetPosition('Turret'); local b, q = __boneWorld(__units[${carrier}], 0); local o = __qrot(q, {2, 0, 0}); return math.abs(p[1]-(b[1]+o[1])) < 1e-6 and math.abs(p[3]-(b[3]+o[3])) < 1e-6 and math.abs(o[3]) > 0.5 end)()`),
+    'SetParentOffset(2, 0, 0) is applied in the bone frame: it turns with the carrier heading (Compose, Cfile:916373)',
+  )
+  // A dead unit on the bone: FinishBuildThread releases a dead site with
+  // DetachAll(bone) and NO skipBallistic (defaultunits.lua:539-542) -- that
+  // must not throw, or the factory's thread dies. The dead unit is released
+  // in place (the drop is not implemented).
+  host.eval(`__units[${rider2}]:Kill()`)
+  check(err(`__units[${carrier}]:DetachAll(0)`) === '', 'DetachAll(0) without skipBallistic releases a DEAD land unit without the refusal')
+  check(bool(host, `__units[${rider2}]:GetParent() == __units[${rider2}] and __units[${rider2}].__layer == 'Land'`), 'the dead unit is on its own and kept its layer (no Ballistic/Air transition without the drop)')
+  host.eval(`__units[${rider2}]:Destroy()`)
+  beat(engine)
+  // OnParentKilled / OnParentDestroyed reach the child (Cfile:916082, 916161).
+  const parent2 = spawnLuaUnit(host, 'uel0201', { x: 360, y: 20, z: 300 }, 1)
+  const child2 = spawnLuaUnit(host, 'uel0201', { x: 380, y: 20, z: 300 }, 1)
+  host.eval(`
+    __units[${child2}]:AttachBoneTo(-2, __units[${parent2}], 0)
+    __attachLog = {}
+    __units[${child2}].OnParentKilled = function(self, e) table.insert(__attachLog, 'child:OnParentKilled') end
+    __units[${child2}].OnParentDestroyed = function(self, e) table.insert(__attachLog, 'child:OnParentDestroyed') end
+    __units[${parent2}]:Kill()
+  `)
+  check(bool(host, `__attachLog[1] == 'child:OnParentKilled'`), 'Kill of the parent: the child hears OnParentKilled')
+  host.eval(`__units[${parent2}]:Destroy()`)
+  beat(engine)
+  check(
+    bool(host, `__attachLog[2] == 'child:OnParentDestroyed' and __units[${child2}]:GetParent() == __units[${child2}] and __units[${child2}].__motionState == 'None' and __attachedEntities[__units[${child2}]] == nil`),
+    'Destroy of the parent: OnParentDestroyed, the child is released in place, motion state None, off the follow list',
+  )
+}
+
 console.log('\n== Unit:SetImmobile pauses and resumes one movement order ==')
 await game.giveUnit(host, 'uel0001')
 // Ein Panzer hat GAR KEINE ToggleCaps im Blueprint — der saubere Negativfall

@@ -225,5 +225,51 @@ console.log('\n== Splash on a unit that owns the shield: it takes the remainder 
   )
 }
 
+console.log('\n== The shield entity hangs on its owner and follows it ==')
+{
+  // shield.lua:50 `self:AttachBoneTo(-1, spec.Owner, -1)`: the shield's own
+  // reference bone -1 (no blueprint -> the identity, GetBoneLocalTransform
+  // Cfile:916286-916295) on the owner's collision centre (-1, Cfile:916203-
+  // 916218). SetParentOffset(0, ShieldVerticalOffset, 0) (shield.lua:267) adds
+  // nothing here (offset 0). Every beat the shield is recomputed from the
+  // owner (Entity::TaskTick -> CalculateAttachedTransform, Cfile:916175-916190).
+  type Vec3 = [number, number, number]
+  const centre = (): Vec3 =>
+    (host.eval(`local p = __boneWorld(__units[${u}], -1); return p[1] .. ',' .. p[2] .. ',' .. p[3]`) as string)
+      .split(',')
+      .map(Number) as Vec3
+  const shieldPos = (): Vec3 =>
+    (host.eval(`local p = __units[${u}].MyShield:GetPosition(); return p[1] .. ',' .. p[2] .. ',' .. p[3]`) as string)
+      .split(',')
+      .map(Number) as Vec3
+  const same = (a: Vec3, b: Vec3): boolean => a.every((v, i) => Math.abs(v - (b[i] ?? Number.NaN)) < 1e-6)
+  check(
+    host.eval(`return __units[${u}].MyShield:GetParent() == __units[${u}]`) === true,
+    'the shield entity reports its owner as GetParent()',
+  )
+  const c0 = centre()
+  check(
+    same(shieldPos(), c0),
+    `the shield sits on the owner's collision centre (${c0.map((v) => v.toFixed(3)).join(', ')})`,
+  )
+  check(c0[1] > 20, `which is above the ground the owner stands on (y ${c0[1].toFixed(3)} > 20 -- SizeY/2 + CollisionOffsetY)`)
+  host.eval(`IssueMove({ __units[${u}] }, { 130, 20, 100 })`)
+  for (let i = 0; i < 15; i++) beat(engine)
+  const c1 = centre()
+  check(c1[0] > c0[0] + 1, `the owner moved (x ${c0[0].toFixed(2)} -> ${c1[0].toFixed(2)})`)
+  check(
+    same(shieldPos(), c1),
+    `and the shield followed to (${c1.map((v) => v.toFixed(3)).join(', ')})`,
+  )
+  host.eval(`__units[${u}].MyShield:SetParentOffset(Vector(0, 2.5, 0))`)
+  beat(engine)
+  const c2 = centre()
+  const s2 = shieldPos()
+  check(
+    Math.abs(s2[1] - (c2[1] + 2.5)) < 1e-6 && Math.abs(s2[0] - c2[0]) < 1e-6 && Math.abs(s2[2] - c2[2]) < 1e-6,
+    `SetParentOffset(0, 2.5, 0) lifts it by 2.5 on the next beat (y ${s2[1].toFixed(3)} vs centre ${c2[1].toFixed(3)})`,
+  )
+}
+
 console.log(failures === 0 ? '\nSHIELDS PASSED' : `\nSHIELDS FAILED (${failures})`)
 process.exit(failures === 0 ? 0 : 1)

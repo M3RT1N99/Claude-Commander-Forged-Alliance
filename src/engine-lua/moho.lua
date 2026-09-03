@@ -112,7 +112,99 @@ local entity = withNoops(ENTITY_NAMES, {
   GetEntityId = function(self) return self.__id end,
   GetArmy = function(self) return self.__army or 1 end,
   GetAIBrain = function(self) return self.__brain end,
-  GetParent = function(self) return self.__parent end,
+  -- "Entity:GetParent()" (cfunc_EntityGetParentL, Cfile:932396-932425): the
+  -- parent while attached, otherwise the entity ITSELF -- never nil (932423).
+  GetParent = function(self) return self.__attachParent or self end,
+
+  -- The attach family. The bookkeeping and the per-tick follow live in
+  -- bones.lua (__attachTo/__detachFrom/__attachFollowTick), the unit side —
+  -- NotifyAttached/NotifyDetached — in motion.lua.
+  --
+  -- "Entity:AttachTo(entity, bone)" (cfunc_EntityAttachToL, Cfile:931897-
+  -- 931972): the parent bone may be a pseudo bone (ResolveBoneIndex with 1),
+  -- the own reference bone is 0. A refused attach is the engine error
+  -- "Failed to attach entity %s to %s on bone %d" (own blueprint, parent
+  -- blueprint, parent bone).
+  AttachTo = function(self, ...)
+    local n = select('#', ...)
+    if n ~= 2 then
+      error(string.format('Entity:AttachTo(entity, bone)\n  expected %d args, but got %d', 3, n + 1), 2)
+    end
+    local par, bone = ...
+    __checkEntityArg(par, 'AttachTo')
+    local parentBone = __resolveBoneArg(par, bone, 'AttachTo', true)
+    if not __entityAttach(self, par, 0, parentBone) then
+      error(string.format('Failed to attach entity %s to %s on bone %d', __bpName(self), __bpName(par), parentBone), 2)
+    end
+  end,
+  -- "Entity:AttachBoneTo(selfbone, entity, bone)" (cfunc_EntityAttachBoneToL,
+  -- Cfile:932014-932090): both bones may be pseudo bones (-1 the collision
+  -- centre, -2 the entity itself).
+  AttachBoneTo = function(self, ...)
+    local n = select('#', ...)
+    if n ~= 3 then
+      error(string.format('Entity:AttachBoneTo(selfbone, entity, bone)\n  expected %d args, but got %d', 4, n + 1), 2)
+    end
+    local selfbone, par, bone = ...
+    local selfBone = __resolveBoneArg(self, selfbone, 'AttachBoneTo', true)
+    __checkEntityArg(par, 'AttachBoneTo')
+    local parentBone = __resolveBoneArg(par, bone, 'AttachBoneTo', true)
+    if not __entityAttach(self, par, selfBone, parentBone) then
+      error(string.format('Failed to attach entity %s to %s on bone %d', __bpName(self), __bpName(par), parentBone), 2)
+    end
+  end,
+  -- "Entity:DetachFrom([skipBallistic])" (cfunc_EntityDetachFromL,
+  -- Cfile:932178-932241): detaches from the current parent and returns whether
+  -- that happened; without a parent the result stays the initial 0
+  -- (Cfile:932229, pushed at 932239) -- false.
+  DetachFrom = function(self, ...)
+    local n = select('#', ...)
+    if n > 1 then
+      error(string.format('Entity:DetachFrom([skipBallistic])\n  expected between %d and %d args, but got %d', 1, 2, n + 1), 2)
+    end
+    local skip = ...
+    return __entityDetach(self, skip == true)
+  end,
+  -- "Entity:DetachAll(bone,[skipBallistic])" (cfunc_EntityDetachAllL,
+  -- Cfile:932259-932368): the bone must be a REAL bone (ResolveBoneIndex with
+  -- 0, Cfile:932312); every entity attached to exactly that bone is detached
+  -- (Cfile:932356-932362).
+  DetachAll = function(self, ...)
+    local n = select('#', ...)
+    if n < 1 or n > 2 then
+      error(string.format('Entity:DetachAll(bone,[skipBallistic])\n  expected between %d and %d args, but got %d', 2, 3, n + 1), 2)
+    end
+    local bone, skip = ...
+    local raw = __resolveBoneArg(self, bone, 'DetachAll', false)
+    local list = self.__attachedEntities
+    if not list then return end
+    local copy = {}
+    for i, c in ipairs(list) do copy[i] = c end
+    for _, c in ipairs(copy) do
+      if c.__attachParentBone == raw then __entityDetach(c, skip == true) end
+    end
+  end,
+  -- "Entity:SetParentOffset(vector)" (cfunc_EntitySetParentOffsetL,
+  -- Cfile:932126-932161): exactly two arguments (932132-932133); without a
+  -- parent the engine error (932147); the vector is copied as a Vector3
+  -- (SCR_FromLuaCopy, 932152 -- its own text for a non-vector is not
+  -- reproduced); the attach orientation becomes the identity with that
+  -- offset (932155-932159), applied by the next follow -- the engine's next
+  -- TaskTick.
+  SetParentOffset = function(self, ...)
+    local n = select('#', ...)
+    if n ~= 1 then
+      error(string.format('Entity:SetParentOffset(vector)\n  expected %d args, but got %d', 2, n + 1), 2)
+    end
+    if not self.__attachParent then error('SetParentOffset: Entity has no parent.', 2) end
+    local v = ...
+    if type(v) ~= 'table' then error("bad argument #1 to 'SetParentOffset' (vector expected)", 2) end
+    local x, y, z = v.x or v[1], v.y or v[2], v.z or v[3]
+    if type(x) ~= 'number' or type(y) ~= 'number' or type(z) ~= 'number' then
+      error("bad argument #1 to 'SetParentOffset' (vector expected)", 2)
+    end
+    self.__attachOffset = { pos = { x, y, z }, rot = { 1, 0, 0, 0 } }
+  end,
 
   -- Intel bindings (cfunc_Entity{Init,Set,Get}IntelRadiusL / IsIntelEnabledL,
   -- Cfile:933318-933807). We do NOT model the recon grids, but must honour the
@@ -275,6 +367,10 @@ local entity = withNoops(ENTITY_NAMES, {
       __econSetDead(self.__army or 1, self.__id)
     end
     if self.SetDead then pcall(function() self:SetDead() end) end
+    -- Entity::Kill (Cfile:916064-916084): the parent hears OnAttachedKilled,
+    -- every attached entity OnParentKilled — after SetDead and before
+    -- OnNotAdjacentTo/OnKilled (Unit::Kill order, Cfile:952128-952177).
+    __attachNotifyKilled(self)
 
     -- OnKilled ZUERST, KILLS DANACH — die Reihenfolge in cfunc_EntityKillL:
     -- erst `v4->Kill(...)` (feuert OnKilled intern, Cfile:936149), dann der
@@ -698,15 +794,18 @@ local unit = withNoops(UNIT_NAMES, {
   -- (`ual0001_script.lua:261` ruft `AddToggleCap`). Gegen das Blueprint zu
   -- pruefen hiesse, jede Erweiterung wirkungslos zu machen.
   --
-  -- NICHT nachgebildet, und zwar mangels Grundlage: die Engine blockt zusaetzlich,
-  -- wenn die Einheit an etwas aus der Kategorie TRANSPORTATION angehaengt ist
-  -- (Cfile:951400-951424). Wir haben keinen Anhaenge-Zustand — `AttachTo` ist
-  -- einer der stillen No-ops, und zwar einer der NEUN, die das Spiel wirklich
-  -- ruft (docs/STATUS.md). Ohne ihn gibt es nichts zu pruefen.
+  -- And the engine refuses the toggle while the unit is ATTACHED to something
+  -- of the category TRANSPORTATION (Cfile:951400-951424: IsUnitState(Attached)
+  -- and the parent entity IsInCategory "TRANSPORTATION") — a unit in a
+  -- transport cannot switch its shield or cloak.
   ToggleScriptBit = function(self, bit)
     local n = scriptBitIndex(bit)
     local capBit = 2 ^ n
     if (__ensureToggleCapMask(self) // capBit) % 2 ~= 1 then return end
+    local par = self.__attachParent
+    if self:IsUnitState('Attached') and par and EntityCategoryContains(categories.TRANSPORTATION, par) then
+      return
+    end
     local state = not self:GetScriptBit(n)
     self.__scriptBits = (self.__scriptBits or 0) + (state and capBit or -capBit)
     local cb = state and self.OnScriptBitSet or self.OnScriptBitClear

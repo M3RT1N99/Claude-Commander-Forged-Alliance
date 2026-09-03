@@ -174,6 +174,18 @@ function __boneIndex(e, bone)
   return s.index[string.lower(tostring(bone))]
 end
 
+--- The collision centre of a blueprint in model space — the engine's pseudo
+--- bone -1 (GetBoneWorldTransform Cfile:916203-916210, GetBoneLocalTransform
+--- Cfile:916264-916284). The blueprint pipeline fills these fields for units;
+--- a blueprint of another kind may lack them.
+local function collisionCentre(bp)
+  return {
+    bp.CollisionOffsetX or 0,
+    (bp.SizeY or 0) * 0.5 + (bp.CollisionOffsetY or 0),
+    bp.CollisionOffsetZ or 0,
+  }
+end
+
 --- Die WELTPOSE eines Knochens: Ruhepose im Modellraum, gedreht mit dem Heading
 --- der Unit, verschoben an ihre Position.
 --- Liefert pos {x,y,z}, rot {w,x,y,z}. Ohne Knochen: die Pose der Entity selbst
@@ -194,6 +206,13 @@ function __boneWorld(e, bone)
   -- Heading ist eine Drehung um die Y-Achse (motion.lua: vorwaerts = sin/cos h).
   local hq = { math.cos(h * 0.5), 0, math.sin(h * 0.5), 0 }
 
+  -- GetBoneWorldTransform(-1) (Cfile:916203-916218): the collision centre,
+  -- rotated with the entity and added to its position. -2 (and anything
+  -- without a bone) is the entity's own pose (Cfile:916219-916222).
+  if bone == -1 and e.__bp then
+    local wp = qrot(hq, collisionCentre(e.__bp))
+    return { (p[1] or 0) + wp[1], (p[2] or 0) + wp[2], (p[3] or 0) + wp[3] }, hq
+  end
   local i = __boneIndex(e, bone)
   if not i then
     return { p[1] or 0, p[2] or 0, p[3] or 0 }, hq
@@ -209,34 +228,38 @@ function __quatForward(q)
   return qrot(q, { 0, 0, 1 })
 end
 
---- ENTSCR_ResolveBoneIndex (Cfile:936279-936330) for HideBone/ShowBone:
---- returns the 1-based index, or nil for the pseudo bones -1/-2 (allowed
---- when `disallowPseudo` is 0, and the callers then do nothing). A number
---- outside [-2, boneCount) and an unknown name are the engine's errors.
-local function resolveBoneArg(e, bone, what)
+--- ENTSCR_ResolveBoneIndex (Cfile:936279-936330): the 0-based engine index of
+--- a bone given by name or number. A number is range-checked against
+--- [min, boneCount) where min is -2 when the caller allows the pseudo bones
+--- (third argument 1: AttachTo/AttachBoneTo, Cfile:931924/932035/932045) and
+--- 0 when it does not (HideBone/ShowBone Cfile:981522/981598, DetachAll
+--- Cfile:932312). An index outside that range and an unknown name are the
+--- engine's errors, with its texts.
+local function resolveBoneArg(e, bone, what, allowPseudo)
   local s = __skeletonOf(e)
   local count = #s.names
+  local min = allowPseudo and -2 or 0
   if type(bone) == 'number' then
     if bone ~= math.floor(bone) then error("bad argument #1 to '" .. what .. "' (integer expected)", 3) end
-    if bone < -2 or bone >= count then
-      error(string.format('Invalid bone index of %d; must be bettern %d (inclusive) and %d (exclusive)', bone, -2, count), 3)
+    if bone < min or bone >= count then
+      error(string.format('Invalid bone index of %d; must be bettern %d (inclusive) and %d (exclusive)', bone, min, count), 3)
     end
-    if bone < 0 then return nil end
-    return bone + 1
+    return bone
   end
   if type(bone) == 'string' then
     local i = s.index[string.lower(bone)]
     if not i then error(string.format('Invalid bone name "%s".', bone), 3) end
-    return i
+    return i - 1
   end
   error("bad argument #1 to '" .. what .. "' (bone name or index expected)", 3)
 end
+__resolveBoneArg = resolveBoneArg
 
 --- HideBone/ShowBone: CAniPoseBone::mVisible, over the subtree when
 --- `affectChildren` (SetVisibleRecur, Cfile:981590-981596).
 function __setBoneVisible(e, bone, affectChildren, visible)
-  local i = resolveBoneArg(e, bone, visible and 'ShowBone' or 'HideBone')
-  if not i then return end
+  -- HideBone/ShowBone resolve with 0 (Cfile:981522/981598): no pseudo bones.
+  local i = resolveBoneArg(e, bone, visible and 'ShowBone' or 'HideBone', false) + 1
   e.__hiddenBones = e.__hiddenBones or {}
   local hidden = e.__hiddenBones
   hidden[i] = (not visible) or nil
@@ -261,3 +284,229 @@ end
 
 __qmul = qmul
 __qrot = qrot
+
+-- =====================================================================
+-- ATTACHMENT — SEntAttachInfo and Entity::AttachTo (Cfile:915773-915924)
+--
+-- An entity carries ONE parent link (mAttachInfo: mEnt = the parent, mBone =
+-- the PARENT bone, v3 = the entity's OWN reference bone, mParentOrientation =
+-- the offset SetParentOffset writes) and the list of entities attached to it
+-- (mAttachedEntities). The AttachTo binding builds the info with own bone 0
+-- and the parent bone (Cfile:931936: sub_5E3B50(..., 0, bone)), AttachBoneTo
+-- with the given own bone (Cfile:932049). Defaults: no parent, both bones -1
+-- (Cfile:914497-914500).
+--
+-- The transform of an attached entity is not stored — its task recomputes it
+-- every tick (Entity::TaskTick, Cfile:916175-916190): once the parent has
+-- ticked, SetPendingTransform(CalculateAttachedTransform()). That transform
+-- (Cfile:916355-916377) is parentBoneWorld o parentOffset o inverse(ownBone):
+-- the own reference bone lands on the parent bone. GetBoneLocalTransform
+-- (Cfile:916242-916296) yields the bone's rest pose in model space for a real
+-- bone (it inverts the stored SAniSkelBone::ori, which is the inverse rest
+-- pose -- docs/FORMATS.md), the collision centre for -1, the identity for -2
+-- or without a skeleton; sub_676850 (Cfile:913683-913740) then composes the
+-- parent side with the INVERSE of that local transform.
+-- =====================================================================
+
+-- The follow list: every attached entity, child -> true.
+__attachedEntities = {}
+
+local function identityOffset() return { pos = { 0, 0, 0 }, rot = { 1, 0, 0, 0 } } end
+local function qconj(q) return { q[1], -q[2], -q[3], -q[4] } end
+
+--- The heading (rotation about +Y) of a (w, x, y, z) quaternion — the inverse
+--- of the `hq` that __boneWorld builds from a heading.
+local function yawOf(q)
+  local w, x, y, z = q[1], q[2], q[3], q[4]
+  return math.atan(2 * (w * y + x * z), 1 - 2 * (y * y + z * z))
+end
+
+--- The own reference bone in model space (pos, rot) — GetBoneLocalTransform
+--- before the engine's inversion; __attachedTransform inverts it.
+local function ownBoneLocal(e, raw)
+  if raw >= 0 then
+    local x = __skeletonOf(e).xform[raw + 1]
+    if x then return x.pos, x.rot end
+  elseif raw == -1 and e.__bp then
+    return collisionCentre(e.__bp), { 1, 0, 0, 0 }
+  end
+  return { 0, 0, 0 }, { 1, 0, 0, 0 }
+end
+
+--- The blueprint name the attach error prints (str_empty without one).
+function __bpName(e)
+  return (e.__bp and e.__bp.BlueprintId) or ''
+end
+
+--- SCR_FromLua_Entity for an argument that must be an entity. The engine's
+--- own text for a wrong argument is not reproduced here.
+function __checkEntityArg(v, what)
+  if type(v) ~= 'table' or v.__id == nil then
+    error("bad argument to '" .. what .. "' (entity expected)", 3)
+  end
+end
+
+--- CalculateAttachedTransform: the world pose an attached entity takes.
+--- Returns pos {x,y,z}, rot {w,x,y,z}.
+function __attachedTransform(e)
+  local par = e.__attachParent
+  local tp, tq = __boneWorld(par, e.__attachParentBone)
+  -- Compose(mParentOrientation, parentBoneWorld) (Cfile:916373): the offset
+  -- lives in the parent bone's frame.
+  local off = e.__attachOffset
+  local op = qrot(tq, off.pos)
+  local ap = { tp[1] + op[1], tp[2] + op[2], tp[3] + op[3] }
+  local aq = qmul(tq, off.rot)
+  -- ... o inverse(own bone): the W with W o R = A.
+  local rp, rq = ownBoneLocal(e, e.__attachSelfBone)
+  local wq = qmul(aq, qconj(rq))
+  local wp = qrot(wq, rp)
+  return { ap[1] - wp[1], ap[2] - wp[2], ap[3] - wp[3] }, wq
+end
+
+--- One entity's follow for this tick (Entity::TaskTick). The parent's own
+--- follow runs first — the engine delays the child until its parent has
+--- ticked (mLastTickProcessed, Cfile:916183-916184).
+function __attachFollow(e)
+  local par = e.__attachParent
+  if not par or e.__destroyed then return end
+  if e.__attachTick == __gameTick then return end
+  e.__attachTick = __gameTick
+  if par.__attachParent then __attachFollow(par) end
+  local p, q = __attachedTransform(e)
+  local cur = e.__pos
+  if cur then cur[1], cur[2], cur[3] = p[1], p[2], p[3] else e.__pos = p end
+  e.__heading = yawOf(q)
+  -- Entities keep __orient as (x, y, z, w) (GetOrientation); projectiles keep
+  -- theirs as (w, x, y, z) -- no original script attaches a projectile, so
+  -- that case is not handled here.
+  e.__orient = { q[2], q[3], q[4], q[1] }
+end
+
+--- All attached entities follow their parents (the entity task stage of the
+--- beat, after the parents moved).
+function __attachFollowTick()
+  for e in pairs(__attachedEntities) do __attachFollow(e) end
+end
+
+--- Entity::AttachTo (Cfile:915773-915880). False when this entity already
+--- has a parent (915797-915798), when the parent chain leads back to it
+--- (915800-915818) or when it is already in the parent's list (915820-915836).
+--- On success the entity joins the list (915838-915860), its task thread is
+--- woken (mWaitTicks = 0, 915862-915878 -- its TaskTick runs in the same
+--- frame, after the parent's) and the attach info is stored (915879).
+function __attachTo(e, par, selfBone, parentBone)
+  if e.__attachParent then return false end
+  local a = par
+  while a do
+    if a == e then return false end
+    a = a.__attachParent or nil
+  end
+  local list = par.__attachedEntities or {}
+  for _, c in ipairs(list) do
+    if c == e then return false end
+  end
+  list[#list + 1] = e
+  par.__attachedEntities = list
+  e.__attachParent = par
+  e.__attachParentBone = parentBone
+  e.__attachSelfBone = selfBone
+  e.__attachOffset = identityOffset()
+  __attachedEntities[e] = true
+  -- Follow at once (the woken task) and again in this beat's follow stage
+  -- after the parent moved -- the engine's TaskTick waits for the parent's
+  -- tick (916183-916184), so the child ends the attach beat on the parent's
+  -- post-motion pose.
+  e.__attachTick = nil
+  __attachFollow(e)
+  e.__attachTick = nil
+  return true
+end
+
+--- Entity::DetachFrom (Cfile:915924-915950): out of the parent's list, the
+--- attach info back to its defaults. False when the entity is not in that list.
+function __detachFrom(e, par)
+  local list = par.__attachedEntities
+  local at
+  for i, c in ipairs(list or {}) do
+    if c == e then at = i break end
+  end
+  if not at then return false end
+  table.remove(list, at)
+  e.__attachParent = false
+  e.__attachParentBone = -1
+  e.__attachSelfBone = -1
+  e.__attachOffset = identityOffset()
+  __attachedEntities[e] = nil
+  return true
+end
+
+--- The virtual AttachTo: Entity::AttachTo, then for a unit what Unit::AttachTo
+--- adds (Cfile:954378-954392, motion.lua).
+function __entityAttach(e, par, selfBone, parentBone)
+  if not __attachTo(e, par, selfBone, parentBone) then return false end
+  if e.__isUnit then __unitOnAttached(e) end
+  return true
+end
+
+--- The virtual DetachFrom (Unit::DetachFrom, Cfile:954394-954427, wraps
+--- Entity::DetachFrom with CUnitMotion::NotifyDetached). Returns whether the
+--- entity was attached.
+function __entityDetach(e, skipBallistic)
+  local par = e.__attachParent
+  if not par then return false end
+  if e.__isUnit then __unitCheckDetach(e, skipBallistic) end
+  if not __detachFrom(e, par) then return false end
+  if e.__isUnit then __unitOnDetached(e, par, skipBallistic) end
+  return true
+end
+
+local function callback(target, name, arg)
+  local f = target[name]
+  if type(f) ~= 'function' then return end
+  local ok, err = pcall(f, target, arg)
+  if not ok then WARN(name .. ': ' .. tostring(err)) end
+end
+
+--- Entity::Kill (Cfile:916064-916084): the parent hears OnAttachedKilled(e),
+--- every attached entity OnParentKilled(e) — before mIsDead is set.
+function __attachNotifyKilled(e)
+  local par = e.__attachParent
+  if par then callback(par, 'OnAttachedKilled', e) end
+  for _, c in ipairs(e.__attachedEntities or {}) do callback(c, 'OnParentKilled', e) end
+end
+
+--- Entity::OnDestroy after the Lua OnDestroy (Cfile:916143-916162): the
+--- parent hears OnAttachedDestroyed(e), the entity detaches, every attached
+--- entity hears OnParentDestroyed(e).
+function __attachOnDestroyed(e)
+  local par = e.__attachParent
+  if par then
+    callback(par, 'OnAttachedDestroyed', e)
+    -- The engine calls the virtual DetachFrom(parent, false) here
+    -- (Cfile:916158); for a unit that is Unit::DetachFrom with its state
+    -- bookkeeping (motion.lua __unitDetachedOnDestroy).
+    __detachFrom(e, par)
+    if e.__isUnit then __unitDetachedOnDestroy(e) end
+  end
+  local list = e.__attachedEntities
+  if list then
+    local copy = {}
+    for i, c in ipairs(list) do copy[i] = c end
+    for _, c in ipairs(copy) do callback(c, 'OnParentDestroyed', e) end
+    -- The children's parent link is a weak reference (SEntAttachInfo::mEnt,
+    -- Cfile:915896-915912) that clears with the parent. An attached UNIT then
+    -- finds no parent in UMS_Attached and starts a ballistic drop
+    -- (Cfile:966231-966238); that drop is not implemented (docs/STATUS.md) —
+    -- the unit is released where it is and lands on its next motion tick.
+    for _, c in ipairs(copy) do
+      c.__attachParent = false
+      c.__attachParentBone = -1
+      c.__attachSelfBone = -1
+      c.__attachOffset = identityOffset()
+      __attachedEntities[c] = nil
+      if c.__isUnit then __unitParentLost(c) end
+    end
+    e.__attachedEntities = nil
+  end
+end

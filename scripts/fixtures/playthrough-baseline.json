@@ -1,10 +1,5 @@
 {
   "findings": [
-    "SIM NO-OP aufgerufen: AttachBoneTo",
-    "SIM NO-OP aufgerufen: AttachTo",
-    "SIM NO-OP aufgerufen: DetachAll",
-    "SIM NO-OP aufgerufen: DetachFrom",
-    "SIM NO-OP aufgerufen: GetFocusUnit",
     "SIM NO-OP aufgerufen: ShakeCamera",
     "SIM __emitterBpJson liefert kein brauchbares BP für Tarmacs/Tar8x_01_albedo",
     "UI Error running lua script: Error: UI camera bridge is unavailable for targetBox",

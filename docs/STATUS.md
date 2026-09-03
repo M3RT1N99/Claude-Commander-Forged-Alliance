@@ -41,25 +41,23 @@ defect — then Sim-Globals (47), `CAiPersonality` (35), `Entity` (27),
 
 ## Welche der stillen No-ops das Spiel wirklich aufruft
 
-`src/engine-lua/moho.lua` füllt **147** Bindungen mit einem stillen No-op. Bis
-jetzt war unbekannt, welche davon im laufenden Spiel überhaupt erreicht werden —
-die Priorisierung war Raten. `scripts/verify-playthrough.ts` schaltet dafür
-`__mohoNoopWarn` ein; jeder No-op meldet sich beim ersten Aufruf.
+`src/engine-lua/moho.lua` filled **147** bindings with a silent no-op when
+this was measured. Until then nobody knew which of them a running game even
+reaches -- the priorities were guesswork. `scripts/verify-playthrough.ts`
+switches on `__mohoNoopWarn` for that; every no-op reports its first call.
 
-Eine vollständige Partie (ACU → Bau → Fabrik → Kampf → Wrack) ruft **6 von 147**
-(neun, bis `AddBuildRestriction`, `HideBone` und `ShowBone` echt wurden — siehe
-unten):
+A full game (ACU -> build -> factory -> combat -> wreck) reaches **1 of them**
+(nine, until `AddBuildRestriction`, `HideBone`, `ShowBone`, `GetFocusUnit` and
+the attach family `AttachTo`/`AttachBoneTo`/`DetachFrom`/`DetachAll` became
+real -- see below):
 
-| No-op | Wofür |
+| No-op | What for |
 | --- | --- |
-| `AttachTo`, `AttachBoneTo`, `DetachFrom`, `DetachAll` | Anhängen — Transporter, Bauarme |
-| `GetFocusUnit` | die Fokus-Einheit |
-| `ShakeCamera` | Kamera-Erschütterung bei Einschlägen |
+| `ShakeCamera` | camera shake on impacts |
 
-Das ist die Arbeitsliste, nach Messung sortiert. Die übrigen 141 werden auf
-diesem Weg nicht erreicht — sie sind deshalb nicht harmlos, aber sie sind auch
-nicht dringend. Ein **siebter** aufgerufener No-op lässt den Durchlauf
-fehlschlagen (eingecheckte Fund-Liste).
+That is the work list, sorted by measurement. The other no-ops are not
+reached this way -- not harmless, but not urgent either. A **second** called
+no-op fails the run (the checked-in finding list).
 
 ## Golden Master: ein Orakel, das keine Frage stellt
 
@@ -444,10 +442,11 @@ Das hat zwei Dinge aufgedeckt:
   identisch, alle zehn Einheiten identisch, sonst nichts. Der Hash ist mit
   diesem Commit nachgezogen.
 
-Nicht nachgebildet, mangels Grundlage: die Engine blockt zusätzlich, solange die
-Einheit an etwas aus der Kategorie TRANSPORTATION hängt
-(Cfile:951400-951424). Einen Anhänge-Zustand gibt es hier nicht — `AttachTo` ist
-einer der stillen No-ops, und einer der **neun**, die das Spiel wirklich ruft.
+Mirrored as well, since the attach family became real (see "The attach
+family was four silent no-ops"): the engine refuses the toggle while the unit
+is attached to something of the category TRANSPORTATION (Cfile:951400-951424)
+-- `ToggleScriptBit` checks `IsUnitState('Attached')` and the parent's
+category.
 
 ### Der schook-Blocker war ein Typfehler an der JS-Grenze — und er ist behoben
 
@@ -1433,8 +1432,10 @@ commander is complete, and the enhancements show them again; factories hide
 and show their build arms the same way. The engine binding
 (cfunc_UnitHideBoneL, Cfile:981560-981600) resolves the bone with
 ENTSCR_ResolveBoneIndex (Cfile:936279-936330: a number must lie in
-[-2, boneCount), a name must exist, the pseudo bones -1/-2 pass and do
-nothing) and clears `CAniPoseBone::mVisible` -- over the whole subtree when
+[0, boneCount) -- HideBone/ShowBone pass 0 as the third argument, which
+sets the minimum to 0, so the pseudo bones -1/-2 are errors there; the
+Attach* bindings and the effect, beam and projectile bindings pass 1 and
+admit -2 -- a name must exist) and clears `CAniPoseBone::mVisible` -- over the whole subtree when
 `affectChildren` is true (SetVisibleRecur), which is why the fresh ACU hides
 seven bones: the three pods, their muzzles and `Back_Upgrade_B02`.
 
@@ -1464,3 +1465,115 @@ passes over the flagged tank), `verify-reclaim.ts` and
 The hidden-bone renderer path (`animator.ts setHiddenBones`) is not
 screenshot-verified yet: the headless sandbox without `selftest` frames the
 whole map, not the commander.
+
+## The attach family was four silent no-ops -- now entities hang on bones
+
+`AttachTo`, `AttachBoneTo`, `DetachFrom` and `DetachAll` did nothing, and
+`GetParent` answered nil. The original Lua leans on them everywhere: a
+factory hangs the unit it builds on its `BuildAttachBone`
+(defaultunits.lua:669-670 `AttachBoneTo(-2, self, bone)`, released in
+FinishBuildThread with `DetachFrom(true)` + `DetachAll(bone)`), every shield
+hangs on its owner's collision centre (shield.lua:50 `AttachBoneTo(-1, Owner,
+-1)`, lifted by `SetParentOffset`), ambient-sound entities hang on their unit
+(unit.lua:2789), transports carry units as attachments
+(scenarioframework.lua:1364). Without the state a tank under construction
+sat at the factory origin and `IsUnitState('Attached')` was never true.
+
+What the engine does (all Cfile): `SEntAttachInfo` is one parent link per
+entity -- parent, PARENT bone, OWN reference bone, offset (914497-914500
+defaults) -- plus the parent's list `mAttachedEntities`. `Entity::AttachTo`
+(915773-915880) refuses an entity that already has a parent, a cycle up the
+parent chain and a duplicate list entry; on success it wakes the entity's
+task thread so the first follow happens in the same frame. `Entity::TaskTick`
+(916175-916190) recomputes the transform every tick once the parent has
+ticked: `CalculateAttachedTransform` (916355-916377) = parent bone world o
+offset o inverse(own bone local), where `GetBoneLocalTransform`
+(916242-916296) is the inverse rest pose for a real bone, the collision
+centre for -1 and the identity for -2. `Unit::AttachTo` (954378-954392) adds
+`CUnitMotion::NotifyAttached` (motion state Attached) and the Attached state
+bit; `Unit::DetachFrom` (954394-954427) adds `NotifyDetached` (965794-965870:
+Ballistic + Air layer for a non-flying unit unless skipBallistic, otherwise
+motion state None; mProcessSurfaceCollision), clears the bit and releases
+`mTransportedBy`. `Entity::Kill` (916064-916084) fires OnAttachedKilled on
+the parent and OnParentKilled on the children; `Entity::OnDestroy`
+(916143-916162) OnAttachedDestroyed, the detach, OnParentDestroyed. The
+bindings: `AttachTo` = own bone 0 (931927), `AttachBoneTo` with the given own
+bone (932049), both resolving bones with the pseudo bones admitted;
+`DetachAll` resolves without them and releases only the entities on that bone
+(932312, 932356-932362); `GetParent` returns the entity itself when
+unattached (932423); `SetParentOffset` takes exactly one vector and errors
+without a parent (932132-932133, 932147); `DetachFrom` answers false without
+a parent (932229, 932239).
+
+Implemented in `bones.lua` (bookkeeping, transform, the per-beat follow
+after the motion loop), `moho.lua` (the six bindings with the engine's
+argument counts and error texts, the Kill hook), `motion.lua` (an attached
+unit does not move and follows its parent's layer unless that parent is
+building it, Cfile:966205-966229; NotifyAttached/NotifyDetached; a surface
+snap after a release -- this model's own step, since it keeps a land unit's
+height only while it moves; UNVERIFIED which engine call restores the height
+after a release, as NotifyDetached's mProcessSurfaceCollision (965870)
+triggers the entity-collision pass ProcessSurfaceCollisionFromLastMove,
+Cfile:965566-965668, not the terrain height) and `damage.lua` (the destroy
+callbacks).
+`ToggleScriptBit` now also honours the TRANSPORTATION gate
+(Cfile:951400-951424), which the old comment had declared out of reach.
+
+Seen: the factory suite's site now stands on the factory's `Attachpoint`
+bone (120.000, 20.491, 120.335) instead of the origin, next to the factory's
+own ambient-sound entity in the attach list; the shield follows a moving ACU
+beat by beat and `SetParentOffset(0, 2.5, 0)` lifts it on the next beat; 36
+contract checks cover argument counts, bone ranges, refusals, the follow
+(own bone -2 and the real `Turret` bone, an offset that turns with the parent
+heading), DetachAll per bone, a dead unit released by DetachAll without
+skipBallistic, and the Kill/Destroy callbacks on both sides. Of the first 27,
+21 were seen red on the old no-ops, plus 6 factory, 4 shield and 1
+restriction check; of the 9 added after the review, 8 were seen red under a targeted mutation of the four behaviours they cover (the ninth, the attach call itself succeeding, is their precondition).
+The playthrough's finding list lost five entries (the four attach no-ops
+and `GetFocusUnit`, which had already become real). The golden master
+moved, and the dump on both states differs in exactly two fields: the final
+headings of the two factory-built tanks (1.91567 -> 2.06258 and -1.81956 ->
+-1.87193). They now begin their roll-off from the Attachpoint pose rather
+than from the factory origin; positions, health and the economy are
+identical. The hash was updated with that explanation.
+
+Not implemented, recorded rather than faked:
+
+* **The ballistic drop.** `DetachFrom` without `skipBallistic` on a
+  non-flying unit (a transport unload, Cfile:965830-965848) puts the engine
+  unit into UMS_Ballistic and the Air layer until `CalcMoveBallistic` lands
+  it. Here that call is refused with an error naming the gap for a LIVE unit
+  (the tractor claw's `DetachAll` in aeonweapons.lua:179, scenario detaches).
+  A DEAD unit is exempt and released in place, keeping its layer: the factory
+  releases a dead site with `DetachAll(bone)` and no `skipBallistic`
+  (defaultunits.lua:539-542, FinishBuildThread skips `DetachFrom(true)` for
+  a dead site), and a refusal there would kill the factory's thread while it
+  is busy. Likewise the children of a destroyed parent are released in place
+  instead of dropping (Cfile:966231-966238), and a dying attached unit's own
+  detach in OnDestroy (916158) keeps only the state bookkeeping of
+  Unit::DetachFrom, not the Ballistic/Air callbacks.
+* **Motion events.** `NotifyAttached` also forces the horizontal event to
+  Stopped and the vertical one to Top with their callbacks and `UpdateIntel`
+  (965760-965785); this motion model tracks neither event anywhere, so the
+  two callbacks are not fired. `NotifyDetached`'s steering target one unit
+  behind the parent's facing (965803-965816) has no counterpart either.
+* **UNVERIFIED: the predicate gating the unit side of AttachTo and
+  DetachFrom.** The calls at 954384 and 954405-954409 go through slot 0x30 of
+  the unit's IUnit vtable, which the decompilation does not list (the IDA
+  server was unreachable); NotifyAttached, NotifyDetached and the Attached
+  bit are applied to every unit here.
+* **Scale.** `GetBoneLocalTransform` scales the rest pose by
+  `mVarDat.mScale` (916249-916253); the rest pose here already carries the
+  blueprint's `Display.UniformScale` (bones.lua), a runtime `SetScale` is
+  not modelled.
+* **The navigator goal survives.** NotifyDetached replaces the steering
+  target (965803-965816); a goal the unit held before the attach is kept here
+  and resumes after `DetachFrom`.
+* The engine's own error text for a non-entity argument
+  (`SCR_FromLua_Entity`) is not reproduced.
+
+A side finding on the way: `ENTSCR_ResolveBoneIndex`'s third argument admits
+the pseudo bones when it is 1 (minimum -2) and rejects them when it is 0
+(minimum 0, Cfile:936295). `HideBone`/`ShowBone` pass 0 (981522/981598), so
+`HideBone(-1)` is an engine error -- the earlier claim that it "passes and
+does nothing" was wrong and is corrected above and in `verify-restrictions`.

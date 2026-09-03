@@ -167,8 +167,31 @@ function __advanceMotion()
     local stunTicks = u.__stunTicks or 0
     if stunTicks > 0 then u.__stunTicks = stunTicks - 1 end
     local stunned = (u.__stunTicks or 0) ~= 0
+    -- UMS_Attached (CUnitMotion tick, Cfile:966205-966229): no velocity, the
+    -- position is the follow (__attachFollowTick after this loop); the layer
+    -- follows the parent's — except under a unit that is building this one
+    -- (GetFocusEntity == self), which keeps its own layer.
+    if u.__attachParent then
+      u.__speed = 0
+      local par = u.__attachParent
+      if par.__layer and not (par.__isUnit and par.__focusEntity == u) then
+        __setCurrentLayer(u, par.__layer)
+      end
+      goto continue
+    end
     local goal = u.__goal
     local p = u.__pos
+    -- A released unit is put back on its surface before it moves again. This
+    -- is this motion model's own step: it keeps a land unit's height only while
+    -- it moves, so a unit released at a bone's height would float otherwise.
+    -- UNVERIFIED which engine call restores the height after a release --
+    -- NotifyDetached's mProcessSurfaceCollision (Cfile:965870) triggers
+    -- ProcessSurfaceCollisionFromLastMove (Cfile:965566-965668), the
+    -- entity-collision pass, not the terrain height.
+    if u.__snapToSurface and p then
+      u.__snapToSurface = nil
+      p[2] = surfaceY(u, p[1], p[3])
+    end
 
     -- DREH-ZIEL ohne Fahr-Ziel: die Unit steht und dreht sich zum Ziel — mit
     -- ihrer `Physics.TurnRate` (Grad/Sekunde), nicht sofort. Der Bauer sieht sein
@@ -328,5 +351,121 @@ function __advanceMotion()
         p[2] = surfaceY(u, p[1], p[3])
       end
     end
+    ::continue::
   end
+  -- Attached entities follow their parents once everyone has moved (their
+  -- task ticks wait for the parent's, Cfile:916183-916184).
+  __attachFollowTick()
+end
+
+-- =====================================================================
+-- Attachment on the unit side — what Unit::AttachTo / Unit::DetachFrom add
+-- to the entity bookkeeping in bones.lua.
+-- =====================================================================
+
+--- Entity::SetCurrentLayer (Cfile:917202-917222): OnLayerChange(new, old)
+--- when the layer actually changes.
+function __setCurrentLayer(u, layer)
+  local old = u.__layer
+  u.__layer = layer
+  u.Layer = layer
+  if old ~= layer and type(u.OnLayerChange) == 'function' then
+    local ok, err = pcall(u.OnLayerChange, u, layer, old)
+    if not ok then WARN('OnLayerChange: ' .. tostring(err)) end
+  end
+end
+
+--- CUnitMotion::SetMotionState: OnMotionStateChange(new, old) when it changes.
+--- The names are Moho::MotionStates — 'None' (the constructor value,
+--- Cfile:964771), 'Attached' [1], 'Ballistic' [2] (Cfile:965759/965830).
+local function setMotionState(u, state)
+  local old = u.__motionState or 'None'
+  if old == state then return end
+  u.__motionState = state
+  if type(u.OnMotionStateChange) == 'function' then
+    local ok, err = pcall(u.OnMotionStateChange, u, state, old)
+    if not ok then WARN('OnMotionStateChange: ' .. tostring(err)) end
+  end
+end
+
+--- Unit::AttachTo after Entity::AttachTo succeeded (Cfile:954378-954392):
+--- CUnitMotion::NotifyAttached (Cfile:965746-965793) and the Attached state
+--- bit (UNITSTATEMASK_Attached, 954389); mTransportLoadFactor = -1 (954391).
+---
+--- The engine gates NotifyAttached and the bit on a virtual predicate of the
+--- unit (slot 0x30 of the IUnit vtable, 954384) whose identity the
+--- decompilation does not resolve (that vtable is not listed) — UNVERIFIED;
+--- both are applied to every unit here. NotifyAttached also forces the
+--- horizontal motion event to Stopped and the vertical one to Top, with
+--- their callbacks and UpdateIntel (965760-965785); this motion model tracks
+--- neither event (docs/STATUS.md), so those two callbacks are not fired.
+function __unitOnAttached(u)
+  setMotionState(u, 'Attached')
+  u.__unitStates = u.__unitStates or {}
+  u.__unitStates.Attached = true
+  u.__transportLoadFactor = -1
+end
+
+--- Before Unit::DetachFrom: NotifyDetached (Cfile:965794-965870) puts a
+--- non-flying unit into UMS_Ballistic and LAYER_Air unless skipBallistic --
+--- the unit falls (CalcMoveBallistic) until the surface collision lands it.
+--- That fall is not implemented: refusing here beats a LIVE land unit that
+--- stays in the Air layer for good. A DEAD unit is exempt: FinishBuildThread
+--- skips `DetachFrom(true)` for a dead site (defaultunits.lua:539-542) and
+--- releases it with `DetachAll(bone)` -- without skipBallistic -- while its
+--- DeathThread still runs; refusing there would kill the factory's thread
+--- and leave it busy for good. The dead unit is released in place instead
+--- of dropping (docs/STATUS.md).
+function __unitCheckDetach(u, skipBallistic)
+  local canFly = u.__bp and u.__bp.Air and u.__bp.Air.CanFly
+  if not canFly and not skipBallistic and not u.__dead then
+    error('DetachFrom: the ballistic drop of a live non-flying unit (UMS_Ballistic, CUnitMotion::CalcMoveBallistic) is not implemented; pass skipBallistic = true', 3)
+  end
+end
+
+--- Unit::DetachFrom after Entity::DetachFrom (Cfile:954394-954427):
+--- NotifyDetached (965794-965870) -- motion state None for a flying unit or
+--- with skipBallistic (965855-965863), the Air layer for a flying unit
+--- without skipBallistic (965838-965848), mProcessSurfaceCollision (965870);
+--- then the Attached bit is cleared (954404), mTransportLoadFactor reset and
+--- mTransportedBy released (954406-954425). The engine gates NotifyDetached
+--- and the bit on the same unit predicate as Unit::AttachTo (954405-954409,
+--- UNVERIFIED which -- see __unitOnAttached); both run for every unit here.
+--- NotifyDetached also sets a steering target one unit behind the parent's
+--- facing (SetTarget, 965803-965816); this motion model has no such target,
+--- and a navigator goal the unit had before the attach survives the detach.
+--- A dead non-flying unit released without skipBallistic keeps its layer:
+--- the Ballistic/Air transition it would get (965830-965848) belongs to the
+--- drop that is not implemented.
+function __unitOnDetached(u, par, skipBallistic)
+  setMotionState(u, 'None')
+  local canFly = u.__bp and u.__bp.Air and u.__bp.Air.CanFly
+  if canFly and not skipBallistic then __setCurrentLayer(u, 'Air') end
+  u.__snapToSurface = true
+  if u.__unitStates then u.__unitStates.Attached = nil end
+  u.__transportLoadFactor = -1
+  u.__transportedBy = false
+end
+
+--- The unit part of the detach that Entity::OnDestroy performs on a dying
+--- attached unit (the virtual DetachFrom(parent, false), Cfile:916158 ->
+--- Unit::DetachFrom 954394-954427): the Attached bit is cleared,
+--- mTransportLoadFactor reset, mTransportedBy released. NotifyDetached's
+--- Ballistic/Air callbacks on the entity being deleted belong to the drop
+--- that is not implemented and are not fired.
+function __unitDetachedOnDestroy(u)
+  u.__motionState = 'None'
+  if u.__unitStates then u.__unitStates.Attached = nil end
+  u.__transportLoadFactor = -1
+  u.__transportedBy = false
+end
+
+--- An attached unit whose parent was destroyed (the CUnitMotion tick with an
+--- empty attach link, Cfile:966231-966238): the engine drops it (Ballistic,
+--- Air layer, surface collision). Without the drop the unit is released in
+--- place and lands on its next motion tick; the Attached bit stays set, as
+--- in the engine (only Unit::DetachFrom clears it, 954404).
+function __unitParentLost(u)
+  setMotionState(u, 'None')
+  u.__snapToSurface = true
 end
