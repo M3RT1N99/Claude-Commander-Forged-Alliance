@@ -70,6 +70,11 @@ export interface LuaUnitSnapshot {
   /** Bone names the sim has hidden (Unit:HideBone, CAniPoseBone::mVisible);
    *  absent when none. The renderer collapses their geometry. */
   hidden?: string[]
+  /** Unit::SetCustomName (Cfile:979089-979120); absent when unnamed. */
+  customName?: string
+  /** UNITSTATE_UnSelectable (SetUnSelectable, Cfile:974215-974260); absent
+   *  when selectable. */
+  unselectable?: boolean
   /** WorkProgress (mUnitVarDat.mWorkProgress): the progress of what this unit
    *  is building/upgrading/enhancing, written by the build task every tick
    *  (Cfile:815482). construction.lua:380 draws it. */

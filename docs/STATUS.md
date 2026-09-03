@@ -1443,3 +1443,24 @@ the hidden names, and the renderer collapses those bones' skin matrices to
 zero scale (`animator.ts setHiddenBones`) so their geometry rasterises
 nothing in the main and the shadow pass alike. `verify-restrictions.ts`
 walks the ACU through hide, show, the two engine errors and the root.
+
+## Five unit setters that were silent no-ops
+
+Each one is a single engine field, and each had a consumer that never saw
+the value:
+
+| Binding | Engine | Consumer |
+| --- | --- | --- |
+| `SetUnSelectable(bool)` | bit 33 `UNITSTATE_UnSelectable` (Cfile:974215-974260) | the ACUs raise it while they teleport (uel0001_script.lua:185-200); the user layer now drops such units from `SelectUnits`. **UNVERIFIED** which user-layer function reads the bit -- `UserEntity::IsSelectable` (Cfile:1357434) tests the SELECTABLE category, not this state. |
+| `SetDoNotTarget(bool)` | bit 34 `UNITSTATE_DoNotTarget` (Cfile:974281-974326) | the free target search skips it (CAcquireTargetTask, Cfile:792119); the Aeon tractor beam and the UEF transport flag their victim/cargo |
+| `SetReclaimable(bool)` | `UnitAttributes::mReclaimable`, 1 from the ctor (Cfile:976068-976090, 772327) | an unreclaimable unit is refused as a reclaim target (Cfile:1007090) and ends a running reclaim (Cfile:847982); unit.lua:3468 clears it on a unit being captured |
+| `SetIsValidTarget(bool)` | `mUnitVarDat.mIsValidTarget`, 1 from the ctor (Cfile:974478-974490, 772274) | `IsValidTarget()` (Cfile:974550) |
+| `SetCustomName(string)` | `Unit::SetCustomName` (Cfile:979089-979120) | the user layer's `GetCustomName` -- the name now travels with the unit row |
+
+Pinned in `verify-moho-sim-contracts.ts`, `verify-combat.ts` (the gun
+passes over the flagged tank), `verify-reclaim.ts` and
+`verify-user-unit-state.ts`.
+
+The hidden-bone renderer path (`animator.ts setHiddenBones`) is not
+screenshot-verified yet: the headless sandbox without `selftest` frames the
+whole map, not the commander.

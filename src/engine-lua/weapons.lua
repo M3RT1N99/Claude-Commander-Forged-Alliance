@@ -247,7 +247,10 @@ local function acquireTarget(w, u)
   local maxD2 = radius * radius
   local best, bestDist, bestCat = nil, maxD2, nil
   for _, other in pairs(__units) do
-    if IsEnemy(u.__army, other.__army) and canTarget(w, u, other) then
+    -- A unit flagged UNITSTATE_DoNotTarget (SetDoNotTarget) is skipped by the
+    -- free search (Cfile:792119) -- a commanded attack still reaches it.
+    if IsEnemy(u.__army, other.__army) and canTarget(w, u, other)
+      and not (other.__unitStates and other.__unitStates.DoNotTarget) then
       local p, q = u.__pos, other.__pos
       local dx, dz = q[1] - p[1], q[3] - p[3]
       local d2 = dx * dx + dz * dz

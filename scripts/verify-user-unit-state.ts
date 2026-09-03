@@ -140,7 +140,15 @@ ui.eval(`
   -- caps=Attack only; layers Land/Sub; script bit 0 on/off.
   __uiSetUnit(1, 'testunit', 1, 0, 0, 0, 100, 100, 0, true, 0, 0, 0x4, false, 0, 1, false, 'Land', 1, 1, true, true)
   __uiSetUnit(2, 'testunit', 1, 0, 0, 0, 100, 100, 0, true, 0, 0, 0x1, false, 0, 1, false, 'Sub', 0, 1, false, false)
+  __uiSetUnit(3, 'testunit', 1, 0, 0, 0, 100, 100, 0, true, 0, 0, 0x1, false, 0, 1, false, 'Land', 0, 1, false, false, '', 'Rex', true)
 `)
+// The sim's custom name and UNITSTATE_UnSelectable arrive with the row
+// (Unit::SetCustomName Cfile:979089; SetUnSelectable Cfile:974215-974260).
+check(ui.eval(`return __uiUnits[3]:GetCustomName()`) === 'Rex', "the row's custom name is what GetCustomName returns")
+check(
+  Number(ui.eval(`local s = SelectUnits({ __uiUnits[2], __uiUnits[3] }) return table.getn(s)`)) === 1,
+  'SelectUnits drops the UnSelectable unit (UNVERIFIED which user-layer check does it; the teleporting ACU relies on it)',
+)
 
 check(
   ui.eval(`

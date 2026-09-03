@@ -290,7 +290,8 @@ export class GameUi {
           `${u.fireState ?? 0}, ${u.guard ?? 0}, ${u.caps ?? -1}, ${u.dead === true}, ` +
           `${u.shieldRatio ?? 0}, ${u.fraction ?? 1}, ${u.beingUpgraded === true}, ` +
           `${JSON.stringify(u.layer ?? 'Land')}, ${u.scriptBits ?? 0}, ${u.toggleCaps ?? -1}, ` +
-          `${u.autoMode === true}, ${u.autoSurfaceMode === true}, ${JSON.stringify(u.restrict ?? '')})`,
+          `${u.autoMode === true}, ${u.autoSurfaceMode === true}, ${JSON.stringify(u.restrict ?? '')}, ` +
+          `${JSON.stringify(u.customName ?? '')}, ${u.unselectable === true})`,
       )
       // Die Bau-Warteschlange einer Fabrik (construction.lua zeigt sie an).
       // IMMER senden, auch leer: sonst bleibt in der UI-Kopie die letzte Queue

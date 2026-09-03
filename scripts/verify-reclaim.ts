@@ -46,6 +46,13 @@ const mass0 = Number(host.eval(`return __getBrain(1):GetEconomyStored('MASS')`))
 
 // The reclaim command that the world-click fallback issues on a non-attackable
 // reclaimable enemy: __dispatchReclaim with a UNIT id target.
+// A unit whose attributes say mReclaimable = 0 is refused as a reclaim target
+// (UNITCOMMAND_Reclaim validation, Cfile:1007090). SetReclaimable was a silent
+// no-op; unit.lua:3468 clears it on a unit being captured.
+host.eval(`__units[${target}]:SetReclaimable(false)`)
+host.eval(`__dispatchReclaim(${acu}, ${target}, true)`)
+check(host.eval(`return __reclaimTasks[${acu}] == nil`) === true, 'an unreclaimable unit target is refused (SetReclaimable(false), Cfile:1007090)')
+host.eval(`__units[${target}]:SetReclaimable(true)`)
 host.eval(`__dispatchReclaim(${acu}, ${target}, true)`)
 check(
   host.eval(`return __reclaimTasks[${acu}] ~= nil`) === true,

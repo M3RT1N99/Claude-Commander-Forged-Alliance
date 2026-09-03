@@ -1143,6 +1143,32 @@ console.log('\n== A unit that must unpack does not look for targets while it mov
   check(host.eval(`return __units[${arty}]:GetWeapon(1):GetCurrentTarget() ~= nil`) === true, 'once it stands still the next check finds the tank')
 }
 
+console.log('\n== A DoNotTarget unit is skipped by the free target search ==')
+{
+  // CAcquireTargetTask's FindBestEnemy loop passes over candidates whose
+  // UNITSTATE_DoNotTarget is set (Cfile:792119). SetDoNotTarget was a silent
+  // no-op, so the Aeon tractor beam's victim and a UEF transport's cargo stayed
+  // fair game for every gun around.
+  const gunner = spawnLuaUnit(host, 'uel0201', { x: 700, y: 20, z: 900 }, 1)
+  const near = spawnLuaUnit(host, 'uel0201', { x: 700, y: 20, z: 908 }, 2)
+  const far = spawnLuaUnit(host, 'uel0201', { x: 700, y: 20, z: 914 }, 2)
+  host.eval(`__units[${near}]:SetDoNotTarget(true)`)
+  let picked = 0
+  for (let t = 0; t < 12 && picked === 0; t++) {
+    beat(engine)
+    picked = Number(host.eval(`local t = __units[${gunner}]:GetWeapon(1):GetCurrentTarget() return (t and t.__id) or 0`))
+  }
+  check(picked === far, `with the near tank flagged DoNotTarget the gun picks the far one (picked ${picked}, far ${far})`)
+  host.eval(`__units[${near}]:SetDoNotTarget(false)`)
+  host.eval(`__units[${gunner}]:GetWeapon(1).__bp.AlwaysRecheckTarget = true`)
+  let picked2 = 0
+  for (let t = 0; t < 12 && picked2 !== near; t++) {
+    beat(engine)
+    picked2 = Number(host.eval(`local t = __units[${gunner}]:GetWeapon(1):GetCurrentTarget() return (t and t.__id) or 0`))
+  }
+  check(picked2 === near, `cleared, the nearer tank is chosen again (picked ${picked2}, near ${near})`)
+}
+
 console.log('\n== Was die Sim dabei gemeldet hat ==')
 const uniq = [...new Set(warnings.map((w) => w.split('\n')[0]?.slice(0, 110)))]
 for (const w of uniq.slice(0, 12)) console.log(`  · ${w}`)

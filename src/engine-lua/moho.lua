@@ -773,6 +773,40 @@ local unit = withNoops(UNIT_NAMES, {
   -- "CanBuild(blueprintId)" -- see globals.lua __unitCanBuild for the binding
   -- (Cfile:980796-980840). It was missing entirely.
   CanBuild = function(self, bpId) return __unitCanBuild(self, bpId) end,
+
+  -- Five more setters that were silent no-ops, each a single engine field:
+  --   SetUnSelectable(bool)   bit 33 UNITSTATE_UnSelectable (Cfile:974215-974260);
+  --                           the ACUs raise it while they teleport
+  --                           (uel0001_script.lua:185-200).
+  --   SetDoNotTarget(bool)    bit 34 UNITSTATE_DoNotTarget (Cfile:974281-974326);
+  --                           the free target search skips such units
+  --                           (CAcquireTargetTask, Cfile:792119) -- the
+  --                           Aeon tractor beam and the UEF transport use it.
+  --   SetReclaimable(bool)    UnitAttributes::mReclaimable, 1 from the ctor
+  --                           (Cfile:976068-976090, 772327); an unreclaimable
+  --                           unit is refused as a reclaim target
+  --                           (Cfile:1007090) and ends a running reclaim
+  --                           (Cfile:847982).
+  --   SetIsValidTarget(bool)  mUnitVarDat.mIsValidTarget, 1 from the ctor
+  --                           (Cfile:974478-974490, 772274); IsValidTarget
+  --                           reads it back (Cfile:974550).
+  --   SetCustomName(string)   Unit::SetCustomName (Cfile:979089-979120);
+  --                           the user layer shows it (UserUnit::GetCustomName).
+  SetUnSelectable = function(self, on)
+    self.__unitStates = self.__unitStates or {}
+    self.__unitStates.UnSelectable = (on and on ~= 0) and true or nil
+  end,
+  SetDoNotTarget = function(self, on)
+    self.__unitStates = self.__unitStates or {}
+    self.__unitStates.DoNotTarget = (on and on ~= 0) and true or nil
+  end,
+  SetReclaimable = function(self, on) self.__reclaimable = (on and on ~= 0) and true or false end,
+  SetIsValidTarget = function(self, on) self.__isValidTarget = (on and on ~= 0) and true or false end,
+  IsValidTarget = function(self) return self.__isValidTarget ~= false end,
+  SetCustomName = function(self, name)
+    if type(name) ~= 'string' then error("bad argument #1 to 'SetCustomName' (string expected)", 2) end
+    self.__customName = name
+  end,
   SetUnitState = function(self, state, on)
     if type(state) ~= 'string' then error("bad argument #1 to 'SetUnitState' (string expected)", 2) end
     if not UNIT_STATES[state] then return end

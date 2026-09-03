@@ -457,6 +457,26 @@ check(
   host.eval(`return (pcall(function() __units[${mover}]:SetUnitState('NoSuchState', true) end))`) === true,
   'SetUnitState with an unknown name does nothing (SetLexical fails silently)',
 )
+// Five more setters that were silent no-ops (each one engine field):
+host.eval(`__units[${mover}]:SetUnSelectable(true)`)
+check(bool(host, `__units[${mover}]:IsUnitState('UnSelectable')`), 'SetUnSelectable(true) raises UNITSTATE_UnSelectable (Cfile:974215-974260)')
+host.eval(`__units[${mover}]:SetUnSelectable(false)`)
+check(!bool(host, `__units[${mover}]:IsUnitState('UnSelectable')`), 'and false clears it')
+host.eval(`__units[${mover}]:SetDoNotTarget(true)`)
+check(bool(host, `__units[${mover}]:IsUnitState('DoNotTarget')`), 'SetDoNotTarget(true) raises UNITSTATE_DoNotTarget (Cfile:974281-974326)')
+host.eval(`__units[${mover}]:SetDoNotTarget(false)`)
+check(bool(host, `__units[${mover}]:IsValidTarget()`), 'IsValidTarget starts true (ctor Cfile:772274)')
+host.eval(`__units[${mover}]:SetIsValidTarget(false)`)
+check(!bool(host, `__units[${mover}]:IsValidTarget()`), 'SetIsValidTarget(false) is read back by IsValidTarget (Cfile:974478, 974550)')
+host.eval(`__units[${mover}]:SetIsValidTarget(true)`)
+check(host.eval(`return __units[${mover}].__reclaimable ~= false`) === true, 'a unit starts reclaimable (ctor Cfile:772327)')
+host.eval(`__units[${mover}]:SetReclaimable(false)`)
+check(host.eval(`return __units[${mover}].__reclaimable == false`) === true, 'SetReclaimable(false) clears mReclaimable (Cfile:976068-976090)')
+host.eval(`__units[${mover}]:SetReclaimable(true)`)
+host.eval(`__units[${mover}]:SetCustomName('Rex')`)
+check(host.eval(`return __units[${mover}].__customName`) === 'Rex', 'SetCustomName stores the name (Cfile:979089-979120)')
+check(host.eval(`return string.find(__readAllUnitsJson(), '"customName":"Rex"', 1, true) ~= nil`) === true, 'and the unit row carries it')
+check(host.eval(`return (pcall(function() __units[${mover}]:SetCustomName(7) end))`) === false, 'a non-string name is a type error')
 for (let i = 0; i < 10; i++) beat(engine)
 const resumedX = num(host, `__units[${mover}].__pos[1]`)
 check(

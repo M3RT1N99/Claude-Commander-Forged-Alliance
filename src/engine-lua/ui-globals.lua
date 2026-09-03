@@ -349,7 +349,7 @@ function GetAttachedUnitsList(units)
 end
 
 -- Von der Engine pro Beat: der Zustand einer Unit aus der Sim.
-function __uiSetUnit(id, blueprintId, army, x, y, z, health, maxHealth, workProgress, idle, fireState, guardedId, capMask, deadFlag, shieldRatio, fractionComplete, beingUpgraded, layer, scriptBits, toggleCapMask, autoMode, autoSurfaceMode, restrict)
+function __uiSetUnit(id, blueprintId, army, x, y, z, health, maxHealth, workProgress, idle, fireState, guardedId, capMask, deadFlag, shieldRatio, fractionComplete, beingUpgraded, layer, scriptBits, toggleCapMask, autoMode, autoSurfaceMode, restrict, customName, unselectable)
   local u = __uiUnits[id]
   if not u then
     -- SUnitVarDat-Ctor (Cfile:772277): mFireState = FIRESTATE_ReturnFire (0).
@@ -406,6 +406,15 @@ function __uiSetUnit(id, blueprintId, army, x, y, z, health, maxHealth, workProg
   if restrict ~= nil then
     u.__restriction = (restrict ~= '') and __categoryFromString(restrict) or nil
   end
+  -- The sim's custom name (Unit::SetCustomName, Cfile:979089-979120) is the
+  -- authority; the user-side SetCustomName only bridges the round trip.
+  if customName ~= nil and customName ~= '' then u.customName = customName end
+  -- UNITSTATE_UnSelectable (SetUnSelectable, Cfile:974215-974260): the ACUs
+  -- raise it while they teleport. Which user-layer function consults the
+  -- bit is UNVERIFIED (UserEntity::IsSelectable, Cfile:1357434, tests the
+  -- SELECTABLE category, not this state); here SelectUnits drops such
+  -- units, which is what the name and the teleport use imply.
+  if unselectable ~= nil then u.unselectable = unselectable == true end
 end
 
 -- Die Bau-Warteschlange einer Fabrik aus der Sim spiegeln. Die Engine haelt sie
@@ -601,7 +610,7 @@ function SelectUnits(units)
     -- PlaySelectionSound, GetUnitCommandData).
     local seen = {}
     for _, u in ipairs(units) do
-      if not u:IsDead() and not seen[u.id] then
+      if not u:IsDead() and not u.unselectable and not seen[u.id] then
         seen[u.id] = true
         new[table.getn(new) + 1] = u
       end

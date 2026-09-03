@@ -1942,6 +1942,11 @@ local function __startOrder(unitId, cmd)
     -- selection cannot attack, dispatch 0x13 CUnitReclaimTask, Cfile:1240271).
     local t = __props[cmd.target] or __units[cmd.target]
     if not t or t.__destroyed or t.__dead or t.__destroyQueued then return false end
+    -- A unit whose attributes say mReclaimable = 0 (SetReclaimable(false)) is
+    -- not a reclaim target: the command validation breaks out for it
+    -- (Cfile:1007090). unit.lua:3468 clears it on a unit that is being
+    -- captured, defaultunits.lua:1166 on a wall segment being built.
+    if __units[cmd.target] and t.__reclaimable == false then return false end
     __reclaimTasks[unitId] = { target = cmd.target, started = false }
     return true
   elseif cmd.type == 'Guard' then
@@ -2468,6 +2473,11 @@ function __reclaimTick()
     local isUnit = t ~= nil and __props[task.target] == nil
     if not u or u.__dead or u.__destroyQueued
       or not t or t.__destroyed or t.__dead or t.__destroyQueued then
+      __reclaimTasks[unitId] = nil
+    elseif isUnit and t.__reclaimable == false then
+      -- CUnitReclaimTask ends on a unit target whose attributes no longer say
+      -- reclaimable (Cfile:847982): a started task runs OnStopReclaim first.
+      if task.started and u.OnStopReclaim then pcall(function() u:OnStopReclaim(t) end) end
       __reclaimTasks[unitId] = nil
     else
       local p, q = u.__pos, t.__pos

@@ -873,6 +873,10 @@ local function readRow(id, u)
     -- Bones hidden by HideBone (CAniPoseBone::mVisible), by name; nil when
     -- none. The renderer collapses their geometry.
     hidden = __hiddenBoneNames(u),
+    -- Unit::SetCustomName (Cfile:979089-979120): the user layer shows it.
+    customName = u.__customName or '',
+    -- UNITSTATE_UnSelectable (SetUnSelectable, Cfile:974215-974260).
+    unselectable = (u.__unitStates and u.__unitStates.UnSelectable) == true,
     -- WorkProgress (mUnitVarDat.mWorkProgress): what this unit is working on,
     -- written by the build task every tick (Cfile:815482) and by Lua for
     -- enhancements (unit.lua:3579). The UI shows exactly this
@@ -968,6 +972,8 @@ function __readAllUnitsJson()
       .. ',"dead":' .. tostring(r.dead)
       .. ',"shieldRatio":' .. jnum(r.shieldRatio)
       .. ',"restrict":' .. jstr(r.restrict)
+      .. (r.customName ~= '' and (',"customName":' .. jstr(r.customName)) or '')
+      .. (r.unselectable and ',"unselectable":true' or '')
       .. (function()
         if not r.hidden then return '' end
         local hs = {}
