@@ -159,6 +159,85 @@ local function freeSpotNear(u, x, z)
 end
 
 -- Entity::AdvanceCoords — advance every unit with a goal by one tick.
+-- =====================================================================
+-- Motion events -- CUnitMotion::mHorzEvent / mVertEvent and the callbacks
+-- OnMotionHorzEventChange / OnMotionVertEventChange that unit.lua:2133-2265
+-- turns into the start/stop sounds, the ambient move loops, the movement
+-- effects and the weapons' notifications.
+--
+-- Names: horzMotionEvent_names { Cruise, TopSpeed, Stopping, Stopped }
+-- (Cfile:421837); vertMotionEvent_names { Top, Bottom, Up } (Cfile:421838),
+-- with Down and Hover as the further literals the engine passes and
+-- unit.lua:2213-2221 compares. A fresh CUnitMotion starts with Stopped /
+-- Bottom (Cfile:964772-964773).
+-- =====================================================================
+
+local function motionCallback(u, name, new, old)
+  local f = u[name]
+  if type(f) ~= 'function' then return end
+  local ok, err = pcall(f, u, new, old)
+  if not ok then WARN(name .. ': ' .. tostring(err)) end
+end
+
+--- CUnitMotion::SetMotionHorzEvent (Cfile:965503-965520): the callback fires
+--- on a change only. On Stopped the engine also refreshes the unit's intel
+--- (Entity::UpdateIntel, 965518-965519); there is no intel model here
+--- (docs/STATUS.md).
+function __setMotionHorzEvent(u, ev)
+  local old = u.__horzEvent or 'Stopped'
+  if old == ev then return end
+  u.__horzEvent = ev
+  motionCallback(u, 'OnMotionHorzEventChange', ev, old)
+end
+
+--- CUnitMotion::SetMotionVertEvent (Cfile:965524-965538).
+function __setMotionVertEvent(u, ev)
+  local old = u.__vertEvent or 'Bottom'
+  if old == ev then return end
+  u.__vertEvent = ev
+  motionCallback(u, 'OnMotionVertEventChange', ev, old)
+end
+
+--- CUnitMotion::ProcessCommonMotionState (Cfile:971451-971510), run at the
+--- end of every land, hover and water tick with CalcMoveCommon's result:
+---   not moving                         -> Stopped
+---   |velocity| >  mTopSpeed * 0.08      -> TopSpeed   (|v| is the per-tick
+---                                          displacement -- the engine scales
+---                                          it by 10 against MaxSpeed,
+---                                          Cfile:766083 -- and mTopSpeed the
+---                                          blueprint MaxSpeed * speed mult per
+---                                          second, 953172: 80 % of top speed)
+---   otherwise, when not Stopped and the target is closer than one second
+---   of travel (MaxSpeed * speed mult)  -> Stopping
+---   otherwise                          -> Cruise
+--- The engine's second Stopping condition -- the next waypoint being a
+--- PPS_1 point (971469-971470) -- is not modelled: PPS_1 is the state the
+--- path spline gives its own start point (765664) and its meaning for the
+--- NEXT waypoint is unresolved.
+local function processCommonMotionState(u, moving)
+  if not moving then
+    __setMotionHorzEvent(u, 'Stopped')
+    return
+  end
+  local m = motionParams(u)
+  local speed = u.__speed or 0
+  if speed > m.maxSpeed * 0.8 then
+    __setMotionHorzEvent(u, 'TopSpeed')
+    return
+  end
+  local dist = 0
+  local goal, p = u.__goal, u.__pos
+  if goal and p then
+    local dx, dz = goal[1] - p[1], goal[2] - p[3]
+    dist = math.sqrt(dx * dx + dz * dz)
+  end
+  if (u.__horzEvent or 'Stopped') ~= 'Stopped' and dist < m.maxSpeed * 10 then
+    __setMotionHorzEvent(u, 'Stopping')
+  else
+    __setMotionHorzEvent(u, 'Cruise')
+  end
+end
+
 function __advanceMotion()
   for id, u in pairs(__units) do
     -- Unit::MotionTick decrements positive stun durations before delegating to
@@ -181,6 +260,13 @@ function __advanceMotion()
     end
     local goal = u.__goal
     local p = u.__pos
+    -- CalcMoveCommon's result: whether a move was computed this tick
+    -- (Cfile:971040-971352 -- 0 while being built (971044), in a layer
+    -- transition (971048), off every valid layer (971211-971218) or when the
+    -- computed velocity is zero (971329-971338: a unit that has just arrived
+    -- or has no path); 1 after a move). It feeds ProcessCommonMotionState at
+    -- the end of the tick (971718, 971575).
+    local moving = false
     -- A released unit is put back on its surface before it moves again:
     -- NotifyDetached sets mProcessSurfaceCollision (Cfile:965870), and the
     -- next CalcMoveLand snaps the unit to the ground for it
@@ -210,6 +296,10 @@ function __advanceMotion()
       end
     end
 
+    -- A live stunned or immobile unit still runs CalcMoveCommon in the engine
+    -- (Cfile:966266-966274): its residual velocity brakes over a few ticks and
+    -- the motion events follow that braking before Stopped. This model stops
+    -- such a unit at once, so it reports Stopped at once (docs/STATUS.md).
     if goal and p and (u.__dead or u.__destroyQueued or u:IsUnitState('Immobile') or stunned) then
       -- A DEAD unit computes no movement at all: CUnitMotion::CalcMoveLand
       -- (Cfile:971696-971704), ::CalcMoveWater (Cfile:971825-971826) and
@@ -225,6 +315,7 @@ function __advanceMotion()
       -- shape is right for death: the goal stays, the unit simply stops.
       u.__speed = 0
     elseif goal and p then
+      moving = true
       local m = motionParams(u)
       local dx = goal[1] - p[1]
       local dz = goal[2] - p[3]
@@ -240,6 +331,7 @@ function __advanceMotion()
       if m.maxSpeed <= 0 then
         u.__goal = false
         u.__speed = 0
+        moving = false
       -- Nah genug: diesen Tick exakt auf dem Ziel ankommen — außer eine
       -- STEHENDE Unit belegt die Zelle: dann zur nächsten freien Zelle
       -- weiterfahren (Occupancy statt Pushing, movement-path.md §6).
@@ -249,9 +341,11 @@ function __advanceMotion()
           if nx ~= goal[1] or nz ~= goal[2] then
             u.__goal = { nx, nz }
           else
-            -- No free cell in reach: stop where we are.
+            -- No free cell in reach: stop where we are (zero velocity, so
+            -- CalcMoveCommon would return 0: not moving).
             u.__goal = false
             u.__speed = 0
+            moving = false
           end
         else
           p[1] = goal[1]
@@ -261,7 +355,12 @@ function __advanceMotion()
           -- Keep the momentum through an intermediate/patrol goal (speed-through);
           -- only a final goal brakes to 0 (the order system re-issues the next
           -- leg, so the unit flows on without a full stop).
-          if not u.__speedThroughGoal then u.__speed = 0 end
+          if not u.__speedThroughGoal then
+            u.__speed = 0
+            -- Arrived with zero velocity: CalcMoveCommon returns 0 for that
+            -- (971329-971338), so this tick already reports Stopped.
+            moving = false
+          end
         end
       else
         -- Heading/Forward VOM TICK-ANFANG: die Cap-Kaskade der Engine rechnet
@@ -349,6 +448,9 @@ function __advanceMotion()
         p[2] = surfaceY(u, p[1], p[3])
       end
     end
+    -- CUnitMotion::ProcessCommonMotionState closes every land, hover and
+    -- water tick (Cfile:971718, 971575, 971856).
+    processCommonMotionState(u, moving)
     ::continue::
   end
   -- Attached entities follow their parents once everyone has moved (their
@@ -392,13 +494,15 @@ end
 ---
 --- The engine gates NotifyAttached and the bit on a virtual predicate of the
 --- unit (slot 0x30 of the IUnit vtable, 954384) whose identity the
---- decompilation does not resolve (that vtable is not listed) — UNVERIFIED;
+--- decompilation does not resolve (that vtable is not listed) -- UNVERIFIED;
 --- both are applied to every unit here. NotifyAttached also forces the
 --- horizontal motion event to Stopped and the vertical one to Top, with
---- their callbacks and UpdateIntel (965760-965785); this motion model tracks
---- neither event (docs/STATUS.md), so those two callbacks are not fired.
+--- their callbacks (965760-965785; the UpdateIntel on Stopped has no intel
+--- model here).
 function __unitOnAttached(u)
   setMotionState(u, 'Attached')
+  __setMotionHorzEvent(u, 'Stopped')
+  __setMotionVertEvent(u, 'Top')
   u.__unitStates = u.__unitStates or {}
   u.__unitStates.Attached = true
   u.__transportLoadFactor = -1

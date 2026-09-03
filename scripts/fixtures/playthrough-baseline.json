@@ -1,5 +1,7 @@
 {
   "findings": [
+    "SIM NO-OP aufgerufen: AddThreadScroller",
+    "SIM NO-OP aufgerufen: RemoveScroller",
     "SIM __emitterBpJson liefert kein brauchbares BP für Tarmacs/Tar8x_01_albedo",
     "UI Error running lua script: Error: UI camera bridge is unavailable for targetBox",
     "UI UI: minimap.lua NOCH NICHT — Error: UI camera bridge is unavailable for set",

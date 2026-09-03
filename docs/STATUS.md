@@ -46,12 +46,18 @@ this was measured. Until then nobody knew which of them a running game even
 reaches -- the priorities were guesswork. `scripts/verify-playthrough.ts`
 switches on `__mohoNoopWarn` for that; every no-op reports its first call.
 
-A full game (ACU -> build -> factory -> combat -> wreck) reaches **none of
-them** any more (nine, until `AddBuildRestriction`, `HideBone`, `ShowBone`,
+A full game (ACU -> build -> factory -> combat -> wreck) reaches **2 of
+them** (nine, until `AddBuildRestriction`, `HideBone`, `ShowBone`,
 `GetFocusUnit`, the attach family `AttachTo`/`AttachBoneTo`/`DetachFrom`/
-`DetachAll` and `ShakeCamera` became real -- see below). The other no-ops are
-not reached this way -- not harmless, but not urgent either. The **first**
-called no-op fails the run (the checked-in finding list).
+`DetachAll` and `ShakeCamera` became real -- see below; then the motion
+events made unit.lua's movement effects run, which reach the two below):
+
+| No-op | What for |
+| --- | --- |
+| `AddThreadScroller`, `RemoveScroller` | the scrolling tread textures of moving tanks (unit.lua CreateMovementEffects) |
+
+The other no-ops are not reached this way -- not harmless, but not urgent
+either. A **third** called no-op fails the run (the checked-in finding list).
 
 ## Golden Master: ein Orakel, das keine Frage stellt
 
@@ -1618,3 +1624,58 @@ error of a non-number argument carries luaG_typeerror's text (1424984-
 1424985), without a position prefix in the engine; ours adds the usual Lua
 position. A shake request with a non-finite number would break the per-beat
 JSON here where the engine takes any float -- no original caller passes one.
+
+## The motion events never fired -- no start/stop sounds, no movement effects
+
+`CUnitMotion` reports every unit's horizontal motion event (Cruise,
+TopSpeed, Stopping, Stopped -- Cfile:421837) and vertical one (Top, Bottom,
+Up, Down, Hover -- 421838, unit.lua:2213-2221) through
+`OnMotionHorzEventChange(new, old)` and `OnMotionVertEventChange(new, old)`.
+unit.lua:2133-2260 turns them into the start/stop move sounds, the ambient
+move loops, `StartRocking`/`StopRocking` on water, the movement effects
+(`UpdateMovementEffectsOnMotionEventChange`), the horizontal start-move
+callbacks and every weapon's `OnMotionHorzEventChange`
+(defaultweapons.lua:90-105: `PackAndMove` for unpack-locking weapons and
+`FiringRandomnessWhileMoving`). This motion model fired none of them.
+
+The engine (Cfile): a fresh CUnitMotion is Stopped / Bottom (964772-964773).
+`SetMotionHorzEvent` (965503-965520) and `SetMotionVertEvent`
+(965524-965538) fire the callback on a change only; Stopped also refreshes
+the intel. `ProcessCommonMotionState` (971451-971510) closes every land,
+hover and water tick (971718, 971575, 971856) with CalcMoveCommon's result:
+not moving -> Stopped; |velocity| (per tick) above mTopSpeed * 0.08 (the top
+speed per second, i.e. 80 % of it) -> TopSpeed; otherwise Stopping when the
+event is not Stopped and the target lies within one second of travel at
+MaxSpeed * speed mult (or the next waypoint is a PPS_1 point), else Cruise.
+NotifyAttached forces Stopped / Top (965766-965785).
+
+Implemented in `motion.lua` (`__setMotionHorzEvent`/`__setMotionVertEvent`,
+`processCommonMotionState` after every unit's tick with a `moving` flag that
+mirrors CalcMoveCommon -- true only when a move was computed; the attach
+path forces Stopped/Top) and `units.lua` (the constructor values).
+`verify-motion` drives an ACU 60 m and sees exactly
+`Cruise<Stopped TopSpeed<Cruise Stopping<TopSpeed Stopped<Stopping`, a
+0.4 m hop `Cruise<Stopped Stopping<Cruise Stopped<Stopping` (never
+TopSpeed, and Stopped never turns straight into Stopping), nothing while
+standing, and unit.lua's own handler running (the horizontal start-move
+callback fires once); five of those checks were red on the old code.
+`verify-moho-sim-contracts` checks the forced Stopped/Top on attach.
+
+With the events firing, unit.lua's movement effects run for the first time
+and reach two more silent no-ops, `AddThreadScroller` and `RemoveScroller`
+(the tread texture scrollers, CTextureScroller ticked from Entity::TaskTick,
+Cfile:916177-916179). They are recorded in the playthrough's finding list
+and are the next work item.
+
+Not modelled: the `PPS_1` condition of Stopping (971469-971470) -- PPS_1 is
+the state the path spline gives its own start point (765664) and its
+meaning for the NEXT waypoint is unresolved; the intel refresh on Stopped
+(no intel model); the vertical events of air, hover and amphibious motion
+(Up/Down/Hover, Top/Bottom on surfacing, 969729-969885, 971775-971812) --
+those motion types are not driven here yet, so their units keep the
+constructor's Bottom. A live stunned or immobile unit keeps running
+CalcMoveCommon in the engine (966266-966274), so its residual velocity
+brakes over a few ticks and the events follow that braking; this motion
+model stops such a unit at once and therefore reports Stopped at once. A
+unit that arrives with zero velocity reports Stopped on the arrival tick
+(CalcMoveCommon returns 0 for a zero velocity, 971329-971338).

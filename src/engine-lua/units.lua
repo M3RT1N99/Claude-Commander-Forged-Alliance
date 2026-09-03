@@ -264,6 +264,9 @@ function __spawnUnit(scriptPath, bpId, x, y, z, army, complete, requestedLayer)
   -- die Waffen pruefen ihre Turm-Knochen beim Aufbau (weapon.lua:67).
   u.__bones = __unitBones[string.lower(bpId)] or { names = {}, xform = {}, index = {} }
   u.__heading = 0
+  -- CUnitMotion::CUnitMotion: Stopped / Bottom (Cfile:964772-964773).
+  u.__horzEvent = 'Stopped'
+  u.__vertEvent = 'Bottom'
   u.__navigator = __getNavigator(id)
   -- echte Felder (nicht der wrapInstance-Stub) für die Physik-Fortschreibung
   u.__goal = false

@@ -102,6 +102,61 @@ check(Math.abs(zf - 128) < 1.5, `Spur gehalten: z ${zf.toFixed(2)} ≈ 128`)
 check(host.eval(`return not __units[${id}].__goal`) === true, 'Ziel erreicht → Goal geleert')
 check(!bool(host, `__units[${id}]:IsMoving()`), 'IsMoving() = false nach Ankunft')
 
+console.log('\n== The motion events: Stopped -> Cruise -> TopSpeed -> Stopping -> Stopped ==')
+{
+  // CUnitMotion::ProcessCommonMotionState (Cfile:971451-971510) closes every
+  // land tick; SetMotionHorzEvent (965503-965520) fires
+  // OnMotionHorzEventChange(new, old) on a change. The log wraps the
+  // original unit.lua:2133 handler so it still runs.
+  const eid = spawnLuaUnit(host, 'uel0001', { x: 400, y: 20, z: 128 }, 1)
+  host.eval(`
+    __evLog = {}
+    local u = __units[${eid}]
+    local orig = u.OnMotionHorzEventChange
+    u.OnMotionHorzEventChange = function(self, new, old)
+      table.insert(__evLog, new .. '<' .. old)
+      return orig(self, new, old)
+    end
+  `)
+  check(bool(host, `__units[${eid}].__horzEvent == 'Stopped' and __units[${eid}].__vertEvent == 'Bottom'`), 'a fresh unit is Stopped / Bottom (CUnitMotion ctor, Cfile:964772-964773)')
+  for (let i = 0; i < 5; i++) beat()
+  check(bool(host, `table.getn(__evLog) == 0`), 'standing still fires nothing (the callback needs a change)')
+  host.eval(`__units[${eid}]:GetNavigator():SetGoal({ 460, 20, 128 })`)
+  let steps = 0
+  while (bool(host, `__units[${eid}].__goal ~= nil and __units[${eid}].__goal ~= false`) && steps < 600) {
+    beat()
+    steps++
+  }
+  beat()
+  const log = host.eval(`return table.concat(__evLog, ' ')`) as string
+  check(log === 'Cruise<Stopped TopSpeed<Cruise Stopping<TopSpeed Stopped<Stopping', `a 60 m drive: ${log}`)
+  check(bool(host, `__units[${eid}].__horzEvent == 'Stopped'`), 'and the unit ends Stopped')
+  // The Stopping threshold: the target closer than one second of travel at
+  // MaxSpeed * speed mult (971461-971467) while slower than 80 % of the top
+  // speed. A 0.4 m hop stays below 80 % (the ACU accelerates by
+  // MaxAcceleration/100 per tick and arrives within four ticks), so it never
+  // reports TopSpeed; a 2 m hop already does.
+  host.eval(`__evLog = {}`)
+  host.eval(`__units[${eid}]:GetNavigator():SetGoal({ 460.4, 20, 128 })`)
+  steps = 0
+  while (bool(host, `__units[${eid}].__goal ~= nil and __units[${eid}].__goal ~= false`) && steps < 600) {
+    beat()
+    steps++
+  }
+  beat()
+  const short = host.eval(`return table.concat(__evLog, ' ')`) as string
+  check(short === 'Cruise<Stopped Stopping<Cruise Stopped<Stopping', `a 0.4 m hop: ${short} (Stopped never turns straight into Stopping, 971460)`)
+  // The original handler ran: unit.lua:2197 DoOnHorizontalStartMoveCallbacks
+  // fires the callbacks registered with AddOnHorizontalStartMoveCallback.
+  host.eval(`
+    __startMoves = 0
+    __units[${eid}]:AddOnHorizontalStartMoveCallback(function() __startMoves = __startMoves + 1 end)
+    __units[${eid}]:GetNavigator():SetGoal({ 500, 20, 128 })
+  `)
+  for (let i = 0; i < 3; i++) beat()
+  check(num(host, '__startMoves') === 1, "unit.lua's handler ran: the horizontal start-move callback fired once (old == Stopped)")
+}
+
 console.log('\n== Die Speed-Cap-Kaskade (sub_699760 @0x699760, Cfile:942291-942328) ==')
 // (a) Ziel exakt 90° seitlich in Distanz d: der Bogen-Kreis hat r = d/2 —
 // liegt er unter dem TurnRadius, ist der Cap turnRate·|r|·0.5 (GATE 2).

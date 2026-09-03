@@ -431,11 +431,19 @@ console.log('\n== The attach family: Entity::AttachTo and its bindings ==')
   check(bool(host, `__units[${rider}]:GetParent() == __units[${rider}]`), 'GetParent() of an unattached entity is the entity itself (Cfile:932423)')
   check(err(`__units[${rider}]:SetParentOffset(Vector(0, 1, 0))`).includes('SetParentOffset: Entity has no parent.'), 'SetParentOffset without a parent is the engine error (Cfile:932147)')
   check(bool(host, `__units[${rider}]:DetachFrom(true) == false`), 'DetachFrom on an unattached entity returns false')
+  // The rider drives first so NotifyAttached's forced Stopped is visible as a
+  // change (a parked unit is Stopped already).
+  host.eval(`__units[${rider}]:GetNavigator():SetGoal({ 340, 20, 300 })`)
+  for (let i = 0; i < 3; i++) beat(engine)
+  check(bool(host, `__units[${rider}].__horzEvent == 'Cruise'`), 'the rider is under way (Cruise) before the attach')
+  host.eval(`__units[${rider}]:GetNavigator():SetGoal({ __units[${rider}].__pos[1], 20, __units[${rider}].__pos[3] })`)
+  beat(engine)
   // A successful attach: pseudo bone -2 (the rider itself) on the carrier's bone 0.
   check(err(`__units[${rider}]:AttachBoneTo(-2, __units[${carrier}], 0)`) === '', 'AttachBoneTo(-2, carrier, 0) succeeds')
   check(bool(host, `__units[${rider}]:GetParent() == __units[${carrier}]`), 'GetParent() is now the carrier')
   check(bool(host, `__units[${rider}]:IsUnitState('Attached')`), "and the rider IsUnitState('Attached')")
   check(bool(host, `__units[${rider}].__motionState == 'Attached'`), "NotifyAttached: the motion state is 'Attached' (Cfile:965759)")
+  check(bool(host, `__units[${rider}].__horzEvent == 'Stopped' and __units[${rider}].__vertEvent == 'Top'`), 'NotifyAttached forces the motion events to Stopped / Top (Cfile:965766-965785)')
   check(
     bool(host, `(function() local p = __units[${rider}]:GetPosition(); local b = __boneWorld(__units[${carrier}], 0); return math.abs(p[1]-b[1]) < 1e-6 and math.abs(p[2]-b[2]) < 1e-6 and math.abs(p[3]-b[3]) < 1e-6 end)()`),
     'the rider moved onto the carrier bone in the same frame (the woken task thread, Cfile:915862-915878)',
