@@ -23,6 +23,7 @@ import { beginSession } from '../src/sim/session'
 import { simBootPaths, mapSession, mapScenarioFile } from '../src/sim/mapSession'
 import { loadProjectileBlueprints, loadPropBlueprints } from '../src/lua/unitFactory'
 import { parseScmap } from '../src/formats/scmap'
+import { terrainTypeSampler } from '../src/sim/terrain'
 import { GameFiles, GAME_DIR } from './gameFiles'
 
 const MAP = 'SCMP_009'
@@ -104,13 +105,34 @@ setTerrainSource(
     width: scmap.width,
     height: scmap.height,
     waterElevation: scmap.water.hasWater ? scmap.water.elevation : undefined,
-    terrainTypeAt: (x, z) => {
-      const xi = Math.max(0, Math.min(scmap.width - 1, Math.floor(x)))
-      const zi = Math.max(0, Math.min(scmap.height - 1, Math.floor(z)))
-      return scmap.terrainTypeData[zi * scmap.width + xi] ?? 1
-    },
+    // The worker's own sampler (terrain.ts terrainTypeSampler), fed the same
+    // HeightfieldData the browser builds from the scmap.
+    terrainTypeAt: terrainTypeSampler({
+      data: scmap.heightmap,
+      width: scmap.width,
+      height: scmap.height,
+      scale: scmap.heightScale,
+      terrainType: scmap.terrainTypeData,
+    }),
   },
 )
+{
+  // The layer must actually be read: SCMP_009 carries eleven type codes, and a
+  // Sim that answers the default type everywhere would pass every other check
+  // here while lava did no damage and wrecks sat at the wrong offset.
+  const namen = new Set<string>()
+  for (let x = 8; x < scmap.width; x += 37) {
+    for (let z = 8; z < scmap.height; z += 37) {
+      namen.add(String(host.eval(`return GetTerrainType(${x}, ${z}).Name`)))
+    }
+  }
+  check(namen.size > 1, `the terrain-type layer reaches the Sim: ${[...namen].join(', ')}`)
+  check(
+    String(host.eval(`return GetTerrainType(${scmap.width}, 0).Name`)) === 'Default'
+      && String(host.eval('return GetTerrainType(-1, 5).Name')) === 'Default',
+    'at the map size and at a negative coordinate the engine answers type code 1 (Cfile:1087700-1087703)',
+  )
+}
 // Und jetzt genau das, was der Worker tut: die Sim sagt, welche Blueprints
 // dieser Sitzungsstart erzeugen kann, und erst dann werden sie geladen. Die
 // Engine hat alle (siminit.lua:8); der Worker kann das nicht, weil zu jeder

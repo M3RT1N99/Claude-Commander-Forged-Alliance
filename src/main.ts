@@ -1041,6 +1041,7 @@ async function startSandbox(mapFolder: string): Promise<void> {
           width: currentScmap.width,
           height: currentScmap.height,
           scale: currentScmap.heightScale,
+          terrainType: currentScmap.terrainTypeData,
         },
         mapPropSpawns(),
         mapWaterElevation(),
@@ -2155,6 +2156,9 @@ async function getLuaSim(): Promise<LuaSimClient> {
       width: currentScmap.width,
       height: currentScmap.height,
       scale: currentScmap.heightScale,
+      // The terrain-type layer goes with it: GetTerrainType read the default
+      // type for every position while the browser sent the heights alone.
+      terrainType: currentScmap.terrainTypeData,
     }
     luaSimBoot = LuaSimClient.create(
       vfs!,

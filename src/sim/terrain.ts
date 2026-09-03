@@ -14,6 +14,35 @@ export interface HeightfieldData {
   width: number
   height: number
   scale: number
+  /**
+   * The map's terrain-type layer: one type code per cell, `width × height`
+   * bytes row-major (scmap.ts:411). `GetTerrainType(x, z)` reads it
+   * (STIMap::GetTerrainType, Cfile:1087694-1087707); without it every
+   * position answers the default type -- lava does no damage, wrecks sit at
+   * the wrong offset, footfall effects pick the wrong set. The browser Sim
+   * refuses to boot a map without it; only the flat suite terrain omits it.
+   */
+  terrainType?: Uint8Array
+}
+
+/**
+ * The engine's cell lookup for the terrain-type layer
+ * (STIMap::GetTerrainType, Cfile:1087700-1087705): the coordinates are cast
+ * to unsigned integers, anything at or beyond `width - 1` / `height - 1` of
+ * the heightfield -- i.e. at or beyond the map size -- is type code 1, and
+ * everything else is the byte of that cell. A negative coordinate wraps to a
+ * huge unsigned value in C and lands in the same branch.
+ */
+export function terrainTypeSampler(hf: HeightfieldData): ((x: number, z: number) => number) | undefined {
+  const types = hf.terrainType
+  if (!types) return undefined
+  const { width, height } = hf
+  return (x, z) => {
+    const xi = Math.trunc(x)
+    const zi = Math.trunc(z)
+    if (xi < 0 || zi < 0 || xi >= width || zi >= height) return 1
+    return types[zi * width + xi] ?? 1
+  }
 }
 
 export class Heightfield {

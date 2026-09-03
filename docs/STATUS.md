@@ -1327,3 +1327,22 @@ previous tick decides how the unlimited-arc branch converges) -- our
 (Cfile:984750-984845) rejects Seabed targets for `AboveWaterTargetsOnly` /
 `BelowWaterTargetsonly` weapons through `PickTargetPointAbove/BelowWater`;
 we do not implement that pair yet.
+
+## The browser Sim never saw the terrain-type layer
+
+`GetTerrainType(x, z)` was corrected earlier to read the map's type layer --
+in the suites, which hand `terrainTypeAt` to the engine themselves. The
+browser did not: `luaSimWorker.ts` built its terrain source from the heights
+alone, so every position in a real session answered the default type. Lava
+did no damage (`HealthEffectPerSecond`), every wreck took the offset of the
+wrong type (`GetTerrainTypeOffset`, unit.lua:1100), and the footfall and
+impact effect sets were the default's -- silently, in every browser session
+so far.
+
+Now `HeightfieldData` carries the layer (`terrainType`, the scmap's
+`width × height` bytes), `terrain.ts terrainTypeSampler` is the ONE lookup
+(STIMap::GetTerrainType, Cfile:1087700-1087705: unsigned cast, code 1 at or
+beyond the map size), the worker refuses to boot a map without the layer,
+and it logs `Sim: terrain types on the map: …` so a session shows what it
+read. `verify-browser-session.ts` uses the same sampler and is red when the
+layer is missing (nine type names on SCMP_009, one without).

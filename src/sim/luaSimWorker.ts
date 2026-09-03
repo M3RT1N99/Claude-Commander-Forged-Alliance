@@ -23,7 +23,7 @@ import {
   type SimBone,
 } from '../lua/unitFactory'
 import { setTerrainSource } from '../lua/engineGlobals'
-import { Heightfield, type HeightfieldData } from './terrain'
+import { Heightfield, terrainTypeSampler, type HeightfieldData } from './terrain'
 import type { MapPropSpawn } from './luaSimClient'
 
 const ctx = self as unknown as Worker
@@ -219,7 +219,9 @@ const handleMessage = async (msg: InMsg): Promise<void> => {
       width: msg.terrain.width,
       height: msg.terrain.height,
       waterElevation: msg.waterElevation,
+      terrainTypeAt: terrainTypesOf(msg.terrain),
     })
+    reportTerrainTypes(h, msg.terrain)
     // ALLE Projektil- und Prop-Blueprints, VOR dem ersten Schuss. Die Engine
     // lädt beim Start ebenfalls alles (Blueprints.lua über DiskFindFiles) —
     // mitten im Tick kann eine Waffe nichts nachladen.
@@ -430,10 +432,34 @@ async function resetSession(
   // liest dabei das Heightfield, Cfile:1017321-1017333).
   engine = installEngine(h, undefined, session, {
     heightAt: (x, z) => hf.at(x, z),
-    size: { width: terrain.width, height: terrain.height, waterElevation },
+    size: { width: terrain.width, height: terrain.height, waterElevation, terrainTypeAt: terrainTypesOf(terrain) },
   })
+  reportTerrainTypes(h, terrain)
   loadBlueprintGroups(h, files)
   host = h
+}
+
+/**
+ * The terrain-type layer is part of the map, not an option: without it the
+ * Sim answered "Default" for every position, so lava did no damage and every
+ * wreck sat at the wrong offset -- silently, for as long as the browser
+ * session existed. A map without the layer is refused here.
+ */
+function terrainTypesOf(terrain: HeightfieldData): (x: number, z: number) => number {
+  const sampler = terrainTypeSampler(terrain)
+  if (!sampler) throw new Error('Sim boot: the map has no terrain-type layer (HeightfieldData.terrainType)')
+  return sampler
+}
+
+/** One log line with what the layer holds -- the evidence that it is read. */
+function reportTerrainTypes(h: LuaHost, terrain: HeightfieldData): void {
+  const namen = new Set<string>()
+  for (let x = 8; x < terrain.width; x += 32) {
+    for (let z = 8; z < terrain.height; z += 32) {
+      namen.add(String(h.eval(`return GetTerrainType(${x}, ${z}).Name`)))
+    }
+  }
+  ctx.postMessage({ type: 'log', level: 'LOG', msg: `Sim: terrain types on the map: ${[...namen].join(', ')}` })
 }
 
 /**
