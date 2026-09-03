@@ -349,7 +349,7 @@ function GetAttachedUnitsList(units)
 end
 
 -- Von der Engine pro Beat: der Zustand einer Unit aus der Sim.
-function __uiSetUnit(id, blueprintId, army, x, y, z, health, maxHealth, workProgress, idle, fireState, guardedId, capMask, deadFlag, shieldRatio, fractionComplete, beingUpgraded, layer, scriptBits, toggleCapMask, autoMode, autoSurfaceMode)
+function __uiSetUnit(id, blueprintId, army, x, y, z, health, maxHealth, workProgress, idle, fireState, guardedId, capMask, deadFlag, shieldRatio, fractionComplete, beingUpgraded, layer, scriptBits, toggleCapMask, autoMode, autoSurfaceMode, restrict)
   local u = __uiUnits[id]
   if not u then
     -- SUnitVarDat-Ctor (Cfile:772277): mFireState = FIRESTATE_ReturnFire (0).
@@ -399,6 +399,13 @@ function __uiSetUnit(id, blueprintId, army, x, y, z, health, maxHealth, workProg
   -- Shield strength (0..1) from shield.lua UpdateShieldRatio -> SetShieldRatio;
   -- GetShieldRatio and the rollover shield bar read it.
   u.shieldRatio = shieldRatio or 0
+  -- The unit's own build-restriction category (UnitAttributes::
+  -- mRestrictionCategory), mirrored per beat in the text form of
+  -- globals.lua __categoryToString; nil = nothing restricted. An absent
+  -- argument keeps what the unit had (the older call sites pass none).
+  if restrict ~= nil then
+    u.__restriction = (restrict ~= '') and __categoryFromString(restrict) or nil
+  end
 end
 
 -- Die Bau-Warteschlange einer Fabrik aus der Sim spiegeln. Die Engine haelt sie
@@ -977,6 +984,12 @@ function GetUnitCommandData(units)
           unitCats = unitCats + ParseEntityCategory(expr)
         end
       end
+      -- Minus the unit's OWN restriction category (Cfile:1264642-1264646:
+      -- `EntityCategory::Sub` of UnitAttributes::mRestrictionCategory from
+      -- the buildable set). This is why an unenhanced ACU's build menu holds
+      -- no T2 structures: uel0001_script.lua:117 restricts them until the
+      -- engineering enhancement. The sim mirrors the category per beat.
+      if u.__restriction then unitCats = unitCats - u.__restriction end
     end
     -- Intersect for EVERY selected unit (blueprint-less -> EMPTY -> blanks it).
     cats = cats == nil and unitCats or (cats * unitCats)

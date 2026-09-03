@@ -1767,6 +1767,72 @@ function __unitRestoreBuildRestrictions(u)
   u.__buildRestrictions = nil
 end
 
+-- A category expression as text, and back. The user layer needs the unit's
+-- restriction category too: GetUnitCommandData subtracts it from the
+-- buildable category (Cfile:1264642-1264646, `EntityCategory::Sub` of the
+-- unit's mRestrictionCategory from buildable x army category), so the build
+-- menu of an unenhanced ACU shows no T2 structures. The blueprint DSL that
+-- ParseEntityCategory reads has no subtraction, so the tree travels in its
+-- own prefix form: `tok:NAME`, `all`, `and(A,B)`, `or(A,B)`, `sub(A,B)`.
+function __categoryToString(c)
+  if type(c) ~= 'table' or not c.__cat then return '' end
+  local k = c.kind
+  if k == 'tok' then return 'tok:' .. tostring(c.a) end
+  if k == 'all' then return 'all' end
+  return k .. '(' .. __categoryToString(c.a) .. ',' .. __categoryToString(c.b) .. ')'
+end
+
+function __categoryFromString(s)
+  if type(s) ~= 'string' or s == '' then return nil end
+  local pos = 1
+  local parse
+  parse = function()
+    if string.sub(s, pos, pos + 3) == 'tok:' then
+      local e = string.find(s, '[,)]', pos + 4) or (#s + 1)
+      local name = string.sub(s, pos + 4, e - 1)
+      pos = e
+      return categories[name]
+    end
+    if string.sub(s, pos, pos + 2) == 'all' then
+      pos = pos + 3
+      return categories.ALLUNITS
+    end
+    local op = string.match(s, '^(%a+)%(', pos)
+    if not op then error('category string: unexpected input at ' .. pos .. ' in ' .. s, 2) end
+    pos = pos + #op + 1
+    local a = parse()
+    if string.sub(s, pos, pos) ~= ',' then error('category string: expected , at ' .. pos .. ' in ' .. s, 2) end
+    pos = pos + 1
+    local b = parse()
+    if string.sub(s, pos, pos) ~= ')' then error('category string: expected ) at ' .. pos .. ' in ' .. s, 2) end
+    pos = pos + 1
+    if op == 'and' then return a * b end
+    if op == 'or' then return a + b end
+    if op == 'sub' then return a - b end
+    error('category string: unknown operator ' .. op .. ' in ' .. s, 2)
+  end
+  local r = parse()
+  if pos <= #s then error('category string: trailing input at ' .. pos .. ' in ' .. s, 2) end
+  return r
+end
+
+-- The unit's restriction category as ONE expression: the add/remove log
+-- folded with the set operators (add = union, remove = difference), which
+-- is what the engine's bitset holds. Empty string when nothing is restricted.
+function __unitRestrictionString(u)
+  local log = u and u.__buildRestrictions
+  if not log then return '' end
+  local s = nil
+  for _, op in ipairs(log) do
+    if op.add then
+      s = s and (s + op.cat) or op.cat
+    elseif s then
+      s = s - op.cat
+    end
+  end
+  return s and __categoryToString(s) or ''
+end
+
 -- Unit::CanBuild checks the army filter, the builder blueprint cache, then the
 -- per-unit restriction cache in that order (faf-re Unit.cpp:12386-12398).
 -- Verified: `Moho::Unit::CanBuild` (Cfile:953352-953391) builds the set

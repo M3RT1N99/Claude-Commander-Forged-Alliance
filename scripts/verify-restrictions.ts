@@ -76,5 +76,25 @@ host.eval(`__units[${acu}]:RestoreBuildRestrictions()`)
 check(can('ueb1301'), 'RestoreBuildRestrictions empties the set')
 check(host.eval(`return (pcall(function() __units[${acu}]:AddBuildRestriction() end))`) === false, 'AddBuildRestriction without a category throws')
 
+console.log('\n== The restriction travels to the user layer as text ==')
+// GetUnitCommandData subtracts the unit's restriction category from the build
+// menu (Cfile:1264642-1264646), so the UI VM needs the category. The
+// blueprint DSL has no subtraction; globals.lua __categoryToString carries
+// the tree in a prefix form that __categoryFromString reads back.
+host.eval(`__units[${acu}]:AddBuildRestriction(categories.UEF * (categories.BUILTBYTIER2COMMANDER + categories.BUILTBYTIER3COMMANDER))`)
+const text = String(host.eval(`return __unitRestrictionString(__units[${acu}])`))
+check(text === 'and(tok:UEF,or(tok:BUILTBYTIER2COMMANDER,tok:BUILTBYTIER3COMMANDER))', `the ACU's restriction as text (${text})`)
+host.eval(`__units[${acu}]:RemoveBuildRestriction(ParseEntityCategory('BUILTBYTIER2COMMANDER UEF'))`)
+const text2 = String(host.eval(`return __unitRestrictionString(__units[${acu}])`))
+check(text2.startsWith('sub(and(tok:UEF,or(') && text2.endsWith(',and(tok:BUILTBYTIER2COMMANDER,tok:UEF))'), `a removal becomes a set difference in the text (${text2})`)
+check(
+  host.eval(`return __categoryToString(__categoryFromString(${JSON.stringify(text2)})) == ${JSON.stringify(text2)}`) === true,
+  'the text reads back into the same tree',
+)
+check(host.eval(`return (pcall(__categoryFromString, 'and(tok:A,tok:B'))`) === false, 'a malformed text throws instead of yielding a category')
+check(host.eval(`return string.find(__readAllUnitsJson(), '"restrict":"sub(and(tok:UEF', 1, true) ~= nil`) === true, 'and the per-beat unit row carries it')
+host.eval(`__units[${acu}]:RestoreBuildRestrictions()`)
+check(host.eval(`return __unitRestrictionString(__units[${acu}]) == ''`) === true, 'RestoreBuildRestrictions leaves an empty text')
+
 console.log(failures === 0 ? '\nRESTRICTIONS PASSED' : `\nRESTRICTIONS FAILED (${failures})`)
 process.exit(failures === 0 ? 0 : 1)

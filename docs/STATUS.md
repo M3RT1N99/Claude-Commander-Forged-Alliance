@@ -1390,11 +1390,15 @@ blueprints register lazily, the unit keeps the ordered add/remove log and
 answers per blueprint from it, which gives the set's answer whenever the
 blueprint arrived. `verify-restrictions.ts` walks a UEF ACU through it.
 
-Still open, and now visible: the UI's build menu does not subtract the
-unit's own restriction the way `GetUnitCommandData` does
-(Cfile:1264622-1264645), so the ACU's menu still shows the T2 items and the
-Sim refuses the order. `mRequestRefreshUI` is recorded on the unit
-(`__requestRefreshUI`) but nothing consumes it yet.
+The user layer follows: `GetUnitCommandData` subtracts the unit's own
+restriction category from the buildable set (Cfile:1264642-1264646), so an
+unenhanced ACU's build menu holds no T2 structures. The blueprint DSL has
+no subtraction, so the category travels per beat in the prefix text form of
+`globals.lua __categoryToString` (`sub(and(tok:UEF,or(...)),...)`) and the
+UI VM reads it back with `__categoryFromString`; `verify-ui-panels.ts` shows
+ueb1201 leaving and re-entering the ACU's menu with it. `mRequestRefreshUI`
+is still only recorded (`__requestRefreshUI`); the per-beat mirror makes a
+refresh signal unnecessary here.
 
 ## GetFocusUnit was a no-op -- and the build cost was an invention on top
 

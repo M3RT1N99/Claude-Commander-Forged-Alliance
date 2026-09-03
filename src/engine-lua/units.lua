@@ -866,6 +866,10 @@ local function readRow(id, u)
     -- Unit:SetShieldRatio (moho). The UI mirror shows it (GetShieldRatio; the
     -- rollover shield bar, unitview.lua).
     shieldRatio = u.__shieldRatio or 0,
+    -- The unit's own build-restriction category (UnitAttributes::
+    -- mRestrictionCategory) in text form; the user layer subtracts it from
+    -- the build menu (GetUnitCommandData, Cfile:1264642-1264646).
+    restrict = __unitRestrictionString(u),
     -- WorkProgress (mUnitVarDat.mWorkProgress): what this unit is working on,
     -- written by the build task every tick (Cfile:815482) and by Lua for
     -- enhancements (unit.lua:3579). The UI shows exactly this
@@ -960,6 +964,7 @@ function __readAllUnitsJson()
       .. ',"autoSurfaceMode":' .. tostring(r.autoSurfaceMode)
       .. ',"dead":' .. tostring(r.dead)
       .. ',"shieldRatio":' .. jnum(r.shieldRatio)
+      .. ',"restrict":' .. jstr(r.restrict)
       .. ',"workProgress":' .. jnum(r.workProgress)
       .. ',"beingUpgraded":' .. tostring(r.beingUpgraded)
       .. ',"born":' .. jint(r.born)

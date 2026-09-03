@@ -555,6 +555,18 @@ const inMenu = (bp: string): boolean =>
   `) === true
 check(inMenu('ueb0101'), 'ueb0101 (T1-Landfabrik) steht im Bau-Menü der ACU')
 check(!inMenu('uel0101'), 'uel0101 (Panzer) steht NICHT drin — den baut die Fabrik')
+// The unit's OWN restriction category: GetUnitCommandData subtracts
+// UnitAttributes::mRestrictionCategory from the buildable set
+// (Cfile:1264642-1264646). A fresh ACU restricts its T2 and T3 structures
+// (uel0001_script.lua:117); the sim mirrors that category per beat as the
+// last __uiSetUnit argument, in the text form of __categoryToString.
+check(inMenu('ueb1201'), 'without a mirrored restriction the T2 extractor is in the menu')
+host.eval(`__uiSetUnit(1, 'uel0001', 1, 100, 20, 100, 12000, 12000, 1, true, 0, 0, -1, false, 0, 1, false, 'Land', 0, -1, false, false, 'and(tok:UEF,or(tok:BUILTBYTIER2COMMANDER,tok:BUILTBYTIER3COMMANDER))')`)
+check(!inMenu('ueb1201'), 'with the ACU restriction mirrored, ueb1201 (T2 extractor) leaves the menu')
+check(!inMenu('ueb1301'), 'and so does ueb1301 (T3 generator)')
+check(inMenu('ueb0101'), 'while ueb0101 (T1 factory) stays')
+host.eval(`__uiSetUnit(1, 'uel0001', 1, 100, 20, 100, 12000, 12000, 1, true, 0, 0, -1, false, 0, 1, false, 'Land', 0, -1, false, false, '')`)
+check(inMenu('ueb1201'), 'an empty restriction text puts it back (the enhancement bought)')
 
 console.log('\n== Klick aufs Bau-Icon: der Bau-Modus startet, die Auswahl bleibt ==')
 // Der Weg, den ein Spieler nimmt: ACU wählen → Bau-Icon anklicken → Gebäude

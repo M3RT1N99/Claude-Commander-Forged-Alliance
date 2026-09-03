@@ -62,6 +62,11 @@ export interface LuaUnitSnapshot {
   /** Shield strength ratio 0..1 (shield.lua UpdateShieldRatio -> SetShieldRatio);
    *  the UI shows it via GetShieldRatio. */
   shieldRatio?: number
+  /** The unit's own build-restriction category (UnitAttributes::
+   *  mRestrictionCategory) in the text form of globals.lua
+   *  __categoryToString; '' when nothing is restricted. GetUnitCommandData
+   *  subtracts it from the build menu (Cfile:1264642-1264646). */
+  restrict?: string
   /** WorkProgress (mUnitVarDat.mWorkProgress): the progress of what this unit
    *  is building/upgrading/enhancing, written by the build task every tick
    *  (Cfile:815482). construction.lua:380 draws it. */
