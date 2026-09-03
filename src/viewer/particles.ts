@@ -44,7 +44,7 @@ class Batch {
   private write = 0
   private count = 0
 
-  constructor(bp: EmitterBpData, texture: THREE.Texture, ramp: THREE.Texture) {
+  constructor(bp: EmitterBpData, texture: THREE.Texture, ramp: THREE.Texture, depthTest = true) {
     // Sampler-Zustände aus particle.fx:33-51: die Partikeltextur wickelt in U
     // (Frame-Strips) und klemmt in V; die Ramp klemmt in beiden Achsen.
     texture.wrapS = THREE.RepeatWrapping
@@ -59,6 +59,7 @@ class Batch {
       animated: (bp.TextureFramecount ?? 0) > 1,
       flat: bp.Flat === true,
       drag: bp.ParticleResistance === true,
+      depthTest,
     })
 
     const g = new THREE.InstancedBufferGeometry()
@@ -140,9 +141,9 @@ export class ParticleSystem {
   ) {}
 
   /** Batch je Emitter-Blueprint — beim ersten Partikel dieses Typs angelegt. */
-  batchFor(bpId: string, bp: EmitterBpData, texture: THREE.Texture, ramp: THREE.Texture): void {
+  batchFor(bpId: string, bp: EmitterBpData, texture: THREE.Texture, ramp: THREE.Texture, depthTest = true): void {
     if (this.batches.has(bpId)) return
-    const batch = new Batch(bp, texture, ramp)
+    const batch = new Batch(bp, texture, ramp, depthTest)
     this.batches.set(bpId, batch)
     this.attach(batch.mesh)
   }
@@ -162,6 +163,13 @@ export class ParticleSystem {
     this.camRight.set(m[0]!, m[1]!, m[2]!)
     this.camUp.set(m[4]!, m[5]!, m[6]!)
     for (const b of this.batches.values()) b.update(timeTicks, this.camRight, this.camUp)
+  }
+
+  /** The batch keys with their particle counts (self-test / CDP probes). */
+  batchCounts(): Record<string, number> {
+    const out: Record<string, number> = {}
+    for (const [k, b] of this.batches) out[k] = b.particleCount
+    return out
   }
 
   /** Gesamtzahl der Slots mit je gespawnten Partikeln (für den Selbsttest). */

@@ -533,6 +533,9 @@ function tickAndPost(): void {
   // Sim->user camera shakes (Sim::mSyncCamShake, handed over with the beat
   // like the engine's Sync, Cfile:1074494-1074501).
   const camShakes = host.pull<unknown[]>('__drainCamShakesJson()')
+  // The light particles spawned this beat (CreateLightParticle -> the
+  // particle buffer, Cfile:906023).
+  const lights = host.pull<unknown[]>('__drainLightParticlesJson()')
   const a = engine.economy.army(1)
   // Der SIM-TICK gehoert zum Zustand: die Spielzeit-Uhr der UI (score.lua:230,
   // GetGameTime) zaehlt in Sim-Ticks und steht bei Pause still.
@@ -547,6 +550,7 @@ function tickAndPost(): void {
     removedMapProps,
     audio,
     camShakes,
+    lights,
     economy: {
       mass: a.mass, massStorage: a.maxMass, massIncome: a.incomeMass, massExpense: a.expenseMass,
       energy: a.energy, energyStorage: a.maxEnergy, energyIncome: a.incomeEnergy, energyExpense: a.expenseEnergy,

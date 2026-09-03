@@ -1,8 +1,11 @@
 // Port des Seraphim-Unit-Shaders (mesh.fx, UnitFalloffPS):
 // Falloff-Ramp-Lookup über pow(1−N·V, 0.6) (v = fractionComplete = 1),
 // Rim-Glow = fallOff.rgb · diffuse.a, Sonnenanteil 0 (shadow=0 im
-// Original), Phong (0.5,0.6,0.7)·spec.g⁹, Environment ≈ konstant · spec.r
-// · fallOff.a.
+// Original), Phong (0.5,0.6,0.7)·spec.g⁹, environment = the map's cube map
+// reflected off the normal (mesh.fx:2659 texCUBE(environmentSampler,
+// reflect(-viewDirection, normal))), scaled by spec.r · fallOff.a
+// (mesh.fx:2670). Without a cube map (the unit viewer tool) the term is
+// zero, as in unit.frag.glsl -- no invented constant.
 
   precision highp float;
 
@@ -13,6 +16,9 @@
   uniform vec3 sunDirection;
   uniform vec3 sunAmbience;
   uniform vec3 shadowFillColor;
+#ifdef ENVCUBE
+  uniform samplerCube environmentMap;
+#endif
 
   varying vec2 vUv0;
   varying vec2 vUv1;
@@ -39,9 +45,14 @@
     float specularAmount = clamp(dot(reflect(-sunDirection, normal), viewDir), 0.0, 1.0);
     vec3 phongAdditive = vec3(0.5, 0.6, 0.7) * pow(specularAmount, 9.0) * specular.g;
 
-    float fresnel = pow(1.0 - max(dot(normal, viewDir), 0.0), 2.0);
-    vec3 environment = mix(vec3(0.15, 0.17, 0.2), vec3(0.5, 0.55, 0.6), fresnel)
+    // mesh.fx:2659: environment = texCUBE(environmentSampler,
+    // reflect(-viewDirection, normal)); :2670 environment *= spec.r * fallOff.a.
+#ifdef ENVCUBE
+    vec3 environment = textureCube(environmentMap, reflect(-viewDir, normal)).rgb
       * specular.r * fallOff.a;
+#else
+    vec3 environment = vec3(0.0);
+#endif
 
     // Original: shadow = 0 -> Sonnenanteil entfällt
     vec3 light = sunAmbience;

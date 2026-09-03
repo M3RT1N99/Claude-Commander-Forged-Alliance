@@ -1817,9 +1817,51 @@ the back buffer is A8R8G8B8 (1394107); there is no gamma ramp (no
 SetGammaRamp, no ren_Gamma; the only "gamma" is libpng's); the HLSL has no
 pow(2.2) anywhere. Our raw-texture, raw-output shaders are therefore right
 -- recorded in docs/research/verified-facts.md. Real deviations: the
-Seraphim unit shader replaces the environment cube reflection of
-UnitFalloffPS (mesh.fx:2665-2670) with two invented constants; the water
+Seraphim unit shader replaced the environment cube reflection of
+UnitFalloffPS (mesh.fx:2659, 2670) with two invented constants -- fixed, it
+samples the map's cube map like the other unit shaders now; the water
 lacks the scene reflection target, the refraction offset and the shoreline
 geometry (water2.fx:206-213, 612-629, documented in the shader); particle
 blend mode 5 (REFRACT) falls back to alpha blending. Terrain, decals, sky
 and bloom were checked against terrain.fx/sky.fx and match.
+
+## Light particles: the flash core of impacts, explosions and build glow
+
+`CreateLightParticle` and `CreateLightParticleIntel` were empty. Every
+explosion (defaultexplosions.lua:204), most projectile impacts
+(cybranprojectiles.lua:70-71, terranprojectiles.lua:282, the nuke
+controllers), the build glow (effectutilities.lua:733/795) and the reclaim
+glow (:1218, the Intel variant) call them.
+
+The engine (Cfile): the binding takes exactly seven arguments, resolves the
+bone with the pseudo bones admitted and takes its world transform once
+(908832-908848) -- a one-shot spawn point that never follows the bone;
+size and lifetime are numbers, the two names optional strings
+(908871-908909). CEffectManagerImpl::CreateLightParticle (905874-906033)
+builds one SWorldParticle at that point with blend mode 3 (ADD), a
+constant size (mBeginSize = mEndSize), the raw lifetime, the texture
+`/textures/particles/<name>.dds` or beam_white_01.dds without a name, tags
+it "TLight" and pushes it into the particle buffer -- all of that only when
+a ramp name is given (`if (ramp->_Mysize)`, 905929-906023). The tag selects
+particle.fx's TLight_ADD technique: a FLAT quad (WorldVS(false, true),
+:1097), additive, depth test off (Depth_Disable_Write_None, :1094), the
+ramp sampled with t/lifetime (LightPS, :272-275). The Intel variant spawns
+only when the focus army has line of sight on the point (ReconCanDetect2
+with RECON8_LOSNow, 909075-909090).
+
+Implemented: `globals.lua` records each spawn (`__lightParticles`,
+`__drainLightParticlesJson`), the worker's states message carries them as
+`lights`, `luaSimClient.ts` accumulates and drains them, and `main.ts`
+puts each into the particle system as one SpawnedParticle of a batch per
+texture/ramp pair (blend 3, flat, single frame, depth test off -- the
+particle material and batch gained that option). `verify-light-particles`
+(16 checks) covers the argument errors, the bone point (-2 the entity, -1
+the collision centre), size and lifetime, the texture default, the ramp
+gate, the Intel variant and the drain; two mutations (the bone point, the
+texture default) went red and the removed ramp gate crashed the suite on
+the nil concatenation. In the headless self-test the live page holds three
+light batches with particles after the first combat.
+
+Not modelled: the Intel variant's line-of-sight gate -- this sim has no
+recon model and the browser draws the whole world, so it spawns
+unconditionally (recorded, not faked).

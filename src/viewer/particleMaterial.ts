@@ -152,6 +152,9 @@ export interface ParticleMaterialOptions {
   animated: boolean
   /** Flat ⇒ Quad in der XZ-Ebene (TRampFlat_*). */
   flat: boolean
+  /** Depth test on (every TRamp* technique: Depth_Enable_Less_Write_None) or
+   *  off (the TLight* techniques: Depth_Disable_Write_None, particle.fx:1094). */
+  depthTest?: boolean
   /** ParticleResistance ⇒ Drag-Modell im Shader (DragEnabled). */
   drag: boolean
 }
@@ -173,7 +176,7 @@ export function createParticleMaterial(o: ParticleMaterialOptions): THREE.Shader
     },
     // Alle Techniques: Depth-Test Less AN, Depth-Write AUS, Cull None
     // (particle.fx: Depth_Enable_Less_Write_None, Rasterizer_Cull_None).
-    depthTest: true,
+    depthTest: o.depthTest ?? true,
     depthWrite: false,
     side: THREE.DoubleSide,
     transparent: true,

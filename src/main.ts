@@ -27,7 +27,7 @@ import {
 import { ddsToTexture } from './viewer/textures'
 import { UnitViewer, type SceneUnit } from './viewer/unitViewer'
 import { SandboxController, type SandboxUnitAssets } from './sandbox/sandbox'
-import { LuaSimClient, type LuaPropSnapshot, type MapPropSpawn } from './sim/luaSimClient'
+import { LuaSimClient, type LuaPropSnapshot, type MapPropSpawn, type SimLightParticle } from './sim/luaSimClient'
 import { SANDBOX_SESSION, type SessionInfo } from './sim/session'
 import type { HeightfieldData } from './sim/terrain'
 import { Hud, type HudSource, type HudUnitInfo, type EcoSnapshot } from './ui/hud'
@@ -801,6 +801,56 @@ async function ladeEmitterBatch(bpId: string): Promise<void> {
   }
   emitterBpData.set(bpId, bp)
   particles?.batchFor(bpId, bp, tex, ramp)
+}
+
+/**
+ * A light particle (CEffectManagerImpl::CreateLightParticle,
+ * Cfile:905874-906033) is one SWorldParticle in the same buffer as the
+ * emitter particles: blend mode 3 (ADD), constant size, its ramp sampled
+ * with t/lifetime, tagged "TLight" -- which selects particle.fx's TLight_*
+ * technique: a FLAT quad (WorldVS(false, true), :1097) with the depth test
+ * off (:1094). One batch per texture/ramp pair carries them.
+ */
+const LIGHT_BP: EmitterBpData = { Blendmode: 3, Flat: true, TextureFramecount: 1, TextureStripcount: 1 }
+async function spawnLightParticle(l: SimLightParticle): Promise<void> {
+  if (!particles) return
+  const key = `light|${l.tex}|${l.ramp}`
+  if (!particles.hasBatch(key)) {
+    const texP = l.tex.replace(/^\//, '').toLowerCase()
+    const rampP = l.ramp.replace(/^\//, '').toLowerCase()
+    const [tex, ramp] = await Promise.all([loadFirstTexture([texP]), loadFirstTexture([rampP])])
+    if (!tex || !ramp) {
+      log(`Light particle: texture missing (${texP || '—'} / ${rampP || '—'})`)
+      return
+    }
+    if (!particles) return
+    particles.batchFor(key, LIGHT_BP, tex, ramp, false)
+  }
+  particles.add(key, {
+    px: l.x,
+    py: l.y,
+    pz: l.z,
+    angle: 0,
+    beginSize: l.size,
+    sizeRate: 0,
+    vx: 0,
+    vy: 0,
+    vz: 0,
+    rotRate: 0,
+    ax: 0,
+    ay: 0,
+    az: 0,
+    birth: l.tick,
+    lifetime: l.life,
+    framerate: 0,
+    frameSize: 1,
+    texRow: 0,
+    rampV: 0,
+    rowHeight: 1,
+    dragX: 0,
+    dragY: 0,
+    dragZ: 0,
+  })
 }
 
 /** Pro NEUEM Sim-Tick: alle gemeldeten Emitter einen Tick weiterdrehen. */
@@ -2587,6 +2637,11 @@ function luaSimUpdate(): void {
   // entry reaches the camera's CameraShake (Cfile:1327867).
   for (const s of luaSim.drainCamShakes()) viewer.cameraShake(s)
 
+  // Light particles (CreateLightParticle -> the particle buffer,
+  // Cfile:906023): one flat, additive, depth-test-free quad each
+  // (TLight_ADD, particle.fx:1089-1099).
+  for (const l of luaSim.drainLights()) void spawnLightParticle(l)
+
   // Neue Units aus der Sim (Baustelle, Fabrik-Produkt) bekommen ihr Modell. Die
   // Sim erzeugt sie; die Szene zieht nach — nicht umgekehrt.
   for (const s of states) {
@@ -3031,6 +3086,9 @@ if (import.meta.env.DEV) {
     viewer.focusOn(new THREE.Vector3(x, viewer.heightAt(x, z), z), dist)
     return 'ok'
   }
+  // The particle batches with their counts (light particles included) for
+  // CDP probes of the effect pipeline.
+  ;(window as unknown as Record<string, unknown>).__cfaParticleBatches = () => (particles ? particles.batchCounts() : {})
   // Lua in der UI-VM auswerten (Fehlersuche der Tastatur-/Keymap-Wege).
   ;(window as unknown as Record<string, unknown>).__cfaUiEval = (code: string) =>
     gameUi ? gameUi.debugEval(code) : 'keine UI'

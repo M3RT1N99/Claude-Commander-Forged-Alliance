@@ -207,11 +207,29 @@ interface StatesMsg {
   audio?: SimAudioRequest[]
   /** Sim->user camera shakes (SCamShakeParams, Sim::mSyncCamShake). */
   camShakes?: SimCamShake[]
+  /** Light particles spawned this beat (CreateLightParticle, Cfile:905874-906033). */
+  lights?: SimLightParticle[]
   economy: EcoSnapshot
 }
 
 /** One camera shake request: Entity:ShakeCamera's epicentre and numbers
  *  (cfunc_EntityShakeCameraL, Cfile:931108-931169). */
+/** One light particle: a flat additive quad of constant size at a fixed
+ *  world point, its ramp sampled with t/lifetime (TLight_ADD, particle.fx). */
+export interface SimLightParticle {
+  x: number
+  y: number
+  z: number
+  size: number
+  /** Lifetime in the particle clock's unit (sim ticks, like the curves). */
+  life: number
+  tex: string
+  ramp: string
+  army: number
+  /** The sim tick of the spawn -- the particle's birth. */
+  tick: number
+}
+
 export interface SimCamShake {
   x: number
   y: number
@@ -259,6 +277,8 @@ export class LuaSimClient {
   private readonly audioRequests: SimAudioRequest[] = []
   /** Accumulated camera shakes; drained by the viewer in main. */
   private readonly camShakes: SimCamShake[] = []
+  /** Accumulated light particles; drained by the particle system in main. */
+  private readonly lights: SimLightParticle[] = []
   /** Letzter gemeldeter Sim-Tick (Spielzeit = Tick / 10). */
   gameTick = 0
   private nextReq = 1
@@ -396,6 +416,9 @@ export class LuaSimClient {
         }
         if (m.camShakes && m.camShakes.length > 0) {
           for (const s of m.camShakes) this.camShakes.push(s)
+        }
+        if (m.lights && m.lights.length > 0) {
+          for (const l of m.lights) this.lights.push(l)
         }
         this.statesById.clear()
         for (const u of m.units) this.statesById.set(u.id, u)
@@ -552,6 +575,7 @@ export class LuaSimClient {
     this.removedMapProps.length = 0
     this.audioRequests.length = 0
     this.camShakes.length = 0
+    this.lights.length = 0
     this.projectileStates = []
     this.emitterStates = []
     this.propStates = []
@@ -691,6 +715,12 @@ export class LuaSimClient {
   drainAudioRequests(): SimAudioRequest[] {
     if (this.audioRequests.length === 0) return []
     return this.audioRequests.splice(0, this.audioRequests.length)
+  }
+
+  /** Drain the light particles spawned since the last call. */
+  drainLights(): SimLightParticle[] {
+    if (this.lights.length === 0) return []
+    return this.lights.splice(0, this.lights.length)
   }
 
   /** Drain the sim->user camera shakes since the last call. */

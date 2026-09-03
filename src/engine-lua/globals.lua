@@ -1035,8 +1035,74 @@ function CreateBeamEntityToEntity(a, aBone, b, bBone, army, blueprint)
   e.__otherBone = bBone
   return e
 end
-function CreateLightParticle(owner, bone, army, size, life, tex, ramp) end
-function CreateLightParticleIntel(owner, bone, army, size, life, tex, ramp) end
+-- === Light particles (CEffectManagerImpl::CreateLightParticle,
+-- Cfile:905874-906033) ===
+-- "CreateLightParticle(entity, bone, army, size, lifetime, textureName,
+-- rampName)" (cfunc_CreateLightParticleL, Cfile:908818-908944): exactly
+-- seven arguments (908832-908834); the bone is resolved with the pseudo bones
+-- admitted and its WORLD transform taken once (908847-908848) -- the particle
+-- is spawned at that point and never follows the bone; size and lifetime
+-- are numbers (908871-908884), the two names optional strings
+-- (908888-908909). The engine builds one SWorldParticle (blend mode 3 = ADD,
+-- 905914; constant size, mBeginSize = mEndSize = size, 906019-906020;
+-- lifetime raw, 905915) with the texture '/textures/particles/<name>.dds'
+-- or, without a name, beam_white_01.dds (905916-905928), tags it "TLight"
+-- (906016) and pushes it into the particle buffer -- but ONLY when a ramp
+-- name is given: the ramp load, the tag and the push all sit inside
+-- `if (ramp->_Mysize)` (905929-906023). Without a ramp nothing is spawned.
+-- The Intel variant (908975-909110) additionally spawns only when the focus
+-- army currently sees the point (ReconCanDetect2 with RECON8_LOSNow,
+-- 909075-909090); this sim has no recon model and the browser draws the
+-- whole world, so the Intel variant spawns unconditionally here
+-- (docs/STATUS.md).
+--
+-- The renderer draws them with particle.fx's TLight_ADD technique: a FLAT
+-- quad (WorldVS(false, true), particle.fx:1097) of constant size, additive,
+-- with the depth test OFF (Depth_Disable_Write_None, particle.fx:1094), the
+-- ramp sampled with t/lifetime (LightPS, particle.fx:272-275).
+__lightParticles = {}
+
+local LIGHT_HELP = 'CreateLightParticle(entity, bone, army, size, lifetime, textureName, rampName)'
+
+local function createLightParticle(...)
+  local n = select('#', ...)
+  if n ~= 7 then
+    error(string.format('%s\n  expected %d args, but got %d', LIGHT_HELP, 7, n), 2)
+  end
+  local entity, bone, army, size, life, tex, ramp = ...
+  __checkEntityArg(entity, 'CreateLightParticle')
+  local raw = __resolveBoneArg(entity, bone, 'CreateLightParticle', true)
+  local pos = __boneWorld(entity, raw)
+  if type(size) ~= 'number' then error('number expected but got ' .. type(size), 2) end
+  if type(life) ~= 'number' then error('number expected but got ' .. type(life), 2) end
+  if tex ~= nil and type(tex) ~= 'string' then error('string expected but got ' .. type(tex), 2) end
+  if ramp ~= nil and type(ramp) ~= 'string' then error('string expected but got ' .. type(ramp), 2) end
+  if ramp == nil or ramp == '' then return end
+  local texPath = (tex ~= nil and tex ~= '') and ('/textures/particles/' .. tex .. '.dds')
+    or '/textures/particles/beam_white_01.dds'
+  __lightParticles[#__lightParticles + 1] = {
+    x = pos[1], y = pos[2], z = pos[3], size = size, life = life,
+    tex = texPath, ramp = '/textures/particles/' .. ramp .. '.dds',
+    army = army, tick = __gameTick or 0,
+  }
+end
+
+function CreateLightParticle(...) return createLightParticle(...) end
+function CreateLightParticleIntel(...) return createLightParticle(...) end
+
+--- The light particles spawned since the last drain, as JSON for the
+--- browser (one entry each; the browser adds them to the particle buffer).
+function __drainLightParticlesJson()
+  if __lightParticles[1] == nil then return '[]' end
+  local parts = {}
+  for i, l in ipairs(__lightParticles) do
+    parts[i] = string.format(
+      '{"x":%.6g,"y":%.6g,"z":%.6g,"size":%.6g,"life":%.6g,"tex":%q,"ramp":%q,"army":%d,"tick":%d}',
+      l.x, l.y, l.z, l.size, l.life, l.tex, l.ramp, tonumber(l.army) or 0, l.tick)
+  end
+  for i = #__lightParticles, 1, -1 do __lightParticles[i] = nil end
+  return '[' .. table.concat(parts, ',') .. ']'
+end
 -- CreateSplat(position, heading, texture, sizeX, sizeZ, lod, duration, army,
 -- fidelity) / CreateDecal(...) drop a GROUND effect at a FIXED world transform
 -- independent of any entity (cfunc_CreateDecalL builds a VTransform from the
