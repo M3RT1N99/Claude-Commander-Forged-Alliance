@@ -2754,6 +2754,17 @@ function luaSimUpdate(): void {
       u.scene.animator.setAimOverrides([])
     }
 
+    // HIDDEN BONES: Unit:HideBone/ShowBone (CAniPoseBone::mVisible) -- the
+    // ACU's upgrade pods, factory build arms. The sim sends the names; the
+    // renderer collapses those bones' geometry.
+    const hiddenNames = s.hidden ?? []
+    const hiddenIdx: number[] = []
+    for (const name of hiddenNames) {
+      const bi = u.scene.boneNames.findIndex((n) => n.toLowerCase() === name.toLowerCase())
+      if (bi >= 0) hiddenIdx.push(bi)
+    }
+    u.scene.animator.setHiddenBones(hiddenIdx)
+
     // BAUSTELLE: die Build-Technique lebt von drei Uniforms — Baufortschritt
     // (material.y), Unit-Alter und Weltzeit in Sekunden (mesh.fx `time`).
     // Bei Fertigstellung kommt das normale Unit-Material zurück.

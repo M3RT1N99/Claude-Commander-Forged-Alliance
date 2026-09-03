@@ -67,6 +67,9 @@ export interface LuaUnitSnapshot {
    *  __categoryToString; '' when nothing is restricted. GetUnitCommandData
    *  subtracts it from the build menu (Cfile:1264642-1264646). */
   restrict?: string
+  /** Bone names the sim has hidden (Unit:HideBone, CAniPoseBone::mVisible);
+   *  absent when none. The renderer collapses their geometry. */
+  hidden?: string[]
   /** WorkProgress (mUnitVarDat.mWorkProgress): the progress of what this unit
    *  is building/upgrading/enhancing, written by the build task every tick
    *  (Cfile:815482). construction.lua:380 draws it. */

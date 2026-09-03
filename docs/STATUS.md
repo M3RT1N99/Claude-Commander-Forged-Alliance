@@ -46,19 +46,19 @@ jetzt war unbekannt, welche davon im laufenden Spiel überhaupt erreicht werden 
 die Priorisierung war Raten. `scripts/verify-playthrough.ts` schaltet dafür
 `__mohoNoopWarn` ein; jeder No-op meldet sich beim ersten Aufruf.
 
-Eine vollständige Partie (ACU → Bau → Fabrik → Kampf → Wrack) ruft **8 von 147**
-(neun, bis `AddBuildRestriction` echt wurde — siehe unten):
+Eine vollständige Partie (ACU → Bau → Fabrik → Kampf → Wrack) ruft **6 von 147**
+(neun, bis `AddBuildRestriction`, `HideBone` und `ShowBone` echt wurden — siehe
+unten):
 
 | No-op | Wofür |
 | --- | --- |
-| `HideBone`, `ShowBone` | Knochen aus-/einblenden (Bau, Upgrade) |
 | `AttachTo`, `AttachBoneTo`, `DetachFrom`, `DetachAll` | Anhängen — Transporter, Bauarme |
 | `GetFocusUnit` | die Fokus-Einheit |
 | `ShakeCamera` | Kamera-Erschütterung bei Einschlägen |
 
-Das ist die Arbeitsliste, nach Messung sortiert. Die übrigen 139 werden auf
+Das ist die Arbeitsliste, nach Messung sortiert. Die übrigen 141 werden auf
 diesem Weg nicht erreicht — sie sind deshalb nicht harmlos, aber sie sind auch
-nicht dringend. Ein **neunter** aufgerufener No-op lässt den Durchlauf
+nicht dringend. Ein **siebter** aufgerufener No-op lässt den Durchlauf
 fehlschlagen (eingecheckte Fund-Liste).
 
 ## Golden Master: ein Orakel, das keine Frage stellt
@@ -1424,3 +1424,22 @@ every build was charged twice -- 120 energy/s for a T1 generator instead of
 60, in `verify-build.ts` and in the game. The stand-in is gone; the progress
 rate is the builder's `GetResourceConsumed()`. The golden master moved by
 exactly the double charge (army 1 keeps 20.5 more mass), nothing else.
+
+## Every ACU was drawn with all three upgrade pods
+
+`HideBone` and `ShowBone` were silent no-ops. uel0001_script.lua:110-112
+hides `Right_Upgrade`, `Left_Upgrade` and `Back_Upgrade_B01` when the
+commander is complete, and the enhancements show them again; factories hide
+and show their build arms the same way. The engine binding
+(cfunc_UnitHideBoneL, Cfile:981560-981600) resolves the bone with
+ENTSCR_ResolveBoneIndex (Cfile:936279-936330: a number must lie in
+[-2, boneCount), a name must exist, the pseudo bones -1/-2 pass and do
+nothing) and clears `CAniPoseBone::mVisible` -- over the whole subtree when
+`affectChildren` is true (SetVisibleRecur), which is why the fresh ACU hides
+seven bones: the three pods, their muzzles and `Back_Upgrade_B02`.
+
+The skeleton now keeps its parent table (`bones.lua`), the unit row carries
+the hidden names, and the renderer collapses those bones' skin matrices to
+zero scale (`animator.ts setHiddenBones`) so their geometry rasterises
+nothing in the main and the shadow pass alike. `verify-restrictions.ts`
+walks the ACU through hide, show, the two engine errors and the root.

@@ -90,7 +90,7 @@ end
 function __finishBones()
   if not pending then return end
   local bones = pending.bones
-  local names, xform, index = {}, {}, {}
+  local names, xform, index, parent = {}, {}, {}, {}
   local resolve
 
   local bp = __registered and __registered.Unit and __registered.Unit[pending.id]
@@ -116,6 +116,10 @@ function __finishBones()
   for i, b in ipairs(bones) do
     names[i] = b.name
     index[string.lower(b.name)] = i
+    -- 1-based parent index, false for a root -- HideBone/ShowBone with
+    -- affectChildren walk the subtree (CAniPoseBone::SetVisibleRecur).
+    local pi = (b.parent or -1) + 1
+    parent[i] = (pi >= 1 and pi ~= i and bones[pi] ~= nil) and pi or false
     resolve(i)
   end
   -- NACH dem Aufloesen skalieren (die relative Kette bleibt dabei konsistent,
@@ -127,8 +131,27 @@ function __finishBones()
       x.pos[3] = x.pos[3] * scale
     end
   end
-  __unitBones[pending.id] = { names = names, xform = xform, index = index }
+  __unitBones[pending.id] = { names = names, xform = xform, index = index, parent = parent }
   pending = nil
+end
+
+--- The 1-based indices of every bone below `i` (children, grandchildren, ...),
+--- in index order. Empty when the skeleton has no parent table (a bare
+--- entity) or the bone has no children.
+function __boneDescendants(e, i)
+  local s = __skeletonOf(e)
+  local parent = s.parent
+  local out = {}
+  if not parent then return out end
+  local below = { [i] = true }
+  for j = 1, #s.names do
+    local p = parent[j]
+    if p and below[p] then
+      below[j] = true
+      out[#out + 1] = j
+    end
+  end
+  return out
 end
 
 --- Das Skelett einer Entity (oder ein leeres, wenn kein Modell geladen ist).
@@ -184,6 +207,56 @@ end
 --- Die +Z-Achse einer Quaternion — was GetBoneDirection zurueckgibt.
 function __quatForward(q)
   return qrot(q, { 0, 0, 1 })
+end
+
+--- ENTSCR_ResolveBoneIndex (Cfile:936279-936330) for HideBone/ShowBone:
+--- returns the 1-based index, or nil for the pseudo bones -1/-2 (allowed
+--- when `disallowPseudo` is 0, and the callers then do nothing). A number
+--- outside [-2, boneCount) and an unknown name are the engine's errors.
+local function resolveBoneArg(e, bone, what)
+  local s = __skeletonOf(e)
+  local count = #s.names
+  if type(bone) == 'number' then
+    if bone ~= math.floor(bone) then error("bad argument #1 to '" .. what .. "' (integer expected)", 3) end
+    if bone < -2 or bone >= count then
+      error(string.format('Invalid bone index of %d; must be bettern %d (inclusive) and %d (exclusive)', bone, -2, count), 3)
+    end
+    if bone < 0 then return nil end
+    return bone + 1
+  end
+  if type(bone) == 'string' then
+    local i = s.index[string.lower(bone)]
+    if not i then error(string.format('Invalid bone name "%s".', bone), 3) end
+    return i
+  end
+  error("bad argument #1 to '" .. what .. "' (bone name or index expected)", 3)
+end
+
+--- HideBone/ShowBone: CAniPoseBone::mVisible, over the subtree when
+--- `affectChildren` (SetVisibleRecur, Cfile:981590-981596).
+function __setBoneVisible(e, bone, affectChildren, visible)
+  local i = resolveBoneArg(e, bone, visible and 'ShowBone' or 'HideBone')
+  if not i then return end
+  e.__hiddenBones = e.__hiddenBones or {}
+  local hidden = e.__hiddenBones
+  hidden[i] = (not visible) or nil
+  if affectChildren then
+    for _, j in ipairs(__boneDescendants(e, i)) do hidden[j] = (not visible) or nil end
+  end
+end
+
+--- The hidden bones of an entity by NAME, sorted -- what the renderer needs.
+function __hiddenBoneNames(e)
+  local hidden = e.__hiddenBones
+  if not hidden then return nil end
+  local names = __skeletonOf(e).names
+  local out = {}
+  for i in pairs(hidden) do
+    if names[i] then out[#out + 1] = names[i] end
+  end
+  if out[1] == nil then return nil end
+  table.sort(out)
+  return out
 end
 
 __qmul = qmul

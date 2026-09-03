@@ -96,5 +96,31 @@ check(host.eval(`return string.find(__readAllUnitsJson(), '"restrict":"sub(and(t
 host.eval(`__units[${acu}]:RestoreBuildRestrictions()`)
 check(host.eval(`return __unitRestrictionString(__units[${acu}]) == ''`) === true, 'RestoreBuildRestrictions leaves an empty text')
 
+console.log('\n== HideBone / ShowBone: the ACU hides its upgrade pods ==')
+// cfunc_UnitHideBoneL (Cfile:981560-981600) clears CAniPoseBone::mVisible,
+// over the subtree with affectChildren; uel0001_script.lua:110-112 hides
+// Right_Upgrade, Left_Upgrade and Back_Upgrade_B01 when the ACU is done, and
+// the enhancements show them again. Both bindings were silent no-ops: every
+// pod was drawn on every ACU. The per-beat row carries the hidden names.
+const hiddenOf = (): string => String(host.eval(`local h = __hiddenBoneNames(__units[${acu}]) return h and table.concat(h, ',') or ''`))
+// affectChildren = true walks the subtree (SetVisibleRecur): the three pods
+// take their muzzles and Back_Upgrade_B02 with them -- seven bones.
+const hidden0 = hiddenOf().split(',')
+check(
+  hidden0.length === 7 && ['Back_Upgrade_B01', 'Left_Upgrade', 'Right_Upgrade', 'Right_Upgrade_Muzzle', 'Back_Upgrade_B02'].every((n) => hidden0.includes(n)),
+  `the fresh ACU hides its three pod bones and their children (${hiddenOf()})`,
+)
+check(host.eval(`return string.find(__readAllUnitsJson(), '"hidden":["Back_Upgrade_B01","Back_Upgrade_B02"', 1, true) ~= nil`) === true, 'and the unit row carries them by name')
+host.eval(`__units[${acu}]:ShowBone('Right_Upgrade', true)`)
+const hidden1 = hiddenOf().split(',')
+check(hidden1.length === 5 && !hidden1.includes('Right_Upgrade') && !hidden1.includes('Right_Upgrade_Muzzle'), `ShowBone with affectChildren brings the pod and its muzzle back (${hiddenOf()})`)
+check(host.eval(`return (pcall(function() __units[${acu}]:HideBone('NoSuchBone', true) end))`) === false, 'an unknown bone name is the engine error (Invalid bone name)')
+check(host.eval(`return (pcall(function() __units[${acu}]:HideBone(9999, true) end))`) === false, 'an index outside [0, boneCount) is the engine error too')
+check(host.eval(`return (pcall(function() __units[${acu}]:HideBone(-1, true) end))`) === true, 'the pseudo bone -1 passes and does nothing (ResolveBoneIndex allows it)')
+host.eval(`__units[${acu}]:HideBone(0, true)`)
+check(Number(host.eval(`local h = __hiddenBoneNames(__units[${acu}]) return h and table.getn(h) or 0`)) > 3, 'hiding the root with affectChildren hides the whole skeleton')
+host.eval(`__units[${acu}]:ShowBone(0, true)`)
+check(hiddenOf() === '', 'ShowBone on the root with affectChildren shows everything again')
+
 console.log(failures === 0 ? '\nRESTRICTIONS PASSED' : `\nRESTRICTIONS FAILED (${failures})`)
 process.exit(failures === 0 ? 0 : 1)

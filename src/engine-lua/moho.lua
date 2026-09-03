@@ -437,6 +437,21 @@ local entity = withNoops(ENTITY_NAMES, {
   -- (`PushStack(&v5->mLuaObj, …); return 1`, Cfile:935374-935375). Ohne die
   -- Rueckgabe laeuft jede Kette wie `CreateEmitterAtEntity(…):SetScale(…)` ins
   -- Leere; dieselbe Regel steht in der Projektil-Sektion dieser Datei.
+  -- "HideBone(bone, affectChildren)" / "ShowBone(bone, affectChildren)"
+  -- (cfunc_UnitHideBoneL, Cfile:981560-981600, ShowBone alike): the bone is
+  -- resolved with ENTSCR_ResolveBoneIndex (Cfile:936279-936330 -- a number
+  -- must lie in [0, boneCount), a name must exist, the pseudo bones -1/-2
+  -- pass and do nothing), then CAniPoseBone::mVisible is cleared or set,
+  -- with SetVisibleRecur over the subtree when affectChildren is true. The
+  -- renderer skips the geometry of an invisible bone: the ACU hides its
+  -- upgrade pods this way (uel0001_script.lua:110-112) and factories their
+  -- build arms. Both were silent no-ops, so every upgrade pod was drawn.
+  HideBone = function(self, bone, affectChildren)
+    __setBoneVisible(self, bone, affectChildren, false)
+  end,
+  ShowBone = function(self, bone, affectChildren)
+    __setBoneVisible(self, bone, affectChildren, true)
+  end,
   SetScale = function(self, x, y, z)
     if z == nil and y ~= nil then
       error('Wrong number of arguments to Entity:SetScale, expected 2 or 4 but got 3', 2)

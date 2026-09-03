@@ -34,6 +34,15 @@ export class UnitAnimator {
    * around its local X (standard FA turret rigging).
    */
   private readonly aimOverrides = new Map<number, { yaw: number; pitch: number }>()
+  /**
+   * Bones the sim has hidden (Unit:HideBone -> CAniPoseBone::mVisible = 0,
+   * Cfile:981560-981600). The engine's renderer skips the geometry of an
+   * invisible bone; here the bone's skin matrix collapses to zero scale, so
+   * every vertex bound to it degenerates into a point that rasterises no
+   * fragment -- in the main pass and in the shadow pass, which share the
+   * matrices. The ACU hides its upgrade pods this way (uel0001_script.lua:110).
+   */
+  private readonly hiddenBones = new Set<number>()
   private lastTime = 0
   private readonly tmpAim = new Quaternion()
   private readonly axisY = new Vector3(0, 1, 0)
@@ -111,6 +120,16 @@ export class UnitAnimator {
     this.update(this.lastTime)
   }
 
+  /** Replace the hidden-bone set and re-pose when it changed. */
+  setHiddenBones(indices: number[]): void {
+    let changed = indices.length !== this.hiddenBones.size
+    if (!changed) for (const i of indices) if (!this.hiddenBones.has(i)) { changed = true; break }
+    if (!changed) return
+    this.hiddenBones.clear()
+    for (const i of indices) this.hiddenBones.add(i)
+    this.update(this.lastTime)
+  }
+
   /** Berechnet die Skin-Matrizen für Zeitpunkt t (Sekunden, looped). */
   update(timeSec: number): void {
     this.lastTime = timeSec
@@ -167,7 +186,13 @@ export class UnitAnimator {
       } else {
         this.worlds[i]!.copy(this.tmpLocal)
       }
-      this.skinMatrices[i]!.multiplyMatrices(this.worlds[i]!, this.restInverse[i]!)
+      if (this.hiddenBones.has(i)) {
+        // The world matrix stays intact for the children; only the skin
+        // matrix of the hidden bone itself collapses.
+        this.skinMatrices[i]!.makeScale(0, 0, 0)
+      } else {
+        this.skinMatrices[i]!.multiplyMatrices(this.worlds[i]!, this.restInverse[i]!)
+      }
     }
   }
 
