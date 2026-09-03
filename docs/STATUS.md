@@ -1738,3 +1738,88 @@ UNVERIFIED: whether mesh.fx keys the second UV set's band off its own V
 (the shader tests texcoord.y only; unit.vert.glsl uses the first set's V for
 both). Not modelled: the build materials do not scroll (mesh.fx applies the
 scroll in the build techniques too).
+
+## UI, interaction and picture -- the audit of 2026-09-03 and its work list
+
+The user reported offset icons, missing effects and a picture that is not
+the original's. Four parallel research passes (maui layout and icons, the
+build-command chain, the effect system, the shaders) plus a headless run
+with screenshots gave this picture; each item names its evidence.
+
+**Icons.** The maui substrate is faithful: the engine's seven LazyVars per
+control start raw (CMauiControl ctor, Cfile:1123926-1123972), every pixel
+snap happens in the original Lua (LayoutHelpers/grid.lua `math.floor`,
+executed unmodified), and CMauiBitmap::Draw builds its quad from
+Left/Top/Right/Bottom without any half-pixel term (Cfile:1119309-1119395)
+-- the DOM renderer does the same. The construction panel was checked
+number by number in the running page: the build button, its icon and its
+strategic-icon overlay sit exactly where construction.lua:399-401 and
+:463-466 put them (48x48, the overlay 36x40 at +4/+4), and the 36x40 comes
+from the DDS header itself. The one real deviation was the strategic icons
+over the world: RenderUnitIcon (Cfile:1285668-1285760) projects the unit
+position, FLOORS it (1285692-1285693) and places the quad at that pixel
+minus the integer half size of the texture (1285726-1285727); ours used the
+raw fractional projection and a CSS -50 % shift, so a 1-bit-alpha icon was
+resampled and sat visibly off the crisp bar under the same unit -- fixed in
+`hud.ts`, verified in the headless page (integer transforms). UNVERIFIED:
+`GetTextureDimensions(filename, border=1)` (Cfile:1119423-1119507) hands
+the border into the atlas loader; whether it changes the reported size is
+not settled (our sizes come from the DDS header).
+
+**The build chain** (Cfile:1264504-1264808 GetUnitCommandData,
+1265706 IssueBlueprintCommand, 1242134-1242178 the world click,
+815090-815102 the build task, 953443-953476 progress, 1257038-1257380 the
+queue) matches step for step through the real construction.lua,
+commandmode.lua, gamemain.lua and orders.lua. Open, ranked: the ARMY
+build-restriction category (Cfile:1264632) is not subtracted in the UI
+mirror (the army's `mVarDat.mCat` is an allowed-to-build set seeded with
+ALLUNITS, Cfile:1017296-1017307, changed only by the sim-only
+AddBuildRestriction/RemoveBuildRestriction, 1016787-1016830; the sim side
+here enforces it, the menu does not hide the button); a finished factory
+copies EVERY command of its rally queue into the product -- Guard, Patrol,
+Attack, all of them, only TransportLoadUnits is skipped for AIR/NAVAL
+products (sub_5FA340, 818487-818600) -- while ours forwards one rally Move,
+because the factory has no command list; `DecreaseBuildCountInQueue` on the
+queue head removes the command, and CFactoryBuildTask::TaskTick then ends
+on its lost command reference at the next tick (Cfile:818738, 1007719-
+1007771 -- no refund, the site is abandoned), which ours cannot do because
+the running entry was decremented at task start; the player's Stop button
+is a clear-then-Stop (ISSUE_Command with clear=1, 1255059-1255063,
+ClearCommandQueue 1005371-1005399, then IAiCommandDispatchImpl::Stop
+1231239-1231256 stops the attacker and silo builds) and is right here, but
+the sim-only `IssueStop(units)` appends a Stop with clear=0
+(1007889-1007952) and ours clears like the button. Ranked by play impact:
+the factory command list, the queue-head abort, the army restriction
+mirror, the soft IssueStop.
+
+**Effects.** The emitter/trail/beam pipeline is real and verified
+(CEfxEmitter::Tick port). Missing or dead: `CreateLightParticle`/
+`CreateLightParticleIntel` are empty (the flash core of nearly every impact,
+nuke and build/reclaim glow -- engine object CEffectManagerImpl::
+CreateLightParticle, Cfile:905874-906033: an additive billboard of constant
+size whose ramp texture drives colour and alpha over the lifetime, spawned
+only when a ramp is given; the Intel variant is gated by the focus army's
+line of sight, 909075-909090); `CreateSplat`/`CreateDecal`/
+`CreateSplatOnBone` carry sim state but nothing draws them (CDecal,
+Cfile:907293-907441: a ground-projected quad with size, yaw, expiry tick,
+type Albedo/Normals/Glow/Water, per-army visibility, 1112197-1112337;
+the map-decal renderer already has the projection); the shield dome is
+never drawn (shield.lua:263-283 hangs two sphere entities on the owner with
+SetMesh/SetDrawScale/SetParentOffset -- ShieldUEF and ShieldFill techniques
+in mesh.fx, the unit-mesh swap of personal shields via SetMesh(mesh, true)
+keepActor, Cfile:954614-954634); `SetEmitterParam`/`SetEmitterCurveParam`
+are write-only; `SetBeamParam` and `ResizeEmitterCurve` are missing.
+
+**The picture.** The original renderer is NOT colour-managed: the device
+default state sets D3DSAMP_SRGBTEXTURE to 0 for all samplers and
+D3DRS_SRGBWRITEENABLE to 0 (Cfile:1464960-1465074) and never toggles them;
+the back buffer is A8R8G8B8 (1394107); there is no gamma ramp (no
+SetGammaRamp, no ren_Gamma; the only "gamma" is libpng's); the HLSL has no
+pow(2.2) anywhere. Our raw-texture, raw-output shaders are therefore right
+-- recorded in docs/research/verified-facts.md. Real deviations: the
+Seraphim unit shader replaces the environment cube reflection of
+UnitFalloffPS (mesh.fx:2665-2670) with two invented constants; the water
+lacks the scene reflection target, the refraction offset and the shoreline
+geometry (water2.fx:206-213, 612-629, documented in the shader); particle
+blend mode 5 (REFRACT) falls back to alpha blending. Terrain, decals, sky
+and bloom were checked against terrain.fx/sky.fx and match.

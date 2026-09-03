@@ -548,3 +548,19 @@ by a suite. The facts worth remembering:
   raises a 0 to `ceil(SizeX/SizeZ)` (Cfile:647164-647177). 72 retail structures
   ship no `Footprint` section at all. `Physics.BuildOnLayerCaps` likewise
   defaults to the `LAYER_Land` bit (Cfile:656146-656172).
+
+## Colour management: the renderer is gamma-space, not sRGB (verified 2026-09-03)
+
+The retail D3D9 renderer never enables sRGB sampling or writing: the device
+default-state block sets D3DSAMP_SRGBTEXTURE (sampler state 11) to 0 for all
+16 samplers and D3DRS_SRGBWRITEENABLE (render state 194) to 0
+(Cfile:1464960-1465074) and no other call site touches either; the back
+buffer is D3DFMT_A8R8G8B8 (GetHeadParameters, Cfile:1394107); textures are
+created with plain DXT1/DXT3/DXT5/A8R8G8B8 formats (FormatGalToD3D,
+Cfile:1396492) -- D3D9 has no sRGB DDS variants; there is no gamma ramp
+(no SetGammaRamp, no ren_Gamma; the only "gamma" in the binary is libpng's
+chunk handling, Cfile:1595631-1599030); the HLSL of mesh.fx, terrain.fx,
+water2.fx and particle.fx contains no pow(x, 2.2) or 1/2.2 anywhere (the
+pow calls are specular exponents). Consequence for the port: every texture
+stays THREE.NoColorSpace, the ShaderMaterial fragment shaders write raw
+values, and no output encoding or gamma ramp is added.

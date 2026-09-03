@@ -387,7 +387,25 @@ export class Hud {
         img.dataset.url = url
       }
       img.style.display = 'block'
-      img.style.transform = `translate(${s.x - rootRect.left}px, ${s.y - rootRect.top}px) translate(-50%, -50%)`
+      // RenderUnitIcon (Cfile:1285668-1285760): the unit position is projected
+      // and FLOORED (1285692-1285693), and the quad is placed at that pixel
+      // minus the integer half size of the icon texture (mWidth >> 1,
+      // mHeight >> 1, 1285726-1285727) -- no life-bar offset (that belongs to
+      // the bars, 1285331-1285334). A fractional anchor or a fractional half
+      // size resamples the 1-bit-alpha icon and makes it sit visibly off the
+      // crisp bar under the same unit.
+      const ix = Math.floor(s.x - rootRect.left)
+      const iy = Math.floor(s.y - rootRect.top)
+      if (img.naturalWidth === 0) {
+        // The texture is still decoding: the engine has the size at draw
+        // time, so hold the icon back for this frame instead of placing it
+        // at the anchor's corner.
+        img.style.display = 'none'
+        continue
+      }
+      const hw = img.naturalWidth >> 1
+      const hh = img.naturalHeight >> 1
+      img.style.transform = `translate(${ix - hw}px, ${iy - hh}px)`
     }
   }
 
