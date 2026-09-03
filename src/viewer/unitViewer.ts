@@ -12,6 +12,7 @@ import SKIRT_FS from './shaders/skirt.frag.glsl?raw'
 import { parseDds } from '../formats/dds'
 import { bgraToRgba, decodeDxt } from '../formats/dxt'
 import { UnitAnimator } from '../anim/animator'
+import { CameraShakeState, type CamShakeParams } from './cameraShake'
 import type { ScaAnim } from '../formats/sca'
 import { MapProps } from './mapProps'
 import { MapDecals } from './mapDecals'
@@ -242,6 +243,10 @@ export class UnitViewer {
       }
       for (const hook of this.updateHooks) hook(dt)
       for (const unit of this.units) unit.update(dt)
+      // CameraImpl::Frame runs for every camera every frame (RCamManager::Frame,
+      // Cfile:1151593-1151610): the shake clock and sign advance whether or
+      // not the RTS controls drive the camera.
+      this.shake.frame(Math.max(dt, 0))
       if (this.rts.enabled) this.updateRtsCamera(dt)
       else this.controls.update()
       this.renderWorldViews()
@@ -849,6 +854,17 @@ export class UnitViewer {
   /** STRG beschleunigt Schwenken und Drehen (Cfile:1300005-1300007). */
   private ctrlDown = false
 
+  /** The camera's shake (CameraImpl::mCamShakeParams and friends). */
+  private readonly shake = new CameraShakeState()
+  /** This frame's shake offset — drawn once per frame (UpdateCoords is the
+   *  only caller of func_CameraImplUpdateShake, Cfile:1150657). */
+  private shakeOffset: [number, number, number] = [0, 0, 0]
+
+  /** CameraImpl::CameraShake, fed by the sim's Entity:ShakeCamera. */
+  cameraShake(p: CamShakeParams): void {
+    this.shake.request(p)
+  }
+
   private rts = {
     enabled: false,
     target: new THREE.Vector3(),
@@ -960,7 +976,7 @@ export class UnitViewer {
         r.dist = r.goalDist
         r.transition = null
       }
-      this.applyRtsCameraTransform()
+      this.applyRtsCameraTransform(true)
       return
     }
 
@@ -973,10 +989,15 @@ export class UnitViewer {
     while (dy < -Math.PI) dy += 2 * Math.PI
     r.yaw += dy * k
 
-    this.applyRtsCameraTransform()
+    this.applyRtsCameraTransform(true)
   }
 
-  private applyRtsCameraTransform(): void {
+  /**
+   * \param frame true from the per-frame update: the shake offset is drawn
+   *   then (UpdateCoords, Cfile:1150657); other callers (zoom setter, target
+   *   box) reuse this frame's draw.
+   */
+  private applyRtsCameraTransform(frame = false): void {
     const r = this.rts
     const pitch = this.rtsPitch(r.dist)
     // Vertical FOV varies with zoom too: cam_NearFOV(65 deg) near, cam_FarFOV
@@ -987,15 +1008,20 @@ export class UnitViewer {
       this.conVarNumber('cam_NearFOV')
     if (Math.abs(this.camera.fov - fov) > 1e-3) this.camera.fov = fov
     const horiz = Math.cos(pitch) * r.dist
+    // The shake offset is added to the eye after the basis is computed
+    // (func_CameraImplUpdateShake, Cfile:1151445-1151452) — the camera
+    // translates, its orientation stays.
+    if (frame) this.shakeOffset = this.shake.offset(r.target.x, r.target.z, this.conVarNumber('cam_ShakeMult'))
+    const [sx, sy, sz] = this.shakeOffset
     this.camera.position.set(
-      r.target.x + Math.sin(r.yaw) * horiz,
-      r.target.y + Math.sin(pitch) * r.dist,
-      r.target.z + Math.cos(r.yaw) * horiz,
+      r.target.x + Math.sin(r.yaw) * horiz + sx,
+      r.target.y + Math.sin(pitch) * r.dist + sy,
+      r.target.z + Math.cos(r.yaw) * horiz + sz,
     )
     this.camera.near = Math.max(r.dist / 100, 0.05)
     this.camera.far = Math.max(2000, r.dist * 10)
     this.camera.updateProjectionMatrix()
-    this.camera.lookAt(r.target)
+    this.camera.lookAt(r.target.x + sx, r.target.y + sy, r.target.z + sz)
   }
 
   /**

@@ -51,6 +51,8 @@ local KNOWN_VARS = {
   -- "range_OuterThicknessCoeff".
   'range_RenderHighlighted', 'range_RenderSelected', 'range_RenderBuild',
   'range_Fill', 'range_InnerThicknessCoeff', 'range_OuterThicknessCoeff',
+  -- The camera shake multiplier (func_CameraImplUpdateShake, Cfile:1148690).
+  'cam_ShakeMult',
 }
 
 -- DEFAULTS — only the ones the decomp PROVES. A default I cannot back with
@@ -73,6 +75,7 @@ local DEFAULTS = {
   ui_ForceLifbarsOnEnemy = false,                -- Cfile:1285062
   graphics_Fidelity = 2,                         -- Cfile: int Moho::graphics_Fidelity = 2
   shadow_Fidelity = 2,                           -- Cfile: int Moho::shadow_Fidelity = 2
+  cam_ShakeMult = 1.0,                           -- Cfile:421830
 }
 
 local function key(name)

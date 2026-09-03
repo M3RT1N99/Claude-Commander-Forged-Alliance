@@ -107,6 +107,17 @@ local ENTITY_NAMES = {
   'ShowBone',
 }
 
+-- luadef_EntityShakeCamera.mHelp (Cfile:931090-931097) -- the text the
+-- argument-count error prints.
+local SHAKE_CAMERA_HELP = 'Entity:ShakeCamera(radius, max, min, duration)\n'
+  .. 'Shake the camera. This is a method of entities rather than a global function\n'
+  .. 'because it takes the position of the entity as the epicenter where it shakes more.\n'
+  .. '\n'
+  .. "    radius - distance from epicenter at which shaking falls off to 'min'\n"
+  .. '    max - size of shaking in world units, when looking at epicenter\n'
+  .. "    min - size of shaking in world units, when at 'radius' distance or farther\n"
+  .. '    duration - length of time to shake for, in seconds'
+
 local entity = withNoops(ENTITY_NAMES, {
   GetBlueprint = function(self) return self.__bp end,
   GetEntityId = function(self) return self.__id end,
@@ -183,6 +194,30 @@ local entity = withNoops(ENTITY_NAMES, {
     for _, c in ipairs(copy) do
       if c.__attachParentBone == raw then __entityDetach(c, skip == true) end
     end
+  end,
+  -- "Entity:ShakeCamera(radius, max, min, duration)"
+  -- (cfunc_EntityShakeCameraL, Cfile:931108-931169): exactly five arguments
+  -- (931128-931129), each of the four a number (931141-931165 --
+  -- LuaStackObject::TypeError ends in luaG_typeerror's "%s expected but got
+  -- %s", Cfile:448122-448132, 1424984-1424985), the epicentre is the
+  -- entity's current position (931137-931139). The request joins
+  -- Sim::mSyncCamShake (931167 -> func_ShakeCamera 936387) and reaches every
+  -- user camera with the next sync; the browser side is
+  -- src/viewer/cameraShake.ts.
+  ShakeCamera = function(self, ...)
+    local n = select('#', ...)
+    if n ~= 4 then
+      error(string.format('%s\n  expected %d args, but got %d', SHAKE_CAMERA_HELP, 5, n + 1), 2)
+    end
+    local radius, max, min, duration = ...
+    local args = { radius, max, min, duration }
+    for i = 1, 4 do
+      if type(args[i]) ~= 'number' then
+        error(string.format('number expected but got %s', type(args[i])), 2)
+      end
+    end
+    local p = self.__pos or { 0, 0, 0 }
+    __camShakeRequest(p[1] or 0, p[2] or 0, p[3] or 0, radius, max, min, duration)
   end,
   -- "Entity:SetParentOffset(vector)" (cfunc_EntitySetParentOffsetL,
   -- Cfile:932126-932161): exactly two arguments (932132-932133); without a

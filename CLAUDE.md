@@ -182,9 +182,9 @@ npx tsx scripts/peek-lua.ts --grep <regex>  # search original Lua/Blueprints
   weapons were dead for ~23 hours of committed history because nobody looked
   first.
 - **The gate runs on push**, via `.githooks/pre-push`. Activate it once with
-  `git config core.hooksPath .githooks`. It has to be local: 49 of the 56
+  `git config core.hooksPath .githooks`. It has to be local: 66 of the 70
   suites read the original game files, which no CI runner has. The GitHub
-  workflow only typechecks and runs the three asset-free suites — a green tick
+  workflow only typechecks and runs the four asset-free suites — a green tick
   there does **not** mean the engine was verified.
 - **A check that cannot fail is not a check.** See every new check go red once
   before trusting it: undo the fix, confirm red, restore. Written down because

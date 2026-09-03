@@ -202,7 +202,21 @@ interface StatesMsg {
   removedMapProps?: number[]
   /** Sim->user audio requests (SAudioRequest analog). */
   audio?: SimAudioRequest[]
+  /** Sim->user camera shakes (SCamShakeParams, Sim::mSyncCamShake). */
+  camShakes?: SimCamShake[]
   economy: EcoSnapshot
+}
+
+/** One camera shake request: Entity:ShakeCamera's epicentre and numbers
+ *  (cfunc_EntityShakeCameraL, Cfile:931108-931169). */
+export interface SimCamShake {
+  x: number
+  y: number
+  z: number
+  radius: number
+  max: number
+  min: number
+  duration: number
 }
 
 /** One sim->user audio request (SAudioRequest: EntitySound=0, StartLoop=1,
@@ -240,6 +254,8 @@ export class LuaSimClient {
   private readonly removedMapProps: number[] = []
   /** Accumulated sim audio requests; drained by GameAudio in main. */
   private readonly audioRequests: SimAudioRequest[] = []
+  /** Accumulated camera shakes; drained by the viewer in main. */
+  private readonly camShakes: SimCamShake[] = []
   /** Letzter gemeldeter Sim-Tick (Spielzeit = Tick / 10). */
   gameTick = 0
   private nextReq = 1
@@ -374,6 +390,9 @@ export class LuaSimClient {
         }
         if (m.audio && m.audio.length > 0) {
           for (const r of m.audio) this.audioRequests.push(r)
+        }
+        if (m.camShakes && m.camShakes.length > 0) {
+          for (const s of m.camShakes) this.camShakes.push(s)
         }
         this.statesById.clear()
         for (const u of m.units) this.statesById.set(u.id, u)
@@ -529,6 +548,7 @@ export class LuaSimClient {
     this.economy = null
     this.removedMapProps.length = 0
     this.audioRequests.length = 0
+    this.camShakes.length = 0
     this.projectileStates = []
     this.emitterStates = []
     this.propStates = []
@@ -668,6 +688,12 @@ export class LuaSimClient {
   drainAudioRequests(): SimAudioRequest[] {
     if (this.audioRequests.length === 0) return []
     return this.audioRequests.splice(0, this.audioRequests.length)
+  }
+
+  /** Drain the sim->user camera shakes since the last call. */
+  drainCamShakes(): SimCamShake[] {
+    if (this.camShakes.length === 0) return []
+    return this.camShakes.splice(0, this.camShakes.length)
   }
 
   /** Reclaim (dispatch 0x13, CUnitReclaimTask): drain prop `targetId`. */

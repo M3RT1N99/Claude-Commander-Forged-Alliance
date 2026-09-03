@@ -525,6 +525,24 @@ console.log('\n== The attach family: Entity::AttachTo and its bindings ==')
   )
 }
 
+console.log('\n== Entity:ShakeCamera queues a sim->user camera shake ==')
+{
+  await game.giveUnit(host, 'uel0001')
+  const shaker = spawnLuaUnit(host, 'uel0001', { x: 210, y: 20, z: 240 }, 1)
+  const err = (expression: string): string =>
+    host.eval(`local ok, e = pcall(function() ${expression} end); return ok and '' or tostring(e)`) as string
+  check(err(`__units[${shaker}]:ShakeCamera(30, 1, 0)`).includes('expected 5 args, but got 4'), 'ShakeCamera with three numbers is the arg-count error (Cfile:931128-931129)')
+  check(err(`__units[${shaker}]:ShakeCamera(30, 1, 0, 'x')`).includes('number expected but got string'), "a non-number duration is luaG_typeerror's text (Cfile:931164, 1424984-1424985)")
+  host.eval(`__drainCamShakesJson()`)
+  host.eval(`__units[${shaker}]:ShakeCamera(30, 1, 0, 0.45)`)
+  const drained = host.eval(`return __drainCamShakesJson()`) as string
+  check(
+    drained === '[{"x":210,"y":20,"z":240,"radius":30,"max":1,"min":0,"duration":0.45}]',
+    `the request carries the entity position as the epicentre and the four numbers (${drained})`,
+  )
+  check(host.eval(`return __drainCamShakesJson()`) === '[]', 'the list is empty after the drain')
+}
+
 console.log('\n== Unit:SetImmobile pauses and resumes one movement order ==')
 await game.giveUnit(host, 'uel0001')
 // Ein Panzer hat GAR KEINE ToggleCaps im Blueprint — der saubere Negativfall

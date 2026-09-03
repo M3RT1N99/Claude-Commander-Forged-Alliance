@@ -530,6 +530,9 @@ function tickAndPost(): void {
   // Sim->user audio requests (SAudioRequest analog: EntitySound=0,
   // StartLoop=1, StopLoop=2) — weapon fire, unit ambient loops.
   const audio = host.pull<unknown[]>('__drainAudioRequestsJson()')
+  // Sim->user camera shakes (Sim::mSyncCamShake, handed over with the beat
+  // like the engine's Sync, Cfile:1074494-1074501).
+  const camShakes = host.pull<unknown[]>('__drainCamShakesJson()')
   const a = engine.economy.army(1)
   // Der SIM-TICK gehoert zum Zustand: die Spielzeit-Uhr der UI (score.lua:230,
   // GetGameTime) zaehlt in Sim-Ticks und steht bei Pause still.
@@ -543,6 +546,7 @@ function tickAndPost(): void {
     props,
     removedMapProps,
     audio,
+    camShakes,
     economy: {
       mass: a.mass, massStorage: a.maxMass, massIncome: a.incomeMass, massExpense: a.expenseMass,
       energy: a.energy, energyStorage: a.maxEnergy, energyIncome: a.incomeEnergy, energyExpense: a.expenseEnergy,

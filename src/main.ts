@@ -2582,6 +2582,10 @@ function luaSimUpdate(): void {
     }
   }
 
+  // Sim->user camera shakes (Entity:ShakeCamera -> Sim::mSyncCamShake): every
+  // entry reaches the camera's CameraShake (Cfile:1327867).
+  for (const s of luaSim.drainCamShakes()) viewer.cameraShake(s)
+
   // Neue Units aus der Sim (Baustelle, Fabrik-Produkt) bekommen ihr Modell. Die
   // Sim erzeugt sie; die Szene zieht nach — nicht umgekehrt.
   for (const s of states) {

@@ -46,18 +46,12 @@ this was measured. Until then nobody knew which of them a running game even
 reaches -- the priorities were guesswork. `scripts/verify-playthrough.ts`
 switches on `__mohoNoopWarn` for that; every no-op reports its first call.
 
-A full game (ACU -> build -> factory -> combat -> wreck) reaches **1 of them**
-(nine, until `AddBuildRestriction`, `HideBone`, `ShowBone`, `GetFocusUnit` and
-the attach family `AttachTo`/`AttachBoneTo`/`DetachFrom`/`DetachAll` became
-real -- see below):
-
-| No-op | What for |
-| --- | --- |
-| `ShakeCamera` | camera shake on impacts |
-
-That is the work list, sorted by measurement. The other no-ops are not
-reached this way -- not harmless, but not urgent either. A **second** called
-no-op fails the run (the checked-in finding list).
+A full game (ACU -> build -> factory -> combat -> wreck) reaches **none of
+them** any more (nine, until `AddBuildRestriction`, `HideBone`, `ShowBone`,
+`GetFocusUnit`, the attach family `AttachTo`/`AttachBoneTo`/`DetachFrom`/
+`DetachAll` and `ShakeCamera` became real -- see below). The other no-ops are
+not reached this way -- not harmless, but not urgent either. The **first**
+called no-op fails the run (the checked-in finding list).
 
 ## Golden Master: ein Orakel, das keine Frage stellt
 
@@ -1509,13 +1503,11 @@ Implemented in `bones.lua` (bookkeeping, transform, the per-beat follow
 after the motion loop), `moho.lua` (the six bindings with the engine's
 argument counts and error texts, the Kill hook), `motion.lua` (an attached
 unit does not move and follows its parent's layer unless that parent is
-building it, Cfile:966205-966229; NotifyAttached/NotifyDetached; a surface
-snap after a release -- this model's own step, since it keeps a land unit's
-height only while it moves; UNVERIFIED which engine call restores the height
-after a release, as NotifyDetached's mProcessSurfaceCollision (965870)
-triggers the entity-collision pass ProcessSurfaceCollisionFromLastMove,
-Cfile:965566-965668, not the terrain height) and `damage.lua` (the destroy
-callbacks).
+building it, Cfile:966205-966229; NotifyAttached/NotifyDetached; the
+surface snap after a release -- NotifyDetached's mProcessSurfaceCollision
+(965870) makes the next CalcMoveLand snap the unit to the ground,
+Cfile:971709-971716, CalcMoveHover 971573-971575) and `damage.lua` (the
+destroy callbacks).
 `ToggleScriptBit` now also honours the TRANSPORTATION gate
 (Cfile:951400-951424), which the old comment had declared out of reach.
 
@@ -1577,3 +1569,52 @@ the pseudo bones when it is 1 (minimum -2) and rejects them when it is 0
 (minimum 0, Cfile:936295). `HideBone`/`ShowBone` pass 0 (981522/981598), so
 `HideBone(-1)` is an engine error -- the earlier claim that it "passes and
 does nothing" was wrong and is corrected above and in `verify-restrictions`.
+
+## ShakeCamera was the last no-op the game reached -- the camera shakes now
+
+`Entity:ShakeCamera(radius, max, min, duration)` is what every explosion and
+every heavy footstep calls (defaultexplosions.lua:99/179, unit.lua:2308/
+2526/2615 with the blueprint's `CameraShake` table). It was a silent no-op.
+
+The engine path (all Cfile): the binding (cfunc_EntityShakeCameraL,
+931108-931169) takes exactly five arguments, type-checks the four numbers
+and packs the entity's position with them into an SCamShakeParams appended to
+Sim::mSyncCamShake (func_ShakeCamera, 936387). Sim::Sync hands the list to
+the user layer with the beat (1074494-1074501); the user side calls
+CameraImpl::CameraShake for every entry on every camera (1327867).
+CameraImpl::CameraShake (1149138-1149153) accepts a request only while
+mCanShake, and only when the running shake is over or the new one is
+stronger (max); it then restarts mTotalTime. CameraImpl::Frame
+(1150647-1150651) advances mTotalTime, clamped to the duration, and flips a
+sign every frame. func_CameraImplUpdateShake (1148657-1148712) computes the
+eye offset: direction focus -> epicentre in the XZ plane (random closer than
+10 units), amplitude (1 - t/duration) * ((min - max) * clamp(dist/radius) +
+max), rand(0, amp) * sign * 0.5 along the direction, rand(-amp, amp) * 0.25
+across it, times `cam_ShakeMult` (421830, default 1.0); the offset is added
+to the eye (1151445-1151452).
+
+Implemented: the sim binding in `moho.lua` with the engine's help text and
+argument checks, the per-beat list in `weapons.lua` next to the audio
+requests, the `camShakes` field of the worker's states message, the
+`SimCamShake` type and drain in `luaSimClient.ts`, the pure state and math
+in `src/viewer/cameraShake.ts`, the eye offset in `applyRtsCameraTransform`
+and the `cam_ShakeMult` convar. `scripts/verify-camera-shake.ts` (asset-free)
+checks the replacement rule, the clock, the sign flip, the falloff, the
+decay, the two random terms and the multiplier with a deterministic rand --
+8 of its 16 checks went red under a mutation of the along factor and the
+replacement rule. Three contract checks (argument count, type error, the
+drained request) were red against the old no-op. The playthrough's finding
+list is now free of reached no-ops.
+
+Not modelled: the engine's mCanShake is cleared for an orthographic world
+view (CRenderWorldView::SetOrthographic, 1297718-1297735); this viewer has
+no orthographic mode, so the flag stays true. The shake is applied to the
+one rendered camera; the engine applies it to every camera of the session
+(the minimap's SimpleRenderWorldView answers CanShake as well, 1210359 --
+not read). The camera runs on the system clock (TIMESOURCE_System,
+1149644); `Camera:UseGameClock` (1153602, reached through
+Sync.CameraRequests from cinematics.lua) has no counterpart here. The type
+error of a non-number argument carries luaG_typeerror's text (1424984-
+1424985), without a position prefix in the engine; ours adds the usual Lua
+position. A shake request with a non-finite number would break the per-beat
+JSON here where the engine takes any float -- no original caller passes one.

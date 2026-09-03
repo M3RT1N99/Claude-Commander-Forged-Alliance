@@ -35,3 +35,4 @@ jobs:
           npx tsx --import ./scripts/register-lua.mjs scripts/verify-economy.ts
           npx tsx --import ./scripts/register-lua.mjs scripts/verify-keys.ts
           npx tsx --import ./scripts/register-lua.mjs scripts/verify-emitter-runtime.ts
+          npx tsx --import ./scripts/register-lua.mjs scripts/verify-camera-shake.ts

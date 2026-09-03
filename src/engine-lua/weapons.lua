@@ -91,6 +91,31 @@ function __drainAudioRequestsJson()
   return '[' .. table.concat(parts, ',') .. ']'
 end
 
+-- === The sim->user camera shakes (SCamShakeParams, 7 floats: position,
+-- radius, max, min, duration). Entity:ShakeCamera appends one to
+-- Sim::mSyncCamShake (func_ShakeCamera, Cfile:936387); Sim::Sync hands the
+-- list to the user layer with the beat (Cfile:1074494-1074501), where every
+-- camera gets CameraImpl::CameraShake for every entry (Cfile:1327867). Here
+-- the list drains to the browser once per beat, like the audio requests.
+__camShakes = {}
+
+function __camShakeRequest(x, y, z, radius, max, min, duration)
+  __camShakes[table.getn(__camShakes) + 1] =
+    { x = x, y = y, z = z, radius = radius, max = max, min = min, duration = duration }
+end
+
+function __drainCamShakesJson()
+  if __camShakes[1] == nil then return '[]' end
+  local parts = {}
+  for i, s in ipairs(__camShakes) do
+    parts[i] = string.format(
+      '{"x":%.9g,"y":%.9g,"z":%.9g,"radius":%.9g,"max":%.9g,"min":%.9g,"duration":%.9g}',
+      s.x, s.y, s.z, s.radius, s.max, s.min, s.duration)
+  end
+  for i = table.getn(__camShakes), 1, -1 do __camShakes[i] = nil end
+  return '[' .. table.concat(parts, ',') .. ']'
+end
+
 function __simSoundRequested(cue)
   __simSounds[table.getn(__simSounds) + 1] = cue
   -- Sound{} carries Bank+Cue (CSndParams) — forward it as an EntitySound

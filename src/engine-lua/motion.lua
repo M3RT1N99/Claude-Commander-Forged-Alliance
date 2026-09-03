@@ -181,13 +181,11 @@ function __advanceMotion()
     end
     local goal = u.__goal
     local p = u.__pos
-    -- A released unit is put back on its surface before it moves again. This
-    -- is this motion model's own step: it keeps a land unit's height only while
-    -- it moves, so a unit released at a bone's height would float otherwise.
-    -- UNVERIFIED which engine call restores the height after a release --
-    -- NotifyDetached's mProcessSurfaceCollision (Cfile:965870) triggers
-    -- ProcessSurfaceCollisionFromLastMove (Cfile:965566-965668), the
-    -- entity-collision pass, not the terrain height.
+    -- A released unit is put back on its surface before it moves again:
+    -- NotifyDetached sets mProcessSurfaceCollision (Cfile:965870), and the
+    -- next CalcMoveLand snaps the unit to the ground for it
+    -- (FindIntersectingRaisedPlatform + SnapToGround, then the flag is
+    -- cleared, Cfile:971709-971716; CalcMoveHover likewise, 971573-971575).
     if u.__snapToSurface and p then
       u.__snapToSurface = nil
       p[2] = surfaceY(u, p[1], p[3])
