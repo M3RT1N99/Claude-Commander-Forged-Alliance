@@ -849,6 +849,10 @@ export class UnitViewer {
       ui_KeyboardRotateSpeed: 10.0, // Cfile:421741
       ui_KeyboardRotateAccelerateMultiplier: 2.0, // Cfile:421742
       ui_ScreenEdgeScrollView: true, // Cfile:421730
+      // The camera shake multiplier -- read every frame by the RTS camera
+      // (func_CameraImplUpdateShake), so it must exist before the UI VM's
+      // ConExecute pass reaches the viewer.
+      cam_ShakeMult: 1.0, // Cfile:421830
     }),
   )
   /** STRG beschleunigt Schwenken und Drehen (Cfile:1300005-1300007). */

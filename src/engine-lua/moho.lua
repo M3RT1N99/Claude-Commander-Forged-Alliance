@@ -195,6 +195,61 @@ local entity = withNoops(ENTITY_NAMES, {
       if c.__attachParentBone == raw then __entityDetach(c, skip == true) end
     end
   end,
+  -- The texture scrollers (CTextureScroller; the model lives in bones.lua,
+  -- the tick in motion.lua). Each binding checks its argument count and
+  -- numbers like the engine (cfunc_EntityAdd*ScrollerL, Cfile:935407-935760)
+  -- and hands an SScroller to Entity::AddScroller (1110823-1110842).
+  --
+  -- "Entity:AddThreadScroller(sideDist, scrollMult)" (935504-935572, type 3).
+  AddThreadScroller = function(self, ...)
+    local n = select('#', ...)
+    if n ~= 2 then
+      error(string.format('Entity:AddThreadScroller(sideDist, scrollMult)\n  expected %d args, but got %d', 3, n + 1), 2)
+    end
+    local sideDist, scrollMult = ...
+    if type(sideDist) ~= 'number' then error('number expected but got ' .. type(sideDist), 2) end
+    if type(scrollMult) ~= 'number' then error('number expected but got ' .. type(scrollMult), 2) end
+    __scrollerSet(self, { type = 'Thread', sideDist = sideDist, scrollMult = scrollMult })
+  end,
+  -- "Entity:AddManualScroller(scrollSpeed1, scrollSpeed2)" (935407-935480,
+  -- type 2): mScroll2 += (speed1, speed2) every tick.
+  AddManualScroller = function(self, ...)
+    local n = select('#', ...)
+    if n ~= 2 then
+      error(string.format('Entity:AddManualScroller(scrollSpeed1, scrollSpeed2)\n  expected %d args, but got %d', 3, n + 1), 2)
+    end
+    local speed1, speed2 = ...
+    if type(speed1) ~= 'number' then error('number expected but got ' .. type(speed1), 2) end
+    if type(speed2) ~= 'number' then error('number expected but got ' .. type(speed2), 2) end
+    __scrollerSet(self, { type = 'Manual', speed1 = speed1, speed2 = speed2 })
+  end,
+  -- "Entity:AddPingPongScroller(ping1, pingSpeed1, pong1, pongSpeed1, ping2,
+  -- pingSpeed2, pong2, pongSpeed2)" (935599-935730, type 1): two channels
+  -- that dwell pingSpeed / pongSpeed seconds on the ping / pong value.
+  AddPingPongScroller = function(self, ...)
+    local n = select('#', ...)
+    if n ~= 8 then
+      error(string.format('Entity:AddPingPongScroller(ping1, pingSpeed1, pong1, pongSpeed1, ping2, pingSpeed2, pong2, pongSpeed2)\n  expected %d args, but got %d', 9, n + 1), 2)
+    end
+    local a = { ... }
+    for i = 1, 8 do
+      if type(a[i]) ~= 'number' then error('number expected but got ' .. type(a[i]), 2) end
+    end
+    __scrollerSet(self, {
+      type = 'PingPong',
+      ping = { a[1], a[5] }, pingSpeed = { a[2], a[6] },
+      pong = { a[3], a[7] }, pongSpeed = { a[4], a[8] },
+    })
+  end,
+  -- "Entity:RemoveScroller()" (935743-935760, type 0): the scroll freezes
+  -- where it is (mScroll2 = mScroll1, 1110838-1110840).
+  RemoveScroller = function(self, ...)
+    local n = select('#', ...)
+    if n ~= 0 then
+      error(string.format('Entity:RemoveScroller()\n  expected %d args, but got %d', 1, n + 1), 2)
+    end
+    __scrollerSet(self, { type = 'None' })
+  end,
   -- "Entity:ShakeCamera(radius, max, min, duration)"
   -- (cfunc_EntityShakeCameraL, Cfile:931108-931169): exactly five arguments
   -- (931128-931129), each of the four a number (931141-931165 --

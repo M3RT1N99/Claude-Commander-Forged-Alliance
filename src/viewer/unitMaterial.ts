@@ -112,6 +112,10 @@ export function createUnitMaterial(
       sunAmbience: { value: lighting.sunAmbience },
       shadowFillColor: { value: lighting.shadowFillColor },
       glowMultiplier: { value: 2.0 }, // mesh.fx:56
+      // The entity's texture scroll (unit.vert.glsl; mesh.fx:438-452) and
+      // the LOD's Scrolling flag -- both set per unit by the caller.
+      scroll: { value: new THREE.Vector2(0, 0) },
+      scrolling: { value: 0 },
     },
     side: THREE.DoubleSide,
   })

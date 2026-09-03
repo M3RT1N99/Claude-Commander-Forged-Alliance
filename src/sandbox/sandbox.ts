@@ -12,6 +12,8 @@ export interface SandboxUnitAssets {
   bp: BpObject
   walkAnim: ScaAnim | null
   shader: string
+  /** LOD0 Scrolling flag: the mesh scrolls its tread UVs (mesh.fx:438-452). */
+  scrolling: boolean
 }
 
 /**

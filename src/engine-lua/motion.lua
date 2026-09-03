@@ -246,6 +246,9 @@ function __advanceMotion()
     local stunTicks = u.__stunTicks or 0
     if stunTicks > 0 then u.__stunTicks = stunTicks - 1 end
     local stunned = (u.__stunTicks or 0) ~= 0
+    -- Entity::TaskTick opens with the texture scroller (Cfile:916174-916176),
+    -- before the attach follow and the motion of this tick.
+    __scrollerTick(u)
     -- UMS_Attached (CUnitMotion tick, Cfile:966205-966229): no velocity, the
     -- position is the follow (__attachFollowTick after this loop); the layer
     -- follows the parent's — except under a unit that is building this one

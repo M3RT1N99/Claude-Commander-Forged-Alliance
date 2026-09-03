@@ -876,6 +876,9 @@ local function readRow(id, u)
     -- Bones hidden by HideBone (CAniPoseBone::mVisible), by name; nil when
     -- none. The renderer collapses their geometry.
     hidden = __hiddenBoneNames(u),
+    -- The texture scroll pair (mVarDat.mScroll1 -> mScroll2, synced per
+    -- entity, Cfile:701559-701562); nil until a scroller exists.
+    scroll = __scrollerRow(u),
     -- Unit::SetCustomName (Cfile:979089-979120): the user layer shows it.
     customName = u.__customName or '',
     -- UNITSTATE_UnSelectable (SetUnSelectable, Cfile:974215-974260).
@@ -983,6 +986,8 @@ function __readAllUnitsJson()
         for hi, name in ipairs(r.hidden) do hs[hi] = jstr(name) end
         return ',"hidden":[' .. table.concat(hs, ',') .. ']'
       end)()
+      .. (r.scroll and (',"scroll":[' .. jnum(r.scroll[1]) .. ',' .. jnum(r.scroll[2]) .. ','
+        .. jnum(r.scroll[3]) .. ',' .. jnum(r.scroll[4]) .. ']') or '')
       .. ',"workProgress":' .. jnum(r.workProgress)
       .. ',"beingUpgraded":' .. tostring(r.beingUpgraded)
       .. ',"born":' .. jint(r.born)

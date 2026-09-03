@@ -22,6 +22,9 @@ export interface UnitAssetPaths {
   lookup: string[]
   /** LOD0-ShaderName ('Unit', 'Seraphim', 'Insect', 'Aeon', …) */
   shader: string
+  /** LOD0 `Scrolling`: the mesh scrolls its tread UVs (mesh.fx:438-452,
+   *  ComputeScrolledTexcoord, gated by anim.w = the LOD flag, Cfile:1191018). */
+  scrolling: boolean
 }
 
 /**
@@ -83,6 +86,7 @@ function resolveFromSource(
     specTeam: texture(lod?.SpecularName, `${prefix}_specteam.dds`),
     lookup: texture(lod?.LookupName, `${prefix}_lookup.dds`),
     shader: typeof lod?.ShaderName === 'string' && lod.ShaderName ? lod.ShaderName : 'Unit',
+    scrolling: lod?.Scrolling === true,
   }
 }
 

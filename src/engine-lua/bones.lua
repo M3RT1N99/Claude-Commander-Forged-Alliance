@@ -510,3 +510,111 @@ function __attachOnDestroyed(e)
     e.__attachedEntities = nil
   end
 end
+
+-- =====================================================================
+-- TEXTURE SCROLLERS -- CTextureScroller (Cfile:1110823-1111068)
+--
+-- An entity owns at most one scroller (Entity::mScroller); the four bindings
+-- AddThreadScroller / AddManualScroller / AddPingPongScroller / RemoveScroller
+-- (Cfile:935407-935760) create it on first use and hand it an SScroller
+-- through Entity::AddScroller (1110823-1110842): the spec is copied, a
+-- PingPong spec zeroes its directions and countdowns, a None spec (Remove)
+-- freezes the scroll (mScroll2 = mScroll1). The scroll itself is the
+-- entity's mVarDat.mScroll1/mScroll2 (a pair for interpolation), part of
+-- the per-entity sync (701559-701562, 701700-701703); the user side copies
+-- it to the mesh instance (1358126-1358133) and the shader scrolls the tread
+-- bands of the UV layout (effects/mesh.fx:438-452, unit.vert.glsl).
+--
+-- CTextureScroller::Tick runs from Entity::TaskTick every tick, first thing
+-- (916174-916176), before the attach follow and MotionTick:
+--   PingPong (1110851-1110900): two channels with a countdown each; at zero
+--     the channel flips and reloads floor(speed * 10) ticks of the side it
+--     enters; when any channel flipped, mScroll1 = mScroll2 = the current
+--     (ping or pong) values.
+--   Manual (1110901-1110908): mScroll1 = mScroll2; mScroll2 += (speed1, speed2).
+--   MotionDerived / thread (1110909-1111064): when the position changed since
+--     the last transform, the points at +/- sideDist along the local X axis
+--     are moved with the entity; each point's displacement projected on the
+--     averaged forward axis, times scrollMult, is added to mScroll2.x (the
+--     + side, 1111061) and mScroll2.y (the - side, 1111062 -- its term v37
+--     carries the multiplier inside, 1111051-1111058); mScroll1 takes the
+--     old mScroll2.
+-- =====================================================================
+
+--- Entity::AddScroller.
+function __scrollerSet(e, spec)
+  local sc = e.__scroller
+  if not sc then
+    -- A fresh scroller and a fresh entity both start at zero
+    -- (CTextureScroller ctor 913851-913855; entity variable data 700652).
+    sc = { s1x = 0, s1y = 0, s2x = 0, s2y = 0 }
+    e.__scroller = sc
+  end
+  sc.spec = spec
+  if spec.type == 'PingPong' then
+    sc.dir = { false, false }
+    sc.count = { 0, 0 }
+  elseif spec.type == 'None' then
+    sc.s2x, sc.s2y = sc.s1x, sc.s1y
+  end
+end
+
+--- The entity's scroll pair for the sync row, or nil without a scroller.
+function __scrollerRow(e)
+  local sc = e.__scroller
+  if not sc then return nil end
+  return { sc.s1x, sc.s1y, sc.s2x, sc.s2y }
+end
+
+--- CTextureScroller::Tick for one entity, plus the entity's own record of
+--- its previous transform (mVarDat.mLastTransform), which the thread
+--- scroller compares against -- kept for every entity, scroller or not, so
+--- a scroller created mid-motion sees the last step like the engine's does.
+function __scrollerTick(e)
+  local p = e.__pos or { 0, 0, 0 }
+  local h = e.__heading or 0
+  local lp, lh = e.__lastPos, e.__lastHeading
+  e.__lastPos = { p[1], p[2], p[3] }
+  e.__lastHeading = h
+  local sc = e.__scroller
+  if not sc then return end
+  local spec = sc.spec
+  local t = spec.type
+  if t == 'PingPong' then
+    local flipped = false
+    for i = 1, 2 do
+      sc.count[i] = sc.count[i] - 1
+      if sc.count[i] <= 0 then
+        flipped = true
+        sc.dir[i] = not sc.dir[i]
+        local dwell = sc.dir[i] and spec.pingSpeed[i] or spec.pongSpeed[i]
+        sc.count[i] = math.floor(dwell * 10)
+      end
+    end
+    if flipped then
+      local x = sc.dir[1] and spec.ping[1] or spec.pong[1]
+      local y = sc.dir[2] and spec.ping[2] or spec.pong[2]
+      sc.s1x, sc.s1y, sc.s2x, sc.s2y = x, y, x, y
+    end
+  elseif t == 'Manual' then
+    sc.s1x, sc.s1y = sc.s2x, sc.s2y
+    sc.s2x = sc.s2x + spec.speed1
+    sc.s2y = sc.s2y + spec.speed2
+  elseif t == 'Thread' then
+    if lp and (p[1] ~= lp[1] or p[2] ~= lp[2] or p[3] ~= lp[3]) then
+      local d = spec.sideDist
+      -- The local X axis (right) and forward of a yaw-only pose, as
+      -- __boneWorld builds it: forward = (sin h, 0, cos h).
+      local rx, rz = math.cos(h), -math.sin(h)
+      local lrx, lrz = math.cos(lh), -math.sin(lh)
+      local fx = (math.sin(h) + math.sin(lh)) * 0.5
+      local fz = (math.cos(h) + math.cos(lh)) * 0.5
+      local dpx, dpz = p[1] - lp[1], p[3] - lp[3]
+      local ax, az = dpx + d * (rx - lrx), dpz + d * (rz - lrz)
+      local bx, bz = dpx - d * (rx - lrx), dpz - d * (rz - lrz)
+      sc.s1x, sc.s1y = sc.s2x, sc.s2y
+      sc.s2x = sc.s2x + (ax * fx + az * fz) * spec.scrollMult
+      sc.s2y = sc.s2y + (bx * fx + bz * fz) * spec.scrollMult
+    end
+  end
+end

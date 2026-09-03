@@ -70,6 +70,9 @@ export interface LuaUnitSnapshot {
   /** Bone names the sim has hidden (Unit:HideBone, CAniPoseBone::mVisible);
    *  absent when none. The renderer collapses their geometry. */
   hidden?: string[]
+  /** The texture scroll of the entity, [s1x, s1y, s2x, s2y] = mVarDat.mScroll1
+   *  and mScroll2 (CTextureScroller::Tick); present once a scroller exists. */
+  scroll?: number[]
   /** Unit::SetCustomName (Cfile:979089-979120); absent when unnamed. */
   customName?: string
   /** UNITSTATE_UnSelectable (SetUnSelectable, Cfile:974215-974260); absent

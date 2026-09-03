@@ -290,7 +290,7 @@ async function loadFirstTexture(paths: string[]): Promise<THREE.Texture | null> 
 
 async function loadUnitAssets(
   id: string,
-): Promise<{ model: ScmModel; textures: UnitTextures; bp: BpObject; shader: string } | null> {
+): Promise<{ model: ScmModel; textures: UnitTextures; bp: BpObject; shader: string; scrolling: boolean } | null> {
   if (!vfs) return null
   const bp = parseBlueprint(await vfs.readText(`units/${id}/${id}_unit.bp`))
 
@@ -319,6 +319,7 @@ async function loadUnitAssets(
     textures: { albedo: albedo ?? fallbackAlbedo, normals, specTeam, lookup },
     bp,
     shader: paths.shader,
+    scrolling: paths.scrolling,
   }
 }
 
@@ -2792,6 +2793,18 @@ function luaSimUpdate(): void {
       }
     }
 
+    // TEXTURE SCROLL: the entity's mScroll1 -> mScroll2 interpolated with the
+    // beat interpolant (CUIWorldMesh::GetInterpolatedScroll, Cfile:1297389-
+    // 1297393), fed to the unit material (mesh.fx material.zw).
+    if (s.scroll && !u.build) {
+      const mat = (u.scene.mesh as THREE.Mesh).material as THREE.ShaderMaterial
+      const sc = mat.uniforms.scroll
+      if (sc) {
+        const [s1x = 0, s1y = 0, s2x = 0, s2y = 0] = s.scroll
+        ;(sc.value as THREE.Vector2).set(s1x + (s2x - s1x) * lerpAlpha, s1y + (s2y - s1y) * lerpAlpha)
+      }
+    }
+
     // Die LAUFANIMATION. Die Sim sagt, ob die Einheit fährt (`moving` kommt aus
     // `__readAllUnitsJson`, gespeist vom Navigator) — der Renderer spielt sie
     // dann ab. Die Animation selbst ist die Original-SCA des Blueprints
@@ -2834,6 +2847,12 @@ async function addLuaUnitToScene(
   const assets = await loadSandboxAssets(id)
   if (!assets) return
   const scene = viewer.addUnit(assets.model, assets.textures, currentTeamColor(), assets.shader)
+  // The LOD's Scrolling flag (mesh.fx anim.w, Cfile:1191018): only such
+  // meshes scroll their tread bands.
+  {
+    const mat = scene.mesh.material as THREE.ShaderMaterial
+    if (mat.uniforms.scrolling) mat.uniforms.scrolling.value = assets.scrolling ? 1 : 0
+  }
   const scale = bpGet(assets.bp, 'Display.UniformScale')
   if (typeof scale === 'number' && scale > 0) scene.mesh.scale.setScalar(scale)
   scene.mesh.position.set(pos.x, pos.y, pos.z)

@@ -46,18 +46,14 @@ this was measured. Until then nobody knew which of them a running game even
 reaches -- the priorities were guesswork. `scripts/verify-playthrough.ts`
 switches on `__mohoNoopWarn` for that; every no-op reports its first call.
 
-A full game (ACU -> build -> factory -> combat -> wreck) reaches **2 of
-them** (nine, until `AddBuildRestriction`, `HideBone`, `ShowBone`,
+A full game (ACU -> build -> factory -> combat -> wreck) reaches **none of
+them** any more (nine, until `AddBuildRestriction`, `HideBone`, `ShowBone`,
 `GetFocusUnit`, the attach family `AttachTo`/`AttachBoneTo`/`DetachFrom`/
-`DetachAll` and `ShakeCamera` became real -- see below; then the motion
-events made unit.lua's movement effects run, which reach the two below):
-
-| No-op | What for |
-| --- | --- |
-| `AddThreadScroller`, `RemoveScroller` | the scrolling tread textures of moving tanks (unit.lua CreateMovementEffects) |
-
-The other no-ops are not reached this way -- not harmless, but not urgent
-either. A **third** called no-op fails the run (the checked-in finding list).
+`DetachAll` and `ShakeCamera` became real; then the motion events made
+unit.lua's movement effects run, which reached `AddThreadScroller` and
+`RemoveScroller` until the texture scrollers became real -- see below). The
+other no-ops are not reached this way -- not harmless, but not urgent either.
+The **first** called no-op fails the run (the checked-in finding list).
 
 ## Golden Master: ein Orakel, das keine Frage stellt
 
@@ -1625,6 +1621,15 @@ error of a non-number argument carries luaG_typeerror's text (1424984-
 position. A shake request with a non-finite number would break the per-beat
 JSON here where the engine takes any float -- no original caller passes one.
 
+A regression of this block that no Node suite could see: the RTS camera
+reads `cam_ShakeMult` every frame, and the viewer's own start table of
+engine convars (the values compiled into the engine, which exist before any
+Lua runs) did not carry it -- the first frame threw "ConVar cam_ShakeMult
+ist nicht gesetzt" before the UI VM's ConExecute pass could deliver it, and
+the browser self-test ended with "keine ACU". The headless self-test gate
+(`scripts/selftest-gate.ts`) found it; the seed (Cfile:421830, 1.0) is in
+the table now and the gate runs through (SELFTEST-OK).
+
 ## The motion events never fired -- no start/stop sounds, no movement effects
 
 `CUnitMotion` reports every unit's horizontal motion event (Cruise,
@@ -1662,10 +1667,8 @@ callback fires once); five of those checks were red on the old code.
 `verify-moho-sim-contracts` checks the forced Stopped/Top on attach.
 
 With the events firing, unit.lua's movement effects run for the first time
-and reach two more silent no-ops, `AddThreadScroller` and `RemoveScroller`
-(the tread texture scrollers, CTextureScroller ticked from Entity::TaskTick,
-Cfile:916177-916179). They are recorded in the playthrough's finding list
-and are the next work item.
+and reached two more silent no-ops, `AddThreadScroller` and `RemoveScroller`
+(the tread texture scrollers) -- implemented in the next section.
 
 Not modelled: the `PPS_1` condition of Stopping (971469-971470) -- PPS_1 is
 the state the path spline gives its own start point (765664) and its
@@ -1679,3 +1682,59 @@ brakes over a few ticks and the events follow that braking; this motion
 model stops such a unit at once and therefore reports Stopped at once. A
 unit that arrives with zero velocity reports Stopped on the arrival tick
 (CalcMoveCommon returns 0 for a zero velocity, 971329-971338).
+
+## The texture scrollers -- tank treads scroll again
+
+`AddThreadScroller`, `AddManualScroller`, `AddPingPongScroller` and
+`RemoveScroller` were silent no-ops; the first two the movement effects
+reach as soon as a tank drives (unit.lua:2621-2624 `CreateTreads` ->
+`AddThreadScroller(1.0, treads.ScrollMultiplier)` for every blueprint with
+`Display.MovementEffects.<layer>.Treads.ScrollTreads` -- 37 of them -- and
+`RemoveScroller` when the effects are destroyed, unit.lua:2537-2538);
+`AddPingPong` (defaultunits.lua:1415-1424) feeds `Display.PingPongScroller`.
+
+The engine (Cfile): an entity owns one CTextureScroller; the bindings
+(935407-935760) create it on first use and hand it an SScroller through
+Entity::AddScroller (1110823-1110842: a PingPong spec zeroes its directions
+and countdowns, a None spec freezes the scroll, mScroll2 = mScroll1). The
+scroll itself is the entity's mVarDat.mScroll1/mScroll2 -- a pair for the
+renderer's interpolation -- part of the per-entity sync (701559-701562,
+701700-701703); the user entity copies it to its mesh instance every sync
+(1358126-1358133) and interpolates mScroll1 -> mScroll2 with the beat
+interpolant (1297389-1297393). CTextureScroller::Tick runs first thing in
+Entity::TaskTick every tick (916174-916176, 1110848-1111068): ping-pong
+flips each of two channels when its countdown ends and reloads
+floor(speed * 10) ticks of the side it enters; manual adds (speed1, speed2)
+per tick; the thread scroller, when the position changed, moves the points
+at +/- sideDist along the local X axis with the entity and adds each point's
+displacement projected on the averaged forward axis, times scrollMult, to
+mScroll2.x (the + side) and mScroll2.y (the - side). The shader
+(effects/mesh.fx:438-452 ComputeScrolledTexcoord, gated by the LOD's
+`Scrolling` flag, Cfile:1191018) adds the interpolated scroll to U for the
+UV bands texcoord.y > 0.95 (scroll.x) and 0.90 < y <= 0.95 (scroll.y).
+
+Implemented: the scroller model and tick in `bones.lua`, the bindings in
+`moho.lua`, the tick from the motion loop, the `scroll` pair in the unit
+rows, the `scrolling` LOD flag in `unitPaths.ts`, the `scroll`/`scrolling`
+uniforms of the unit material with `unit.vert.glsl` scrolling the two UV
+bands, and the per-frame interpolation in `main.ts`.
+`scripts/verify-scrollers.ts` checks the argument errors, the zero start,
+the thread scroll of a straight drive (both treads = distance * mult, the
+interpolation lag), the unequal scroll in a turn, the freeze of
+RemoveScroller, the manual and ping-pong ticks, and the real chain of a
+driving uel0201 (ScrollMultiplier 0.75) down to the sync row; 6 of its 24
+checks went red under a mutation of the thread multiplier, the ping-pong
+dwell and the freeze. The golden master moved by exactly the new `scroll`
+field of the three tread units -- the dump on both states differs in nothing
+else -- and was updated; the coverage floor is 794 real / 146 no-op.
+
+Both accumulations carry the scrollMult factor (the .x term explicitly at
+1111061, the .y term inside its v37 expression at 1111051-1111058). The
+SScroller field layout behind the ping-pong arguments follows from the
+0x2C-byte copy in Entity::AddScroller starting one slot before the nested
+struct: channel 1 (ping1/pingSpeed1/pong1/pongSpeed1) drives the x tread,
+channel 2 the y tread, the dwell taken from the side just entered.
+UNVERIFIED: whether mesh.fx keys the second UV set's band off its own V
+(the shader tests texcoord.y only; unit.vert.glsl uses the first set's V for
+both). Not modelled: the build materials do not scroll (mesh.fx applies the
+scroll in the build techniques too).
