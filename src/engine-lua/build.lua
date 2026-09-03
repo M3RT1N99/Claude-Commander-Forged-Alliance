@@ -57,6 +57,7 @@ function __abortBuildTasks(builderId)
           local ok, err = pcall(function() b:OnStopBuild(t, task.order) end)
           if not ok then WARN('OnStopBuild: ' .. tostring(err)) end
         end
+        if b.__focusEntity == t then b.__focusEntity = nil end
         local okF, errF = pcall(function() b:OnFailedToBuild() end)
         if not okF then WARN('OnFailedToBuild: ' .. tostring(errF)) end
       end
@@ -67,7 +68,6 @@ function __abortBuildTasks(builderId)
       -- through the decay path (Unit::OnTick, Cfile:952824-952840).
       if t and not t.__engineBorn and (t.__fraction or 1) <= 0 then t:Destroy() end
       if b then b.__workProgress = 0 end
-      __econClearBuildRequest((b and b.__army) or 1, tid)
       __buildTasks[tid] = nil
     end
   end
@@ -182,8 +182,22 @@ local function startTask(task, tid)
   -- Die Engine setzt UnitBeingBuilt, BEVOR sie OnStartBuild ruft:
   -- FactoryUnit.RollOffUnit (defaultunits.lua:570) liest genau dieses Feld.
   b.UnitBeingBuilt = t
+  -- CBuildTaskHelper::SetFocus (Cfile:815090-815102): the target becomes the
+  -- builder's focus entity, the script hears OnAssignedFocusEntity, and only
+  -- then OnStartBuild. GetFocusUnit answers from that field (unit.lua:698).
+  b.__focusEntity = t
+  if b.OnAssignedFocusEntity then
+    local okF, errF = pcall(function() b:OnAssignedFocusEntity() end)
+    if not okF then WARN('OnAssignedFocusEntity: ' .. tostring(errF)) end
+  end
   local ok, err = pcall(function() b:OnStartBuild(t, task.order) end)
   if not ok then WARN('OnStartBuild: ' .. tostring(err)) end
+end
+
+--- CBuildTaskHelper::OnStopBuild ends with the builder's focus entity
+--- unlinked (Cfile:815022-815030): after OnStopBuild there is no focus.
+local function clearFocus(b, t)
+  if b and b.__focusEntity == t then b.__focusEntity = nil end
 end
 
 --- Pro Beat: der Bauer geht zu seinem aktiven Auftrag und DREHT SICH ZU IHM.
@@ -466,7 +480,6 @@ function __buildCollect()
       -- nothing, does nothing; the task itself is dropped once the unit leaves
       -- __units.
       task.blocked = true
-      __econClearBuildRequest(army, tid)
     elseif b and t
       and ((t.__fraction or 1) < 1
         or (task.order == 'Repair' and (t.__health or 0) < t:GetMaxHealth())) then
@@ -479,7 +492,6 @@ function __buildCollect()
       local dist = math.sqrt(dx * dx + dz * dz)
       if mbd > 0 and dist > mbd then
         task.blocked = true
-        __econClearBuildRequest(army, tid)
       else
         -- HP repair of a FINISHED unit runs the same helper, but only
         -- health rises (Materialize -> AdjustHealth, Cfile:953468); the
@@ -521,12 +533,17 @@ function __buildCollect()
         end
         if step > rest then step = rest end
         task.step = step
-        -- HP repair pays the FULL build cost rate in both resources
-        -- (unit.lua:712-726: GetBuildCosts of the focus blueprint).
-        __econSetBuildRequest(army, tid, (te.BuildCostMass or 0) * step, (te.BuildCostEnergy or 0) * step)
+        -- The COST is not registered here. The engine has no build request of
+        -- its own: the builder's consumption request IS the build's demand.
+        -- unit.lua:697-745 (UpdateConsumptionValues) reads GetFocusUnit(),
+        -- prices the focus blueprint through GetBuildCosts and sets the rate
+        -- with SetConsumptionPerSecondEnergy/Mass; Unit::HandleResourceManagement
+        -- takes `perSecond x LimitingRate` from the army and stores that
+        -- LimitingRate as mResourceConsumed (Cfile:953945-953965), which
+        -- UpdateWorkProgress then multiplies into the delta. While GetFocusUnit
+        -- was a no-op the Lua could not price anything and a TS-side request
+        -- stood in for it; with both alive every build was charged twice.
       end
-    else
-      __econClearBuildRequest(army, tid)
     end
   end
 end
@@ -545,7 +562,7 @@ function __buildApply()
       -- (Cfile:953455-953466) and OnStopBeingBuilt never re-fires
       -- (Cfile:953470-953476). Done when health == max (Cfile:815498):
       -- only the builder's OnStopBuild fires (unit.lua:1704).
-      local rate = __econBuildRate(army, tid)
+      local rate = b:GetResourceConsumed() -- mResourceConsumed of the BUILDER (Cfile:953945-953948), see __buildCollect
       local maxH = t:GetMaxHealth()
       local h = (t.__health or 0) + maxH * task.step * rate
       if h > maxH then h = maxH end
@@ -557,11 +574,12 @@ function __buildApply()
         b.UnitBeingBuilt = t
         local okS, errS = pcall(function() b:OnStopBuild(t, task.order) end)
         if not okS then WARN('OnStopBuild: ' .. tostring(errS)) end
+        clearFocus(b, t)
         n = n + 1
         done[n] = tid
       end
     elseif b and t and task.step > 0 then
-      local rate = __econBuildRate(army, tid)
+      local rate = b:GetResourceConsumed() -- mResourceConsumed of the BUILDER (Cfile:953945-953948), see __buildCollect
       local oldFrac = t.__fraction or 0
       local maxH = t:GetMaxHealth()
       local delta = task.step * rate
@@ -618,6 +636,7 @@ function __buildApply()
         b.UnitBeingBuilt = t
         local okS, errS = pcall(function() b:OnStopBuild(t, task.order) end)
         if not okS then WARN('OnStopBuild: ' .. tostring(errS)) end
+        clearFocus(b, t)
         -- The finished unit INHERITS its factory's commands (sub_5FA340,
         -- Cfile:818487-818600): every command of the factory goes into the new
         -- unit's queue; only TransportLoadUnits is skipped for AIR/NAVAL units.
@@ -660,7 +679,6 @@ function __buildApply()
     -- Every build task resets the builder's WorkProgress when it ends
     -- (task destructors, Cfile:814889/817002/817050/818358/819000).
     if b then b.__workProgress = 0 end
-    __econClearBuildRequest((b and b.__army) or 1, tid)
     __buildTasks[tid] = nil
   end
 end

@@ -1724,15 +1724,74 @@ function RemoveBuildRestriction(army, category)
   if restrictions then removeCategoryTerm(restrictions, category) end
 end
 
+-- The unit's OWN restriction category (UnitAttributes::mRestrictionCategory).
+-- In the engine it is a SET of blueprints: `Unit:AddBuildRestriction(cat)`
+-- unions the category's set into it (EntityCategory::Add,
+-- Cfile:975286-975288), `RemoveBuildRestriction(cat)` subtracts the
+-- category's set (BVIntSet::RemoveAllFrom, Cfile:975342-975344) and
+-- `RestoreBuildRestrictions()` empties it (Cfile:975399-975410). The ACUs
+-- live on this: uel0001_script.lua:117 adds
+-- `UEF * (BUILTBYTIER2COMMANDER + BUILTBYTIER3COMMANDER)` in OnStopBeingBuilt
+-- and the engineering enhancements remove `BuildableCategoryAdds` again
+-- (uel0001_script.lua:334-335, 370-371) -- a DIFFERENT expression than the one
+-- added, which only set arithmetic gets right.
+--
+-- Our blueprints register lazily, so the set cannot be materialised at call
+-- time. The unit keeps the ordered LOG of add/remove operations instead, and
+-- a blueprint is restricted when the last operation whose category matches
+-- it was an add -- the same answer the set gives, for any blueprint,
+-- whenever it was registered.
+local function unitRestrictionBlocks(u, targetCategories)
+  local log = u and u.__buildRestrictions
+  if not log then return false end
+  local blocked = false
+  for _, op in ipairs(log) do
+    if catTest(op.cat, targetCategories) then blocked = (op.add == true) end
+  end
+  return blocked
+end
+
+function __unitAddBuildRestriction(u, category)
+  u.__buildRestrictions = u.__buildRestrictions or {}
+  local log = u.__buildRestrictions
+  log[table.getn(log) + 1] = { add = true, cat = ParseEntityCategory(category) }
+end
+
+function __unitRemoveBuildRestriction(u, category)
+  u.__buildRestrictions = u.__buildRestrictions or {}
+  local log = u.__buildRestrictions
+  log[table.getn(log) + 1] = { add = false, cat = ParseEntityCategory(category) }
+end
+
+function __unitRestoreBuildRestrictions(u)
+  u.__buildRestrictions = nil
+end
+
 -- Unit::CanBuild checks the army filter, the builder blueprint cache, then the
 -- per-unit restriction cache in that order (faf-re Unit.cpp:12386-12398).
+-- Verified: `Moho::Unit::CanBuild` (Cfile:953352-953391) builds the set
+-- (buildable x army category) minus the unit's restriction category and
+-- tests the blueprint's ordinal bit in it (Cfile:953369-953377).
 local function canBuildBlueprint(u, bp)
   if not u or not bp then return false end
   local targetCategories = bpCategorySet(bp)
   if categoryTermsMatch(__armyBuildRestrictions[u.__army], targetCategories) then return false end
   local builderCategories = u.__bp and u.__bp.Economy and u.__bp.Economy.BuildableCategory
   if not categoryTermsMatch(builderCategories, targetCategories) then return false end
-  return not categoryTermsMatch(u.__buildRestrictions, targetCategories)
+  return not unitRestrictionBlocks(u, targetCategories)
+end
+
+-- "CanBuild(blueprintId)" (cfunc_UnitCanBuildL, Cfile:980796-980840): the id
+-- must be a string; an id no blueprint carries is the engine error
+-- `Unknown unit blueprint id: %s` (Cfile:980833), and the answer is
+-- Unit::CanBuild for that blueprint. The AI asks it before every structure
+-- (aibuildstructures.lua:623, aibrain.lua:2996); the method did not exist
+-- here at all, so those paths died with "attempt to call a nil value".
+function __unitCanBuild(u, bpId)
+  if type(bpId) ~= 'string' then error("bad argument #1 to 'CanBuild' (string expected)", 3) end
+  local bp = __registered and __registered.Unit and __registered.Unit[string.lower(bpId)]
+  if not bp then error('Unknown unit blueprint id: ' .. bpId, 3) end
+  return canBuildBlueprint(u, bp)
 end
 
 -- Restriction-only gate for the primary build path (build.lua __factoryTick):
@@ -1745,7 +1804,7 @@ function __isBuildRestricted(u, bpId)
   if not u or not bp then return false end
   local targetCategories = bpCategorySet(bp)
   if categoryTermsMatch(__armyBuildRestrictions[u.__army], targetCategories) then return true end
-  return categoryTermsMatch(u.__buildRestrictions, targetCategories)
+  return unitRestrictionBlocks(u, targetCategories)
 end
 
 local function factoryBuildCategoriesIntersect(a, b)

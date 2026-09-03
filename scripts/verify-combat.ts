@@ -1122,6 +1122,27 @@ console.log('\n== Fire control on a dual turret: only the manipulator with the w
   check(host.eval(`return (pcall(function() ${w}:IsFireControl(7) end))`) === false, 'a non-string label is a type error')
 }
 
+console.log('\n== A unit that must unpack does not look for targets while it moves ==')
+{
+  // CAcquireTargetTask::TaskTick (Cfile:792913-792917): with AI.NeedUnpack
+  // set, a unit in the Moving, TransportLoading or WaitingForTransport state
+  // skips the whole check and only re-arms the interval. uel0304 is the UEF
+  // T3 mobile artillery; its TargetCheckInterval is 0.5 like the tank's.
+  await game.giveUnit(host, 'uel0304')
+  const arty = spawnLuaUnit(host, 'uel0304', { x: 700, y: 20, z: 800 }, 1)
+  spawnLuaUnit(host, 'uel0201', { x: 700, y: 20, z: 830 }, 2)
+  check(host.eval(`return __units[${arty}].__bp.AI.NeedUnpack`) === true, 'uel0304 carries AI.NeedUnpack (uel0304_unit.bp:4)')
+  // Moving through the real path: a move order sets the navigator goal,
+  // which is what UNITSTATE_Moving reads here; the stop order clears it.
+  host.eval(`IssueMove({ __units[${arty}] }, { 700, 20, 700 })`)
+  for (let t = 0; t < 8; t++) beat(engine)
+  check(host.eval(`return __units[${arty}]:IsUnitState('Moving')`) === true, 'the move order puts it in the Moving state')
+  check(host.eval(`return __units[${arty}]:GetWeapon(1):GetCurrentTarget() == nil`) === true, 'while Moving it has acquired nothing after 8 beats')
+  host.eval(`IssueStop({ __units[${arty}] })`)
+  for (let t = 0; t < 8; t++) beat(engine)
+  check(host.eval(`return __units[${arty}]:GetWeapon(1):GetCurrentTarget() ~= nil`) === true, 'once it stands still the next check finds the tank')
+}
+
 console.log('\n== Was die Sim dabei gemeldet hat ==')
 const uniq = [...new Set(warnings.map((w) => w.split('\n')[0]?.slice(0, 110)))]
 for (const w of uniq.slice(0, 12)) console.log(`  · ${w}`)

@@ -165,6 +165,18 @@ end
 
 local function acquireTarget(w, u)
   local bp = w.__bp or {}
+  -- A unit that must unpack (AI.NeedUnpack: the mobile artillery uel0304,
+  -- url0304, xal0305, xsl0304 and the Monkeylord) does not look for targets
+  -- while it is Moving, TransportLoading or WaitingForTransport -- the whole
+  -- check is skipped and the task just re-arms its interval
+  -- (Cfile:792913-792917, the else branch returns v6). The current target is
+  -- left alone; the fire gate refuses it separately (UnitWeapon::CanFire:
+  -- NeedUnpack and not Immobile).
+  local ubp = u.__bp or {}
+  if (ubp.AI or {}).NeedUnpack and u.IsUnitState
+    and (u:IsUnitState('Moving') or u:IsUnitState('TransportLoading') or u:IsUnitState('WaitingForTransport')) then
+    return
+  end
   -- HoldFire (1) LOESCHT das Ziel (Cfile:793085-793097).
   if (u.__fireState or 0) == 1 then
     __weaponSetTarget(w, nil, nil)

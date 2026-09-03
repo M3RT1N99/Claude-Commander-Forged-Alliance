@@ -46,19 +46,19 @@ jetzt war unbekannt, welche davon im laufenden Spiel überhaupt erreicht werden 
 die Priorisierung war Raten. `scripts/verify-playthrough.ts` schaltet dafür
 `__mohoNoopWarn` ein; jeder No-op meldet sich beim ersten Aufruf.
 
-Eine vollständige Partie (ACU → Bau → Fabrik → Kampf → Wrack) ruft **9 von 147**:
+Eine vollständige Partie (ACU → Bau → Fabrik → Kampf → Wrack) ruft **8 von 147**
+(neun, bis `AddBuildRestriction` echt wurde — siehe unten):
 
 | No-op | Wofür |
 | --- | --- |
 | `HideBone`, `ShowBone` | Knochen aus-/einblenden (Bau, Upgrade) |
 | `AttachTo`, `AttachBoneTo`, `DetachFrom`, `DetachAll` | Anhängen — Transporter, Bauarme |
-| `AddBuildRestriction` | Bau-Beschränkungen der Armee |
 | `GetFocusUnit` | die Fokus-Einheit |
 | `ShakeCamera` | Kamera-Erschütterung bei Einschlägen |
 
-Das ist die Arbeitsliste, nach Messung sortiert. Die übrigen 138 werden auf
+Das ist die Arbeitsliste, nach Messung sortiert. Die übrigen 139 werden auf
 diesem Weg nicht erreicht — sie sind deshalb nicht harmlos, aber sie sind auch
-nicht dringend. Ein **zehnter** aufgerufener No-op lässt den Durchlauf
+nicht dringend. Ein **neunter** aufgerufener No-op lässt den Durchlauf
 fehlschlagen (eingecheckte Fund-Liste).
 
 ## Golden Master: ein Orakel, das keine Frage stellt
@@ -1346,3 +1346,77 @@ beyond the map size), the worker refuses to boot a map without the layer,
 and it logs `Sim: terrain types on the map: …` so a session shows what it
 read. `verify-browser-session.ts` uses the same sampler and is red when the
 layer is missing (nine type names on SCMP_009, one without).
+
+## Two more from the weapon and unit-state bindings
+
+* **A unit that must unpack does not look for targets while it moves.**
+  `CAcquireTargetTask::TaskTick` skips the whole check for `AI.NeedUnpack`
+  units in the Moving, TransportLoading or WaitingForTransport state and only
+  re-arms its interval (Cfile:792913-792917). The five units that carry the
+  flag are the four T3 mobile artilleries and the Monkeylord; ours acquired
+  on the move. `verify-combat.ts` drives a uel0304 through a real move order.
+* **`SetUnitState(name, bool)` was a silent no-op.** The binding sets or
+  clears the state's bit in the unit's own bitfield (Cfile:974353-974390);
+  the enhancement task uses it for Enhancing and Upgrading
+  (enhancetask.lua:14-22), so `IsUnitState('Enhancing')` could never be true.
+  Now the Lua-set bits live next to the task-derived ones and are OR-ed -- a
+  named reduction, the engine has one bitfield. `IsUnitState` also validates
+  its name against the 45 EUnitState names (Cfile:702955-703060) and throws
+  like SCR_GetEnum; `SetUnitState` with an unknown name does nothing, like
+  SetLexical.
+
+## Every ACU could build T2 and T3 from the first second
+
+`Unit:AddBuildRestriction`, `RemoveBuildRestriction` and
+`RestoreBuildRestrictions` were three of the silent no-ops, and
+`Unit:CanBuild` did not exist at all. The ACU scripts live on them:
+uel0001_script.lua:117 (and the other three factions alike) restricts
+`UEF * (BUILTBYTIER2COMMANDER + BUILTBYTIER3COMMANDER)` when the commander
+is done, and the engineering enhancements remove `BuildableCategoryAdds`
+again (uel0001_script.lua:334-335, 370-371). With the no-ops, the T2
+extractor and the T3 generator were buildable from the start; the AI's
+builders, which ask `CanBuild` before every structure
+(aibuildstructures.lua:623, aibrain.lua:2996), died with "attempt to call
+a nil value" instead.
+
+The engine keeps `UnitAttributes::mRestrictionCategory` as a SET of
+blueprints: add is a union (Cfile:975286-975288), remove a set difference
+(Cfile:975342-975344), restore empties it (Cfile:975399-975410), and
+`Unit::CanBuild` tests the blueprint's bit in `(buildable x army category)
+minus restriction` (Cfile:953352-953391). The enhancement removes a
+DIFFERENT expression than the one added, which only set arithmetic gets
+right -- the old list-of-terms model could never have. Because our
+blueprints register lazily, the unit keeps the ordered add/remove log and
+answers per blueprint from it, which gives the set's answer whenever the
+blueprint arrived. `verify-restrictions.ts` walks a UEF ACU through it.
+
+Still open, and now visible: the UI's build menu does not subtract the
+unit's own restriction the way `GetUnitCommandData` does
+(Cfile:1264622-1264645), so the ACU's menu still shows the T2 items and the
+Sim refuses the order. `mRequestRefreshUI` is recorded on the unit
+(`__requestRefreshUI`) but nothing consumes it yet.
+
+## GetFocusUnit was a no-op -- and the build cost was an invention on top
+
+`Unit:GetFocusUnit()` returned nil for every unit. The engine answers with
+the focus entity when it is a unit (cfunc_UnitGetFocusUnitL,
+Cfile:972698-972712), and `CBuildTaskHelper::SetFocus` makes the build target
+that focus before `OnStartBuild` (Cfile:815090-815102, with the script's
+`OnAssignedFocusEntity` in between); `OnStopBuild` unlinks it again
+(Cfile:815022-815030). unit.lua:698 reads it in `UpdateConsumptionValues`,
+cybranunits.lua:180 for the build effects.
+
+Making it real exposed the second half. `UpdateConsumptionValues`
+(unit.lua:697-745) prices the focus blueprint with `GetBuildCosts` and sets
+the BUILDER's consumption rate -- and that request is the build's whole
+economic demand: `Unit::HandleResourceManagement` takes
+`perSecond x LimitingRate` from the army and keeps the LimitingRate as
+`mResourceConsumed` (Cfile:953945-953965), which `UpdateWorkProgress`
+multiplies into the progress delta. There is no build request in the engine.
+Ours had one: while GetFocusUnit was nil the Lua could price nothing (its
+floor of 1, unit.lua:717), so `build.lua` registered a TS-side request per
+task from the blueprint cost and read its LimitingRate back. With both alive
+every build was charged twice -- 120 energy/s for a T1 generator instead of
+60, in `verify-build.ts` and in the game. The stand-in is gone; the progress
+rate is the builder's `GetResourceConsumed()`. The golden master moved by
+exactly the double charge (army 1 keeps 20.5 more mass), nothing else.

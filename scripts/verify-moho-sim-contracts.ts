@@ -441,6 +441,22 @@ check(
   !bool(host, `__units[${mover}]:IsUnitState('Immobile')`),
   'SetImmobile(false) clears the runtime state',
 )
+// SetUnitState(name, bool) writes the state bitfield itself
+// (cfunc_UnitSetUnitStateL, Cfile:974353-974390); the enhancement task uses it
+// for Enhancing/Upgrading (enhancetask.lua:14-22). It was a silent no-op.
+check(!bool(host, `__units[${mover}]:IsUnitState('Enhancing')`), 'Enhancing starts off')
+host.eval(`__units[${mover}]:SetUnitState('Enhancing', true)`)
+check(bool(host, `__units[${mover}]:IsUnitState('Enhancing')`), "SetUnitState('Enhancing', true) is visible through IsUnitState")
+host.eval(`__units[${mover}]:SetUnitState('Enhancing', false)`)
+check(!bool(host, `__units[${mover}]:IsUnitState('Enhancing')`), 'and false clears it again')
+check(
+  host.eval(`return (pcall(function() return __units[${mover}]:IsUnitState('NoSuchState') end))`) === false,
+  'IsUnitState with an unknown name throws (SCR_GetEnum)',
+)
+check(
+  host.eval(`return (pcall(function() __units[${mover}]:SetUnitState('NoSuchState', true) end))`) === true,
+  'SetUnitState with an unknown name does nothing (SetLexical fails silently)',
+)
 for (let i = 0; i < 10; i++) beat(engine)
 const resumedX = num(host, `__units[${mover}].__pos[1]`)
 check(

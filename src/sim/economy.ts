@@ -152,24 +152,19 @@ export class ArmyEconomy {
   private pendingEnergy = 0
 
   private readonly units = new Map<number, UnitEcon>()
-  /** Transiente Bau-Requests (pro Tick vom Bau-System gesetzt). */
-  private readonly buildReqs = new Map<number, Consumer>()
+  // There is NO separate build request. The engine's only consumers are the
+  // units' own consumption requests (mConsumptionData): the builder's Lua
+  // prices its focus blueprint and sets the rate (unit.lua:697-745), and
+  // Unit::HandleResourceManagement takes `perSecond x LimitingRate` from the
+  // army and keeps that LimitingRate as mResourceConsumed
+  // (Cfile:953945-953965) -- which the build task multiplies into its
+  // progress. A TS-side per-task request used to stand in for that while
+  // GetFocusUnit was a no-op; with both alive every build was charged twice.
 
   register(id: number, e: UnitEcon): void {
     this.units.set(id, e)
   }
 
-  /** Ressourcen-Bedarf einer Bau-Aufgabe für diesen Tick anmelden. */
-  setBuildRequest(taskId: number, mass: number, energy: number): void {
-    this.buildReqs.set(taskId, { mass, energy, rate: 0 })
-  }
-  clearBuildRequest(taskId: number): void {
-    this.buildReqs.delete(taskId)
-  }
-  /** Gewährte LimitingRate der Bau-Aufgabe (gültig nach tick()). */
-  buildRate(taskId: number): number {
-    return this.buildReqs.get(taskId)?.rate ?? 0
-  }
   setComplete(id: number, complete: boolean): void {
     const u = this.units.get(id)
     if (u) u.complete = complete
@@ -279,9 +274,6 @@ export class ArmyEconomy {
         }
       }
     }
-    // Bau-Aufgaben sind ebenfalls Verbraucher (CEconRequest); ihre gewährte
-    // LimitingRate skaliert den Baufortschritt.
-    for (const r of this.buildReqs.values()) consumers.push(r)
     this.maxMass = maxM
     this.maxEnergy = maxE
 
@@ -460,15 +452,6 @@ export function installEconomy(host: LuaHost, mgr: EconomyManager): void {
       mgr.army(army).setRate(id, field, value)
     },
   )
-  // Bau-Requests: das Bau-System meldet vor dem Tick den Bedarf an und liest
-  // danach die gewährte LimitingRate zurück (CEconRequest::LimitingRate).
-  host.setGlobal('__econSetBuildRequest', (army: number, taskId: number, mass: number, energy: number) => {
-    mgr.army(army).setBuildRequest(taskId, mass, energy)
-  })
-  host.setGlobal('__econClearBuildRequest', (army: number, taskId: number) => {
-    mgr.army(army).clearBuildRequest(taskId)
-  })
-  host.setGlobal('__econBuildRate', (army: number, taskId: number) => mgr.army(army).buildRate(taskId))
   // Unit:GetResourceConsumed — the per-unit granted rate (mResourceConsumed,
   // Cfile:953937/953945-953948). The value already exists as the consumer's
   // `rate`; it was simply never bridged into Lua.

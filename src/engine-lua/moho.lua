@@ -537,6 +537,25 @@ local function scriptBitIndex(bit)
   return SCRIPT_BIT_INDEX[bit] or 0
 end
 
+-- EUnitState, the 45 names in registration order (EUnitStateTypeInfo::AddEnums,
+-- Cfile:702955-703060; the Lua sees them without the UNITSTATE_ prefix).
+-- `IsUnitState` resolves its argument with SCR_GetEnum, which ERRORS on an
+-- unknown name; `SetUnitState` uses SetLexical and silently does nothing.
+local UNIT_STATE_NAMES = {
+  'Immobile', 'Moving', 'Attacking', 'Guarding', 'Building', 'Upgrading',
+  'WaitingForTransport', 'TransportLoading', 'TransportUnloading', 'MovingDown',
+  'MovingUp', 'Patrolling', 'Busy', 'Attached', 'BeingReclaimed', 'Repairing',
+  'Diving', 'Surfacing', 'Teleporting', 'Ferrying', 'WaitForFerry',
+  'AssistMoving', 'PathFinding', 'ProblemGettingToGoal', 'NeedToTerminateTask',
+  'Capturing', 'BeingCaptured', 'Reclaiming', 'AssistingCommander', 'Refueling',
+  'GuardBusy', 'ForceSpeedThrough', 'UnSelectable', 'DoNotTarget',
+  'LandingOnPlatform', 'CannotFindPlaceToLand', 'BeingUpgraded', 'Enhancing',
+  'BeingBuilt', 'NoReclaim', 'NoCost', 'BlockCommandQueue', 'MakingAttackRun',
+  'HoldingPattern', 'SiloBuildingAmmo',
+}
+local UNIT_STATES = {}
+for _, n in ipairs(UNIT_STATE_NAMES) do UNIT_STATES[n] = true end
+
 local unit = withNoops(UNIT_NAMES, {
   --- Die Regenerationsrate der Einheit (`UnitAttributes.mRegenRate`), PRO
   --- SEKUNDE. `Unit::OnTick` verrechnet sie mit `* 0.1` je Tick
@@ -704,7 +723,54 @@ local unit = withNoops(UNIT_NAMES, {
   -- EUnitState (Cfile:702962-703052) — answered from the REAL sim state,
   -- not a stub: the original AI/effect Lua branches on these
   -- (engineermanager.lua:58-66, terranunits.lua:130).
+  -- "SetUnitState(name, bool)" (cfunc_UnitSetUnitStateL, Cfile:974353-974390):
+  -- sets or clears the bit of that state in mUnitVarDat.mUnitStates -- the
+  -- same bitfield the engine's tasks write. An unknown name fails SetLexical
+  -- and nothing happens. The original uses it from the enhancement task
+  -- (enhancetask.lua:14-22: Enhancing and Upgrading on, then off). It was a
+  -- silent no-op, so IsUnitState('Enhancing') could never be true.
+  --
+  -- Here the bits the Lua sets live in `__unitStates`; the bits the engine's
+  -- own tasks would set are derived from the task registries below, and the
+  -- two are OR-ed. That is a named reduction: the engine has one bitfield,
+  -- and a Lua `SetUnitState('Moving', false)` there would clear what the move
+  -- task set -- nothing in the original does that.
+  -- The unit's own build restrictions -- three bindings that were silent
+  -- no-ops, so every ACU could build T2 and T3 structures from the first
+  -- second (uel0001_script.lua:117 restricts them until the engineering
+  -- enhancements). Set semantics and citations in globals.lua
+  -- (__unitAddBuildRestriction and friends); each sets mRequestRefreshUI
+  -- (Cfile:975289, 975345, 975411).
+  AddBuildRestriction = function(self, category)
+    if category == nil then error("bad argument #1 to 'AddBuildRestriction' (category expected)", 2) end
+    __unitAddBuildRestriction(self, category)
+    self.__requestRefreshUI = true
+  end,
+  RemoveBuildRestriction = function(self, category)
+    if category == nil then error("bad argument #1 to 'RemoveBuildRestriction' (category expected)", 2) end
+    __unitRemoveBuildRestriction(self, category)
+    self.__requestRefreshUI = true
+  end,
+  RestoreBuildRestrictions = function(self)
+    __unitRestoreBuildRestrictions(self)
+    self.__requestRefreshUI = true
+  end,
+  -- "CanBuild(blueprintId)" -- see globals.lua __unitCanBuild for the binding
+  -- (Cfile:980796-980840). It was missing entirely.
+  CanBuild = function(self, bpId) return __unitCanBuild(self, bpId) end,
+  SetUnitState = function(self, state, on)
+    if type(state) ~= 'string' then error("bad argument #1 to 'SetUnitState' (string expected)", 2) end
+    if not UNIT_STATES[state] then return end
+    self.__unitStates = self.__unitStates or {}
+    self.__unitStates[state] = (on and on ~= 0) and true or nil
+  end,
   IsUnitState = function(self, state)
+    if type(state) ~= 'string' then error("bad argument #1 to 'IsUnitState' (string expected)", 2) end
+    if not UNIT_STATES[state] then
+      error('Invalid enum value ' .. state .. '\nValid Options are:\n   '
+        .. table.concat(UNIT_STATE_NAMES, '\n   ') .. '\n', 2)
+    end
+    if self.__unitStates and self.__unitStates[state] then return true end
     local id = self.__id
     if state == 'Guarding' then -- 4, guard ctor sets bit 0x10 (Cfile:836995)
       return (__guardOrders and __guardOrders[id]) ~= nil
@@ -885,6 +951,16 @@ local unit = withNoops(UNIT_NAMES, {
   SetShieldRatio = function(self, ratio) self.__shieldRatio = ratio end,
   SetFocusEntity = function(self, e) self.__focusEntity = e end,
   ClearFocusEntity = function(self) self.__focusEntity = nil end,
+  -- "GetFocusUnit()" (cfunc_UnitGetFocusUnitL, Cfile:972673-972713): the
+  -- focus entity when it is a Unit, otherwise nil. CBuildTaskHelper::SetFocus
+  -- makes the build target the focus before OnStartBuild (Cfile:815090-815102,
+  -- build.lua startTask); unit.lua:698 reads it for the consumption model and
+  -- cybranunits.lua:180 for the build effects. It was a silent no-op.
+  GetFocusUnit = function(self)
+    local e = self.__focusEntity
+    if e and e.__isUnit and not e.__destroyed then return e end
+    return nil
+  end,
   -- SetStunned stores trunc(time * 10), not a rounded duration. MotionTick
   -- decrements only positive values; a negative duration consequently remains
   -- stunned exactly as in the retail engine (Cfile:952786, 973650, 974184).

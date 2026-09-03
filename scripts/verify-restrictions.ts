@@ -54,5 +54,27 @@ queueTank()
 beat(engine)
 check(tankSiteExists(), 'after RemoveBuildRestriction the tank is produced')
 
+console.log('\n== The unit\'s own restrictions: an ACU cannot build T2 until the enhancement ==')
+// Unit:AddBuildRestriction / RemoveBuildRestriction / RestoreBuildRestrictions
+// edit UnitAttributes::mRestrictionCategory, a SET of blueprints
+// (Cfile:975286-975288, 975342-975344, 975399-975410). uel0001_script.lua:117
+// restricts UEF * (BUILTBYTIER2COMMANDER + BUILTBYTIER3COMMANDER) when the ACU
+// is done, and the T2 enhancement removes 'BUILTBYTIER2COMMANDER UEF' again
+// (:334-335) -- a different expression than the one added, so only set
+// arithmetic answers correctly. All three were silent no-ops.
+for (const id of ['uel0001', 'ueb1101', 'ueb1201', 'ueb1301']) await game.giveUnit(host, id)
+const acu = spawnLuaUnit(host, 'uel0001', { x: 150, y: 20, z: 150 }, 1)
+const can = (bp: string): boolean => host.eval(`return __units[${acu}]:CanBuild('${bp}')`) === true
+check(can('ueb1101'), 'the fresh ACU can build a T1 power generator')
+check(!can('ueb1201'), 'but not the T2 mass extractor (BUILTBYTIER2COMMANDER, uel0001_script.lua:117)')
+check(!can('ueb1301'), 'nor the T3 power generator (BUILTBYTIER3COMMANDER)')
+check(host.eval(`return __isBuildRestricted(__units[${acu}], 'ueb1201')`) === true, 'the build path sees the same restriction')
+host.eval(`__units[${acu}]:RemoveBuildRestriction(ParseEntityCategory('BUILTBYTIER2COMMANDER UEF'))`)
+check(can('ueb1201'), "after RemoveBuildRestriction('BUILTBYTIER2COMMANDER UEF') the T2 extractor is buildable")
+check(!can('ueb1301'), 'the T3 generator stays restricted -- set difference, not list removal')
+host.eval(`__units[${acu}]:RestoreBuildRestrictions()`)
+check(can('ueb1301'), 'RestoreBuildRestrictions empties the set')
+check(host.eval(`return (pcall(function() __units[${acu}]:AddBuildRestriction() end))`) === false, 'AddBuildRestriction without a category throws')
+
 console.log(failures === 0 ? '\nRESTRICTIONS PASSED' : `\nRESTRICTIONS FAILED (${failures})`)
 process.exit(failures === 0 ? 0 : 1)

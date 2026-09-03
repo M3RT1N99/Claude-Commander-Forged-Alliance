@@ -1,5 +1,5 @@
 {
-  "hash": "310b6e4cd0569bf6fc51a550febcf8c5",
+  "hash": "2f9ecc25d524d232952201bc228fde13",
   "units": 10,
   "material": 3878,
   "note": "Endzustand eines festen Ablaufs (Ökonomie, Bau, Fabrik, Bewegung, Kampf, Flächenschaden), gehasht über __readAllUnitsJson() plus die acht Ökonomie-Summen je Armee. Ändert sich der Hash, hat sich das VERHALTEN der Sim geändert — absichtlich oder nicht. Nur zusammen mit dem Commit nachziehen, der die Änderung erklärt (--update)."

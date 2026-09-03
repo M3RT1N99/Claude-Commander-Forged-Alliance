@@ -1,6 +1,5 @@
 {
   "findings": [
-    "SIM NO-OP aufgerufen: AddBuildRestriction",
     "SIM NO-OP aufgerufen: AttachBoneTo",
     "SIM NO-OP aufgerufen: AttachTo",
     "SIM NO-OP aufgerufen: DetachAll",

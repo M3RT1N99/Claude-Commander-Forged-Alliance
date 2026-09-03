@@ -97,19 +97,29 @@ console.log('\n== Fortschritt: delta = BuildRate/BuildTime · rate · 0.1 = 0.00
 beat()
 check(near(num(`__units[${site}].__fraction`), 0.008), `nach 1 Beat: fraction ${num(`__units[${site}].__fraction`).toFixed(4)} (erwartet 0.0080)`)
 check(num(`__units[${site}].__health`) > 0, `Health waechst mit dem Bau: ${num(`__units[${site}].__health`).toFixed(1)}`)
-// Kosten: BuildCostEnergy 750 · 0.008 = 6/Tick → 60/s build drain, PLUS the
-// builder's own build-time maintenance (~1/s) that the original Lua now sets
-// via SetConsumptionPerSecondEnergy (game.lua:41-48) — dynamic-rate fix; before,
-// the setter was a no-op and this maintenance was silently dropped. The build
-// fraction still advances at the full 0.008/beat, proving the 60/s is NOT
-// double-counted (the extra is the ACU's upkeep, not a second build drain).
-check(near(army.expenseEnergy, 61, 1), `Energie-Ausgabe ${army.expenseEnergy.toFixed(1)}/s (60 Bau + ~1 Maintenance)`)
+// CBuildTaskHelper::SetFocus makes the site the builder's focus entity before
+// OnStartBuild (Cfile:815090-815102); GetFocusUnit answers from it
+// (cfunc_UnitGetFocusUnitL, Cfile:972698-972712) and unit.lua:698 needs it for
+// the consumption model. GetFocusUnit was a silent no-op returning nil.
+check(host.eval(`return __units[${acu}]:GetFocusUnit() == __units[${site}]`) === true, 'GetFocusUnit() is the site while the ACU builds it')
+// Kosten: BuildCostEnergy 750 · BuildRate / BuildTime = 60/s -- and that
+// figure is the BUILDER'S consumption request, set by the original Lua:
+// UpdateConsumptionValues (unit.lua:697-745) prices GetFocusUnit()'s
+// blueprint with GetBuildCosts and calls SetConsumptionPerSecondEnergy. The
+// engine has no build request of its own (Unit::HandleResourceManagement,
+// Cfile:953945-953965 -- the unit's mConsumptionData is the only consumer,
+// and its LimitingRate feeds UpdateWorkProgress). This line used to expect
+// 61: a TS-side build request (60) PLUS the Lua's floor of 1 (unit.lua:717,
+// `energy = 1` when GetFocusUnit was a no-op and nothing could be priced) --
+// two stand-ins that added up to a number nobody had derived.
+check(near(army.expenseEnergy, 60, 0.5), `Energie-Ausgabe ${army.expenseEnergy.toFixed(1)}/s (the builder's own consumption request: 60)`)
 
 console.log('\n== Fertigstellung nach BuildTime/BuildRate = 12,5 s (125 Beats) ==')
 for (let i = 0; i < 130; i++) beat()
 check(near(num(`__units[${site}].__fraction`), 1, 1e-6), `fertig: fraction = ${num(`__units[${site}].__fraction`)}`)
 check(host.eval(`return __units[${site}]:IsBeingBuilt()`) === false, 'IsBeingBuilt() = false nach Fertigstellung')
 check(buildTaskCount(host) === 0, 'Bau-Task nach Fertigstellung entfernt')
+check(host.eval(`return __units[${acu}]:GetFocusUnit() == nil`) === true, 'and GetFocusUnit() is nil again after OnStopBuild (Cfile:815022-815030)')
 check(army.incomeEnergy === 40, `Generator produziert jetzt: Einkommen = ${army.incomeEnergy}/s (ACU 20 + Generator 20)`)
 check(near(army.expenseEnergy, 0, 0.01), `kein Bau-Verbrauch mehr (${army.expenseEnergy.toFixed(2)}/s)`)
 
