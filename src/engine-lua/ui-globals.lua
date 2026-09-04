@@ -890,14 +890,12 @@ end
 -- accumulates the buildable category across the selection as an INTERSECTION
 -- (BVIntSet::IntersectWith, Cfile:1264719): the first builder copies, every
 -- further one intersects — the build menu shows only what ALL selected units
--- can build. (The original also intersects each unit's buildable with the army's
--- build-restriction category (army->mVarDat.mCat, Cfile:1264632) so restricted
--- units drop OUT of the build menu. The restrictions themselves live sim-side
--- (globals.lua AddBuildRestriction/__armyBuildRestrictions, enforced by
--- canBuildBlueprint) and are NOT yet mirrored into this UI VM — so the menu still
--- shows a restricted unit, but the sim rejects the build (CanBuild). Wiring this
--- subtraction needs the army restriction category synced to the UI; the sandbox
--- sets no restrictions, so it is inert today.)
+-- can build. The original also intersects each unit's buildable category with
+-- the army's allowed set (army->mVarDat.mCat, seeded ALLUNITS and cut by
+-- AddBuildRestriction, Cfile:1264632-1264646), so a restricted unit drops OUT
+-- of the build menu. The sim mirrors that set's complement -- its deny-list
+-- (globals.lua __armyBuildRestrictions) -- per beat as category text
+-- (__uiSetArmyRestrictions); the subtraction below is the intersection.
 --
 -- orders/toggles are ARRAYS of cap strings — orders.lua:891 iterates them with
 -- `for index, availOrder in availableOrders do`.
@@ -975,6 +973,17 @@ local function blueprintToggleCapMask(bp)
   return mask
 end
 
+-- The army deny-lists from the sim (globals.lua __armyRestrictionsJson), parsed
+-- once per beat: army -> category (nil = nothing restricted).
+__uiArmyRestrictions = {}
+function __uiSetArmyRestrictions(map)
+  local out = {}
+  for army, text in pairs(map or {}) do
+    if text ~= '' then out[army] = __categoryFromString(text) end
+  end
+  __uiArmyRestrictions = out
+end
+
 function GetUnitCommandData(units)
   if type(units) ~= 'table' or table.getn(units) == 0 then
     return {}, {}, EMPTY_CATEGORY
@@ -1017,6 +1026,10 @@ function GetUnitCommandData(units)
       -- the buildable set). This is why an unenhanced ACU's build menu holds
       -- no T2 structures: uel0001_script.lua:117 restricts them until the
       -- engineering enhancement. The sim mirrors the category per beat.
+      -- The army's allowed set first (buildable x mCat, Cfile:1264632-1264640):
+      -- as the mirrored deny-list, a subtraction.
+      local armyDeny = __uiArmyRestrictions[u.army or 0]
+      if armyDeny then unitCats = unitCats - armyDeny end
       if u.__restriction then unitCats = unitCats - u.__restriction end
     end
     -- Intersect for EVERY selected unit (blueprint-less -> EMPTY -> blanks it).

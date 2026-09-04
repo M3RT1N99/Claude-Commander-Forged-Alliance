@@ -1774,8 +1774,8 @@ commandmode.lua, gamemain.lua and orders.lua. Open, ranked: the ARMY
 build-restriction category (Cfile:1264632) is not subtracted in the UI
 mirror (the army's `mVarDat.mCat` is an allowed-to-build set seeded with
 ALLUNITS, Cfile:1017296-1017307, changed only by the sim-only
-AddBuildRestriction/RemoveBuildRestriction, 1016787-1016830; the sim side
-here enforces it, the menu does not hide the button); a finished factory
+AddBuildRestriction/RemoveBuildRestriction, 1016787-1016830) -- DONE below
+("The army's build restrictions reach the build menu"); a finished factory
 copies EVERY command of its rally queue into the product -- Guard, Patrol,
 Attack, all of them, only TransportLoadUnits is skipped for AIR/NAVAL
 products (sub_5FA340, 818487-818600) -- DONE below ("The factory command
@@ -1787,8 +1787,8 @@ ClearCommandQueue 1005371-1005399, then IAiCommandDispatchImpl::Stop
 1231239-1231256 stops the attacker and silo builds) and is right here, but
 the sim-only `IssueStop(units)` appends a Stop with clear=0
 (1007889-1007952) and ours clears like the button. Ranked by play impact:
-the army restriction mirror, the soft IssueStop (the factory command list,
-the rally marker and the queue-head abort are done, see below).
+the soft IssueStop (the factory command list, the rally marker, the
+queue-head abort and the army restriction mirror are done, see below).
 
 **Effects.** The emitter/trail/beam pipeline is real and verified
 (CEfxEmitter::Tick port). Missing or dead: `CreateLightParticle`/
@@ -1862,6 +1862,35 @@ no-ops were never counted before (`Unit.RevertElevation`,
 too; the strip list now carries every documented Sim global plus the
 factory-list helpers, and check-vm-separation is green. `IssueFactoryAssist`
 is a real Sim binding -- the lead for the open factory-assist question.
+
+## The army's build restrictions reach the build menu
+
+The lobby's restricted units (AddBuildRestriction, siminit.lua:190) were
+enforced by the sim only: the build menu still showed a restricted unit and
+the factory dropped it from its queue.
+
+The engine (Cfile): the army keeps an ALLOWED set, `army->mVarDat.mCat`,
+seeded with ALLUNITS (1017296-1017307); CArmyImpl::AddBuildRestriction cuts
+the category's set out of it (BVIntSet::RemoveAllFrom, 1016787-1016793) and
+RemoveBuildRestriction adds it back (EntityCategory::Add, 1016813-1016815).
+GetUnitCommandData intersects every selected builder's buildable category
+with that set before subtracting the unit's own restriction
+(1264632-1264646), so a restricted unit never appears in the panel.
+
+Implemented: the sim serialises each army's deny-list (the complement it
+keeps, globals.lua `__armyBuildRestrictions`) as category text
+(`__armyRestrictionsJson`, the __categoryToString form); the worker's
+states message carries it (`armyRestrictions`), luaSimClient keeps the last
+map, main.ts hands it to gameUi.beat, which pushes the whole map every beat
+(`__uiSetArmyRestrictions`, so a lifted restriction clears), and the UI
+VM's GetUnitCommandData subtracts the army's category before the unit's
+(the intersection with the allowed set, expressed on the deny-list).
+`verify-ui-panels` gained four checks (FACTORY restricted for army 1 drops
+ueb0101 from the ACU's menu while ueb1101 stays; another army's restriction
+does not touch it; an empty map puts it back) -- one went red with the
+subtraction removed; `verify-restrictions` gained two (the text is
+parseable category text after AddBuildRestriction, empty again after
+RemoveBuildRestriction).
 
 ## The factory queue is one command per unit; removing the running head aborts the build
 

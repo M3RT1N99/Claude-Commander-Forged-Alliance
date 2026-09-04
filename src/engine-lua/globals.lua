@@ -1790,6 +1790,29 @@ function RemoveBuildRestriction(army, category)
   if restrictions then removeCategoryTerm(restrictions, category) end
 end
 
+--- The army deny-lists as text for the user layer, one entry per army with
+--- restrictions: the union of its terms in the __categoryToString form
+--- (parsed back by __categoryFromString in the UI VM). The engine keeps the
+--- inverse -- army->mVarDat.mCat is the ALLOWED set, seeded with ALLUNITS
+--- (Cfile:1017296-1017307), cut by CArmyImpl::AddBuildRestriction
+--- (BVIntSet::RemoveAllFrom, 1016787-1016793) and refilled by
+--- RemoveBuildRestriction (EntityCategory::Add, 1016813-1016815) -- and
+--- GetUnitCommandData intersects every builder's buildable category with it
+--- (1264632-1264646), so a restricted unit leaves the build menu.
+function __armyRestrictionsJson()
+  local parts = {}
+  for army, terms in pairs(__armyBuildRestrictions) do
+    local union = nil
+    for _, term in ipairs(terms) do
+      local cat = type(term) == 'string' and ParseEntityCategory(term) or term
+      union = union and (union + cat) or cat
+    end
+    local text = union and __categoryToString(union) or ''
+    parts[table.getn(parts) + 1] = '"' .. tostring(army) .. '":"' .. string.gsub(text, '"', '\\"') .. '"'
+  end
+  return '{' .. table.concat(parts, ',') .. '}'
+end
+
 -- The unit's OWN restriction category (UnitAttributes::mRestrictionCategory).
 -- In the engine it is a SET of blueprints: `Unit:AddBuildRestriction(cat)`
 -- unions the category's set into it (EntityCategory::Add,

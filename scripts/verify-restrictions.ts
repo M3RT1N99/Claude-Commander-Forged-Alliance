@@ -47,12 +47,26 @@ beat(engine)
 check(!tankSiteExists(), 'a restricted (TECH1) tank is NOT built')
 check(queueEmpty(), 'the restricted item is dropped from the factory queue')
 
+// The user layer gets the deny-list as text (GetUnitCommandData subtracts it
+// from the build menu, Cfile:1264632-1264646).
+{
+  const json = JSON.parse(host.eval('return __armyRestrictionsJson()') as string) as Record<string, string>
+  check(
+    typeof json['1'] === 'string' && json['1'] !== '' && host.eval(`return __categoryFromString(${JSON.stringify(json['1'])}) ~= nil`) === true,
+    `the army's restriction travels to the user layer as parseable category text (${json['1']})`,
+  )
+}
+
 // Remove the restriction -> the same tank builds.
 console.log('\n== Removing the restriction lets it build again ==')
 host.eval(`RemoveBuildRestriction(1, 'TECH1')`)
 queueTank()
 beat(engine)
 check(tankSiteExists(), 'after RemoveBuildRestriction the tank is produced')
+check(
+  (JSON.parse(host.eval('return __armyRestrictionsJson()') as string) as Record<string, string>)['1'] === '',
+  'and the mirrored text is empty again',
+)
 
 console.log('\n== The unit\'s own restrictions: an ACU cannot build T2 until the enhancement ==')
 // Unit:AddBuildRestriction / RemoveBuildRestriction / RestoreBuildRestrictions

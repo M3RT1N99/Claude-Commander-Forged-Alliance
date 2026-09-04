@@ -275,7 +275,7 @@ export class GameUi {
    * Ein Sim-Beat: Ökonomie in die UI-VM, dann die Original-`_BeatFunction`
    * (economy.lua:251) rechnen lassen. Sie schreibt den Text in die Controls.
    */
-  beat(eco: EcoSnapshot, units: LuaUnitSnapshot[], gameTick = 0): void {
+  beat(eco: EcoSnapshot, units: LuaUnitSnapshot[], gameTick = 0, armyRestrictions: Record<string, string> = {}): void {
     // Der Zustand der Units in die UI-VM (die Engine spiegelt ihn clientseitig:
     // UserUnit::UpdateUnitData @0x8C0750). Erst danach kann die UI ihn zeigen.
     const seen = new Set<number>()
@@ -324,6 +324,13 @@ export class GameUi {
       ${eco.reclaimMass}, ${eco.reclaimEnergy})`)
     // Die SPIELZEIT (score.lua zeigt sie als Uhr; sie steht bei Pause still).
     lines.push(`__uiSetGameTick(${gameTick})`)
+    // The army build restrictions (army->mVarDat.mCat's complement) for the
+    // build menu's intersection (GetUnitCommandData, Cfile:1264632-1264646).
+    // Always sent as a whole map so a lifted restriction clears.
+    const armies = Object.entries(armyRestrictions)
+      .map(([army, text]) => `[${Number(army)}] = ${JSON.stringify(text)}`)
+      .join(', ')
+    lines.push(`__uiSetArmyRestrictions({ ${armies} })`)
     // Der BEAT-VERTEILER der Original-UI — nicht ein einzelnes Panel.
     //
     // Die Engine ruft pro Sim-Beat GENAU EINE Lua-Funktion:

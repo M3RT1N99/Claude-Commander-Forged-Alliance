@@ -231,6 +231,9 @@ interface StatesMsg {
   camShakes?: SimCamShake[]
   /** Light particles spawned this beat (CreateLightParticle, Cfile:905874-906033). */
   lights?: SimLightParticle[]
+  /** The army build restrictions as category text per army (the deny-list
+   *  the sim enforces; the UI subtracts it from the build menu). */
+  armyRestrictions?: Record<string, string>
   economy: EcoSnapshot
 }
 
@@ -301,6 +304,7 @@ export class LuaSimClient {
   private readonly camShakes: SimCamShake[] = []
   /** Accumulated light particles; drained by the particle system in main. */
   private readonly lights: SimLightParticle[] = []
+  private armyRestrictions: Record<string, string> = {}
   /** Letzter gemeldeter Sim-Tick (Spielzeit = Tick / 10). */
   gameTick = 0
   private nextReq = 1
@@ -442,6 +446,7 @@ export class LuaSimClient {
         if (m.lights && m.lights.length > 0) {
           for (const l of m.lights) this.lights.push(l)
         }
+        if (m.armyRestrictions) this.armyRestrictions = m.armyRestrictions
         this.statesById.clear()
         for (const u of m.units) this.statesById.set(u.id, u)
         break
@@ -740,6 +745,11 @@ export class LuaSimClient {
   drainAudioRequests(): SimAudioRequest[] {
     if (this.audioRequests.length === 0) return []
     return this.audioRequests.splice(0, this.audioRequests.length)
+  }
+
+  /** The army build restrictions of the last beat (category text per army). */
+  getArmyRestrictions(): Record<string, string> {
+    return this.armyRestrictions
   }
 
   /** Drain the light particles spawned since the last call. */

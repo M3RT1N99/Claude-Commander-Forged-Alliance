@@ -2635,7 +2635,7 @@ function luaSimUpdate(): void {
   // rechnet daraus die Anzeige.
   const eco = luaSim.economySnapshot()
   const states = luaSim.allStates()
-  if (eco && gameUi) gameUi.beat(eco, states, luaSim.gameTick)
+  if (eco && gameUi) gameUi.beat(eco, states, luaSim.gameTick, luaSim.getArmyRestrictions())
 
   // Map props whose sim prop died (reclaimed/destroyed): hide the instance
   // in the instanced renderer — map props are not per-beat serialized.

@@ -567,6 +567,16 @@ check(!inMenu('ueb1301'), 'and so does ueb1301 (T3 generator)')
 check(inMenu('ueb0101'), 'while ueb0101 (T1 factory) stays')
 host.eval(`__uiSetUnit(1, 'uel0001', 1, 100, 20, 100, 12000, 12000, 1, true, 0, 0, -1, false, 0, 1, false, 'Land', 0, -1, false, false, '')`)
 check(inMenu('ueb1201'), 'an empty restriction text puts it back (the enhancement bought)')
+// The ARMY's restriction (the lobby's restricted units): GetUnitCommandData
+// intersects the buildable category with army->mVarDat.mCat
+// (Cfile:1264632-1264646); the sim mirrors the deny-list per beat.
+host.eval(`__uiSetArmyRestrictions({ [1] = 'tok:FACTORY' })`)
+check(!inMenu('ueb0101'), 'with FACTORY restricted for army 1, ueb0101 leaves the ACU build menu')
+check(inMenu('ueb1101'), 'while ueb1101 (T1 power) stays')
+host.eval(`__uiSetArmyRestrictions({ [2] = 'tok:FACTORY' })`)
+check(inMenu('ueb0101'), "another army's restriction does not touch army 1's menu")
+host.eval(`__uiSetArmyRestrictions({})`)
+check(inMenu('ueb0101'), 'a lifted restriction (an empty map) puts it back')
 
 console.log('\n== Klick aufs Bau-Icon: der Bau-Modus startet, die Auswahl bleibt ==')
 // Der Weg, den ein Spieler nimmt: ACU wählen → Bau-Icon anklicken → Gebäude

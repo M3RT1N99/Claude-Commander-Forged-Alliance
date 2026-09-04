@@ -545,6 +545,10 @@ function tickAndPost(): void {
   // The light particles spawned this beat (CreateLightParticle -> the
   // particle buffer, Cfile:906023).
   const lights = host.pull<unknown[]>('__drainLightParticlesJson()')
+  // The army build restrictions (the lobby's restricted units, siminit.lua:190)
+  // as text per army: the user side subtracts them from every build menu
+  // (GetUnitCommandData x army->mVarDat.mCat, Cfile:1264632-1264646).
+  const armyRestrictions = host.pull<Record<string, string>>('__armyRestrictionsJson()')
   const a = engine.economy.army(1)
   // Der SIM-TICK gehoert zum Zustand: die Spielzeit-Uhr der UI (score.lua:230,
   // GetGameTime) zaehlt in Sim-Ticks und steht bei Pause still.
@@ -560,6 +564,7 @@ function tickAndPost(): void {
     audio,
     camShakes,
     lights,
+    armyRestrictions,
     economy: {
       mass: a.mass, massStorage: a.maxMass, massIncome: a.incomeMass, massExpense: a.expenseMass,
       energy: a.energy, energyStorage: a.maxEnergy, energyIncome: a.incomeEnergy, energyExpense: a.expenseEnergy,
