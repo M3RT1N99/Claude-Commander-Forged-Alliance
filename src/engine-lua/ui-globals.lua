@@ -288,7 +288,18 @@ function UserUnitMeta:GetGuardedEntity()
   return nil
 end
 function UserUnitMeta:GetCreator() return nil end
-function UserUnitMeta:GetCommandQueue() return self.commandQueue or {} end
+-- UserUnit::GetCommandQueue (cfunc_UserUnitGetCommandQueueL, Cfile:1367107-
+-- 1367200): the factory command queue when the unit has one, else the unit's
+-- queue; one table per command with id (mCmdId), type (the EUnitCommandType
+-- lexical) and position (the target position). rallypoint.lua:17-18 reads
+-- the LAST entry of a selected factory as its rally marker.
+function UserUnitMeta:GetCommandQueue()
+  local out = {}
+  for i, c in ipairs(self.commandQueue or {}) do
+    out[i] = { id = c.id, type = c.t, position = { c.x, c.y, c.z } }
+  end
+  return out
+end
 -- Selection sets (control groups) live ON THE UNIT in the engine:
 -- `UserUnit_base.mSelectionSets` is a std::set<string> at offset 972. The
 -- original selection.lua keeps the group's unit list and mirrors the name onto
@@ -424,6 +435,14 @@ function __uiSetBuildQueue(id, items)
   local u = __uiUnits[id]
   if not u then return end
   u.buildQueue = items or {}
+end
+
+-- The synced command queue (Unit::SyncInterface copies the unit's queue and,
+-- for a factory builder, its command list): what GetCommandQueue answers.
+function __uiSetCommandQueue(id, items)
+  local u = __uiUnits[id]
+  if not u then return end
+  u.commandQueue = items or {}
 end
 
 function __uiRemoveUnit(id)
@@ -2272,6 +2291,87 @@ end
 -- kein Schweigen.
 __uiOverlayFilters = {}
 __uiTeamColorMode = 'FactionColor'
+
+-- === WorldMesh registry (CUIWorldMesh, lua/ui/controls/worldmesh.lua) ===
+--
+-- InternalCreateWorldMesh(luaobj) (cfunc_InternalCreateWorldMeshL,
+-- Cfile:1296242-1296270): exactly one argument, a CUIWorldMesh bound to the
+-- Lua object -- no mesh instance yet (SetMesh creates it). The registry is
+-- what the renderer reads every beat (__uiWorldMeshesJson): the UI's
+-- MeshRenderer draws every mesh instance with its technique; here main.ts
+-- reconciles the list against three.js meshes.
+__uiWorldMeshes = {}
+__uiWorldMeshSerial = 0
+__uiWorldMeshInstanceSerial = 0
+
+function InternalCreateWorldMesh(...)
+  local n = select('#', ...)
+  if n ~= 1 then
+    error(string.format('InternalCreateWorldMesh(luaobj) -- for internal use by WorldMesh()\n  expected %d args, but got %d', 1, n), 2)
+  end
+  local obj = ...
+  if type(obj) ~= 'table' then
+    error('InternalCreateWorldMesh(luaobj): table expected, got ' .. type(obj), 2)
+  end
+  __uiWorldMeshSerial = __uiWorldMeshSerial + 1
+  rawset(obj, '__wmId', __uiWorldMeshSerial)
+  rawset(obj, '__wmInstance', nil)
+  __uiWorldMeshes[__uiWorldMeshSerial] = obj
+end
+
+-- A changed instance gets a new sync serial (the mesh instance's refresh).
+function __uiWorldMeshTouched(obj)
+  local inst = rawget(obj, '__wmInstance')
+  if inst and not inst.serial then
+    __uiWorldMeshInstanceSerial = __uiWorldMeshInstanceSerial + 1
+    inst.serial = __uiWorldMeshInstanceSerial
+  end
+end
+
+function __uiWorldMeshDestroyed(obj)
+  local id = rawget(obj, '__wmId')
+  if id then __uiWorldMeshes[id] = nil end
+end
+
+local function wmJsonStr(v)
+  return '"' .. string.gsub(string.gsub(tostring(v), '\\', '\\\\'), '"', '\\"') .. '"'
+end
+
+-- Every registered mesh WITH an instance: id, instance serial, the mesh
+-- source (MeshName/TextureName/ShaderName or BlueprintID), scale, color,
+-- LOD cutoff, stance, hidden flag and the four shader parameters.
+function __uiWorldMeshesJson()
+  local parts = {}
+  local ids = {}
+  for id in pairs(__uiWorldMeshes) do ids[table.getn(ids) + 1] = id end
+  table.sort(ids)
+  for _, id in ipairs(ids) do
+    local obj = __uiWorldMeshes[id]
+    local inst = rawget(obj, '__wmInstance')
+    if inst then
+      parts[table.getn(parts) + 1] = '{"id":' .. id
+        .. ',"serial":' .. tostring(inst.serial or 0)
+        .. ',"meshName":' .. wmJsonStr(inst.meshName or '')
+        .. ',"textureName":' .. wmJsonStr(inst.textureName or '')
+        .. ',"shaderName":' .. wmJsonStr(inst.shaderName or '')
+        .. ',"blueprintId":' .. wmJsonStr(inst.blueprintId or '')
+        .. ',"scale":' .. tostring(inst.scale)
+        .. ',"color":' .. wmJsonStr(inst.color)
+        .. ',"lodCutoff":' .. tostring(inst.lodCutoff)
+        .. ',"hidden":' .. tostring(inst.hidden == true)
+        .. ',"x":' .. tostring(inst.pos[1]) .. ',"y":' .. tostring(inst.pos[2]) .. ',"z":' .. tostring(inst.pos[3])
+        .. ',"qx":' .. tostring(inst.orient[1]) .. ',"qy":' .. tostring(inst.orient[2])
+        .. ',"qz":' .. tostring(inst.orient[3]) .. ',"qw":' .. tostring(inst.orient[4])
+        .. ',"sx":' .. tostring(inst.scaleVec[1]) .. ',"sy":' .. tostring(inst.scaleVec[2]) .. ',"sz":' .. tostring(inst.scaleVec[3])
+        .. ',"lifetime":' .. tostring(inst.lifetime)
+        .. ',"aux":' .. tostring(inst.aux)
+        .. ',"fractionComplete":' .. tostring(inst.fractionComplete)
+        .. ',"fractionHealth":' .. tostring(inst.fractionHealth)
+        .. '}'
+    end
+  end
+  return '[' .. table.concat(parts, ',') .. ']'
+end
 
 -- MapBorderAdd(blueprintid) (Cfile:1269840) / MapBorderClear(): der dekorative
 -- KARTENRAND der Weltansicht — WorldMesh-Blueprints aus dem Skin

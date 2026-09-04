@@ -23,10 +23,34 @@ import * as THREE from 'three'
  */
 
 /** Per-shader animation parameters (mesh.fx technique annotations). */
-const SHADER_PARAMS: Record<string, { scaleTo: number; fade: boolean }> = {
+export const SHADER_PARAMS: Record<string, { scaleTo: number; fade: boolean }> = {
   CommandFeedback: { scaleTo: 0.7, fade: true }, // mesh.fx:4868
   CommandFeedback2: { scaleTo: 1.1, fade: true }, // mesh.fx:4918
-  RallyPoint: { scaleTo: 1.0, fade: false }, // mesh.fx:4873 (PS0(false))
+  // mesh.fx:4890-4891: CommandFeedbackVS(0.7), CommandFeedbackPS0(false) --
+  // the rally marker shrinks to 0.7 like a blip, but never fades.
+  RallyPoint: { scaleTo: 0.7, fade: false },
+}
+
+/**
+ * The feedback-family material (mesh.fx:4859-4866, shared by CommandFeedback,
+ * CommandFeedback2 and RallyPoint): SrcAlpha/InvSrcAlpha writing RGB only
+ * (the frame alpha is the glow buffer), no depth, alpha test > 0x23.
+ */
+export function createFeedbackMaterial(texture: THREE.Texture | null): THREE.MeshBasicMaterial {
+  return new THREE.MeshBasicMaterial({
+    map: texture ?? undefined,
+    color: 0xffffff,
+    transparent: true,
+    blending: THREE.CustomBlending,
+    blendSrc: THREE.SrcAlphaFactor,
+    blendDst: THREE.OneMinusSrcAlphaFactor,
+    blendSrcAlpha: THREE.ZeroFactor,
+    blendDstAlpha: THREE.OneFactor,
+    depthTest: false, // Depth_Disable (mesh.fx:4862)
+    depthWrite: false,
+    alphaTest: 0x23 / 255, // AlphaTest Greater 0x23 (mesh.fx:4864-4866)
+    side: THREE.DoubleSide,
+  })
 }
 
 export interface BlipAssets {
@@ -66,22 +90,7 @@ export class CommandFeedbackSystem {
     const assets = await this.loadAssets(opts.meshPath, opts.texPath)
     if (!assets) return
     const params = SHADER_PARAMS[opts.shaderName] ?? SHADER_PARAMS.CommandFeedback!
-    const material = new THREE.MeshBasicMaterial({
-      map: assets.texture ?? undefined,
-      color: 0xffffff,
-      transparent: true,
-      // SrcAlpha/InvSrcAlpha Write_RGB (mesh.fx:4859) — keep the frame
-      // alpha (glow buffer) untouched.
-      blending: THREE.CustomBlending,
-      blendSrc: THREE.SrcAlphaFactor,
-      blendDst: THREE.OneMinusSrcAlphaFactor,
-      blendSrcAlpha: THREE.ZeroFactor,
-      blendDstAlpha: THREE.OneFactor,
-      depthTest: false, // Depth_Disable (mesh.fx:4862)
-      depthWrite: false,
-      alphaTest: 0x23 / 255, // AlphaTest Greater 0x23 (mesh.fx:4864-4866)
-      side: THREE.DoubleSide,
-    })
+    const material = createFeedbackMaterial(assets.texture)
     const mesh = new THREE.Mesh(assets.geometry, material)
     mesh.position.set(opts.x, opts.y, opts.z)
     mesh.scale.setScalar(opts.scale)

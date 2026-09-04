@@ -31,7 +31,7 @@ local NOT_IMPLEMENTED = {
   'HasLocalizedVO', 'IN_AddKeyMapTable', 'IN_ClearKeyMap', 'IN_RemoveKeyMapTable', 'InternalCreateBitmap',
   'InternalCreateBorder', 'InternalCreateDiscoveryService', 'InternalCreateDragger', 'InternalCreateEdit', 'InternalCreateFrame', 'InternalCreateGroup',
   'InternalCreateHistogram', 'InternalCreateItemList', 'InternalCreateLobby', 'InternalCreateMapPreview', 'InternalCreateMesh', 'InternalCreateMovie',
-  'InternalCreateScrollbar', 'InternalCreateText', 'InternalCreateWorldMesh', 'InternalSaveGame', 'IsAlly',
+  'InternalCreateScrollbar', 'InternalCreateText', 'InternalSaveGame', 'IsAlly',
   'IsEnemy', 'IsNeutral', 'IsObserver', 'IssueBlueprintCommand', 'IssueCommand',
   'IssueDockCommand', 'IssueUnitCommand', 'KeycodeMSWToMaui', 'KeycodeMauiToMSW', 'LaunchGPGNet', 'LaunchSinglePlayerSession',
   'LoadSavedGame', 'OpenURL', 'ParseEntityCategory', 'PauseSound',

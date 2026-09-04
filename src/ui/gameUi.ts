@@ -26,6 +26,7 @@ import type { Validity } from '../sim/ogrid'
 import type { GameVfs } from '../vfs/vfs'
 import type { EcoSnapshot } from './hud'
 import type { LuaUnitSnapshot } from '../sim/luaSimClient'
+import type { WorldMeshRow } from '../viewer/worldMeshes'
 import type { SessionInfo } from '../sim/session'
 
 /**
@@ -299,6 +300,15 @@ export class GameUi {
       const q = u.buildQueue ?? []
       const items = q.map((i) => `{ id = '${i.id}', count = ${i.count} }`).join(',')
       lines.push(`__uiSetBuildQueue(${u.id}, { ${items} })`)
+      // The command queue GetCommandQueue answers (UserUnit::GetCommandQueue,
+      // Cfile:1367121-1367128): the FACTORY command list when the unit has
+      // one, else its own queue. Always sent, even empty, like the build
+      // queue -- rallypoint.lua re-reads it every beat.
+      const cq = u.fcmds ?? u.orders ?? []
+      const cmds = cq
+        .map((c) => `{ id = ${c.id}, t = '${c.t}', x = ${c.x}, y = ${c.y ?? 0}, z = ${c.z} }`)
+        .join(',')
+      lines.push(`__uiSetCommandQueue(${u.id}, { ${cmds} })`)
     }
     for (const id of this.knownUnits) {
       if (!seen.has(id)) lines.push(`__uiRemoveUnit(${id})`)
@@ -332,6 +342,9 @@ export class GameUi {
     lines.push(`__uiFactoryQueueBeat()`)
     lines.push(`import('/lua/ui/game/gamemain.lua').OnBeat()`)
     this.host.eval(lines.join('\n'))
+    // The UI's world meshes after the beat (rallypoint.lua's OnBeat moved
+    // its markers): the renderer reconciles the registry (worldMeshes.ts).
+    if (this.worldMeshSink) this.worldMeshSink(this.host.pull<WorldMeshRow[]>('__uiWorldMeshesJson()'))
 
     // The engine runs DoInitializing on the FIRST sync beat, gated purely on
     // HasSyncData() (mSyncdat is non-empty) with NO unit-count test
@@ -749,6 +762,15 @@ export class GameUi {
    * Click-feedback blips (AddCommandFeedbackBlip, commandmode.lua:133) —
    * the renderer receives the flat spec and spawns the short-lived mesh.
    */
+  /**
+   * The UI's world meshes (CUIWorldMesh: rally markers, tutorial arrows).
+   * The registry is handed over once per beat, after gamemain.OnBeat.
+   */
+  connectWorldMeshes(sink: (rows: WorldMeshRow[]) => void): void {
+    this.worldMeshSink = sink
+  }
+  private worldMeshSink: ((rows: WorldMeshRow[]) => void) | null = null
+
   connectCommandFeedback(
     sink: (
       meshName: string,

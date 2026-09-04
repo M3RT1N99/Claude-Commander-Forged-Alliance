@@ -27,6 +27,21 @@ export interface MapPropSpawn {
   heading: number
 }
 
+/** One command of a synced queue: id, EUnitCommandType and target position
+ *  (y only where the sim resolved it -- factory commands always). */
+export interface SimOrderEntry {
+  id: number
+  t: 'Move' | 'Attack' | 'Repair' | 'BuildMobile' | 'Patrol' | 'Guard' | 'Reclaim'
+  x: number
+  y?: number
+  z: number
+}
+
+/** A command for a factory's command list (see LuaSimClient.factoryCommand). */
+export type FactoryCommand =
+  | { cmd: 'Move' | 'Patrol' | 'AttackGround'; x: number; z: number }
+  | { cmd: 'Attack' | 'Guard'; targetId: number }
+
 export interface LuaUnitSnapshot {
   id: number
   name: string
@@ -88,9 +103,16 @@ export interface LuaUnitSnapshot {
   /** Erstellungs-Tick — die Build-Shader zählen ihr Alter darüber (material.x). */
   born: number
   /** The unit's active order (command graph): type + target position. */
-  order?: { t: 'Move' | 'Attack' | 'Repair' | 'BuildMobile' | 'Patrol'; x: number; z: number }
+  order?: SimOrderEntry
   /** The full command queue, head first (CUnitCommandQueue). */
-  orders?: { t: 'Move' | 'Attack' | 'Repair' | 'BuildMobile' | 'Patrol'; x: number; z: number }[]
+  orders?: SimOrderEntry[]
+  /**
+   * The FACTORY command list (CAiBuilderImpl::mCommands): the rally commands
+   * the user side reads as the factory's command queue (UserUnit::
+   * GetCommandQueue, Cfile:1367121-1367128), draws beside the unit's own
+   * queue (1245537-1245575) and every product inherits (818487-818600).
+   */
+  fcmds?: SimOrderEntry[]
   /** Turret aim state per weapon (yaw/pitch bones, radians vs. rest pose). */
   turrets?: { b: string; y: number; pb?: string; p?: number }[]
   /** Die Armee der Unit (1-basiert) — unitsOfFocusArmy filtert danach. */
@@ -646,12 +668,15 @@ export class LuaSimClient {
   }
 
   /**
-   * Der Sammelpunkt einer Fabrik (IssueFactoryRallyPoint, Cfile:1008266). Die
-   * Fabrik BEWEGT sich nicht — ihre frischen Einheiten fahren dorthin
-   * (defaultunits.lua:578 CalculateRollOffPoint liest GetRallyPoint).
+   * A FACTORY command (ISSUE_FactoryCommand, Cfile:1350766): Move / Patrol /
+   * Attack / Guard into the factory's command list. The rally point is the
+   * Move at its head (GetRallyPoint, 980887-980900); every finished unit
+   * inherits the whole list (818487-818600); the factory itself stays put.
+   * Shift appends, otherwise the list is replaced (the ClearQueue byte,
+   * 997129-997159).
    */
-  setRallyPoint(id: number, x: number, y: number, z: number): void {
-    this.worker.postMessage({ type: 'rally', id, x, y, z })
+  factoryCommand(id: number, cmd: FactoryCommand, queue?: boolean): void {
+    this.worker.postMessage({ type: 'factoryCommand', id, ...cmd, queue })
   }
 
   /**

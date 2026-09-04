@@ -161,7 +161,7 @@ const recSim = {
   patrol: () => {},
   reclaim: () => {},
   reclaimMapProp: () => {},
-  setRallyPoint: () => {},
+  factoryCommand: () => {},
   build: async () => 0,
 }
 const { worldClick } = await import('../src/ui/worldCommands')

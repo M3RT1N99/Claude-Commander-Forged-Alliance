@@ -138,6 +138,9 @@ function __uiSelectionJson()
       .. ',"canGuard":' .. tostring(canGuard)
       .. ',"canReclaim":' .. tostring(canReclaim)
       .. ',"isFactory":' .. tostring(isFactory)
+      -- IsMobile: the click handler splits the selection by it (sub_81EB20,
+      -- Cfile:1239941-1240011) -- immobile units get FACTORY commands.
+      .. ',"isMobile":' .. tostring(not immobile)
       .. '}'
   end
   return '[' .. table.concat(parts, ',') .. ']'

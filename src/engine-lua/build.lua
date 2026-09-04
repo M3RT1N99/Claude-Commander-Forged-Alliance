@@ -387,6 +387,10 @@ end
 -- (Sim::CreateUnit, beingBuilt = 1) — der Rest ist derselbe Bau-Task wie ueberall.
 function __factoryTick()
   for id, f in pairs(__units) do
+    -- CAiBuilderImpl::OnTick housekeeping of the factory command list
+    -- (Cfile:751344-751458): dead transport targets out, an empty list gets
+    -- the blueprint's initial rally point back.
+    if not f.__dead and not f.__destroyQueued then __factoryCommandTick(f) end
     local q = f.__buildQueue
     -- A paused factory (SetPaused) starts no new unit from its queue
     -- (cfunc_SetPausedL: mIsPaused halts production).
@@ -637,15 +641,16 @@ function __buildApply()
         local okS, errS = pcall(function() b:OnStopBuild(t, task.order) end)
         if not okS then WARN('OnStopBuild: ' .. tostring(errS)) end
         clearFocus(b, t)
-        -- The finished unit INHERITS its factory's commands (sub_5FA340,
-        -- Cfile:818487-818600): every command of the factory goes into the new
-        -- unit's queue; only TransportLoadUnits is skipped for AIR/NAVAL units.
-        -- The rally point IS such a command — IssueFactoryRallyPoint puts a
-        -- UNITCOMMAND_Move into the factory's command list (Cfile:1008346). It
-        -- lands BEHIND the roll-off command RollOffUnit just issued
+        -- The finished unit INHERITS its factory's command list
+        -- (CFactoryBuildTask::InheritCommandsTo, Cfile:818487-818600), called
+        -- after the completed build's OnStopBuild (818844-818966): every
+        -- command of the factory goes into the new unit's queue; only
+        -- TransportLoadUnits is skipped for AIR/NAVAL units. The rally point
+        -- IS such a command (a UNITCOMMAND_Move in the list, Cfile:1008346),
+        -- so it lands BEHIND the roll-off command RollOffUnit just issued
         -- (defaultunits.lua:571): off the pad first, then to the rally point.
-        if task.order == 'FactoryBuild' and b.__rally then
-          __issueOrder(task.target, { type = 'Move', x = b.__rally[1], z = b.__rally[3] }, false)
+        if task.order == 'FactoryBuild' then
+          __inheritFactoryCommands(task.builder, task.target)
         end
         -- Now the produced unit is counted OUT of the factory's queue — the
         -- engine decrements the task's OWN BuildFactory command on completion

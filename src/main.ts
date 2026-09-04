@@ -64,8 +64,9 @@ import {
   createFactionBuildMaterials,
   type UnitTextures,
 } from './viewer/unitMaterial'
-import { OrderLineSystem, type OrderLineEntry } from './viewer/orderLines'
+import { OrderLineSystem, PARAMS, type OrderLineEntry } from './viewer/orderLines'
 import { CommandFeedbackSystem, type BlipAssets } from './viewer/commandFeedback'
+import { WorldMeshSystem } from './viewer/worldMeshes'
 
 const $ = <T extends HTMLElement>(sel: string): T => {
   const el = document.querySelector<T>(sel)
@@ -728,6 +729,7 @@ let trails: TrailSystem | null = null
 let beams: BeamSystem | null = null
 let orderLines: OrderLineSystem | null = null
 let commandFeedback: CommandFeedbackSystem | null = null
+let worldMeshes: WorldMeshSystem | null = null
 const blipAssetCache = new Map<string, Promise<BlipAssets | null>>()
 let gameAudio: GameAudio | null = null
 /** Sim loop handles (HSound analog) map into their own id space. */
@@ -1187,9 +1189,7 @@ async function startSandbox(mapFolder: string): Promise<void> {
     // Click-feedback blips (commandmode.lua:128-176 picks mesh/texture/
     // shader per command; the engine port lives in commandFeedback.ts).
     commandFeedback?.dispose()
-    commandFeedback = new CommandFeedbackSystem(
-      (o) => viewer.addHelper(o),
-      (meshPath, texPath) => {
+    const loadBlipAssets = (meshPath: string, texPath: string): Promise<BlipAssets | null> => {
         const key = `${meshPath}|${texPath}`
         let p = blipAssetCache.get(key)
         if (!p) {
@@ -1212,31 +1212,54 @@ async function startSandbox(mapFolder: string): Promise<void> {
           blipAssetCache.set(key, p)
         }
         return p
-      },
-    )
+    }
+    // BlueprintID branch of a feedback blip / world mesh (Cfile:1281792-1830,
+    // 1296154-1296180): LOD0 mesh and albedo of the unit blueprint, the scale
+    // OVERRIDDEN by Display.UniformScale.
+    const resolveBlueprintMesh = async (
+      blueprintId: string,
+    ): Promise<{ meshPath: string; texPath: string; scale: number } | null> => {
+      if (!vfs) return null
+      const id = blueprintId.toLowerCase()
+      try {
+        const bp = parseBlueprint(await vfs.readText(`units/${id}/${id}_unit.bp`))
+        const paths = resolveUnitPaths(id, bp, (p) => vfs!.exists(p))
+        if (!paths) return null
+        const us = bpGet(bp, 'Display.UniformScale')
+        return {
+          meshPath: paths.mesh,
+          texPath: paths.albedo[paths.albedo.length - 1]!,
+          scale: typeof us === 'number' && us > 0 ? us : 1,
+        }
+      } catch {
+        return null
+      }
+    }
+    commandFeedback = new CommandFeedbackSystem((o) => viewer.addHelper(o), loadBlipAssets)
+    // The UI's world meshes (rally markers, tutorial arrows): the same
+    // assets and material family, persistent and steered by the UI VM.
+    worldMeshes?.dispose()
+    worldMeshes = new WorldMeshSystem((o) => viewer.addHelper(o), loadBlipAssets, resolveBlueprintMesh)
+    ;(window as unknown as { __cfaWorldMeshes?: () => number }).__cfaWorldMeshes = () =>
+      worldMeshes?.count() ?? 0
+    {
+      const wm = worldMeshes
+      gameUi.connectWorldMeshes((rows) => wm.sync(rows))
+    }
     {
       const cf = commandFeedback
       gameUi.connectCommandFeedback(
         (meshName, blueprintId, textureName, shaderName, uniformScale, x, y, z, duration) => {
-          // BlueprintID branch (Cfile:1281792-1830): LOD0 mesh of the unit
-          // blueprint, scale OVERRIDDEN by Display.UniformScale.
           void (async () => {
             let meshPath = meshName
             let texPath = textureName
             let scale = uniformScale
-            if (!meshPath && blueprintId && vfs) {
-              const id = blueprintId.toLowerCase()
-              try {
-                const bp = parseBlueprint(await vfs.readText(`units/${id}/${id}_unit.bp`))
-                const paths = resolveUnitPaths(id, bp, (p) => vfs!.exists(p))
-                if (!paths) return
-                meshPath = paths.mesh
-                texPath = texPath || paths.albedo[paths.albedo.length - 1]!
-                const us = bpGet(bp, 'Display.UniformScale')
-                if (typeof us === 'number' && us > 0) scale = us
-              } catch {
-                return
-              }
+            if (!meshPath && blueprintId) {
+              const bp = await resolveBlueprintMesh(blueprintId)
+              if (!bp) return
+              meshPath = bp.meshPath
+              texPath = texPath || bp.texPath
+              scale = bp.scale
             }
             if (!meshPath) return
             await cf.spawn({ meshPath, texPath, shaderName, scale, x, y, z, duration })
@@ -2774,6 +2797,31 @@ function luaSimUpdate(): void {
         pz = o.z
       })
     }
+    if (u.selected && s.fcmds) {
+      // An immobile FACTORY's command list is drawn beside its own queue as a
+      // second polyline from the unit (UICommandGraph::CreateMeshes,
+      // Cfile:1245537-1245575): the rally line.
+      let px = x
+      let py = y
+      let pz = z
+      s.fcmds.forEach((o, i) => {
+        if (!(o.t in PARAMS)) return
+        // The polyline key is unitId * 4096 + seg (orderLines.ts); the unit's
+        // own queue takes seg 0..499 (its 500-entry cap), the factory list
+        // 1000..4095 -- the engine caps neither list, the key space does.
+        if (1000 + i >= 4096) return
+        orderEntries.push({
+          unitId: u.id,
+          seg: 1000 + i,
+          type: o.t,
+          from: { x: px, y: py, z: pz },
+          to: { x: o.x, y: o.y ?? viewer.heightAt(o.x, o.z), z: o.z },
+        })
+        px = o.x
+        py = o.y ?? viewer.heightAt(o.x, o.z)
+        pz = o.z
+      })
+    }
     u.ring.visible = u.selected
     if (u.selected) {
       // Four bracket quads on the corners of the selection box. The thickness
@@ -2881,6 +2929,7 @@ function luaSimUpdate(): void {
 
   orderLines?.update(orderEntries)
   commandFeedback?.update(performance.now() / 1000)
+  worldMeshes?.update(performance.now() / 1000)
 }
 
 /**

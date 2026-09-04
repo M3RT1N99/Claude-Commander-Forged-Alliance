@@ -91,8 +91,8 @@ not decide anything.
 
 Each engine binding is registered in exactly one state via `mPrevDef`
 ([docs/research/engine-api.md](docs/research/engine-api.md), generated):
-`scr_CoreInits` = both VMs (70), `scr_UserInits` = UI only (453),
-`sim_SimInits` = Sim only (626). That is why the Sim does not know
+`scr_CoreInits` = both VMs (70), `scr_UserInits` = UI only (460),
+`sim_SimInits` = Sim only (685). That is why the Sim does not know
 `_c_CreateCursor` and the UI does not know `CreateUnit`. Never boot both into
 one VM.
 

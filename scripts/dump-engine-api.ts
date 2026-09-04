@@ -1,17 +1,24 @@
 /**
- * Erzeugt docs/research/engine-api.md aus der IDA-Decompilation.
+ * The engine's Lua API, per VM, straight from the IDA decompilation.
  *
- * Jede Lua-Bindung der Engine ist ein globales `Moho::CScrLuaInitForm luadef_*`
- * mit `mMethodName`, `mClassName` und `mPrevDef`. Das `mPrevDef` verrät, in
- * WELCHE Lua-VM die Bindung geht:
+ * Every binding is a `Moho::CScrLuaInitForm luadef_*` with `mMethodName`,
+ * `mClassName` and `mPrevDef`. `mPrevDef` names the init list the binding
+ * hangs on -- and with it the Lua VM it is registered in:
  *
- *   scr_CoreInits  — beide VMs (Sim und UI)
- *   scr_UserInits  — NUR die UI-VM
- *   sim_SimInits   — NUR die Sim-VM
+ *   scr_CoreInits  -- BOTH VMs
+ *   scr_UserInits  -- the UI VM only
+ *   sim_SimInits   -- the Sim VM only
  *
- * Genau diese Dreiteilung ist der Grund, warum die UI eine eigene Lua-VM
- * braucht: `_c_CreateCursor` gibt es in der Sim nicht, `CreateUnit` nicht in
- * der UI. Wer beides in eine VM wirft, baut etwas, das es nie gab.
+ * That is why the Sim does not know `_c_CreateCursor` and the UI does not know
+ * `CreateUnit`. Putting both into one VM creates something that never existed.
+ *
+ * The three assignments of one luadef come in NO fixed order in the
+ * decompilation (IssueFactoryRallyPoint has mMethodName before mPrevDef,
+ * Cfile:1008266-1008270; most bindings the other way round). An earlier
+ * version matched them with one ordered regex and silently dropped every
+ * binding whose lines were ordered differently -- IssueFactoryRallyPoint and
+ * IssueClearFactoryCommands were missing from the checklist for months. The
+ * scan below collects the fields per luadef name regardless of order.
  *
  *   npx tsx scripts/dump-engine-api.ts
  */
@@ -22,20 +29,62 @@ const OUT = 'docs/research/engine-api.md'
 
 const src = await readFile(CFILE, 'utf8')
 
-const re =
-  /luadef_(\w+)\.mPrevDef = Moho::(scr_\w+|sim_\w+)\.mForms;[\s\S]*?luadef_\1\.mMethodName = "([^"]+)";\s*luadef_\1\.mClassName = "([^"]+)";/g
+interface Def {
+  init?: string
+  method?: string
+  cls?: string
+}
+const defs = new Map<string, Def>()
+// 20 luadefs hang on a list head IDA could not name: `mPrevDef =
+// MEMORY[0xF5A124]` (18 Unit/UnitWeapon methods, e.g. UnitIsMobile at
+// Cfile:977841) and `MEMORY[0xF59690]` (UserUnitGetGuardedEntity,
+// SetCurrentFactoryForQueueDisplay). The list is inferred from the class:
+// every other luadef of the same mClassName names its list symbolically
+// (Unit/UnitWeapon -> sim_SimInits, UserUnit -> scr_UserInits); a raw head
+// takes the list its class mates use, a global on such a head the list of
+// the classes sharing the address.
+const rawHead = new Map<string, string>() // luadef name -> MEMORY address
+const line =
+  /luadef_(\w+)\.(mPrevDef|mMethodName|mClassName) = (?:Moho::(scr_\w+|sim_\w+)\.mForms|MEMORY\[(0x[0-9A-F]+)\]|"([^"]*)");/g
+let m: RegExpExecArray | null
+while ((m = line.exec(src)) !== null) {
+  const [, name, field, init, addr, str] = m
+  const d = defs.get(name!) ?? {}
+  defs.set(name!, d)
+  if (field === 'mPrevDef') {
+    if (init) d.init = init
+    else if (addr) rawHead.set(name!, addr)
+  } else if (field === 'mMethodName') d.method = str
+  else d.cls = str
+}
+const listOfClass = new Map<string, string>()
+for (const d of defs.values()) {
+  if (d.init && d.cls && d.cls !== '<global>') listOfClass.set(d.cls, d.init)
+}
+const listOfAddr = new Map<string, string>()
+for (const [name, addr] of rawHead) {
+  const d = defs.get(name)!
+  const viaClass = d.cls && d.cls !== '<global>' ? listOfClass.get(d.cls) : undefined
+  if (viaClass) listOfAddr.set(addr, viaClass)
+}
+for (const [name, addr] of rawHead) {
+  const d = defs.get(name)!
+  if (!d.init) d.init = listOfAddr.get(addr)
+}
 
 type Bucket = Map<string, Set<string>> // className -> methods
 const inits = new Map<string, Bucket>()
-
-let m: RegExpExecArray | null
-while ((m = re.exec(src)) !== null) {
-  const [, , init, method, cls] = m
-  const bucket = inits.get(init!) ?? new Map<string, Set<string>>()
-  inits.set(init!, bucket)
-  const set = bucket.get(cls!) ?? new Set<string>()
-  bucket.set(cls!, set)
-  set.add(method!)
+let incomplete = 0
+for (const d of defs.values()) {
+  if (!d.init || !d.method || !d.cls) {
+    incomplete++
+    continue
+  }
+  const bucket = inits.get(d.init) ?? new Map<string, Set<string>>()
+  inits.set(d.init, bucket)
+  const set = bucket.get(d.cls) ?? new Set<string>()
+  bucket.set(d.cls, set)
+  set.add(d.method)
 }
 
 const sortedList = (s: Set<string> | undefined): string[] => [...(s ?? [])].sort()
@@ -48,11 +97,11 @@ const section = (init: string, title: string, note: string): string => {
   const total = [...bucket.values()].reduce((n, s) => n + s.size, 0)
 
   let out = `## ${title}\n\n${note}\n\n`
-  out += `**${total} Bindungen** — ${globals.length} Globals, ${classes.length} Klassen.\n\n`
+  out += `**${total} bindings** — ${globals.length} globals, ${classes.length} classes.\n\n`
   out += `### Globals (${globals.length})\n\n`
   out += globals.map((g) => `\`${g}\``).join(', ') + '\n\n'
   if (classes.length > 0) {
-    out += `### Klassen (${classes.length})\n\n`
+    out += `### Classes (${classes.length})\n\n`
     for (const c of classes) {
       const methods = sortedList(bucket.get(c))
       out += `**${c}** (${methods.length}): ${methods.map((x) => `\`${x}\``).join(', ')}\n\n`
@@ -61,27 +110,28 @@ const section = (init: string, title: string, note: string): string => {
   return out
 }
 
-const body = `# Engine-Lua-API — welche Bindung in welche VM geht
+const body = `# Engine Lua API — which binding is registered in which VM
 
-**Generiert von [scripts/dump-engine-api.ts](../../scripts/dump-engine-api.ts) aus der
-IDA-Decompilation. Nicht von Hand pflegen.**
+**Generated by [scripts/dump-engine-api.ts](../../scripts/dump-engine-api.ts) from the
+IDA decompilation. Do not edit manually.**
 
-Jede Lua-Bindung der Engine ist ein \`Moho::CScrLuaInitForm luadef_*\`. Das Feld
-\`mPrevDef\` verrät, in welche Lua-VM sie registriert wird — und damit, dass die
-Engine **zwei getrennte Lua-States** hat:
+Each engine Lua binding is a \`Moho::CScrLuaInitForm luadef_*\`. The field
+\`mPrevDef\` reveals the Lua VM in which it is registered, and therefore shows
+that the engine has **two separate Lua states**:
 
-| Init-Liste | Ziel-VM |
+| Init list | Target VM |
 |---|---|
-| \`scr_CoreInits\` | beide (Sim **und** UI) |
-| \`scr_UserInits\` | nur die **UI**-VM |
-| \`sim_SimInits\` | nur die **Sim**-VM |
+| \`scr_CoreInits\` | both (Sim **and** UI) |
+| \`scr_UserInits\` | only the **UI** VM |
+| \`sim_SimInits\` | only the **Sim** VM |
 
-Darum kennt die Sim kein \`_c_CreateCursor\` und die UI kein \`CreateUnit\`. Wer
-beides in eine VM wirft, baut etwas, das es im Original nie gab.
+That is why the Sim does not know \`_c_CreateCursor\` and the UI does not know
+\`CreateUnit\`. Putting both into one VM creates something that never existed in
+the original.
 
-${section('scr_CoreInits', 'Core — in beiden VMs', 'Vektor-Mathematik, Kategorien, Threads, Blueprint-Registrierung, Dateizugriff.')}
-${section('scr_UserInits', 'User — nur die UI-VM', 'maui-Controls, Kommandos, Selektion, Kamera, Session, Preferences.')}
-${section('sim_SimInits', 'Sim — nur die Sim-VM', 'Units, Waffen, Brains, Platoons, Effekte, Ökonomie.')}`
+${section('scr_CoreInits', 'Core — in both VMs', 'Vector mathematics, categories, threads, blueprint registration, and file access.')}
+${section('scr_UserInits', 'User — the UI VM only', 'maui controls, commands, selection, camera, session, and preferences.')}
+${section('sim_SimInits', 'Sim — the Sim VM only', 'Units, weapons, brains, platoons, effects, economy.')}`
 
 await mkdir('docs/research', { recursive: true })
 await writeFile(OUT, body, 'utf8')
@@ -89,4 +139,4 @@ await writeFile(OUT, body, 'utf8')
 const counts = [...inits.entries()].map(
   ([k, v]) => `${k}: ${[...v.values()].reduce((n, s) => n + s.size, 0)}`,
 )
-console.log(`${OUT} geschrieben — ${counts.join(', ')}`)
+console.log(`${OUT} written — ${counts.join(', ')}; ${incomplete} luadef(s) without all three fields`)

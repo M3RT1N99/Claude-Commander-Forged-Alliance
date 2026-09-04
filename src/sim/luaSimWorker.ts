@@ -98,9 +98,13 @@ type InMsg =
   // DISTINCT from the whole-world 'pause' above (that halts the beat).
   | { type: 'unitPause'; id: number; paused: boolean }
   | { type: 'upgrade'; id: number; blueprint: string }
-  // Der Sammelpunkt einer Fabrik (IssueFactoryRallyPoint, Cfile:1008266) — KEIN
-  // Bewegungsbefehl: die Fabrik bleibt stehen.
-  | { type: 'rally'; id: number; x: number; y: number; z: number }
+  // A FACTORY command (ISSUE_FactoryCommand, Cfile:1350766 -> Sim::
+  // IssueFactoryCommand 1075805 -> UNIT_IssueFactoryCommand 1007613): into
+  // the builder's command list, which every finished unit inherits; the
+  // factory itself stays put. clear = not shift (the ClearQueue byte of the
+  // message, CDecoder::DecodeIssueFactoryCommand 997129-997159).
+  | { type: 'factoryCommand'; id: number; cmd: 'Move' | 'Patrol' | 'AttackGround'; x: number; z: number; queue?: boolean }
+  | { type: 'factoryCommand'; id: number; cmd: 'Attack' | 'Guard'; targetId: number; queue?: boolean }
   // Der Reset traegt dieselbe Nutzlast wie der Boot: die Lua der NEUEN Karte
   // und ihre Sitzung. Ohne beides startete die zweite Sandbox ohne ACUs und
   // ohne Lagerstaetten — `SetupSession()` fand die Kartendateien nicht.
@@ -351,8 +355,13 @@ const handleMessage = async (msg: InMsg): Promise<void> => {
     // Abbruch-Kette ab (Cfile:814989), erst dann kommt das Navigator-Ziel.
     // Shift (queue) appends instead: clear = NOT shift (Cfile:1240965).
     host.eval(`__dispatchMove(${msg.id}, ${msg.x}, ${msg.z}, ${msg.queue ? 'false' : 'true'})`)
-  } else if (msg.type === 'rally') {
-    host.eval(`local u=__units[${msg.id}]; if u then u:SetRallyPoint({ ${msg.x}, ${msg.y}, ${msg.z} }) end`)
+  } else if (msg.type === 'factoryCommand') {
+    const clear = msg.queue ? 'false' : 'true'
+    if ('targetId' in msg) {
+      host.eval(`__dispatchFactory${msg.cmd}(${msg.id}, ${msg.targetId}, ${clear})`)
+    } else {
+      host.eval(`__dispatchFactory${msg.cmd}(${msg.id}, ${msg.x}, ${msg.z}, ${clear})`)
+    }
   } else if (msg.type === 'stop') {
     host.eval(`__dispatchStop(${msg.id})`)
   } else if (msg.type === 'attack') {

@@ -2637,6 +2637,218 @@ function __dispatchGuard(unitId, targetId, clear)
   end
 end
 
+-- === The factory command list (CAiBuilderImpl::mCommands) ===
+--
+-- A unit in category FACTORY carries a builder whose mBool1 is set (the Unit
+-- constructor calls SetBool1(1) only for IsInCategory("FACTORY"); GetBool1
+-- reads it). That builder keeps a SECOND command list beside the unit's own
+-- command queue: the commands every unit it finishes inherits
+-- (CFactoryBuildTask::InheritCommandsTo, Cfile:818487-818600). The build
+-- queue is NOT in it -- BuildFactory entries live in the unit's
+-- CUnitCommandQueue (Cfile:838000-838062); IssueClearCommands clears that,
+-- IssueClearFactoryCommands only this list (CAiBuilderImpl::RemoveAllUnits,
+-- vtable +56).
+--
+-- UNIT_IssueFactoryCommand (Cfile:1007613-1007700): per live, untransported
+-- unit whose builder answers GetBool1 (1007635-1007663), the list is emptied
+-- first when the clear flag is set (mBuilder->RemoveAllUnits, 1007672-1007673)
+-- and the command appended (AddUnitToCommand at index -1, 1007674-1007677).
+-- The callers and their clear flag: the Lua IssueFactoryRallyPoint 0
+-- (1008356), the engine's own CAiBuilderImpl::IssueRallyPoint 1 (751323), the
+-- player's ISSUE_FactoryCommand the ClearQueue byte of the message, i.e. not
+-- shift (CDecoder::DecodeIssueFactoryCommand 997129-997159). Not modelled:
+-- the NoRush radius gate (1007648-1007655) -- this sim has no NoRush timer.
+__factoryCommands = {}
+__factoryCommandSerial = 0
+
+--- GetBool1 (CAiBuilderImpl::mBool1): the builder belongs to a FACTORY unit.
+function __isFactoryBuilder(u)
+  return u ~= nil and u.__bp ~= nil and unitInCat(u, 'FACTORY')
+end
+
+--- CAiTarget::GetTargetPosGun (the rally point and the synced queue read it,
+--- Cfile:980893): a ground target is its position, an entity target the
+--- entity's position; nil for an entity that is gone.
+function __factoryCommandPos(cmd)
+  if cmd.gx then return cmd.gx, cmd.gy or GetTerrainHeight(cmd.gx, cmd.gz), cmd.gz end
+  if cmd.x then return cmd.x, cmd.y or GetTerrainHeight(cmd.x, cmd.z), cmd.z end
+  local t = cmd.target and __units[cmd.target]
+  if t and t.__pos then return t.__pos[1], t.__pos[2], t.__pos[3] end
+  return nil
+end
+
+--- UNIT_IssueFactoryCommand for ONE unit. Returns true when the command was
+--- added (the engine drops the CUnitCommand again when no unit took it,
+--- 1007690-1007693).
+function __issueFactoryCommand(unitId, cmd, clear)
+  local u = __units[unitId]
+  if not u or u.__dead then return false end       -- IsDead (1007635)
+  if u.__transportedBy then return false end        -- mTransportedBy (1007638-1007639)
+  if not __isFactoryBuilder(u) then return false end -- mBuilder && GetBool1 (1007660-1007663)
+  local list = __factoryCommands[unitId]
+  if not list then
+    list = {}
+    __factoryCommands[unitId] = list
+  end
+  if clear then
+    for i = #list, 1, -1 do list[i] = nil end        -- RemoveAllUnits
+  end
+  __factoryCommandSerial = __factoryCommandSerial + 1
+  cmd.id = __factoryCommandSerial
+  list[#list + 1] = cmd                               -- AddUnit(index -1) appends
+  u.__factoryNeedsRefresh = true                      -- mNeedsRefresh
+  return true
+end
+
+--- CAiBuilderImpl::RemoveAllUnits (IssueClearFactoryCommands, vtable +56):
+--- the list is emptied, the unit's own command queue untouched.
+function __clearFactoryCommands(unitId)
+  local list = __factoryCommands[unitId]
+  if not list then return end
+  for i = #list, 1, -1 do list[i] = nil end
+  local u = __units[unitId]
+  if u then u.__factoryNeedsRefresh = true end
+end
+
+--- CAiBuilderImpl::IssueRallyPoint (Cfile:751236-751296): the blueprint's
+--- Economy.InitialRallyX/Z (struct defaults 0 and 5, RUnitBlueprintEconomy
+--- ctor 656498-656499) as a local offset (x, 0, z), rotated by the unit's
+--- orientation and added to its position (751242-751275), issued as a
+--- factory Move with AITARGET_Ground and the clear flag (751318-751323).
+--- The unit constructor issues it for every FACTORY builder before OnCreate
+--- (950550-950552); the builder tick re-issues it whenever the list is empty
+--- (751444-751445). The engine rotates by the full quaternion; this sim's
+--- units carry a heading (forward = (sin h, cos h), motion.lua), so the
+--- offset turns about +Y by that heading.
+function __issueInitialRally(u)
+  local e = u.__bp.Economy
+  local ix, iz = e.InitialRallyX, e.InitialRallyZ
+  local h = u.__heading or 0
+  local p = u.__pos
+  local x = p[1] + ix * math.cos(h) + iz * math.sin(h)
+  local z = p[3] - ix * math.sin(h) + iz * math.cos(h)
+  __issueFactoryCommand(u.__id, { type = 'Move', x = x, y = p[2], z = z }, true)
+end
+
+--- CAiBuilderImpl::OnTick (Cfile:751344-751458), FACTORY builders only
+--- (mBool1, 751347): a TransportLoadUnits command whose target is no
+--- FERRYBEACON / TRANSPORTATION / AIRSTAGINGPLATFORM (or is gone) leaves the
+--- list (751382-751432); an EMPTY list gets the initial rally point back
+--- (751444-751445).
+function __factoryCommandTick(u)
+  if not __isFactoryBuilder(u) then return end
+  local list = __factoryCommands[u.__id]
+  if list then
+    local i = 1
+    while i <= #list do
+      local c = list[i]
+      local keep = true
+      if c.type == 'TransportLoadUnits' then
+        local t = c.target and __units[c.target]
+        keep = t ~= nil and not t.__dead
+          and (unitInCat(t, 'FERRYBEACON') or unitInCat(t, 'TRANSPORTATION')
+               or unitInCat(t, 'AIRSTAGINGPLATFORM'))
+      end
+      if keep then
+        i = i + 1
+      else
+        table.remove(list, i)
+        u.__factoryNeedsRefresh = true
+      end
+    end
+  end
+  if not list or #list == 0 then __issueInitialRally(u) end
+end
+
+--- CFactoryBuildTask::InheritCommandsTo (Cfile:818487-818600): after the
+--- completed build's OnStopBuild (818844, which is where RollOffUnit issues
+--- its Move) every command of the factory's list goes into the product's
+--- queue in order; UNITCOMMAND_TransportLoadUnits is skipped for AIR / NAVAL
+--- products.
+function __inheritFactoryCommands(factoryId, productId)
+  local list = __factoryCommands[factoryId]
+  local p = __units[productId]
+  if not list or not p or p.__dead then return end
+  local airOrNaval = unitInCat(p, 'AIR') or unitInCat(p, 'NAVAL')
+  for _, c in ipairs(list) do
+    if not (c.type == 'TransportLoadUnits' and airOrNaval) then
+      local copy = {}
+      for k, v in pairs(c) do copy[k] = v end
+      copy.id = nil
+      copy.serial = nil
+      copy.cmdId = nil
+      __issueOrder(productId, copy, false)
+    end
+  end
+end
+
+-- The unit-list check of func_GetUnitList (the engine walks a Lua table of
+-- units; a non-table is a type error there).
+local function factoryUnitList(units, who)
+  if type(units) ~= 'table' then
+    error(who .. ': expected a table of units, got ' .. type(units), 3)
+  end
+  return units
+end
+
+--- IssueFactoryRallyPoint(units, position) -- cfunc_IssueFactoryRallyPointL
+--- (Cfile:1008296-1008372): exactly two arguments (1008311), a
+--- UNITCOMMAND_Move with the position as its target, through
+--- UNIT_IssueFactoryCommand WITHOUT the clear flag (1008356) -- appended
+--- behind whatever the list holds. aibrain.lua:2114-2115 clears first.
+function IssueFactoryRallyPoint(units, position)
+  if position == nil then
+    error('IssueFactoryRallyPoint\n  expected 2 args, but got 1', 2)
+  end
+  if type(position) ~= 'table' or type(position[1]) ~= 'number'
+    or type(position[2]) ~= 'number' or type(position[3]) ~= 'number' then
+    error('IssueFactoryRallyPoint: expected a position vector', 2)
+  end
+  for _, u in ipairs(factoryUnitList(units, 'IssueFactoryRallyPoint')) do
+    if type(u) == 'table' and u.__id then
+      __issueFactoryCommand(u.__id, { type = 'Move', x = position[1], y = position[2], z = position[3] }, false)
+    end
+  end
+end
+
+--- IssueClearFactoryCommands(units) -- cfunc_IssueClearFactoryCommandsL
+--- (Cfile:1008405-1008460): exactly one argument (1008411); every live unit
+--- with a builder gets RemoveAllUnits (vtable +56), GetBool1 is not checked.
+function IssueClearFactoryCommands(units, extra)
+  if extra ~= nil then
+    error('IssueClearFactoryCommands\n  expected 1 args, but got 2', 2)
+  end
+  for _, u in ipairs(factoryUnitList(units, 'IssueClearFactoryCommands')) do
+    if type(u) == 'table' and u.__id and not u.__dead then
+      __clearFactoryCommands(u.__id)
+    end
+  end
+end
+
+--- The player's factory commands (ISSUE_FactoryCommand from the world click,
+--- Cfile:1241182-1241833; the selection is split by IsMobile, sub_81EB20
+--- 1239941-1240011): the same command types as unit commands, clear = not
+--- shift. Ground targets keep AITARGET_Ground with the click point.
+function __dispatchFactoryMove(unitId, x, z, clear)
+  __issueFactoryCommand(unitId, { type = 'Move', x = x, z = z }, clear)
+end
+function __dispatchFactoryPatrol(unitId, x, z, clear)
+  __issueFactoryCommand(unitId, { type = 'Patrol', x = x, z = z }, clear)
+end
+function __dispatchFactoryAttack(unitId, targetId, clear)
+  if __units[targetId] then
+    __issueFactoryCommand(unitId, { type = 'Attack', target = targetId }, clear)
+  end
+end
+function __dispatchFactoryAttackGround(unitId, x, z, clear)
+  __issueFactoryCommand(unitId, { type = 'Attack', gx = x, gz = z }, clear)
+end
+function __dispatchFactoryGuard(unitId, targetId, clear)
+  if __units[targetId] then
+    __issueFactoryCommand(unitId, { type = 'Guard', target = targetId }, clear)
+  end
+end
+
 -- FlattenMapRect(x, z, w, h, y): Gebaeude planieren ihr Baufeld
 -- (defaultunits.lua:72, StructureUnit:FlattenSkirt). Die Engine deformiert die
 -- Hoehenkarte; solange keine Karte geladen ist, werden die Rechtecke

@@ -1,5 +1,6 @@
 import type { LuaHost } from '../lua/host'
 import type { Validity } from '../sim/ogrid'
+import type { FactoryCommand } from '../sim/luaSimClient'
 
 /**
  * Der Engine-Teil der Weltansicht: Klick → Befehl.
@@ -51,11 +52,12 @@ export interface WorldCommandSim {
   /** Reclaim a MAP prop (tree/rock) by its scmap instance index. */
   reclaimMapProp(id: number, mapIndex: number, queue?: boolean): void
   /**
-   * Der SAMMELPUNKT einer Fabrik (IssueFactoryRallyPoint, Cfile:1008266). Er ist
-   * kein Bewegungsbefehl: die Fabrik bleibt stehen, nur ihre frischen Einheiten
-   * fahren dorthin (defaultunits.lua:578 CalculateRollOffPoint).
+   * A FACTORY command (ISSUE_FactoryCommand, Cfile:1350766): the click's
+   * command into the factory's command list -- the rally point is the Move at
+   * its head, every product inherits the list (818487-818600). The factory
+   * stays put.
    */
-  setRallyPoint(id: number, x: number, y: number, z: number): void
+  factoryCommand(id: number, cmd: FactoryCommand, queue?: boolean): void
   build(
     builderId: number,
     blueprintId: string,
@@ -84,6 +86,13 @@ export interface SelectedUnit {
   canReclaim: boolean
   /** Kategorie FACTORY — sie bekommt einen Sammelpunkt statt eines Move-Befehls. */
   isFactory: boolean
+  /**
+   * IsMobile (a MotionType other than RULEUMT_None). The click handler splits
+   * the selection by it (sub_81EB20, Cfile:1239941-1240011): a mobile unit's
+   * command goes out as a unit command, an immobile unit's as a FACTORY
+   * command, which the sim keeps only for FACTORY builders (1007660-1007663).
+   */
+  isMobile: boolean
 }
 
 /** Der Command-Mode, wie die Original-Lua ihn führt (commandmode.lua:109). */
@@ -184,6 +193,21 @@ export async function worldClick(
   if (cm.mode === 'order' && cm.name === 'RULEUCC_Attack') {
     let n = 0
     for (const u of selection) {
+      if (!u.isMobile) {
+        // An immobile FACTORY takes the attack into its command list: its
+        // products attack (ISSUE_FactoryCommand, Cfile:1241000-1241182).
+        if (u.isFactory) {
+          sim.factoryCommand(
+            u.id,
+            opts.enemyTargetId === undefined
+              ? { cmd: 'AttackGround', x: hit.x, z: hit.z }
+              : { cmd: 'Attack', targetId: opts.enemyTargetId },
+            opts.queue,
+          )
+          n++
+        }
+        continue
+      }
       if (opts.enemyTargetId === undefined) {
         if (!u.canAttackGround) continue
         sim.attackGround(u.id, hit.x, hit.z, opts.queue)
@@ -211,7 +235,14 @@ export async function worldClick(
   if (cm.mode === 'order' && cm.name === 'RULEUCC_Patrol') {
     let n = 0
     for (const u of selection) {
-      if (u.canMove) {
+      if (!u.isMobile) {
+        // An immobile FACTORY takes the patrol into its command list: its
+        // products patrol (ISSUE_FactoryCommand, Cfile:1241396-1241420).
+        if (u.isFactory) {
+          sim.factoryCommand(u.id, { cmd: 'Patrol', x: hit.x, z: hit.z }, opts.queue)
+          n++
+        }
+      } else if (u.canMove) {
         sim.patrol(u.id, hit.x, hit.z, opts.queue)
         n++
       }
@@ -298,18 +329,23 @@ export async function worldClick(
     let moved = 0
     let rallied = 0
     for (const u of selection) {
-      if (u.canMove) {
+      if (!u.isMobile) {
+        // The immobile part of the selection gets the Move as a FACTORY
+        // command (ISSUE_FactoryCommand, Cfile:1241182); only a FACTORY
+        // builder keeps it -- as its rally point.
+        if (u.isFactory) {
+          sim.factoryCommand(u.id, { cmd: 'Move', x: hit.x, z: hit.z }, opts.queue)
+          rallied++
+        }
+      } else if (u.canMove) {
         sim.move(u.id, hit.x, hit.z, opts.queue)
         moved++
-      } else if (u.isFactory) {
-        sim.setRallyPoint(u.id, hit.x, elevation(hit.x, hit.z), hit.z)
-        rallied++
       }
     }
     if (moved === 0 && rallied === 0) return null
     onCommandIssued(host, {
-      // The rally point is issued as UNITCOMMAND_Move (IssueFactoryRallyPoint,
-      // Cfile:1008346) — its feedback is a Move blip, not an invented type.
+      // The rally point is a UNITCOMMAND_Move in the factory's command list
+      // (Cfile:1008346) — its feedback is a Move blip, not an invented type.
       CommandType: 'Move',
       Position: { x: hit.x, y: elevation(hit.x, hit.z), z: hit.z },
       Clear: !opts.queue,
@@ -395,6 +431,14 @@ export async function worldClick(
   if (opts.enemyTargetId !== undefined) {
     let n = 0
     for (const u of selection) {
+      if (!u.isMobile) {
+        // Immobile FACTORY: the attack goes into its command list.
+        if (u.isFactory) {
+          sim.factoryCommand(u.id, { cmd: 'Attack', targetId: opts.enemyTargetId }, opts.queue)
+          n++
+        }
+        continue
+      }
       if (!u.canAttack) continue
       sim.attack(u.id, opts.enemyTargetId, opts.queue)
       n++
@@ -497,19 +541,25 @@ export async function worldClick(
   let moved = 0
   let rallied = 0
   for (const u of selection) {
-    if (u.canMove) {
+    if (!u.isMobile) {
+      // The immobile part of the selection gets the Move as a FACTORY command
+      // (sub_81EB20 split, ISSUE_FactoryCommand Cfile:1241182): the rally
+      // point of a FACTORY builder, nothing for any other immobile unit.
+      if (u.isFactory) {
+        sim.factoryCommand(u.id, { cmd: 'Move', x: hit.x, z: hit.z }, opts.queue)
+        rallied++
+      }
+    } else if (u.canMove) {
       sim.move(u.id, hit.x, hit.z, opts.queue)
       moved++
-    } else if (u.isFactory) {
-      sim.setRallyPoint(u.id, hit.x, y, hit.z)
-      rallied++
     }
   }
   if (moved === 0 && rallied === 0) return null
 
   onCommandIssued(host, {
-    // The rally point is a UNITCOMMAND_Move under the hood (Cfile:1008346), so
-    // its feedback is a Move blip — 'RallyPoint' is not a valid EUnitCommandType.
+    // The rally point is a UNITCOMMAND_Move in the factory's command list
+    // (Cfile:1008346), so its feedback is a Move blip — 'RallyPoint' is not a
+    // valid EUnitCommandType.
     CommandType: 'Move',
     Position: { x: hit.x, y, z: hit.z },
     Clear: !opts.queue,

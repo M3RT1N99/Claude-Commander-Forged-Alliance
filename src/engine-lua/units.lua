@@ -219,7 +219,7 @@ local function calcSpawnElevation(bp, layerName, x, z)
   return 0
 end
 
-function __spawnUnit(scriptPath, bpId, x, y, z, army, complete, requestedLayer)
+function __spawnUnit(scriptPath, bpId, x, y, z, army, complete, requestedLayer, heading)
   local bp = __registered.Unit[bpId]
   if not bp then return -1, 'blueprint not registered: ' .. tostring(bpId) end
   local mod = import(scriptPath)
@@ -263,7 +263,8 @@ function __spawnUnit(scriptPath, bpId, x, y, z, army, complete, requestedLayer)
   -- Das Skelett aus dem Modell (siehe __setBones). Es muss VOR OnCreate stehen:
   -- die Waffen pruefen ihre Turm-Knochen beim Aufbau (weapon.lua:67).
   u.__bones = __unitBones[string.lower(bpId)] or { names = {}, xform = {}, index = {} }
-  u.__heading = 0
+  -- The creation transform's yaw: the initial rally point below turns by it.
+  u.__heading = heading or 0
   -- CUnitMotion::CUnitMotion: Stopped / Bottom (Cfile:964772-964773).
   u.__horzEvent = 'Stopped'
   u.__vertEvent = 'Bottom'
@@ -331,6 +332,12 @@ function __spawnUnit(scriptPath, bpId, x, y, z, army, complete, requestedLayer)
   -- GetWeapon(i) hands that object back; wep:GetBlueprint() is bp.Weapon[i].
   local okW, errW = pcall(function() __createWeapons(u, bp) end)
   if not okW then return id, tostring(errW) end
+
+  -- A FACTORY builder gets its initial rally point before OnCreate: the unit
+  -- constructor calls mBuilder->IssueRallyPoint when GetBool1 holds, right
+  -- after the army pool and before InitializeArmor / RunScript("OnCreate")
+  -- (Cfile:950550-950554).
+  if __isFactoryBuilder(u) then __issueInitialRally(u) end
 
   -- OnCreate läuft als Thread (Original: Unit-Logik ist kooperativ). Der erste
   -- Slice läuft sofort (Sofort-Zustand); WaitTicks/ForkThread darin laufen auf
@@ -513,11 +520,9 @@ local function spawnCreateUnit(blueprint, army, x, y, z, heading, who, layer)
     error('Invalid army index; must be >= 1 but got ' .. tostring(army), 3)
   end
   local scriptPath = bp.Script or ('/units/' .. key .. '/' .. key .. '_script.lua')
-  local id, err = __spawnUnit(scriptPath, key, x, y, z, army, true, layer)
+  local id, err = __spawnUnit(scriptPath, key, x, y, z, army, true, layer, heading)
   if id < 0 then error(who .. '(' .. tostring(blueprint) .. ') failed: ' .. tostring(err), 3) end
-  local u = __units[id]
-  u.__heading = heading or 0
-  return u
+  return __units[id]
 end
 
 --- The yaw from a quaternion (the engine hands out orientations as
@@ -792,7 +797,7 @@ local function orderList(id, u)
   local active = __orderActive and __orderActive[id]
   if active then
     local x, z = resolveOrderPos(active)
-    if x then out = { { t = active.type, x = x, z = z } } end
+    if x then out = { { id = active.serial or 0, t = active.type, x = x, y = GetSurfaceHeight(x, z), z = z } } end
   else
     -- Commands that do NOT flow through the order queue keep their execution
     -- state elsewhere: a mobile builder's structure build/repair lives only in
@@ -805,8 +810,25 @@ local function orderList(id, u)
     local x, z = resolveOrderPos(cmd)
     if x then
       out = out or {}
-      out[#out + 1] = { t = cmd.type, x = x, z = z }
+      out[#out + 1] = { id = cmd.serial or 0, t = cmd.type, x = x, y = GetSurfaceHeight(x, z), z = z }
     end
+  end
+  return out
+end
+
+-- The FACTORY command list for the user side (Unit::SyncInterface copies
+-- mBuilder->GetCommands() whenever the builder needs a refresh; the user
+-- unit's GetCommandQueue reads that list when the unit has one,
+-- Cfile:1367121-1367128, and the command graph draws it for an immobile
+-- FACTORY beside the unit's own queue, 1245537-1245575). One entry per
+-- command: id, type and the target position (GetTargetPosGun).
+local function factoryCommandList(id, u)
+  local list = __factoryCommands and __factoryCommands[id]
+  if not list or #list == 0 then return nil end
+  local out = {}
+  for _, c in ipairs(list) do
+    local x, y, z = __factoryCommandPos(c)
+    if x then out[#out + 1] = { id = c.id, t = c.type, x = x, y = y, z = z } end
   end
   return out
 end
@@ -835,6 +857,7 @@ local function readRow(id, u)
   local moving = (u.__goal ~= nil and u.__goal ~= false)
   return {
     orders = orderList(id, u),
+    fcmds = factoryCommandList(id, u),
     turrets = readTurrets(u),
     id = id,
     name = (u.__bp and u.__bp.BlueprintId) or '?',
@@ -997,9 +1020,21 @@ function __readAllUnitsJson()
         if not r.orders then return '' end
         local os = {}
         for oi, o in ipairs(r.orders) do
-          os[oi] = '{"t":' .. jstr(o.t) .. ',"x":' .. jnum(o.x) .. ',"z":' .. jnum(o.z) .. '}'
+          os[oi] = '{"id":' .. jint(o.id or 0) .. ',"t":' .. jstr(o.t) .. ',"x":' .. jnum(o.x)
+            .. ',"y":' .. jnum(o.y or 0) .. ',"z":' .. jnum(o.z) .. '}'
         end
         return ',"order":' .. os[1] .. ',"orders":[' .. table.concat(os, ',') .. ']'
+      end)()
+      .. (function()
+        -- The factory command list (rally commands) the user side reads as
+        -- the factory's command queue and draws beside the unit's own queue.
+        if not r.fcmds then return '' end
+        local fs = {}
+        for fi, f in ipairs(r.fcmds) do
+          fs[fi] = '{"id":' .. jint(f.id) .. ',"t":' .. jstr(f.t) .. ',"x":' .. jnum(f.x)
+            .. ',"y":' .. jnum(f.y) .. ',"z":' .. jnum(f.z) .. '}'
+        end
+        return ',"fcmds":[' .. table.concat(fs, ',') .. ']'
       end)()
       .. (function()
         if not r.turrets then return '' end

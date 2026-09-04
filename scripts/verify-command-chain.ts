@@ -18,6 +18,7 @@
  *   npx tsx --import ./scripts/register-lua.mjs scripts/verify-command-chain.ts
  */
 import { readdir, readFile } from 'node:fs/promises'
+import type { FactoryCommand } from '../src/sim/luaSimClient'
 import { LuaHost } from '../src/lua/host'
 import { installEngine, beat } from '../src/lua/engine'
 import { setTerrainSource } from '../src/lua/engineGlobals'
@@ -181,8 +182,10 @@ const sim = {
     simHost.eval(`__dispatchReclaim(${id}, ${targetId})`)
   },
   reclaimMapProp: (): void => {},
-  setRallyPoint: (id: number, x: number, y: number, z: number): void => {
-    simHost.eval(`local u = __units[${id}] if u then u:SetRallyPoint({ ${x}, ${y}, ${z} }) end`)
+  factoryCommand: (id: number, cmd: FactoryCommand, queue?: boolean): void => {
+    const clear = queue ? 'false' : 'true'
+    if ('targetId' in cmd) simHost.eval(`__dispatchFactory${cmd.cmd}(${id}, ${cmd.targetId}, ${clear})`)
+    else simHost.eval(`__dispatchFactory${cmd.cmd}(${id}, ${cmd.x}, ${cmd.z}, ${clear})`)
   },
   build: async (
     builderId: number,

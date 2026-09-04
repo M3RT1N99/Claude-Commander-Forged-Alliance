@@ -1069,6 +1069,104 @@ console.log('\n== IssueCommand hotkey + bool ConVar toggle ==')
   )
 }
 
+// === WorldMesh (CUIWorldMesh) and the rally marker of rallypoint.lua ===
+//
+// worldmesh.lua:24-27 derives WorldMesh from moho.world_mesh_methods and calls
+// InternalCreateWorldMesh(self); rallypoint.lua:16-36 hangs one on every
+// selected structure factory at its LAST command (Rally_lod0.scm, technique
+// RallyPoint, UniformScale 0.10, lifetime 10) and moves it every beat.
+console.log('\n== WorldMesh (CUIWorldMesh) and the rally marker ==')
+{
+  const err = (expression: string): string =>
+    host.eval(`local ok, e = pcall(function() ${expression} end); return ok and '' or tostring(e)`) as string
+  const rows = (): { id: number; serial: number; meshName: string; textureName: string; shaderName: string; scale: number; color: string; lodCutoff: number; hidden: boolean; x: number; y: number; z: number; lifetime: number }[] =>
+    JSON.parse(host.eval('return __uiWorldMeshesJson()') as string) as ReturnType<typeof rows>
+  host.eval(`__wm = import('/lua/ui/controls/worldmesh.lua').WorldMesh()`)
+  check(
+    host.eval(`return __uiWorldMeshes[__wm.__wmId] == __wm`) === true,
+    'WorldMesh() registers itself through InternalCreateWorldMesh (worldmesh.lua:24-27)',
+  )
+  check(rows().length === 0, 'without SetMesh there is no mesh instance to draw (Cfile:1295878 mMeshInstance = 0)')
+  check(
+    err(`InternalCreateWorldMesh()`).includes('expected 1 args, but got 0'),
+    'InternalCreateWorldMesh without the object is the arg-count error (Cfile:1296248)',
+  )
+  check(
+    err(`__wm:SetStance()`).includes('expected between 2 and 3 args, but got 1'),
+    'SetStance without a position is the arg-count error (Cfile:1296432-1296433)',
+  )
+  check(
+    err(`__wm:SetLifetimeParameter()`).includes('expected 2 args, but got 1'),
+    'SetLifetimeParameter without the value is the arg-count error (Cfile:1296842-1296843)',
+  )
+  check(
+    err(`__wm:SetLifetimeParameter('x')`).includes('number expected'),
+    'a non-number lifetime is the type error',
+  )
+  host.eval(`__wm:SetStance({ 1, 2, 3 }); __wm:SetLifetimeParameter(5); __wm:SetHidden(false)`)
+  check(
+    host.eval(`return __wm.__wmInstance == nil`) === true && host.eval(`return __wm:IsHidden()`) === true,
+    'SetStance / SetLifetimeParameter / SetHidden before SetMesh change nothing (the engine guards on mMeshInstance)',
+  )
+  host.eval(`__wm:SetMesh({ MeshName = '/meshes/game/Rally_lod0.scm' })`)
+  check(
+    host.eval(`return __wm.__wmInstance == nil`) === true,
+    'MeshName without ShaderName/TextureName creates no instance (Cfile:1296058-1296060 warns)',
+  )
+  host.eval(`__wm:SetMesh({})`)
+  check(host.eval(`return __wm.__wmInstance == nil`) === true, 'an empty descriptor creates no instance ("no mesh specified", Cfile:1296141)')
+  host.eval(`__wm:SetMesh({
+    MeshName = '/meshes/game/Rally_lod0.scm',
+    TextureName = '/meshes/game/Rally_albedo.dds',
+    ShaderName = 'RallyPoint',
+    UniformScale = 0.10,
+  })`)
+  let r = rows()
+  check(
+    r.length === 1 && r[0]!.meshName === '/meshes/game/Rally_lod0.scm' && r[0]!.shaderName === 'RallyPoint'
+      && Math.abs(r[0]!.scale - 0.1) < 1e-9 && r[0]!.color === 'FFFFFFFF' && r[0]!.lodCutoff === 1000,
+    `SetMesh creates the instance with the descriptor's scale and the defaults FFFFFFFF / 1000 (${JSON.stringify(r[0])})`,
+  )
+  host.eval(`__wm:SetLifetimeParameter(10); __wm:SetStance({ 160, 20, 170 }); __wm:SetHidden(false)`)
+  r = rows()
+  check(
+    r.length === 1 && r[0]!.x === 160 && r[0]!.y === 20 && r[0]!.z === 170 && r[0]!.lifetime === 10 && r[0]!.hidden === false,
+    `the stance, lifetime and visibility reach the registry (${r[0]?.x}/${r[0]?.y}/${r[0]?.z}, lifetime ${r[0]?.lifetime}, hidden ${r[0]?.hidden})`,
+  )
+  check(host.eval(`return __wm:IsHidden()`) === false, 'IsHidden answers the instance flag')
+  const pos = host.eval(`local p = __wm:GetInterpolatedPosition(); return p[1] .. '|' .. p[3]`)
+  check(pos === '160|170', `GetInterpolatedPosition hands the stance back (${pos})`)
+  check(
+    err(`__wm:GetInterpolatedSphere()`).includes('not modelled'),
+    'the bounding queries fail loudly (no retail consumer)',
+  )
+  host.eval(`__wm:Destroy()`)
+  check(rows().length === 0 && host.eval(`return __uiWorldMeshes[__wm.__wmId] == nil`) === true, 'Destroy drops the instance and the registration')
+
+  // rallypoint.lua end to end: a selected structure factory with a synced
+  // command queue gets the marker at the LAST command's position.
+  host.eval(`__uiSetUnit(7, 'ueb0101', 1, 120, 20, 120, 3000, 3000, 1, true, 0, 0, -1, false, 0, 1, false, 'Land', 0, -1, false, false, '')`)
+  host.eval(`__uiSetCommandQueue(7, { { id = 1, t = 'Move', x = 120, y = 20, z = 125 }, { id = 2, t = 'Patrol', x = 150, y = 20, z = 150 } })`)
+  const q = host.eval(`local q = __uiUnits[7]:GetCommandQueue(); return table.getn(q) .. '|' .. q[2].type .. '|' .. q[2].position[1] .. '|' .. q[2].id`)
+  check(q === '2|Patrol|150|2', `GetCommandQueue answers id/type/position per command (${q}) -- Cfile:1367107-1367200`)
+  host.eval(`__uiSelectByIds({ 7 })`)
+  r = rows()
+  check(
+    r.length === 1 && r[0]!.meshName === '/meshes/game/Patrol_lod0.scm' && r[0]!.shaderName === 'RallyPoint'
+      && Math.abs(r[0]!.scale - 0.1) < 1e-9 && r[0]!.lifetime === 10 && r[0]!.x === 150 && r[0]!.z === 150 && r[0]!.hidden === false,
+    `selecting the factory hangs the marker of the LAST command on it: the Patrol mesh at 150/150 (rallypoint.lua:17-35) (${JSON.stringify(r[0])})`,
+  )
+  host.eval(`__uiSetCommandQueue(7, { { id = 3, t = 'Move', x = 130, y = 20, z = 140 } })`)
+  host.eval(`import('/lua/ui/game/gamemain.lua').OnBeat()`)
+  r = rows()
+  check(
+    r.length === 1 && r[0]!.x === 130 && r[0]!.z === 140,
+    `the beat moves the marker to the queue's new last command (rallypoint.lua:45-52) (${r[0]?.x}/${r[0]?.z})`,
+  )
+  host.eval(`__uiSelectByIds({})`)
+  check(rows().length === 0, 'deselecting clears every rally marker (ClearAllRallyPoints)')
+}
+
 host.close()
 for (const f of openFiles) await f.close()
 console.log(failures === 0 ? '\nUI-PANELS BESTANDEN' : `\n${failures} CHECK(S) FEHLGESCHLAGEN`)

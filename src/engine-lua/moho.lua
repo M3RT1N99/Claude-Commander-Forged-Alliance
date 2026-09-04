@@ -904,9 +904,6 @@ local unit = withNoops(UNIT_NAMES, {
   GetCurrentLayer = function(self) return self.__layer or 'Land' end,
   IsBeingBuilt = function(self) return self.__beingBuilt or false end,
 
-  -- Der Sammelpunkt einer Fabrik. Ohne gesetzten Punkt ist es die Fabrik selbst
-  -- — FactoryUnit.CalculateRollOffPoint (defaultunits.lua:578) sucht damit den
-  -- naechstgelegenen RollOffPoint des Blueprints aus.
   -- Overcharge: die ACU haelt ihn an, solange er nicht geladen ist
   -- (cfunc_UnitSetOverchargePaused; uel0001_script.lua:35 setzt ihn beim
   -- Waffen-Aufbau).
@@ -917,12 +914,19 @@ local unit = withNoops(UNIT_NAMES, {
     return self.__overchargePaused == true
   end,
 
+  -- cfunc_UnitGetRallyPointL (Cfile:980873-980905): the target position
+  -- (CAiTarget::GetTargetPosGun) of the builder's FIRST command, nil without
+  -- a builder or a command. There is no SetRallyPoint binding -- the rally
+  -- point IS the head of the factory command list (IssueFactoryRallyPoint,
+  -- globals.lua), and every FACTORY gets the blueprint's initial one at
+  -- creation, so CalculateRollOffPoint never sees nil on a live factory.
   GetRallyPoint = function(self)
-    return self.__rally or self:GetPosition()
-  end,
-  SetRallyPoint = function(self, pos)
-    self.__rally = pos
-    return true
+    local list = __factoryCommands[self.__id]
+    local c = list and list[1]
+    if not c then return nil end
+    local x, y, z = __factoryCommandPos(c)
+    if not x then return nil end
+    return { x, y, z }
   end,
   -- EUnitState (Cfile:702962-703052) — answered from the REAL sim state,
   -- not a stub: the original AI/effect Lua branches on these
@@ -2774,6 +2778,244 @@ rawset(moho, 'platoon_methods', cclass(platoon))
 
 rawset(moho, 'aibrain_methods', cclass(aibrain))
 rawset(moho, 'cursor_methods', cclass(cursor))
+
+-- ---------------------------------------------------------------------
+-- world_mesh_methods (CUIWorldMesh) -- 16 bindings, UI VM only
+-- (scr_UserInits; docs/research/engine-api.md:85). WorldMesh
+-- (lua/ui/controls/worldmesh.lua:24-27) derives from it and calls
+-- InternalCreateWorldMesh(self) in __init; ui-globals.lua keeps the registry
+-- the renderer reads. The engine object is thin (Cfile:1295875-1295905: a
+-- CScriptObject with ONE mMeshInstance, null until SetMesh); every method
+-- that needs the instance is a silent no-op before SetMesh, exactly like the
+-- engine's `if ( mMeshInstance )` guards (SetStance 1296492, SetLifetime-
+-- Parameter 1296859, SetColor 1296930). Consumers: rallypoint.lua:24-35 (the
+-- rally marker of a selected factory) and tutorial.lua:86-94 (camera arrows).
+--
+-- Arg counts are the engine's lua_gettop checks with the mHelp text: read
+-- for SetStance (2..3, Cfile:1296432-1296433), SetLifetimeParameter (2,
+-- 1296842-1296843), SetColor (2, 1296907) and InternalCreateWorldMesh (1,
+-- 1296248); the other one-parameter setters follow their mHelp signature
+-- (Cfile:1296887-1296891 and neighbours) with the same check.
+-- ---------------------------------------------------------------------
+local function wmCount(name, expected, n)
+  if n ~= expected then
+    error(string.format('%s\n  expected %d args, but got %d', name, expected, n), 3)
+  end
+end
+
+local function wmNumber(name, v)
+  if type(v) ~= 'number' then
+    error(name .. ': number expected, got ' .. type(v), 3)
+  end
+  return v
+end
+
+local function wmVector(name, v)
+  if type(v) ~= 'table' or type(v[1]) ~= 'number' or type(v[2]) ~= 'number' or type(v[3]) ~= 'number' then
+    error(name .. ': vector expected', 3)
+  end
+  return { v[1], v[2], v[3] }
+end
+
+local function wmInstance(self)
+  return rawget(self, '__wmInstance')
+end
+
+-- Every instance change bumps the UI VM's sync serial (mNeedsRefresh of the
+-- mesh instance); the renderer reconciles by id + instance serial.
+local function wmTouch(self)
+  if __uiWorldMeshTouched then __uiWorldMeshTouched(self) end
+end
+
+local worldMesh = {
+  --- SetMesh(meshDesc) -- CUIWorldMesh::SetMesh (Cfile:1295906-1296230):
+  --- UniformScale (default 1.0), Color (default FFFFFFFF), LODCutoff (default
+  --- 1000); MeshName needs ShaderName and TextureName (else the engine warns
+  --- and creates nothing, 1296058-1296060); otherwise BlueprintID takes the
+  --- unit blueprint's Display.MeshBlueprint and Display.UniformScale
+  --- (1296154-1296180); neither: "no mesh specified" (1296141).
+  SetMesh = function(self, ...)
+    wmCount('WorldMesh:SetMesh(meshDesc)', 2, select('#', ...) + 1)
+    local desc = ...
+    if type(desc) ~= 'table' then
+      error('WorldMesh:SetMesh(meshDesc): table expected, got ' .. type(desc), 2)
+    end
+    local uniformScale = 1.0
+    if desc.UniformScale ~= nil then uniformScale = wmNumber('WorldMesh:SetMesh UniformScale', desc.UniformScale) end
+    local color = 'FFFFFFFF'
+    if desc.Color ~= nil then color = tostring(desc.Color) end
+    local lodCutoff = 1000.0
+    if desc.LODCutoff ~= nil then lodCutoff = wmNumber('WorldMesh:SetMesh LODCutoff', desc.LODCutoff) end
+    local inst
+    if desc.MeshName ~= nil then
+      if desc.ShaderName == nil or desc.TextureName == nil then
+        WARN('WorldMesh:SetMesh - MeshName specified, but ShaderName or TextureName were not specified')
+        return
+      end
+      inst = {
+        meshName = tostring(desc.MeshName), textureName = tostring(desc.TextureName),
+        shaderName = tostring(desc.ShaderName), scale = uniformScale,
+      }
+    elseif desc.BlueprintID ~= nil then
+      local id = string.lower(tostring(desc.BlueprintID))
+      local bp = __blueprints and __blueprints[id]
+      if not bp then
+        WARN('WorldMesh:SetMesh - unable to create MeshInsance')
+        return
+      end
+      -- The blueprint branch takes the blueprint's own UniformScale
+      -- (1296173-1296176), not the descriptor's.
+      inst = { blueprintId = id, scale = bp.Display.UniformScale or 1.0 }
+    else
+      WARN('WorldMesh:SetMesh - no mesh specified')
+      return
+    end
+    inst.color = color
+    inst.lodCutoff = lodCutoff
+    -- The visibility of a fresh mesh instance was not read from the Cfile
+    -- (CreateMeshInstance's trailing 0, 0 at 1296195); both consumers call
+    -- SetHidden(false) right after SetMesh, so the default cannot show.
+    inst.hidden = false
+    inst.pos = { 0, 0, 0 }
+    inst.orient = { 0, 0, 0, 1 }
+    inst.scaleVec = { 1, 1, 1 }
+    inst.lifetime = 0
+    inst.aux = 0
+    inst.fractionComplete = 0
+    inst.fractionHealth = 0
+    rawset(self, '__wmInstance', inst)
+    wmTouch(self)
+  end,
+
+  --- SetStance(vector position, [quaternion orientation]) -- 2..3 args
+  --- (Cfile:1296432-1296433); position copied through SCR_FromLuaCopy
+  --- <Vector3> (1296482), orientation <Quaternion> (1296446); applied to the
+  --- instance only (1296492).
+  SetStance = function(self, ...)
+    local n = select('#', ...) + 1
+    if n < 2 or n > 3 then
+      error(string.format('WorldMesh:SetStance(vector position, [quaternion orientation])\n  expected between %d and %d args, but got %d', 2, 3, n), 2)
+    end
+    local pos, orient = ...
+    local p = wmVector('WorldMesh:SetStance position', pos)
+    local q = nil
+    if n >= 3 then
+      if type(orient) ~= 'table' or type(orient[4]) ~= 'number' then
+        error('WorldMesh:SetStance: quaternion expected', 2)
+      end
+      q = { orient[1], orient[2], orient[3], orient[4] }
+    end
+    local inst = wmInstance(self)
+    if not inst then return end
+    inst.pos = p
+    if q then inst.orient = q end
+    wmTouch(self)
+  end,
+
+  SetHidden = function(self, ...)
+    wmCount('WorldMesh:SetHidden(bool hidden)', 2, select('#', ...) + 1)
+    local hidden = ...
+    local inst = wmInstance(self)
+    if not inst then return end
+    inst.hidden = hidden == true
+    wmTouch(self)
+  end,
+  -- Without an instance nothing is drawn; the engine's answer for that case
+  -- was not read (no consumer asks before SetMesh).
+  IsHidden = function(self, ...)
+    wmCount('bool WorldMesh:IsHidden()', 1, select('#', ...) + 1)
+    local inst = wmInstance(self)
+    return inst == nil or inst.hidden
+  end,
+  --- SetColor(color) -- cfunc_CUIWorldMeshSetColorL (Cfile:1296902-1296935):
+  --- two args, SCR_DecodeColor, written to mMeshInstance->mColor only when
+  --- the instance exists. (The mHelp text "SetColor(bool hidden)" is a copy
+  --- and paste slip in the engine, 1296891.)
+  SetColor = function(self, ...)
+    wmCount('WorldMesh:SetColor(bool hidden)', 2, select('#', ...) + 1)
+    local color = ...
+    local inst = wmInstance(self)
+    if not inst then return end
+    inst.color = tostring(color)
+    wmTouch(self)
+  end,
+  SetScale = function(self, ...)
+    wmCount('WorldMesh:SetScale(vector scale)', 2, select('#', ...) + 1)
+    local v = wmVector('WorldMesh:SetScale', (...))
+    local inst = wmInstance(self)
+    if not inst then return end
+    inst.scaleVec = v
+    wmTouch(self)
+  end,
+  --- The four shader parameters (mesh.fx material.yzw and the auxiliary):
+  --- SetLifetimeParameter writes mMeshInstance->mLifetimeParameter
+  --- (Cfile:1296859-1296860) -- CommandFeedbackVS reads it as material.y,
+  --- the lifetime the scale animation runs over (mesh.fx:1937-1940).
+  SetLifetimeParameter = function(self, ...)
+    wmCount('WorldMesh:SetLifetimeParameter(float param)', 2, select('#', ...) + 1)
+    local v = wmNumber('WorldMesh:SetLifetimeParameter', (...))
+    local inst = wmInstance(self)
+    if not inst then return end
+    inst.lifetime = v
+    wmTouch(self)
+  end,
+  SetAuxiliaryParameter = function(self, ...)
+    wmCount('WorldMesh:SetAuxiliaryParameter(float param)', 2, select('#', ...) + 1)
+    local v = wmNumber('WorldMesh:SetAuxiliaryParameter', (...))
+    local inst = wmInstance(self)
+    if not inst then return end
+    inst.aux = v
+    wmTouch(self)
+  end,
+  SetFractionCompleteParameter = function(self, ...)
+    wmCount('WorldMesh:SetFractionCompleteParameter(float param)', 2, select('#', ...) + 1)
+    local v = wmNumber('WorldMesh:SetFractionCompleteParameter', (...))
+    local inst = wmInstance(self)
+    if not inst then return end
+    inst.fractionComplete = v
+    wmTouch(self)
+  end,
+  SetFractionHealthParameter = function(self, ...)
+    wmCount('WorldMesh:SetFractionHealthParameter(float param)', 2, select('#', ...) + 1)
+    local v = wmNumber('WorldMesh:SetFractionHealthParameter', (...))
+    local inst = wmInstance(self)
+    if not inst then return end
+    inst.fractionHealth = v
+    wmTouch(self)
+  end,
+  --- GetInterpolatedPosition() -- the instance's stance position (the UI
+  --- interpolates between beats; a static stance has one value). nil
+  --- without an instance.
+  GetInterpolatedPosition = function(self, ...)
+    wmCount('Vector WorldMesh:GetInterpolatedPosition()', 1, select('#', ...) + 1)
+    local inst = wmInstance(self)
+    if not inst then return nil end
+    return { inst.pos[1], inst.pos[2], inst.pos[3] }
+  end,
+  -- The bounding queries need the loaded mesh's bounds, which only the
+  -- renderer has; no retail UI file calls them. They fail loudly.
+  GetInterpolatedScroll = function()
+    error('WorldMesh:GetInterpolatedScroll is not modelled (no consumer in the retail UI Lua)', 2)
+  end,
+  GetInterpolatedSphere = function()
+    error('WorldMesh:GetInterpolatedSphere is not modelled (no consumer in the retail UI Lua)', 2)
+  end,
+  GetInterpolatedAlignedBox = function()
+    error('WorldMesh:GetInterpolatedAlignedBox is not modelled (no consumer in the retail UI Lua)', 2)
+  end,
+  GetInterpolatedOrientedBox = function()
+    error('WorldMesh:GetInterpolatedOrientedBox is not modelled (no consumer in the retail UI Lua)', 2)
+  end,
+  --- Destroy() -- ~CUIWorldMesh (Cfile:1295895-1295903): the mesh instance
+  --- goes with the object.
+  Destroy = function(self, ...)
+    wmCount('WorldMesh:Destroy() -- destroy this world mesh', 1, select('#', ...) + 1)
+    rawset(self, '__wmInstance', nil)
+    if __uiWorldMeshDestroyed then __uiWorldMeshDestroyed(self) end
+  end,
+}
+
+rawset(moho, 'world_mesh_methods', cclass(worldMesh))
 
 -- maui (nur UI-VM). group_methods hat keine eigenen Bindungen — ein Group ist
 -- ein CMauiControl mit der Klasse "group" (deshalb steht CMauiGroup auch nicht

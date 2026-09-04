@@ -39,6 +39,8 @@ const check = (ok: boolean, label: string): void => {
   console.log(`  ${ok ? 'OK  ' : 'FAIL'} ${label}`)
   if (!ok) failures++
 }
+const err = (expression: string): string =>
+  host.eval(`local ok, e = pcall(function() ${expression} end); return ok and '' or tostring(e)`) as string
 
 const game = await GameFiles.open()
 const files = game.luaFiles
@@ -212,16 +214,124 @@ for (let i = 0; i < 3; i++) beat(engine)
 const tanks = countTanks()
 check(tanks === 2, `then the factory starts the second tank (${tanks} tanks)`)
 
-// === Rally point ===
+// === The factory command list and the rally point ===
 //
-// The finished unit INHERITS its factory's commands (sub_5FA340,
-// Cfile:818487-818600). The rally point is such a command:
-// IssueFactoryRallyPoint puts a UNITCOMMAND_Move into the factory's command
-// list (Cfile:1008346). Without that inheritance every unit stopped on the
-// roll-off point and piled up there.
-console.log('\n== Rally point: the new unit drives there ==')
+// A FACTORY builder keeps a command list beside the unit's own queue
+// (CAiBuilderImpl::mCommands): the commands every product inherits
+// (CFactoryBuildTask::InheritCommandsTo, Cfile:818487-818600). The unit
+// constructor fills it with the blueprint's initial rally point
+// (CAiBuilderImpl::IssueRallyPoint, 751236-751296, called at 950550-950552);
+// GetRallyPoint reads the head's target position (980887-980900);
+// IssueFactoryRallyPoint appends a Move without clearing (1008356);
+// IssueClearFactoryCommands empties the list (RemoveAllUnits) and the builder
+// tick puts the initial point back when the list is empty (751444-751445).
+console.log('\n== The factory command list: initial rally, GetRallyPoint, clear, append ==')
 {
-  host.eval(`__units[${factory}]:SetRallyPoint({ 160, 20, 170 })`)
+  // The list as 'type|x|z' entries, ';'-joined (a plain string crosses the
+  // wasmoon boundary without table conversion questions).
+  const fcmds = (id: number): { type: string; x: number; z: number }[] => {
+    const raw = host.eval(`
+      local out = {}
+      for i, c in ipairs(__factoryCommands[${id}] or {}) do
+        out[i] = tostring(c.type) .. '|' .. tostring(c.x) .. '|' .. tostring(c.z)
+      end
+      return table.concat(out, ';')
+    `) as string
+    if (raw === '') return []
+    return raw.split(';').map((e) => {
+      const [type, x, z] = e.split('|')
+      return { type: type ?? '', x: Number(x), z: Number(z) }
+    })
+  }
+  const initial = fcmds(factory)
+  // ueb0101 carries no Economy.InitialRallyX/Z of its own: the struct defaults
+  // 0 / 5 apply (RUnitBlueprintEconomy ctor, Cfile:656498-656499); heading 0
+  // puts the point 5 in +z (forward) of the factory at 120/120.
+  check(
+    initial.length === 1 && initial[0]!.type === 'Move'
+      && Math.abs(initial[0]!.x - 120) < 1e-6 && Math.abs(initial[0]!.z - 125) < 1e-6,
+    `the factory was created with the blueprint's initial rally Move at 120/125 (${JSON.stringify(initial)})`,
+  )
+  const rp = host.eval(`local p = __units[${factory}]:GetRallyPoint(); return p and (math.floor(p[1]) .. '|' .. math.floor(p[3])) or 'nil'`)
+  check(rp === '120|125', `GetRallyPoint answers the head command's target (${rp}) -- Cfile:980887-980900`)
+  // A rotated factory turns the offset with its heading (forward = sin/cos).
+  const turned = Number(host.eval(`
+    local u = CreateUnit('ueb0101', 1, 200, 20, 200, 0, math.sin(math.pi / 4), 0, math.cos(math.pi / 4))
+    return u.__id
+  `))
+  const tl = fcmds(turned)
+  check(
+    tl.length === 1 && Math.abs(tl[0]!.x - (200 + 5 * Math.sin(Math.PI / 2))) < 1e-4
+      && Math.abs(tl[0]!.z - (200 + 5 * Math.cos(Math.PI / 2))) < 1e-4,
+    `a factory created with a 90 degree yaw rallies 5 in +x (${tl[0]?.x.toFixed(3)}/${tl[0]?.z.toFixed(3)})`,
+  )
+  host.eval(`__units[${turned}]:Destroy()`)
+  // Append without clearing (the Lua binding passes clear = 0).
+  host.eval(`IssueFactoryRallyPoint({ __units[${factory}] }, { 160, 20, 170 })`)
+  const two = fcmds(factory)
+  check(
+    two.length === 2 && two[1]!.x === 160 && two[1]!.z === 170 && two[0]!.z === 125,
+    `IssueFactoryRallyPoint APPENDS behind the initial point (${two.length} commands) -- Cfile:1008356`,
+  )
+  // The clear binding empties the list; the next factory tick restores the
+  // initial rally point (CAiBuilderImpl::OnTick, 751444-751445).
+  host.eval(`IssueClearFactoryCommands({ __units[${factory}] })`)
+  check(fcmds(factory).length === 0, 'IssueClearFactoryCommands empties the list at once (RemoveAllUnits)')
+  beat(engine)
+  const restored = fcmds(factory)
+  check(
+    restored.length === 1 && restored[0]!.z === 125,
+    `one beat later the builder tick re-issued the initial rally point (${JSON.stringify(restored)})`,
+  )
+  // aibrain.lua:2114-2115: clear, then rally -- the list holds only the new point.
+  host.eval(`IssueClearFactoryCommands({ __units[${factory}] }); IssueFactoryRallyPoint({ __units[${factory}] }, { 160, 20, 170 })`)
+  beat(engine)
+  const only = fcmds(factory)
+  check(only.length === 1 && only[0]!.x === 160 && only[0]!.z === 170, 'clear + rally in one step leaves exactly the new point (no tick in between)')
+  check(
+    err(`IssueFactoryRallyPoint({ __units[${factory}] })`).includes('expected 2 args, but got 1'),
+    'IssueFactoryRallyPoint with one argument is the arg-count error (Cfile:1008311)',
+  )
+  check(
+    err(`IssueClearFactoryCommands({ __units[${factory}] }, 1)`).includes('expected 1 args, but got 2'),
+    'IssueClearFactoryCommands with two arguments is the arg-count error (Cfile:1008411)',
+  )
+  // The player's factory commands: clear = not shift.
+  host.eval(`__dispatchFactoryPatrol(${factory}, 180, 180, false)`)
+  host.eval(`__dispatchFactoryMove(${factory}, 190, 190, false)`)
+  const queued = fcmds(factory)
+  check(
+    queued.length === 3 && queued[1]!.type === 'Patrol' && queued[2]!.type === 'Move',
+    `shift-issued factory commands queue behind the rally point (${queued.map((c) => c.type).join(',')})`,
+  )
+  host.eval(`__dispatchFactoryMove(${factory}, 160, 170, true)`)
+  check(fcmds(factory).length === 1, 'a factory command without shift replaces the whole list (ClearQueue byte)')
+  // Non-factories are refused (GetBool1 is false for an engineer / ACU).
+  host.eval(`__dispatchFactoryMove(${acu}, 1, 1, true)`)
+  check(fcmds(acu).length === 0, 'the ACU (a builder, but no FACTORY) takes no factory command (Cfile:1007660-1007663)')
+  // An entity-target command in the list resolves to the target's position
+  // (CAiTarget::GetTargetPosGun) -- the Guard the products would inherit.
+  host.eval(`__dispatchFactoryGuard(${factory}, ${acu}, false)`)
+  const guarded = host.eval(`
+    local list = __factoryCommands[${factory}]
+    local c = list[#list]
+    local x, y, z = __factoryCommandPos(c)
+    return c.type .. '|' .. tostring(c.target == ${acu}) .. '|' .. math.floor(x) .. '/' .. math.floor(z) .. '|' .. #list
+  `)
+  check(guarded === 'Guard|true|100/100|2', `a factory Guard queues with the entity target and resolves to its position (${guarded})`)
+  host.eval(`__dispatchFactoryMove(${factory}, 160, 170, true)`)
+  const row = host.eval(`
+    local r = __readUnit(${factory})
+    if not r.fcmds then return 'nil' end
+    return #r.fcmds .. '|' .. r.fcmds[1].t .. '|' .. r.fcmds[1].x .. '|' .. r.fcmds[1].y .. '|' .. r.fcmds[1].z
+  `)
+  check(row === '1|Move|160|20|170', `the unit row carries the list as fcmds with id/type/position for the user side (${row})`)
+}
+
+console.log('\n== Inheritance: the product drives the roll-off, then every factory command ==')
+{
+  // Rally Move at 160/170 plus a Patrol behind it; the product must take both.
+  host.eval(`__dispatchFactoryPatrol(${factory}, 150, 150, false)`)
   const tank2 = Number(
     host.eval(`
       local newest = 0
@@ -237,24 +347,26 @@ console.log('\n== Rally point: the new unit drives there ==')
     t++
   }
   // One beat after completion: RollOffUnit issued the roll-off command, the
-  // rally point waits behind it in the queue.
+  // factory commands wait behind it in the queue -- in list order.
   beat(engine)
   const queued = host.eval(`
-    local n = 0
-    for _, c in ipairs(__orders[${tank2}] or {}) do n = n + 1 end
-    return n .. '|' .. tostring(__orderActive[${tank2}] ~= nil)
+    local types = {}
+    for _, c in ipairs(__orders[${tank2}] or {}) do types[#types + 1] = c.type end
+    return table.concat(types, ',') .. '|' .. tostring(__orderActive[${tank2}] ~= nil)
   `)
-  check(queued === '1|true', `roll-off running, rally point queued behind it (${queued})`)
+  check(queued === 'Move,Patrol|true', `roll-off running, rally Move and Patrol queued behind it in order (${queued})`)
   let m = 0
-  while (m < 2000 && host.eval(`return __orderActive[${tank2}] ~= nil`) === true) {
+  while (m < 2000 && host.eval(`local a = __orderActive[${tank2}]; return a ~= nil and a.type ~= 'Patrol'`) === true) {
     beat(engine)
     m++
   }
   const end = readLuaUnit(host, tank2)!
   check(
     Math.hypot(end.x - 160, end.z - 170) < 3,
-    `it stands on the rally point 160/170 (${end.x.toFixed(1)}/${end.z.toFixed(1)}, after ${m} beats)`,
+    `it reached the rally point 160/170 before starting the patrol (${end.x.toFixed(1)}/${end.z.toFixed(1)}, after ${m} beats)`,
   )
+  // Clean the factory list back to a single rally point for the checks below.
+  host.eval(`__dispatchFactoryMove(${factory}, 160, 170, true)`)
 }
 
 // === Queue edited mid-build: completion drains the task's OWN command ===

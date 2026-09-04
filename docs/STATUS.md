@@ -1778,19 +1778,18 @@ AddBuildRestriction/RemoveBuildRestriction, 1016787-1016830; the sim side
 here enforces it, the menu does not hide the button); a finished factory
 copies EVERY command of its rally queue into the product -- Guard, Patrol,
 Attack, all of them, only TransportLoadUnits is skipped for AIR/NAVAL
-products (sub_5FA340, 818487-818600) -- while ours forwards one rally Move,
-because the factory has no command list; `DecreaseBuildCountInQueue` on the
-queue head removes the command, and CFactoryBuildTask::TaskTick then ends
-on its lost command reference at the next tick (Cfile:818738, 1007719-
-1007771 -- no refund, the site is abandoned), which ours cannot do because
-the running entry was decremented at task start; the player's Stop button
+products (sub_5FA340, 818487-818600) -- DONE below ("The factory command
+list"); `DecreaseBuildCountInQueue` on the queue head removes the command
+and the dispatcher interrupts the running CFactoryBuildTask (traced in full
+below, still open here because the running entry is decremented at task
+start); the player's Stop button
 is a clear-then-Stop (ISSUE_Command with clear=1, 1255059-1255063,
 ClearCommandQueue 1005371-1005399, then IAiCommandDispatchImpl::Stop
 1231239-1231256 stops the attacker and silo builds) and is right here, but
 the sim-only `IssueStop(units)` appends a Stop with clear=0
 (1007889-1007952) and ours clears like the button. Ranked by play impact:
-the factory command list, the queue-head abort, the army restriction
-mirror, the soft IssueStop.
+the queue-head abort, the army restriction mirror, the soft IssueStop (the
+factory command list and the rally marker are done, see below).
 
 **Effects.** The emitter/trail/beam pipeline is real and verified
 (CEfxEmitter::Tick port). Missing or dead: `CreateLightParticle`/
@@ -1824,6 +1823,208 @@ lacks the scene reflection target, the refraction offset and the shoreline
 geometry (water2.fx:206-213, 612-629, documented in the shader); particle
 blend mode 5 (REFRACT) falls back to alpha blending. Terrain, decals, sky
 and bloom were checked against terrain.fx/sky.fx and match.
+
+## The binding checklist missed 66 bindings -- the whole Issue* family among them
+
+The review of the factory command list found `IssueFactoryRallyPoint` and
+`IssueClearFactoryCommands` present in the UI VM: `globals.lua` is loaded
+into both VMs and `ui-sim-globals.lua` strips only what
+docs/research/engine-api.md lists as Sim-only -- and the generated checklist
+did not know these two bindings. Cause: `scripts/dump-engine-api.ts` matched
+the three luadef assignments (mPrevDef, mMethodName, mClassName) with ONE
+regex in a fixed order, and every luadef whose decompiled lines come in
+another order fell out silently (IssueFactoryRallyPoint has mMethodName
+before mPrevDef, Cfile:1008266-1008270). The generator now collects the
+three fields per luadef regardless of order, and resolves the 20 luadefs
+whose list head IDA left as a raw address (`mPrevDef = MEMORY[0xF5A124]`,
+e.g. UnitIsMobile at 977841) through the list their class mates name
+symbolically (Unit/UnitWeapon are sim_SimInits, UserUnit scr_UserInits).
+The checklist grew from 1149 to 1215 bindings: 40 Sim globals (the entire
+Issue* family, IsCommandDone, CoordinateAttacks), 18 Unit/UnitWeapon methods
+(GetCurrentLayer, GetFireState, GetGuards, GetVelocity, IsMobile,
+IsValidTarget, RecoilImpulse, SetSpeedMult, ...), 5 UI globals
+(CreateUnitAtMouse, Dump, DisableWorldSounds, EnableWorldSounds,
+StopAllSounds) and 2 UI bindings (UserUnit.GetGuardedEntity,
+SetCurrentFactoryForQueueDisplay). Still unlisted, with the reason:
+`UnitGetGuardedUnit` has no mClassName line and `LaunchReplaySession` no
+mMethodName line in the decompilation (recorded, not guessed).
+
+What the wider checklist exposes, now in the coverage baseline (1149 ->
+1215 bindings, 794 -> 819 real, 146 -> 150 no-ops): the Sim has NONE of
+the 32 AI command bindings `IssueAttack`, `IssuePatrol`, `IssueRepair`,
+`IssueReclaim`, `IssueBuildMobile`, `IssueBuildFactory`, `IssueFerry`,
+`IssueTransportLoad/Unload`, `IssueFactoryAssist`, `IssueMoveOffFactory`,
+... (only the player's `__dispatch*` path exists; aibrain.lua and
+platoon.lua call these -- the next branch); `Unit.IsMobile`,
+`HasValidTeleportDest` and `RevertCollisionShape` are missing; four silent
+no-ops were never counted before (`Unit.RevertElevation`,
+`Unit.SetBreakOffDistanceMult`, `CAiBrain.GetNumPlatoonsTemplateNamed`,
+`CAiBrain.GetNumPlatoonsWithAI`). `IssueUpgrade` had leaked into the UI VM
+too; the strip list now carries every documented Sim global plus the
+factory-list helpers, and check-vm-separation is green. `IssueFactoryAssist`
+is a real Sim binding -- the lead for the open factory-assist question.
+
+## The factory command list -- the rally point is a command, and the product inherits all of them
+
+The sim modelled a factory's rally point as one stored vector (an invented
+`SetRallyPoint`, no engine binding of that name exists) and forwarded a
+single Move to each product. The engine keeps a COMMAND LIST on the
+factory's builder, and every finished unit inherits the whole list.
+
+The engine (Cfile): a unit in category FACTORY gets a builder whose mBool1
+is set (the Unit constructor calls SetBool1(1) only for
+IsInCategory("FACTORY"); GetBool1 reads it). Beside the unit's own command
+queue -- where the BuildFactory entries live (838000-838062) -- that
+builder holds `CAiBuilderImpl::mCommands`. UNIT_IssueFactoryCommand
+(1007613-1007700) fills it: per live, untransported unit whose builder
+answers GetBool1, the list is emptied first when the clear flag is set
+(mBuilder->RemoveAllUnits, 1007672-1007673) and the command appended
+(AddUnitToCommand at index -1, 1007674-1007677). The three callers and
+their clear flag: the Lua `IssueFactoryRallyPoint` passes 0 (1008356) --
+it APPENDS, which is why aibrain.lua:2114-2115 calls
+`IssueClearFactoryCommands` first; the engine's own
+`CAiBuilderImpl::IssueRallyPoint` passes 1 (751323); the player's
+`ISSUE_FactoryCommand` passes the ClearQueue byte of the message, i.e. not
+shift (CDecoder::DecodeIssueFactoryCommand 997129-997159).
+`IssueClearFactoryCommands` (1008405-1008460) is RemoveAllUnits (vtable
++56) on every unit with a builder; it never touches the unit's own queue.
+`GetRallyPoint` (980873-980905) answers the target position
+(CAiTarget::GetTargetPosGun) of the list's FIRST command and nil without
+one. The unit constructor issues the initial rally point for every FACTORY
+builder before OnCreate (950550-950554): the blueprint's
+`Economy.InitialRallyX/Z` (struct defaults 0 and 5, RUnitBlueprintEconomy
+ctor 656498-656499) as a local offset rotated by the unit's orientation
+and added to its position, a factory Move with AITARGET_Ground and the
+clear flag (751236-751296). `CAiBuilderImpl::OnTick` (751344-751458, FACTORY
+builders only) drops TransportLoadUnits commands whose target is no
+FERRYBEACON / TRANSPORTATION / AIRSTAGINGPLATFORM and puts the initial
+rally point back whenever the list is empty (751444-751445).
+`CFactoryBuildTask::InheritCommandsTo` (818487-818600) runs after the
+completed build's OnStopBuild (818844-818966, where RollOffUnit issues its
+Move): every command of the list goes into the product's queue in order;
+only TransportLoadUnits is skipped for AIR/NAVAL products. The user side:
+`CWldSession::GetLeftMouseButtonAction` splits the selection by IsMobile
+(sub_81EB20, 1239941-1240011: `!IsMobile() || <flag at +440>` goes to the
+factory set) and sends the factory set's command through
+`ISSUE_FactoryCommand` (1241182, 1241396-1241420, 1241506-1241534,
+1241833) and the rest through ISSUE_Command -- the same command type for
+both. `UserUnit::GetCommandQueue` (1367107-1367200) answers the factory
+command queue when the unit has one, else the unit's queue: id, type and
+position per command; rallypoint.lua:16-36 shows the LAST entry of a
+selected structure factory as a WorldMesh marker. The command graph draws
+the factory list beside the unit's own queue for an immobile FACTORY
+(1245537-1245575).
+
+Implemented (globals.lua, units.lua, build.lua, moho.lua, luaSimWorker.ts,
+luaSimClient.ts, worldCommands.ts, world-commands.lua, gameUi.ts,
+ui-globals.lua, main.ts): `__factoryCommands[unitId]` with
+`__issueFactoryCommand(id, cmd, clear)`, `__clearFactoryCommands`,
+`__issueInitialRally` (offset turned by the unit's heading), the builder
+tick inside `__factoryTick`, `__inheritFactoryCommands` after OnStopBuild
+(TransportLoadUnits skipped for AIR/NAVAL), the bindings
+`IssueFactoryRallyPoint` (two-argument check, appends) and
+`IssueClearFactoryCommands` (one-argument check), `GetRallyPoint` from the
+list head (nil without one; `SetRallyPoint` is gone), the player's factory
+commands as the worker message `factoryCommand` (Move/Patrol/Attack/
+AttackGround/Guard, clear = not shift) routed by the selection's new
+`isMobile` flag in worldCommands.ts (Move, Patrol and Attack on an
+immobile FACTORY go into its list), the unit row's `fcmds` (id, type,
+position) and `id`/`y` on every synced queue entry, the UI VM's
+`__uiSetCommandQueue` behind a real `GetCommandQueue()`, and the rally
+polyline in the command graph. `verify-factory` gained 15 checks (initial
+rally at pos + 5 forward and turned by a 90-degree yaw, GetRallyPoint,
+append, clear and the tick's re-issue, clear+rally in one step, both
+arg-count errors, shift queueing versus replacing, the ACU refusal, the
+row's fcmds, and the inheritance order Move,Patrol behind the roll-off);
+`__spawnUnit` takes the creation heading so the initial rally sees it. The
+golden master moved from 1ef2f9abc3d932006c860c4b80a601d9: the factory
+row carries `fcmds`, and both tanks now drive to the initial rally point
+(x/z/heading/scroll of two rows; the economy unchanged).
+
+Not done / open, with evidence in hand:
+
+- **Guard on an immobile factory** stays a UNIT Guard here (factory assist
+  by queue sharing, which the sim's factory tick reads from mGuardedUnit,
+  Cfile:838192-838234). By the IsMobile split the retail UI would send it
+  as a factory command; how retail reaches the assist path from that (the
+  +440 flag in sub_81EB20 is unidentified; UserUnit::GetFactoryCommandQueue2
+  is `*(this + 243)`, not +440) is UNRESOLVED -- changing it blind would
+  break a verified feature.
+- **The NoRush gate** of UNIT_IssueFactoryCommand (1007648-1007655) is not
+  modelled: no NoRush timer in this sim.
+- **The queue-head abort** is now fully traced for the next item:
+  `DecreaseBuildCountInQueue(index, count)` (1257301-1257395) walks the
+  UI's merged build-queue item from its newest command backwards and sends
+  `DecreaseCommandCount` per command; `CUnitCommand::DecreaseCount`
+  (1007719-1007775) clamps at 0 and, at 0, removes the command from every
+  unit's queue (RemoveCommandFromQueue, 1005104-1005155) -- index 0
+  broadcasts UCQS_NeedsRefresh, which the dispatcher answers by
+  interrupting its subtasks (746664-746706, TaskInterruptSubtasks
+  438613-438636): the CFactoryBuildTask destructor (818337-818390) zeroes
+  mWorkProgress and calls CBuildTaskHelper::OnStopBuild(0), which runs the
+  Lua OnFailedToBuild / OnFailedToBeBuilt / OnStopBuild (815007-815022);
+  the next TaskTick dispatches the new head (746591-746594). The engine
+  never destroys the half-built unit itself and has no refund; what
+  happens to it is the original Lua's decision. `IncreaseBuildCountInQueue`
+  issues one fresh BuildFactory command per requested unit through
+  ISSUE_Command (1351091-1351112); it never bumps a count.
+## The rally marker: WorldMesh (CUIWorldMesh) lives in the UI VM and the renderer draws it
+
+With the real `GetCommandQueue`, gamemain.lua:369 reaches rallypoint.lua on
+every selection change, and rallypoint.lua:24 calls `WorldMesh()` for every
+selected structure factory -- `InternalCreateWorldMesh` sat in the fail-loud
+list, so selecting a factory would have thrown. The whole class is real now.
+
+The engine (Cfile): `moho.world_mesh_methods` carries 16 bindings
+(docs/research/engine-api.md:85), UI VM only. CUIWorldMesh is thin
+(1295875-1295905): a CScriptObject with ONE mMeshInstance, null until
+SetMesh. `InternalCreateWorldMesh(luaobj)` takes exactly one argument
+(1296242-1296270). `SetMesh` (1295906-1296230) reads UniformScale (default
+1.0), Color (FFFFFFFF), LODCutoff (1000); with MeshName it needs ShaderName
+and TextureName (else "MeshName specified, but ShaderName or TextureName
+were not specified", 1296058-1296060); otherwise BlueprintID takes the unit
+blueprint's Display.MeshBlueprint and Display.UniformScale (1296154-1296180);
+neither: "no mesh specified" (1296141). `SetStance(position[, orientation])`
+takes two or three arguments (1296432-1296433), copies a Vector3 and an
+optional Quaternion and applies them to the instance only (1296492);
+`SetLifetimeParameter` (1296838-1296860) writes mLifetimeParameter, `SetColor`
+(1296902-1296935) decodes a colour into the instance -- every setter is a
+silent no-op before SetMesh (`if ( mMeshInstance )`). The mesh renderer
+draws each instance with its technique: RallyPoint (mesh.fx:4873-4894) is
+CommandFeedbackVS(0.7) -- the mesh scales from 1.0 to 0.7 over material.y,
+the lifetime (:1937-1940) -- with CommandFeedbackPS0(false): the albedo with
+its own alpha, no fade (:2435-2439); SrcAlpha/InvSrcAlpha writing RGB, cull
+CW, depth disabled, alpha test > 0x23, stage post-water/pre-effect. The
+assets: meshes/game/Rally_lod0.scm (32,059 B) and Rally_Albedo.dds
+(22,000 B) in gamedata/meshes.scd.
+
+Implemented: `moho.world_mesh_methods` in moho.lua (SetMesh, SetStance,
+SetHidden, IsHidden, SetColor, SetScale, the four parameter setters,
+GetInterpolatedPosition, Destroy; the four bounding queries fail loudly --
+no retail UI file calls them), the registry `__uiWorldMeshes` with
+`InternalCreateWorldMesh` and `__uiWorldMeshesJson()` in ui-globals.lua,
+`gameUi.connectWorldMeshes` handing the registry over after every beat, and
+`src/viewer/worldMeshes.ts` reconciling it against three.js meshes with the
+feedback-family material of commandFeedback.ts (whose RallyPoint entry said
+scaleTo 1.0 -- mesh.fx:4890 says 0.7; fixed). `verify-ui-panels` gained 17
+checks: the registration, the arg-count and type errors, the no-op setters
+before SetMesh, the two SetMesh refusals, the descriptor defaults, the
+stance/lifetime/visibility in the registry, GetInterpolatedPosition, the
+loud bounding query, Destroy, `GetCommandQueue` (id/type/position), and
+rallypoint.lua end to end: selecting a factory with a synced queue hangs the
+LAST command's mesh on it at that position, the beat moves it, deselecting
+clears it. Four of them went red when the stance write was removed. In the
+headless page (`?sandbox=SCMP_009&selftest=ueb0101`, SELFTEST-OK): selecting
+the factory yields one live world mesh -- Rally_lod0.scm, RallyPoint, scale
+0.1, lifetime 10 -- at the factory's initial rally point 5 units forward,
+where its two products stand; deselecting drops it to zero.
+
+Not modelled / UNVERIFIED: the distance enlargement of CommandFeedbackVS
+(`lodBasis`, mesh.fx:1936 -- the four floats at frame+660, Cfile:1193426,
+whose writer was not traced); the visibility default of a fresh mesh
+instance (both consumers call SetHidden(false) right after SetMesh); a
+shader name outside the feedback family (tutorial.lua:90 'Unit') falls
+back to the CommandFeedback parameters.
 
 ## Light particles: the flash core of impacts, explosions and build glow
 

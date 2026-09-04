@@ -60,7 +60,31 @@ local NUR_SIM = {
   'SetIgnorePlayableRect', 'SetPlayableRect', 'SetTerrainType',
   'SetTerrainTypeRect', 'ShouldCreateInitialArmyUnits', 'SimConExecute',
   'SplitProp', 'StopLoop', 'SubmitXMLArmyStats', 'TryCopyPose', 'Warp',
-  '_c_CreateEntity', '_c_CreateShield'}
+  '_c_CreateEntity', '_c_CreateShield',
+  -- The whole Issue* family plus IsCommandDone and CoordinateAttacks were
+  -- missing from engine-api.md until 2026-09-04: the generator matched the
+  -- three luadef assignments in one fixed order, and these bindings have
+  -- mMethodName before mPrevDef (Cfile:1008266-1008270). They are
+  -- sim_SimInits like the rest.
+  'CoordinateAttacks',
+  'IsCommandDone', 'IssueAggressiveMove', 'IssueAttack', 'IssueBuildFactory',
+  'IssueBuildMobile', 'IssueCapture', 'IssueClearCommands',
+  'IssueClearFactoryCommands', 'IssueDestroySelf', 'IssueDive',
+  'IssueFactoryAssist', 'IssueFactoryRallyPoint', 'IssueFerry',
+  'IssueFormAggressiveMove', 'IssueFormAttack', 'IssueFormMove',
+  'IssueFormPatrol', 'IssueGuard', 'IssueKillSelf', 'IssueMove',
+  'IssueMoveOffFactory', 'IssueNuke', 'IssueOverCharge', 'IssuePatrol',
+  'IssuePause', 'IssueReclaim', 'IssueRepair', 'IssueSacrifice', 'IssueScript',
+  'IssueSiloBuildNuke', 'IssueSiloBuildTactical', 'IssueStop', 'IssueTactical',
+  'IssueTeleport', 'IssueTeleportToBeacon', 'IssueTransportLoad',
+  'IssueTransportUnload', 'IssueTransportUnloadSpecific', 'IssueUpgrade',
+  -- Sim-side helpers of the factory command list (globals.lua): no engine
+  -- bindings, but Sim state that reads __units -- the UI VM has none of it.
+  '__factoryCommands', '__factoryCommandSerial', '__isFactoryBuilder',
+  '__factoryCommandPos', '__issueFactoryCommand', '__clearFactoryCommands',
+  '__issueInitialRally', '__factoryCommandTick', '__inheritFactoryCommands',
+  '__dispatchFactoryMove', '__dispatchFactoryPatrol', '__dispatchFactoryAttack',
+  '__dispatchFactoryAttackGround', '__dispatchFactoryGuard'}
 
 for _, name in ipairs(NUR_SIM) do
   rawset(_G, name, nil)

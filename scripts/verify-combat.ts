@@ -417,8 +417,10 @@ console.log('\n== Befehls-Dispatch: Stop, Move-bricht-Bau, Attack ==')
   const snapOrders = host.eval(
     `local u = __units[${runner}] return __readAllUnitsJson()`,
   ) as string
+  // Every synced queue entry carries the command id first (UserUnit::
+  // GetCommandQueue hands out id/type/position, Cfile:1367107-1367200).
   check(
-    String(snapOrders).includes('"orders":[{"t":"Move"'),
+    /"orders":\[\{"id":\d+,"t":"Move"/.test(String(snapOrders)),
     'the snapshot carries the full order queue for the command graph',
   )
   for (let t = 0; t < 300; t++) beat(engine)

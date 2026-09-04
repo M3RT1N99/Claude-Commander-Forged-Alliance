@@ -238,7 +238,7 @@ if (cm.mode === false) melde('UI', 'Der Klick aufs Bau-Icon startet KEINEN Bau-M
 
 tue('Gebäude setzen (worldClick → Baustelle + Bau-Auftrag)')
 // The playthrough only ever clicks in the BUILD mode and in the plain/rally
-// mode, so only move/setRallyPoint/build are exercised. The other commands of
+// mode, so only move/factoryCommand/build are exercised. The other commands of
 // the interface are not silently faked here: they fail loudly, exactly as the
 // untyped facade did before (it hit `sim.attack is not a function`).
 const ungenutzterBefehl = (name: string) => (): never => {
@@ -255,8 +255,10 @@ const simFassade: WorldCommandSim = {
   move: (id: number, x: number, z: number): void => {
     sim.eval(`local u=__units[${id}] if u then u:GetNavigator():SetGoal({ ${x}, 0, ${z} }) end`)
   },
-  setRallyPoint: (id: number, x: number, y: number, z: number): void => {
-    sim.eval(`local u=__units[${id}] if u then u:SetRallyPoint({ ${x}, ${y}, ${z} }) end`)
+  factoryCommand: (id: number, cmd, queue?: boolean): void => {
+    const clear = queue ? 'false' : 'true'
+    if ('targetId' in cmd) sim.eval(`__dispatchFactory${cmd.cmd}(${id}, ${cmd.targetId}, ${clear})`)
+    else sim.eval(`__dispatchFactory${cmd.cmd}(${id}, ${cmd.x}, ${cmd.z}, ${clear})`)
   },
   build: async (
     builderId: number,
