@@ -1140,9 +1140,33 @@ console.log('\n== A unit that must unpack does not look for targets while it mov
   for (let t = 0; t < 8; t++) beat(engine)
   check(host.eval(`return __units[${arty}]:IsUnitState('Moving')`) === true, 'the move order puts it in the Moving state')
   check(host.eval(`return __units[${arty}]:GetWeapon(1):GetCurrentTarget() == nil`) === true, 'while Moving it has acquired nothing after 8 beats')
+  // IssueStop APPENDS a Stop with clear = 0 (cfunc_IssueStopL,
+  // Cfile:1007950): the Move keeps running, the Stop waits behind it.
   host.eval(`IssueStop({ __units[${arty}] })`)
+  check(
+    host.eval(`local q = __orders[${arty}] or {}; return #q == 1 and q[1].type == 'Stop' and __orderActive[${arty}].type == 'Move'`) === true,
+    'IssueStop queues a Stop BEHIND the running Move (clear = 0, Cfile:1007950)',
+  )
   for (let t = 0; t < 8; t++) beat(engine)
+  check(host.eval(`return __units[${arty}]:IsUnitState('Moving')`) === true, 'eight beats later it is still Moving -- the soft Stop did not interrupt')
+  // The scenario scripts pair it with IssueClearCommands (scenarioframework.lua:840):
+  // the clear wipes the queue and the running move.
+  host.eval(`IssueClearCommands({ __units[${arty}] })`)
+  for (let t = 0; t < 8; t++) beat(engine)
+  check(host.eval(`return __units[${arty}]:IsUnitState('Moving')`) === false, 'IssueClearCommands stops it (ClearCommandQueue, the head task interrupted)')
   check(host.eval(`return __units[${arty}]:GetWeapon(1):GetCurrentTarget() ~= nil`) === true, 'once it stands still the next check finds the tank')
+  // A Stop on an idle queue runs at once: the attacker's desired target goes
+  // (CAiAttackerImpl::Stop, Cfile:790323-790330), the weapons re-acquire.
+  host.eval(`__attackOrders[${arty}] = ${arty}`)
+  host.eval(`IssueStop({ __units[${arty}] })`)
+  check(
+    host.eval(`return __attackOrders[${arty}] == nil and __orderActive[${arty}] == nil and #(__orders[${arty}] or {}) == 0`) === true,
+    'on an idle unit the Stop dispatches at once: the attacker target is cleared and the command is complete (AIRES_1, Cfile:831250)',
+  )
+  check(
+    (host.eval(`local ok, e = pcall(IssueStop, { __units[${arty}] }, 1); return ok and '' or tostring(e)`) as string).includes('expected 1 args, but got 2'),
+    'IssueStop with two arguments is the arg-count error (Cfile:1007926)',
+  )
 }
 
 console.log('\n== A DoNotTarget unit is skipped by the free target search ==')

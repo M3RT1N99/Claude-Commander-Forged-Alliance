@@ -143,21 +143,20 @@ Order within the phase is free except where a dependency is named.
       `src/engine-lua/globals.lua:1875-1887` — the production entries are
       `UNITCOMMAND_BuildFactory` commands inside the same `CUnitCommandQueue`
       that `ClearCommandQueue` wipes (Cfile:1005371-1005399, 838000-838062).
-- [ ] T021 **DEFERRED — recorded deviation, not done.** Split
-      `IssueClearCommands` from `IssueStop`. Both still route to
-      `__dispatchStop`, i.e. our `IssueStop` performs a full clear.
-      The engine keeps them apart, verified directly:
+- [x] T021 Split `IssueClearCommands` from `IssueStop` (done 2026-09-04).
       `IssueStop` calls `UNIT_IssueCommand(..., UNITCOMMAND_Stop, clear = 0)`
       (Cfile:1007945-1007952) — it APPENDS a Stop command whose entire effect is
       `CAiAttackerImpl::Stop` + `SiloStopBuild`
       (`IAiCommandDispatchImpl::Stop`, Cfile:831239-831256); it does not touch
       the queue, the build tasks or the movement goal.
       `IssueClearCommands` calls `ClearCommandQueue` per unit plus
-      `CAiAttackerImpl::Stop` (Cfile:1007874-1007890).
-      The UI's Stop button is the CLEAR case (`ISSUE_Command(..., 1)`,
-      Cfile:1255059-1255063), which is what T020 fixed and what the suites
-      cover. Splitting `IssueStop` changes sim-Lua callers that currently rely
-      on the over-clear, so it needs its own spec round with its own checks.
+      `CAiAttackerImpl::Stop` (Cfile:1007874-1007890) — that stays
+      `__dispatchStop`. `globals.lua` now appends `{ type = 'Stop' }` with
+      clear = false and `__startOrder` runs the dispatcher's Stop when it
+      reaches the head (the attacker target cleared, complete at once).
+      *Verified by*: `scripts/verify-combat.ts`.
+      asserts: IssueStop queues a Stop BEHIND the running Move
+      asserts: on an idle unit the Stop dispatches at once
 - [x] T022 Extend `scripts/verify-factory.ts`: Stop on a producing factory
       empties the queue and cancels the in-progress unit.
       *Verified by*: `scripts/verify-factory.ts`, `scripts/verify-command-chain.ts`.

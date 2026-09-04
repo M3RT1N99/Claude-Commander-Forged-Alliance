@@ -1421,8 +1421,28 @@ function IsCommandDone(cmd)
   return true
 end
 
-function IssueStop(units)
-  return issueTo(units, function(u) __dispatchStop(u.__id) end)
+--- IssueStop(units) -- cfunc_IssueStopL (Cfile:1007889-1007952): exactly
+--- one argument (1007926), SSTICommandIssueData(UNITCOMMAND_Stop) through
+--- UNIT_IssueCommand with clear = 0 (1007950) -- APPENDED behind whatever
+--- runs, never a clear. A Stop is accepted even while Enhancing (the
+--- requireIdle gate exempts it, 1006817-1006819). When it reaches the head,
+--- the dispatcher runs IAiCommandDispatchImpl::Stop (DispatchTask
+--- 830524/830650 -- the decompiled switch labels sit one value off, the
+--- Stop case is the one IDA labelled None): CAiAttackerImpl::Stop clears the
+--- attacker's desired target (790323-790330), a running silo build stops
+--- (SiloStopBuild, 831246-831248), mRequestRefreshUI is set and the command
+--- completes at once (AIRES_1, 831250-831251). The player's Stop button is
+--- a different thing: ISSUE_Command(Stop, clear = 1) (1255059-1255063), the
+--- queue wiped first -- that is __dispatchStop / IssueClearCommands.
+--- scenarioframework.lua:840/932 pairs the two: IssueStop, then
+--- IssueClearCommands.
+function IssueStop(units, extra)
+  if extra ~= nil then
+    error('IssueStop\n  expected 1 args, but got 2', 2)
+  end
+  return issueTo(units, function(u, cmd)
+    __issueOrder(u.__id, { type = 'Stop', cmdId = cmd.id }, false)
+  end)
 end
 
 --- IssueUpgrade(units, blueprintId) — cfunc_IssueUpgradeL (Cfile:1011315).
@@ -1994,6 +2014,16 @@ end
 local function __startOrder(unitId, cmd)
   local u = __units[unitId]
   if not u then return false end
+  if cmd.type == 'Stop' then
+    -- IAiCommandDispatchImpl::Stop (Cfile:831239-831252): the attacker's
+    -- desired target goes (CAiAttackerImpl::Stop = SetDesiredTarget(none),
+    -- 790323-790330) -- the weapons re-acquire on their own next tick, as in
+    -- the engine; the silo build would stop (831246-831248; StopSiloBuild is
+    -- not modelled here, docs/STATUS.md); the command is complete at once
+    -- (AIRES_1) -- `false` hands the queue on without a running order.
+    __attackOrders[unitId] = nil
+    return false
+  end
   if cmd.type == 'Move' then
     u:GetNavigator():SetGoal({ cmd.x, 0, cmd.z })
     return true

@@ -1786,9 +1786,9 @@ is a clear-then-Stop (ISSUE_Command with clear=1, 1255059-1255063,
 ClearCommandQueue 1005371-1005399, then IAiCommandDispatchImpl::Stop
 1231239-1231256 stops the attacker and silo builds) and is right here, but
 the sim-only `IssueStop(units)` appends a Stop with clear=0
-(1007889-1007952) and ours clears like the button. Ranked by play impact:
-the soft IssueStop (the factory command list, the rally marker, the
-queue-head abort and the army restriction mirror are done, see below).
+(1007889-1007952) -- DONE below ("IssueStop appends"). All four ranked
+items of this audit (the factory command list, the queue-head abort, the
+army restriction mirror, the soft IssueStop) are done, see below.
 
 **Effects.** The emitter/trail/beam pipeline is real and verified
 (CEfxEmitter::Tick port). Missing or dead: `CreateLightParticle`/
@@ -1862,6 +1862,35 @@ no-ops were never counted before (`Unit.RevertElevation`,
 too; the strip list now carries every documented Sim global plus the
 factory-list helpers, and check-vm-separation is green. `IssueFactoryAssist`
 is a real Sim binding -- the lead for the open factory-assist question.
+
+## IssueStop appends; only the Stop button clears
+
+The sim-side `IssueStop(units)` routed to the same full clear as the
+player's Stop button (T021 of specs/001 recorded the deviation). The engine
+keeps them apart: cfunc_IssueStopL (Cfile:1007889-1007952) takes exactly one
+argument (1007926) and sends UNITCOMMAND_Stop through UNIT_IssueCommand
+with clear = 0 (1007950) -- APPENDED behind whatever runs; a Stop is accepted
+even while Enhancing (1006817-1006819). When it reaches the head the
+dispatcher runs IAiCommandDispatchImpl::Stop (DispatchTask 830524/830650;
+the decompiled switch labels sit one enum value off, the Stop case is the
+one IDA labelled None): CAiAttackerImpl::Stop clears the attacker's desired
+target (790323-790330), a running silo build stops (831246-831248),
+mRequestRefreshUI is set and the command completes at once (AIRES_1,
+831250-831251). The player's Stop is ISSUE_Command(Stop, clear = 1)
+(1255059-1255063) -- ClearCommandQueue first -- and IssueClearCommands is
+ClearCommandQueue plus the attacker stop (1007874-1007890);
+scenarioframework.lua:840/932 pairs IssueStop with IssueClearCommands.
+
+Implemented (globals.lua): `IssueStop` checks its one argument and appends
+`{ type = 'Stop' }` with clear = false; `__startOrder` runs the
+dispatcher's Stop for it (the attacker target cleared, the order complete
+at once); `IssueClearCommands` / `__dispatchStop` stay the clear.
+`verify-combat` gained five checks (the Stop queued behind the running
+Move, still Moving eight beats later, IssueClearCommands stops it, an idle
+unit's Stop dispatches at once and clears the attacker target, the
+arg-count error); two went red when the append was turned into a clear.
+Not modelled: SiloStopBuild (StopSiloBuild is still a silent no-op in
+moho.lua).
 
 ## The army's build restrictions reach the build menu
 
