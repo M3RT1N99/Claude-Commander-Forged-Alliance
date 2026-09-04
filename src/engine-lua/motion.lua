@@ -521,9 +521,16 @@ end
 --- DeathThread still runs; refusing there would kill the factory's thread
 --- and leave it busy for good. The dead unit is released in place instead
 --- of dropping (docs/STATUS.md).
+--- A unit already queued for deletion is exempt as well, whatever queued
+--- it: Entity::Destroy defers to the deletion queue (Cfile:916089) and
+--- Entity::OnDestroy detaches the entity at the end of the same beat
+--- (916158) -- no ballistic tick ever runs for it in the engine either, so
+--- releasing it in place is the engine's own outcome, not a silent guess.
+--- The case that reaches this: FactoryUnit.BuildingState's DetachAll(bone)
+--- (defaultunits.lua:669) on the site a failed build just destroyed.
 function __unitCheckDetach(u, skipBallistic)
   local canFly = u.__bp and u.__bp.Air and u.__bp.Air.CanFly
-  if not canFly and not skipBallistic and not u.__dead then
+  if not canFly and not skipBallistic and not u.__dead and not u.__destroyQueued then
     error('DetachFrom: the ballistic drop of a live non-flying unit (UMS_Ballistic, CUnitMotion::CalcMoveBallistic) is not implemented; pass skipBallistic = true', 3)
   end
 end

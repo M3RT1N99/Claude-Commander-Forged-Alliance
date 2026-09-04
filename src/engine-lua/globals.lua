@@ -2368,6 +2368,10 @@ local function guardProcess(unitId, u, g, t)
     -- Cfile:837903-837908). Pull ONE item and leave the guarded factory
     -- its RUNNING head item (pull when index>0 or count>1,
     -- Cfile:837988-838024), decrementing or removing it (Cfile:838030-838049).
+    -- The panel's commands carry a count of 1 each (IssueBlueprintCommand
+    -- loops ISSUE_Command per unit, Cfile:1265867-1265872); a count above 1
+    -- comes from the AI's IssueBuildFactory(units, bp, count) -- a Sim binding
+    -- this engine lacks yet (docs/STATUS.md), so that branch waits for it.
     if __builderBusy(unitId) then return end
     local own = u.__buildQueue
     if own and own[1] then return end

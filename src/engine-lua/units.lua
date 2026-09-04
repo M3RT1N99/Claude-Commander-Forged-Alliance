@@ -934,9 +934,10 @@ local function readRow(id, u)
       and (u.__fraction or 1) >= 1
       and not __builderBusy(id)
       and (u.__buildQueue == nil or u.__buildQueue[1] == nil),
-    -- Die Bau-Warteschlange einer Fabrik ({ id, count }) — die UI zeigt sie an
-    -- (construction.lua:1620), also gehoert sie in den Zustand, den die Sim meldet.
-    buildQueue = u.__buildQueue or {},
+    -- The factory's queue as the construction panel shows it: consecutive
+    -- same-blueprint commands merged into stacks ({ id, count }, sub_835DF0,
+    -- Cfile:1256786-1256813) -- the queue itself holds one command per unit.
+    buildQueue = __factoryQueueDisplay(u),
   }
 end
 

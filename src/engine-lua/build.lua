@@ -50,7 +50,12 @@ end
 function __abortBuildTasks(builderId)
   local b = __units[builderId]
   for tid, task in pairs(__buildTasks) do
-    if task.builder == builderId then
+    if task.builder == builderId and task.order == 'FactoryBuild' then
+      -- A factory's command is removed with its queue (ClearCommandQueue on
+      -- Stop / IssueClearCommands): the running CFactoryBuildTask goes the
+      -- destructor way, not the graceful one.
+      __abortFactoryBuild(tid, task)
+    elseif task.builder == builderId then
       local t = __units[task.target]
       if task.started and b and not b.__dead then
         if t and not t.__dead then
@@ -71,6 +76,43 @@ function __abortBuildTasks(builderId)
       __buildTasks[tid] = nil
     end
   end
+  if b then b.UnitBeingBuilt = nil end
+end
+
+--- The CFactoryBuildTask destructor (Cfile:818337-818390), reached when the
+--- task's command leaves the queue (the head decreased to 0, Stop,
+--- IssueClearCommands) or the dispatcher interrupts: mWorkProgress = 0
+--- (818358) and, because the task is not complete, CBuildTaskHelper::
+--- OnStopBuild(helper, 0) (818367): with the helper still building and the
+--- factory alive it runs OnFailedToBuild on the FACTORY (815007 --
+--- defaultunits.lua:560 sets FactoryBuildFailed and goes idle),
+--- OnFailedToBeBuilt on the SITE (815018 -- unit.lua:1632: Destroy) and the
+--- Lua OnStopBuild(site, order) (815022 -- FactoryUnit.OnStopBuild skips the
+--- roll-off on FactoryBuildFailed, defaultunits.lua:518), then drops the
+--- focus (815027-815055). No refund: the engine has none. The next factory
+--- tick starts the new head (746591-746594).
+function __abortFactoryBuild(tid, task)
+  local b = __units[task.builder]
+  local t = __units[task.target]
+  if b then b.__workProgress = 0 end
+  if task.started and b and not b.__dead then
+    local okF, errF = pcall(function() b:OnFailedToBuild() end)
+    if not okF then WARN('OnFailedToBuild: ' .. tostring(errF)) end
+    if t and not t.__dead then
+      local okS, errS = pcall(function() t:OnFailedToBeBuilt() end)
+      if not okS then WARN('OnFailedToBeBuilt: ' .. tostring(errS)) end
+    end
+    if t then
+      local ok, err = pcall(function() b:OnStopBuild(t, task.order) end)
+      if not ok then WARN('OnStopBuild: ' .. tostring(err)) end
+    end
+    if b.__focusEntity == t then b.__focusEntity = nil end
+  elseif t and not t.__engineBorn and (t.__fraction or 1) <= 0 then
+    -- The site placeholder of a task that never started (spawned at the
+    -- factory this beat): nothing existed yet in the engine.
+    t:Destroy()
+  end
+  __buildTasks[tid] = nil
   if b then b.UnitBeingBuilt = nil end
 end
 
@@ -295,28 +337,103 @@ function __queueFactoryBuild(factoryId, bpId, count)
   if not isFactoryUnit(f) then return false end
   f.__buildQueue = f.__buildQueue or {}
   local q = f.__buildQueue
-  local n = table.getn(q)
-  -- Gleicher Blueprint wie zuletzt? Dann stapeln (die UI zeigt Stapel, keine
-  -- Einzelposten).
-  if n > 0 and q[n].id == bpId then
-    q[n].count = q[n].count + (count or 1)
-  else
-    q[n + 1] = { id = bpId, count = count or 1 }
+  -- ONE UNITCOMMAND_BuildFactory command per unit: the binding loops
+  -- ISSUE_Command `count` times (Cfile:1265867-1265872), every command with
+  -- its own count of 1. The stacks the construction panel shows are the
+  -- user side's merge of consecutive same-blueprint commands (sub_835DF0,
+  -- Cfile:1256786-1256813) -- see __factoryQueueDisplay.
+  for _ = 1, (count or 1) do
+    q[table.getn(q) + 1] = { id = bpId, count = 1 }
   end
   return true
 end
 
---- Einen Queue-Eintrag um `delta` aendern (1-basierter Index) — das Sim-Ende
---- von Increase/DecreaseBuildCountInQueue (Moho::ISSUE_IncreaseCommandCount
---- Cfile:1257266 / DecreaseCommandCount Cfile:1257378). Faellt der Zaehler auf
---- 0 oder darunter, verschwindet der Eintrag.
+--- The queue as the construction panel sees it (sCurrentBuildQueue,
+--- sub_835DF0, Cfile:1256786-1256813): walked front to back, every
+--- BuildFactory command whose blueprint equals the previous item's is merged
+--- into that item -- the count accumulated, the command kept in the item's
+--- list. Returns { { id, count, cmds = { command, ... } }, ... }.
+function __factoryQueueGroups(q)
+  local groups = {}
+  for _, cmd in ipairs(q or {}) do
+    local last = groups[table.getn(groups)]
+    if last and last.id == cmd.id then
+      last.count = last.count + (cmd.count or 1)
+      last.cmds[table.getn(last.cmds) + 1] = cmd
+    else
+      groups[table.getn(groups) + 1] = { id = cmd.id, count = cmd.count or 1, cmds = { cmd } }
+    end
+  end
+  return groups
+end
+
+--- The merged stacks ({ id, count }) for the unit row (construction.lua
+--- reads them as the factory's queue display).
+function __factoryQueueDisplay(u)
+  local out = {}
+  for i, g in ipairs(__factoryQueueGroups(u.__buildQueue)) do
+    out[i] = { id = g.id, count = g.count }
+  end
+  return out
+end
+
+--- The running FactoryBuild task of a factory, if any.
+local function runningFactoryTask(factoryId)
+  for tid, task in pairs(__buildTasks) do
+    if task.builder == factoryId and task.order == 'FactoryBuild' then return tid, task end
+  end
+  return nil
+end
+
+--- A queue entry edited from the construction panel (1-based index into the
+--- MERGED display, construction.lua:895/988-990).
+---
+--- Decrease (cfunc_DecreaseBuildCountInQueueL, Cfile:1257301-1257395): the
+--- binding walks the item's commands from the NEWEST backwards and sends
+--- Sim::DecreaseCommandCount for each until the requested count is used up
+--- (1257350-1257390). CUnitCommand::DecreaseCount (1007719-1007775) clamps
+--- at 0 and, at 0, removes the command from the unit's queue
+--- (RemoveCommandFromQueue, 1005104-1005155). Removing the HEAD broadcasts
+--- UCQS_NeedsRefresh (1005110-1005117), which the dispatcher answers by
+--- interrupting its running task (IAiCommandDispatchImpl::OnEvent
+--- 746664-746706, TaskInterruptSubtasks 438613-438636) -- the
+--- CFactoryBuildTask destructor path below; the next TaskTick dispatches
+--- the new head (746591-746594).
+---
+--- Increase (cfunc_IncreaseBuildCountInQueueL, 1257188-1257270 ->
+--- ISSUE_IncreaseCommandCount 1351002-1351150): one FRESH BuildFactory
+--- command per requested unit through ISSUE_Command (1351091-1351112),
+--- appended at the back of the queue -- no count is bumped.
 function __adjustFactoryQueue(factoryId, index, delta)
   local f = __units[factoryId]
   if not f or not f.__buildQueue then return end
-  local item = f.__buildQueue[index]
-  if not item then return end
-  item.count = item.count + delta
-  if item.count <= 0 then table.remove(f.__buildQueue, index) end
+  local q = f.__buildQueue
+  local group = __factoryQueueGroups(q)[index]
+  if not group then return end
+  if delta > 0 then
+    for _ = 1, delta do
+      q[table.getn(q) + 1] = { id = group.id, count = 1 }
+    end
+    return
+  end
+  local remaining = -delta
+  local tid, task = runningFactoryTask(factoryId)
+  for i = table.getn(group.cmds), 1, -1 do
+    if remaining <= 0 then break end
+    local cmd = group.cmds[i]
+    local take = math.min(remaining, cmd.count or 1)
+    cmd.count = (cmd.count or 1) - take
+    remaining = remaining - take
+    if cmd.count <= 0 then
+      for k = table.getn(q), 1, -1 do
+        if q[k] == cmd then table.remove(q, k); break end
+      end
+      if task and task.__factoryItem == cmd then
+        __abortFactoryBuild(tid, task)
+        task = nil
+      end
+    end
+  end
 end
 
 -- === Structure upgrade (Moho::CUnitUpgradeTask, Cfile:816981/817198) ===

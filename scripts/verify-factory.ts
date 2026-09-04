@@ -53,7 +53,7 @@ const engine = installEngine(host)
 const readUnit = (id: number): LuaUnitState | null => readLuaUnit(host, id)
 setTerrainSource(host, () => 20, FLAT_TEST_MAP_SIZE)
 // Blueprint UND Skelett — beides braucht die Sim, bevor die erste Unit entsteht.
-for (const id of ['uel0001', 'ueb0101', 'uel0101']) await game.giveUnit(host, id)
+for (const id of ['uel0001', 'ueb0101', 'uel0101', 'uel0105']) await game.giveUnit(host, id)
 
 console.log('\n== Fabrik + ACU stehen ==')
 // Die ACU liefert der Armee ihren Startvorrat (GiveInitialResources); ohne
@@ -70,8 +70,9 @@ check(
 console.log('\n== Warteschlange: zwei Panzer ==')
 check(queueFactoryBuild(host, factory, 'uel0101', 2), '__queueFactoryBuild(uel0101, 2)')
 check(
-  Number(host.eval(`return __units[${factory}].__buildQueue[1].count`)) === 2,
-  'Die Warteschlange trägt { id = uel0101, count = 2 } (Form aus construction.lua:1620)',
+  Number(host.eval(`return table.getn(__units[${factory}].__buildQueue)`)) === 2
+    && Number(host.eval(`return __readUnit(${factory}).buildQueue[1].count`)) === 2,
+  'two BuildFactory commands (one per unit, Cfile:1265867-1265872), shown as ONE stack { id = uel0101, count = 2 } (construction.lua:1620)',
 )
 
 // Ein Beat: __factoryTick setzt die erste Einheit auf.
@@ -132,7 +133,7 @@ check(
   'an unattached entity is its own GetParent() (Cfile:932423)',
 )
 check(
-  Number(host.eval(`return table.getn(__units[${factory}].__buildQueue) > 0 and __units[${factory}].__buildQueue[1].count or 0`)) === 2,
+  Number(host.eval(`local q = __readUnit(${factory}).buildQueue return q[1] and q[1].count or 0`)) === 2,
   'Die Warteschlange steht noch auf 2 — die BAUENDE Einheit bleibt gezaehlt ' +
     '(die Engine dekrementiert die BuildFactory-Command erst bei COMPLETION, ' +
     'Cfile:838029), also zeigt die Anzeige die echte Reststueckzahl',
@@ -388,8 +389,9 @@ const midTank = Number(
   `),
 )
 check(midTank > 0, `a tank is building from the stack (id ${midTank})`)
-// Slip a foreign stack in FRONT of the building one — now q[1] is NOT the item
-// the running task was built from.
+// Slip a foreign command in FRONT of the building one — now q[1] is NOT the
+// command the running task was built from. (A command with a count above 1
+// is what the AI's IssueBuildFactory makes; the panel's commands carry 1.)
 host.eval(`table.insert(__units[${factory}].__buildQueue, 1, { id = 'ZZFOREIGN', count = 5 })`)
 let mb = 0
 while (readUnit(midTank)!.fraction < 1 && mb < 3000) {
@@ -399,18 +401,19 @@ while (readUnit(midTank)!.fraction < 1 && mb < 3000) {
 check(readUnit(midTank)!.fraction >= 1, `the tank finished (${mb} beats)`)
 check(
   Number(host.eval(`return __units[${factory}].__buildQueue[1].count`)) === 5,
-  'the foreign stack at q[1] is UNTOUCHED (completion drained its own item by identity, not q[1])',
+  'the foreign command at q[1] is UNTOUCHED (completion drained its own command by identity, not q[1])',
 )
 check(
   Number(
     host.eval(`
+      local n = 0
       for _, it in ipairs(__units[${factory}].__buildQueue) do
-        if it.id == 'uel0101' then return it.count end
+        if it.id == 'uel0101' then n = n + it.count end
       end
-      return -1
+      return n
     `),
   ) === 1,
-  'the tank stack it WAS building dropped 2 -> 1',
+  'of the two tank commands it WAS building from, one is left (the completed one removed itself, Cfile:838029)',
 )
 host.eval(`
   local q = __units[${factory}].__buildQueue
@@ -448,6 +451,102 @@ console.log('\n== Control: an untouched factory DOES produce (the counter works)
   check(producedNear(260, 260) === 1, `the control factory started a unit (${producedNear(260, 260)})`)
 }
 
+console.log('\n== The panel edits the queue: newest command first, the running one last ==')
+// The queue is one BuildFactory command per unit (IssueBlueprintCommand loops
+// ISSUE_Command, Cfile:1265867-1265872); the panel shows consecutive
+// same-blueprint commands as one stack (sub_835DF0, 1256786-1256813).
+// DecreaseBuildCountInQueue walks the stack's commands from the NEWEST
+// backwards (1257350-1257390); a command decreased to 0 leaves the queue
+// (CUnitCommand::DecreaseCount 1007719-1007775) and, when it was the head,
+// the dispatcher interrupts the running CFactoryBuildTask through its
+// destructor (746664-746706, 818337-818390): OnFailedToBuild on the factory,
+// OnFailedToBeBuilt on the site (unit.lua:1632 destroys it), OnStopBuild.
+// IncreaseBuildCountInQueue issues fresh commands at the back
+// (1351091-1351112).
+{
+  const editFactory = spawnLuaUnit(host, 'ueb0101', { x: 380, y: 0, z: 380 }, 1)
+  queueFactoryBuild(host, editFactory, 'uel0101', 2)
+  queueFactoryBuild(host, editFactory, 'uel0105', 1)
+  queueFactoryBuild(host, editFactory, 'uel0101', 1)
+  const display = (): string =>
+    host.eval(`
+      local out = {}
+      for i, g in ipairs(__readUnit(${editFactory}).buildQueue) do out[i] = g.id .. 'x' .. g.count end
+      return table.concat(out, ',')
+    `) as string
+  check(
+    Number(host.eval(`return table.getn(__units[${editFactory}].__buildQueue)`)) === 4 && display() === 'uel0101x2,uel0105x1,uel0101x1',
+    `four commands, three stacks for the panel -- only CONSECUTIVE same-blueprint commands merge (${display()})`,
+  )
+  // The first tank starts; let it gather some progress.
+  let editTank = 0
+  for (let i = 0; i < 40 && editTank === 0; i++) {
+    beat(engine)
+    editTank = Number(
+      host.eval(`
+        for tid, task in pairs(__buildTasks) do
+          if task.builder == ${editFactory} and task.started then return task.target end
+        end
+        return 0
+      `),
+    )
+  }
+  for (let i = 0; i < 20; i++) beat(engine)
+  const progressBefore = readUnit(editTank)?.fraction ?? -1
+  check(editTank > 0 && progressBefore > 0, `the first tank (${editTank}) is building (${progressBefore.toFixed(3)})`)
+  // Decrease the first stack by one: the NEWEST of its two commands goes, the
+  // running head stays and keeps building.
+  host.eval(`__adjustFactoryQueue(${editFactory}, 1, -1)`)
+  beat(engine)
+  check(
+    display() === 'uel0101x1,uel0105x1,uel0101x1' && (readUnit(editTank)?.fraction ?? 0) > progressBefore,
+    `decreasing the stack removes its newest command; the running build continues (${display()}, ${readUnit(editTank)?.fraction.toFixed(3)})`,
+  )
+  // Increase the LAST stack by two: two fresh commands at the back, merged
+  // into that stack by the display.
+  host.eval(`__adjustFactoryQueue(${editFactory}, 3, 2)`)
+  check(display() === 'uel0101x1,uel0105x1,uel0101x3', `increasing appends fresh commands at the back (${display()})`)
+  // Increase the FIRST stack: the fresh commands still go to the back, where
+  // the last stack (same blueprint) absorbs them.
+  host.eval(`__adjustFactoryQueue(${editFactory}, 1, 1)`)
+  check(display() === 'uel0101x1,uel0105x1,uel0101x4', `an increase on an earlier stack lands at the back too (${display()})`)
+  // Decrease the first stack once more: now its only command is the RUNNING
+  // one -- the build is interrupted the destructor way.
+  host.eval(`__adjustFactoryQueue(${editFactory}, 1, -1)`)
+  const afterAbort = host.eval(`
+    local f = __units[${editFactory}]
+    local t = __units[${editTank}]
+    local running = false
+    for _, task in pairs(__buildTasks) do if task.builder == ${editFactory} then running = true end end
+    -- Destroy is deferred to the end of the beat (Entity::Destroy queues,
+    -- Cfile:916089): the site is destroy-queued at once, gone after a beat.
+    return tostring(f.FactoryBuildFailed) .. '|' .. tostring(t == nil or t.__destroyQueued == true) .. '|' .. tostring(f.__workProgress or 0) .. '|' .. tostring(running)
+  `)
+  check(
+    afterAbort === 'true|true|0|false',
+    `removing the running head interrupts the build: FactoryBuildFailed, the site destroyed (unit.lua:1632), work progress 0, no task (${afterAbort})`,
+  )
+  beat(engine)
+  check(host.eval(`return __units[${editTank}] == nil`) === true, 'one beat later the site is deleted (the deletion queue ran)')
+  check(display() === 'uel0105x1,uel0101x4', `the queue lost the head only (${display()})`)
+  // The next tick dispatches the new head (746591-746594): the engineer starts.
+  let nextTarget = 0
+  for (let i = 0; i < 40 && nextTarget === 0; i++) {
+    beat(engine)
+    nextTarget = Number(
+      host.eval(`
+        for _, task in pairs(__buildTasks) do
+          if task.builder == ${editFactory} and task.started then return task.target end
+        end
+        return 0
+      `),
+    )
+  }
+  const nextBp = host.eval(`local u = __units[${nextTarget}]; return u and u.__bp and u.__bp.BlueprintId or 'none'`)
+  check(nextBp === 'uel0105', `the new head (the engineer) starts on the next tick (${nextBp})`)
+  host.eval(`__dispatchStop(${editFactory})`)
+}
+
 console.log('\n== Stop clears the production queue (it IS the command queue) ==')
 // The queue entries are UNITCOMMAND_BuildFactory commands inside
 // mUnit->mCommandQueue (Cfile:838000-838062); ClearCommandQueue removes every
@@ -457,8 +556,8 @@ console.log('\n== Stop clears the production queue (it IS the command queue) =='
   const stopFactory = spawnLuaUnit(host, 'ueb0101', { x: 300, y: 0, z: 300 }, 1)
   queueFactoryBuild(host, stopFactory, 'uel0101', 3)
   check(
-    Number(host.eval(`return table.getn(__units[${stopFactory}].__buildQueue or {})`)) === 1,
-    'the factory has a queued stack before Stop',
+    Number(host.eval(`return table.getn(__units[${stopFactory}].__buildQueue or {})`)) === 3,
+    'the factory has three queued commands before Stop (one per unit, Cfile:1265867-1265872)',
   )
   host.eval(`__dispatchStop(${stopFactory})`)
   check(

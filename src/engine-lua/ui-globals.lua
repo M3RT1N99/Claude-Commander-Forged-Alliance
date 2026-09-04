@@ -1939,18 +1939,16 @@ function __uiFactoryQueueBeat()
 end
 
 -- "IncreaseBuildCountInQueue(queueIndex, count)" (cfunc,
--- Cfile:1257189-1257270) und "DecreaseBuildCountInQueue(queueIndex, count)"
--- (Cfile:1257301-1257380): wirken auf die AKTUELL angezeigte Queue
--- (sCurrentBuildQueue[index-1], 1-basiert aus der Lua), nur auf
--- UNITCOMMAND_BuildFactory-Eintraege (Cfile:1257258-1257263), und reichen an
--- den Sim-Driver durch (ISSUE_IncreaseCommandCount Cfile:1257266 bzw.
--- DecreaseCommandCount Cfile:1257378). construction.lua:895/988-990 haengt
--- Rechtsklick (weniger) und Linksklick (mehr) daran.
---
--- Bekannte Luecke (dokumentiert, kein Raten): das Original storniert ueber
--- das Kommando-System auch den GERADE LAUFENDEN Bau; unsere Sim hat den
--- laufenden Eintrag beim Aufsetzen bereits dekrementiert — ein Decrease auf
--- Position 1 bricht den aktiven Bau (noch) nicht ab.
+-- Cfile:1257189-1257270) and "DecreaseBuildCountInQueue(queueIndex, count)"
+-- (Cfile:1257301-1257395): act on the queue CURRENTLY displayed
+-- (sCurrentBuildQueue[index-1], 1-based from the Lua), on
+-- UNITCOMMAND_BuildFactory entries only (Cfile:1257258-1257263), and hand
+-- the edit to the sim driver (ISSUE_IncreaseCommandCount Cfile:1257266,
+-- DecreaseCommandCount Cfile:1257378). construction.lua:895/988-990 hangs
+-- the right click (fewer) and the left click (more) on them. The sim end
+-- (build.lua __adjustFactoryQueue) walks the stack's commands newest first;
+-- a decrease that removes the RUNNING command interrupts the build the
+-- destructor way (the site is destroyed by unit.lua:1632).
 local function adjustQueueCount(name, queueIndex, count)
   local f = __uiQueueFactory
   if not f or f.dead then return end

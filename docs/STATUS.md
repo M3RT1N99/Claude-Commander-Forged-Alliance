@@ -1780,16 +1780,15 @@ copies EVERY command of its rally queue into the product -- Guard, Patrol,
 Attack, all of them, only TransportLoadUnits is skipped for AIR/NAVAL
 products (sub_5FA340, 818487-818600) -- DONE below ("The factory command
 list"); `DecreaseBuildCountInQueue` on the queue head removes the command
-and the dispatcher interrupts the running CFactoryBuildTask (traced in full
-below, still open here because the running entry is decremented at task
-start); the player's Stop button
+and the dispatcher interrupts the running CFactoryBuildTask -- DONE below
+("The factory queue is one command per unit"); the player's Stop button
 is a clear-then-Stop (ISSUE_Command with clear=1, 1255059-1255063,
 ClearCommandQueue 1005371-1005399, then IAiCommandDispatchImpl::Stop
 1231239-1231256 stops the attacker and silo builds) and is right here, but
 the sim-only `IssueStop(units)` appends a Stop with clear=0
 (1007889-1007952) and ours clears like the button. Ranked by play impact:
-the queue-head abort, the army restriction mirror, the soft IssueStop (the
-factory command list and the rally marker are done, see below).
+the army restriction mirror, the soft IssueStop (the factory command list,
+the rally marker and the queue-head abort are done, see below).
 
 **Effects.** The emitter/trail/beam pipeline is real and verified
 (CEfxEmitter::Tick port). Missing or dead: `CreateLightParticle`/
@@ -1863,6 +1862,66 @@ no-ops were never counted before (`Unit.RevertElevation`,
 too; the strip list now carries every documented Sim global plus the
 factory-list helpers, and check-vm-separation is green. `IssueFactoryAssist`
 is a real Sim binding -- the lead for the open factory-assist question.
+
+## The factory queue is one command per unit; removing the running head aborts the build
+
+The sim stacked queued units at issue time (`{ id, count }` per blueprint
+run) and edited a stack's count in place; a decrease that emptied the stack
+of the RUNNING build left the build running. The engine has neither.
+
+The engine (Cfile): `IssueBlueprintCommand("UNITCOMMAND_BuildFactory", id,
+count)` loops ISSUE_Command `count` times (1265867-1265872) -- ONE
+BuildFactory command per unit, each with its own count of 1. The stacks the
+construction panel shows are the USER side's merge: sub_835DF0
+(1256786-1256813) walks the factory's command list front to back and folds
+every command whose blueprint equals the previous item's into that item,
+count accumulated, CmdIds kept. `DecreaseBuildCountInQueue(index, count)`
+(1257301-1257395) walks the chosen item's commands from the NEWEST
+backwards and sends Sim::DecreaseCommandCount per command until the count
+is used up (1257350-1257390); CUnitCommand::DecreaseCount (1007719-1007775)
+clamps at 0 and, at 0, removes the command from the unit's queue
+(RemoveCommandFromQueue 1005104-1005155). Removing the HEAD broadcasts
+UCQS_NeedsRefresh (1005110-1005117); the dispatcher's OnEvent
+(746664-746706) interrupts its subtasks (TaskInterruptSubtasks
+438613-438636) and the CFactoryBuildTask destructor runs (818337-818390):
+mWorkProgress = 0, CBuildTaskHelper::OnStopBuild(helper, 0)
+(814989-815060) -- OnFailedToBuild on the FACTORY (815007;
+defaultunits.lua:560 sets FactoryBuildFailed and goes idle),
+OnFailedToBeBuilt on the SITE (815018; unit.lua:1632 destroys it), the Lua
+OnStopBuild(site, order) (815022; FactoryUnit.OnStopBuild skips the
+roll-off on FactoryBuildFailed, defaultunits.lua:518), the focus dropped.
+No refund exists in the engine. The next TaskTick dispatches the new head
+(746591-746594). `IncreaseBuildCountInQueue` (1257188-1257270 ->
+ISSUE_IncreaseCommandCount 1351002-1351150) issues one FRESH BuildFactory
+command per requested unit through ISSUE_Command (1351091-1351112),
+appended at the back of the queue -- no count is bumped, so an increase on
+an earlier stack shows up at the end (merged into the last stack when the
+blueprint matches). Stop / IssueClearCommands remove the head with the
+whole queue (ClearCommandQueue 1005371-1005399) -- the same destructor
+path, so the half-built unit is destroyed.
+
+Implemented (build.lua, units.lua, ui-globals.lua, motion.lua):
+`__queueFactoryBuild` appends one command per unit; `__factoryQueueGroups`
+/ `__factoryQueueDisplay` are the panel's merge (the unit row's
+`buildQueue` and the edit index are display stacks); `__adjustFactoryQueue`
+walks newest-first, removes commands at 0 and calls `__abortFactoryBuild`
+when the removed command is the running task's (by identity), or appends
+fresh commands for an increase; `__abortFactoryBuild` is the destructor
+path (work progress 0, OnFailedToBuild, OnFailedToBeBuilt, OnStopBuild,
+focus dropped); `__abortBuildTasks` routes FactoryBuild tasks through it
+(Stop, IssueClearCommands). The completion path is unchanged (the task's
+own command, count <= 1 removed, Cfile:838029). `__unitCheckDetach` exempts
+a destroy-queued unit: Entity::OnDestroy detaches it at the end of the beat
+anyway (916158), and FactoryUnit.BuildingState's DetachAll(bone)
+(defaultunits.lua:669) reaches the destroyed site first when the next head
+starts in the same beat. `verify-factory` gained 9 checks (four commands
+shown as three stacks -- only consecutive commands merge; the newest
+command leaves first while the running build continues; increases land at
+the back; removing the running head sets FactoryBuildFailed, destroy-queues
+the site, zeroes the work progress and drops the task; the site is gone a
+beat later; the new head starts on the next tick) and two updated ones
+(commands versus stacks; Stop sees three commands). Three went red without
+the abort call.
 
 ## The factory command list -- the rally point is a command, and the product inherits all of them
 
@@ -1952,22 +2011,8 @@ Not done / open, with evidence in hand:
   break a verified feature.
 - **The NoRush gate** of UNIT_IssueFactoryCommand (1007648-1007655) is not
   modelled: no NoRush timer in this sim.
-- **The queue-head abort** is now fully traced for the next item:
-  `DecreaseBuildCountInQueue(index, count)` (1257301-1257395) walks the
-  UI's merged build-queue item from its newest command backwards and sends
-  `DecreaseCommandCount` per command; `CUnitCommand::DecreaseCount`
-  (1007719-1007775) clamps at 0 and, at 0, removes the command from every
-  unit's queue (RemoveCommandFromQueue, 1005104-1005155) -- index 0
-  broadcasts UCQS_NeedsRefresh, which the dispatcher answers by
-  interrupting its subtasks (746664-746706, TaskInterruptSubtasks
-  438613-438636): the CFactoryBuildTask destructor (818337-818390) zeroes
-  mWorkProgress and calls CBuildTaskHelper::OnStopBuild(0), which runs the
-  Lua OnFailedToBuild / OnFailedToBeBuilt / OnStopBuild (815007-815022);
-  the next TaskTick dispatches the new head (746591-746594). The engine
-  never destroys the half-built unit itself and has no refund; what
-  happens to it is the original Lua's decision. `IncreaseBuildCountInQueue`
-  issues one fresh BuildFactory command per requested unit through
-  ISSUE_Command (1351091-1351112); it never bumps a count.
+- **The queue-head abort** is done -- see "The factory queue is one command
+  per unit" above.
 ## The rally marker: WorldMesh (CUIWorldMesh) lives in the UI VM and the renderer draws it
 
 With the real `GetCommandQueue`, gamemain.lua:369 reaches rallypoint.lua on
