@@ -1901,10 +1901,19 @@ the factory dropped it from its queue.
 The engine (Cfile): the army keeps an ALLOWED set, `army->mVarDat.mCat`,
 seeded with ALLUNITS (1017296-1017307); CArmyImpl::AddBuildRestriction cuts
 the category's set out of it (BVIntSet::RemoveAllFrom, 1016787-1016793) and
-RemoveBuildRestriction adds it back (EntityCategory::Add, 1016813-1016815).
+RemoveBuildRestriction adds it back (EntityCategory::Add, 1016818-1016824).
 GetUnitCommandData intersects every selected builder's buildable category
 with that set before subtracting the unit's own restriction
 (1264632-1264646), so a restricted unit never appears in the panel.
+
+Known limit of the sim's deny-list model (globals.lua
+`__armyBuildRestrictions`, older than this step): the engine does set
+arithmetic on the allowed set, so a RemoveBuildRestriction of a SUPERSET
+frees what an overlapping earlier term still denies here, and a term added
+as text is only removed by the same text (term identity, not set
+membership). Not reachable in play: siminit.lua:187-191, the one production
+caller, adds a single pre-unioned category once per army and never removes
+it. Recorded, not modelled.
 
 Implemented: the sim serialises each army's deny-list (the complement it
 keeps, globals.lua `__armyBuildRestrictions`) as category text

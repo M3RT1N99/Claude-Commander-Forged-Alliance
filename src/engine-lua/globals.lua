@@ -1816,9 +1816,16 @@ end
 --- inverse -- army->mVarDat.mCat is the ALLOWED set, seeded with ALLUNITS
 --- (Cfile:1017296-1017307), cut by CArmyImpl::AddBuildRestriction
 --- (BVIntSet::RemoveAllFrom, 1016787-1016793) and refilled by
---- RemoveBuildRestriction (EntityCategory::Add, 1016813-1016815) -- and
+--- RemoveBuildRestriction (EntityCategory::Add, 1016818-1016824) -- and
 --- GetUnitCommandData intersects every builder's buildable category with it
 --- (1264632-1264646), so a restricted unit leaves the build menu.
+---
+--- Known limit of the deny-list model (docs/STATUS.md): the engine's set
+--- arithmetic lets a RemoveBuildRestriction of a SUPERSET free what an
+--- overlapping earlier term still denies here, and a term added as text is
+--- only removed by the same text (term identity, not set membership).
+--- siminit.lua:187-191, the one production caller, adds a single
+--- pre-unioned category once per army and never removes it.
 function __armyRestrictionsJson()
   local parts = {}
   for army, terms in pairs(__armyBuildRestrictions) do
@@ -1828,7 +1835,9 @@ function __armyRestrictionsJson()
       union = union and (union + cat) or cat
     end
     local text = union and __categoryToString(union) or ''
-    parts[table.getn(parts) + 1] = '"' .. tostring(army) .. '":"' .. string.gsub(text, '"', '\\"') .. '"'
+    text = string.gsub(text, '\\', '\\\\')
+    text = string.gsub(text, '"', '\\"')
+    parts[table.getn(parts) + 1] = '"' .. tostring(army) .. '":"' .. text .. '"'
   end
   return '{' .. table.concat(parts, ',') .. '}'
 end
