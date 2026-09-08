@@ -22,6 +22,15 @@ varying vec3 vWorldPos;
 attribute vec2 instRot;
 varying vec2 vRotSC;
 #endif
+#ifdef INSTANCED_FADE
+// Runtime decals (CreateDecal): DecalAlpha per instance -- ProcessRemovals'
+// fade (mCurAlpha, Cfile:1306063-1306135) -- and the instance's own
+// cutoff LOD (lodParam or ComputeCutoffLOD, 1335313-1335329).
+attribute float instAlpha;
+attribute float instCutoff;
+varying float vInstAlpha;
+varying float vInstCutoff;
+#endif
 
 void main() {
   vec4 world = modelMatrix * instanceMatrix * vec4(position, 1.0);
@@ -32,6 +41,10 @@ void main() {
   vWorldPos = world.xyz;
 #ifdef NORMALS_DECAL
   vRotSC = instRot;
+#endif
+#ifdef INSTANCED_FADE
+  vInstAlpha = instAlpha;
+  vInstCutoff = instCutoff;
 #endif
   gl_Position = projectionMatrix * viewMatrix * world;
 }

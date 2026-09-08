@@ -31,13 +31,26 @@ uniform vec3 sunAmbience;
 uniform vec3 shadowFillColor;
 uniform vec4 specularColor;
 uniform float lightingMultiplier;
-uniform float cutOffLOD; // distance beyond which the decal is not drawn
+uniform float cutOffLOD; // the texture set's cutoff LOD (static decals)
 
 #include <cfaShadow>
 
 varying vec2 vUv;
 varying vec2 vUvMap;
 varying vec3 vWorldPos;
+#ifdef INSTANCED_FADE
+varying float vInstAlpha;
+varying float vInstCutoff;
+#endif
+
+// GetLODAlpha (CWldTerrainDecal, Cfile:1335082-1335114; the batch loops
+// 1218082-1218099): with mNearCutoff 0 the alpha fades linearly from 1 at
+// cutoff * ren_DecalFadeFraction (0.5, :421725) to 0 at cutoff.
+float cfaLodAlpha(float d, float cutoff) {
+  if (cutoff <= 0.0) return 1.0;
+  float fadeFloor = cutoff * 0.5;
+  return clamp(1.0 - (max(d, fadeFloor) - fadeFloor) / (cutoff - fadeFloor), 0.0, 1.0);
+}
 
 float height(vec2 uvMap) {
   return texture2D(heightTex, uvMap * hmUvScale + hmUvOffset).r * heightScale;
@@ -49,7 +62,14 @@ void main() {
   // The decal sampler is CLAMP (render-details.md par. 3); the instance
   // quad is exactly the decal footprint, so just guard the border.
   if (vUv.x < 0.0 || vUv.x > 1.0 || vUv.y < 0.0 || vUv.y > 1.0) discard;
-  if (cutOffLOD > 0.0 && distance(cameraPosition, vWorldPos) > cutOffLOD) discard;
+  // DecalAlpha = the LOD fade (GetLODAlpha) times the instance's fade.
+  float d = distance(cameraPosition, vWorldPos);
+#ifdef INSTANCED_FADE
+  float decalAlpha = cfaLodAlpha(d, vInstCutoff) * vInstAlpha;
+#else
+  float decalAlpha = cfaLodAlpha(d, cutOffLOD);
+#endif
+  if (decalAlpha <= 0.0) discard;
 
   vec4 albedo = texture2D(decalAlbedo, vUv);
 
@@ -95,7 +115,7 @@ void main() {
     albedo.rgb = mix(albedo.rgb, water.rgb, water.a);
   }
 
-  // alpha = decalAlbedo.a * decalMask.a * DecalAlpha (mask 1; the LOD fade
-  // is the cutOffLOD discard above)
-  gl_FragColor = vec4(albedo.rgb, albedo.a);
+  // alpha = decalAlbedo.a * decalMask.a * DecalAlpha (mask 1: an unbound
+  // sampler reads (0,0,0,1))
+  gl_FragColor = vec4(albedo.rgb, albedo.a * decalAlpha);
 }

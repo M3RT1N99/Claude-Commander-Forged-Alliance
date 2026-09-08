@@ -15,7 +15,8 @@ import { UnitAnimator } from '../anim/animator'
 import { CameraShakeState, type CamShakeParams } from './cameraShake'
 import type { ScaAnim } from '../formats/sca'
 import { MapProps } from './mapProps'
-import { MapDecals } from './mapDecals'
+import { MapDecals, type DecalSceneUniforms } from './mapDecals'
+import { RuntimeDecals } from './runtimeDecals'
 import { SkyDome } from './skyDome'
 import { BloomPipeline } from './bloom'
 import { ShadowRenderer } from './shadow'
@@ -72,6 +73,8 @@ export class UnitViewer {
   private skirtMesh: THREE.Mesh | null = null
   private mapProps: MapProps | null = null
   private mapDecals: MapDecals | null = null
+  /** The runtime splats and decals (CreateSplat / CreateDecal), fed per beat by the session. */
+  runtimeDecals: RuntimeDecals | null = null
   private skyDome: SkyDome | null = null
 
   /** Decal statistics of the loaded map (diagnosis via CDP). */
@@ -473,6 +476,12 @@ export class UnitViewer {
       this.scene.remove(this.mapDecals.group)
       this.mapDecals.dispose()
       this.mapDecals = null
+    }
+    if (this.runtimeDecals) {
+      this.scene.remove(this.runtimeDecals.group)
+      this.terrainNormals.scene.remove(this.runtimeDecals.normalsGroup)
+      this.runtimeDecals.dispose()
+      this.runtimeDecals = null
     }
     if (this.skyDome) {
       this.scene.remove(this.skyDome.group)
@@ -1536,35 +1545,37 @@ export class UnitViewer {
 
     // Decals: albedo (type 1, TDecals/TDecalsXP) into the frame, normals
     // (type 2, TDecalsNormals) into the normal buffer.
-    this.mapDecals = await MapDecals.load(
-      scmap.decals,
-      vfs,
-      {
-        heightTex,
-        heightScale: scmap.heightScale,
-        hmUvScale: new THREE.Vector2((hmW - 1) / hmW, (hmH - 1) / hmH),
-        hmUvOffset: new THREE.Vector2(0.5 / hmW, 0.5 / hmH),
-        hmTexel: new THREE.Vector2(1 / hmW, 1 / hmH),
-        mapSize: new THREE.Vector2(width, height),
-        waterRamp,
-        waterElevation: scmap.water.elevation,
-        depthToG,
-        xpShader: scmap.terrainShader === 'TTerrainXP',
-        shadow: this.shadow.uniforms,
-        normalBuffer: this.terrainNormals.uniforms,
-        lighting: {
-          sunDirection: new THREE.Vector3(...scmap.lighting.sunDirection).normalize(),
-          sunColor: new THREE.Color(...scmap.lighting.sunColor),
-          sunAmbience: new THREE.Color(...scmap.lighting.sunAmbience),
-          shadowFillColor: new THREE.Color(...scmap.lighting.shadowFillColor),
-          specularColor: new THREE.Vector4(...scmap.lighting.specularColor),
-          lightingMultiplier: scmap.lighting.lightingMultiplier,
-        },
+    const decalUniforms: DecalSceneUniforms = {
+      heightTex,
+      heightScale: scmap.heightScale,
+      hmUvScale: new THREE.Vector2((hmW - 1) / hmW, (hmH - 1) / hmH),
+      hmUvOffset: new THREE.Vector2(0.5 / hmW, 0.5 / hmH),
+      hmTexel: new THREE.Vector2(1 / hmW, 1 / hmH),
+      mapSize: new THREE.Vector2(width, height),
+      waterRamp,
+      waterElevation: scmap.water.elevation,
+      depthToG,
+      xpShader: scmap.terrainShader === 'TTerrainXP',
+      shadow: this.shadow.uniforms,
+      normalBuffer: this.terrainNormals.uniforms,
+      lighting: {
+        sunDirection: new THREE.Vector3(...scmap.lighting.sunDirection).normalize(),
+        sunColor: new THREE.Color(...scmap.lighting.sunColor),
+        sunAmbience: new THREE.Color(...scmap.lighting.sunAmbience),
+        shadowFillColor: new THREE.Color(...scmap.lighting.shadowFillColor),
+        specularColor: new THREE.Vector4(...scmap.lighting.specularColor),
+        lightingMultiplier: scmap.lighting.lightingMultiplier,
       },
-      this.s3tcSupported,
-    )
+    }
+    this.mapDecals = await MapDecals.load(scmap.decals, vfs, decalUniforms, this.s3tcSupported)
     this.scene.add(this.mapDecals.group)
     this.terrainNormals.scene.add(this.mapDecals.normalsGroup)
+    // The runtime splats and decals (CreateSplat / CreateDecal) share the
+    // terrain's uniforms and the map decals' techniques; the session feeds
+    // them per beat (runtimeDecals.ts).
+    this.runtimeDecals = new RuntimeDecals(decalUniforms, vfs, this.s3tcSupported, (x, z) => this.heightAt(x, z))
+    this.scene.add(this.runtimeDecals.group)
+    this.terrainNormals.scene.add(this.runtimeDecals.normalsGroup)
     if (this.mapDecals.stats.instances > 0 || this.mapDecals.stats.normalInstances > 0) {
       console.log(
         `map decals: ${this.mapDecals.stats.instances} albedo instances, ` +

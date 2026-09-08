@@ -923,12 +923,9 @@ function __readAllEmittersJson()
   local kompakt, k = {}, 0
   for _, e in ipairs(__emitters) do
     local o = e.__owner
-    -- A FIXED effect (splat/decal — CreateSplat/CreateDecal) lives at a stored
-    -- world transform, owner-independent, until its duration elapses; an
-    -- OWNER-attached emitter follows its bone and dies with the owner.
-    local expired = e.__expireTick and (__gameTick or 0) >= e.__expireTick
-    local lebt = not e.__destroyed and not expired
-      and (e.__fixedPos ~= nil or (o ~= nil and not o.__destroyed and not o.__destroyQueued))
+    -- An emitter follows its owner's bone and dies with the owner.
+    local lebt = not e.__destroyed
+      and (o ~= nil and not o.__destroyed and not o.__destroyQueued)
     if lebt then
       k = k + 1
       kompakt[k] = e
@@ -936,12 +933,7 @@ function __readAllEmittersJson()
       -- drehen die Spawn-Richtungen EINMALIG beim Spawn in den Bone-Raum
       -- (CEfxEmitter::Tick, Cfile:894849-894859) — dafuer braucht der
       -- Spawner die Bone-Orientierung, nicht nur den Ort.
-      local pos, rot
-      if e.__fixedPos then
-        pos, rot = e.__fixedPos, e.__fixedRot or { 1, 0, 0, 0 }
-      else
-        pos, rot = __boneWorld(o, e.__bone)
-      end
+      local pos, rot = __boneWorld(o, e.__bone)
       local off = e.__offset
       -- Beam-Emitter mit zweitem Ende (AttachBeamEntityToEntity): die
       -- Zielposition wandert mit — stirbt das Ziel, endet der Beam
@@ -1103,42 +1095,180 @@ function __drainLightParticlesJson()
   for i = #__lightParticles, 1, -1 do __lightParticles[i] = nil end
   return '[' .. table.concat(parts, ',') .. ']'
 end
--- CreateSplat(position, heading, texture, sizeX, sizeZ, lod, duration, army,
--- fidelity) / CreateDecal(...) drop a GROUND effect at a FIXED world transform
--- independent of any entity (cfunc_CreateDecalL builds a VTransform from the
--- position + heading and constructs a CDecal there, Cfile:908234-908243). The
--- position and heading are load-bearing — the old nil-owner emitter was
--- compacted out of __emitters immediately and never rendered. Stored as a fixed
--- transform with a duration (splat marks, scorch decals, tread marks).
-local function fixedGroundEffect(pos, heading, tex, size, life, army)
-  local e = newEmitter(nil, -1, army, tex)
-  local h = (heading or 0) * 0.5
-  e.__fixedPos = { (pos and pos[1]) or 0, (pos and pos[2]) or 0, (pos and pos[3]) or 0 }
-  e.__fixedRot = { math.cos(h), 0, math.sin(h), 0 } -- heading = rotation about Y
-  e.__scale = size or 1
-  if life and life > 0 then e.__expireTick = (__gameTick or 0) + math.floor(life * 10) end
-  return e
-end
-function CreateSplat(pos, heading, tex, sx, sz, lod, life, army)
-  return fixedGroundEffect(pos, heading, tex, sx, life, army)
-end
-function CreateDecal(pos, heading, tex1, tex2, type, sx, sz, lod, life, army)
-  return fixedGroundEffect(pos, heading, tex1, sx, life, army)
+-- === Splats and decals (CreateSplat / CreateDecal / CreateSplatOnBone) ===
+--
+-- The three bindings (sim only, Cfile:908098/908292/908466) build an
+-- SDecalInfo (907248-907282) through CDecal::CDecal (907293-907423):
+-- position, heading, the two texture names, the type string ('' for a
+-- splat), size (y hardcoded 1.0, 908206), lodParam, the expiry tick --
+-- round(duration * 10) + mCurTick, 0 = never (907344-907360) -- the army
+-- and the fidelity. CDecalBuffer::CreateHandle (1112197-1112337) hands the
+-- handle to Lua; the render thread gets the record with the beat's sync
+-- (AddDecals 1305857-1306038) and resolves the texture name there
+-- (1305895-1305930): an absolute path is taken as is, a bare name becomes
+-- /env/common/splats/<name>.dds resp. /env/common/decals/<name>.dds.
+-- The sweep (1112362-1112600) destroys a handle once the tick passes its
+-- expiry; the render side keeps its own copy and fades (ProcessRemovals
+-- 1306063-1306135). Here: a registry, the beat's adds and removals for the
+-- renderer, the sweep per tick (__decalSweep, threads.lua).
+__decals = {}
+__decalAdds = {}
+__decalRemovals = {}
+__decalNextId = 1
+
+-- CDecalHandle has exactly one method (luadef_CDecalHandleDestroy, 908048):
+-- cfunc_CDecalHandleDestroyL (908061-908075) removes the handle from the
+-- buffer (sub_779680); RemoveDecals (1306039-1306058) sets the render copy's
+-- mRemoveTick = 1, and ProcessRemovals fades it out from the next tick.
+local DecalHandleMeta = {}
+DecalHandleMeta.__index = DecalHandleMeta
+function DecalHandleMeta:Destroy()
+  local id = self.__id
+  if __decals[id] then
+    __decals[id] = nil
+    __decalRemovals[#__decalRemovals + 1] = id
+  end
 end
 
--- "CreateSplatOnBone(entity, offset, boneName, textureName, sizeX, sizeZ,
--- lodParam, duration, army)" (Cfile:908461, sim only; the mHelp is incomplete
--- but the impl and unit.lua:2648 give the 9-arg order). It takes the bone's
--- world transform, rotates the offset by the bone orientation and drops a
--- ground splat there. unit.lua:2325/2649 lays tread marks with it.
-function CreateSplatOnBone(ent, offset, bone, tex, sx, sz, lod, life, army)
+-- CDecalManager::AddDecals (Cfile:1305895-1305930): a UNC name
+-- (FILE_HasUNC, 444111-444168: two leading separators), a leading
+-- separator, or -- after a drive letter (FILE_HasDrive: a letter and a
+-- colon) -- a separator in third place keeps the name; anything else gets
+-- the splat/decal folder and '.dds'.
+local function decalTexturePath(name, isSplat)
+  if type(name) ~= 'string' or name == '' then return '' end
+  local c = string.sub(name, 1, 1)
+  if c == '/' or c == '\\' then return name end
+  if string.match(name, '^%a:[/\\]') then return name end
+  return (isSplat and '/env/common/splats/' or '/env/common/decals/') .. name .. '.dds'
+end
+
+-- CDecal::CDecal (Cfile:907293-907423) stores the footprint's CORNER, not
+-- the Lua position: the position minus half the size along the
+-- transform's x axis and half along its z axis (907380-907400; the
+-- render side spans the quad from that corner, ComputeCorner
+-- 1335287-1335306, and reads the heading back as mRot.y = -yaw,
+-- 907398-907400). The expiry tick is the truncated duration * 10 plus the
+-- current tick (frndint corrected down when it rounded up, 907344-907360).
+local function newDecal(pos, heading, tex1, tex2, dtype, sx, sz, lod, duration, army, fidelity, isSplat)
+  local tick = __gameTick or 0
+  local expire = 0
+  if duration and duration > 0 then expire = math.floor(duration * 10) + tick end
+  local h = heading or 0
+  local c, s = math.cos(h), math.sin(h)
+  local hx, hz = (sx or 1) * 0.5, (sz or 1) * 0.5
+  local px, pz = (pos and pos[1]) or 0, (pos and pos[3]) or 0
+  local d = {
+    id = __decalNextId,
+    x = px - (hx * c + hz * s), y = (pos and pos[2]) or 0, z = pz - (-hx * s + hz * c),
+    heading = h,
+    sx = sx or 1, sz = sz or 1,
+    tex1 = decalTexturePath(tex1, isSplat), tex2 = decalTexturePath(tex2, isSplat),
+    type = dtype or '',
+    lod = lod or 0,
+    expire = expire,
+    army = army or 0,
+    fidelity = fidelity,
+    splat = isSplat,
+    tick = tick,
+  }
+  __decalNextId = __decalNextId + 1
+  __decals[d.id] = d
+  __decalAdds[#__decalAdds + 1] = d
+  return d.id
+end
+
+-- Only CreateDecal hands Lua a CDecalHandle (cfunc_CreateDecalL pushes it,
+-- 908270-908280); cfunc_CreateSplatL (908425-908460) and
+-- cfunc_CreateSplatOnBoneL (908610-908637) return nothing.
+local function decalHandle(id)
+  return setmetatable({ __id = id }, DecalHandleMeta)
+end
+
+-- CreateSplat(position, heading, textureName, sizeX, sizeZ, lodParam,
+-- duration, army, fidelity) -- cfunc_CreateSplatL (908309-908450): 8 or 9
+-- arguments, fidelity 1 when absent (908397-908404), texName2 and type ''
+-- (908413-908419), isSplat 1.
+function CreateSplat(...)
+  local n = select('#', ...)
+  if n < 8 or n > 9 then
+    error(string.format('CreateSplat(position, heading, textureName, sizeX, sizeZ, lodParam, duration, army, fidelity)\n  expected between %d and %d args, but got %d', 8, 9, n), 2)
+  end
+  local pos, heading, tex, sx, sz, lod, duration, army, fidelity = ...
+  if fidelity == nil then fidelity = 1 end
+  newDecal(pos, heading, tex, '', '', sx, sz, lod, duration, army, fidelity, true)
+end
+
+-- handle = CreateDecal(position, heading, textureName1, textureName2, type,
+-- sizeX, sizeZ, lodParam, duration, army, fidelity) -- cfunc_CreateDecalL
+-- (908117-908283): 9 to 11 arguments (908148-908150), fidelity 1 when nil
+-- (908220-908233), isSplat 0 (908267). The type string is looked up on
+-- the render side (CWldTerrainDecal::LookupDecalType 1334911-1334927,
+-- sTypeDesc 1966195-1966229) -- kept verbatim here.
+function CreateDecal(...)
+  local n = select('#', ...)
+  if n < 9 or n > 11 then
+    error(string.format('handle = CreateDecal(position, heading, textureName1, textureName2, type, sizeX, sizeZ, lodParam, duration, army, fidelity)\n  expected between %d and %d args, but got %d', 9, 11, n), 2)
+  end
+  local pos, heading, tex1, tex2, dtype, sx, sz, lod, duration, army, fidelity = ...
+  if fidelity == nil then fidelity = 1 end
+  return decalHandle(newDecal(pos, heading, tex1, tex2, dtype, sx, sz, lod, duration, army, fidelity, false))
+end
+
+-- CreateSplatOnBone(entity, offset, boneName, textureName, sizeX, sizeZ,
+-- lodParam, duration, army) -- cfunc_CreateSplatOnBoneL (908478-908610):
+-- exactly nine arguments (908500-908502; the mHelp at 908465 lists the
+-- first two the other way round, the parser and unit.lua:2648 agree on
+-- this order), fidelity 1 (908573). The bone's world transform, the
+-- offset rotated by the bone's orientation, the heading = the bone's +Z on
+-- the ground. unit.lua:2325/2649 lays tread marks with it.
+function CreateSplatOnBone(...)
+  local n = select('#', ...)
+  if n ~= 9 then
+    error(string.format('CreateSplatOnBone(entity, offset, boneName, textureName, sizeX, sizeZ, lodParam, duration, army)\n  expected %d args, but got %d', 9, n), 2)
+  end
+  local ent, offset, bone, tex, sx, sz, lod, duration, army = ...
   local pos, rot = __boneWorld(ent, bone)
   local o = __qrot(rot, offset or { 0, 0, 0 })
   local p = { pos[1] + o[1], pos[2] + o[2], pos[3] + o[3] }
-  -- Heading = the bone's +Z direction projected onto the ground.
   local fwd = __quatForward(rot)
   local heading = math.atan(fwd[1], fwd[3])
-  return CreateSplat(p, heading, tex, sx, sz, lod, life, army)
+  newDecal(p, heading, tex, '', '', sx, sz, lod, duration, army, 1, true)
+end
+
+-- The sweep (CDecalBuffer, 1112362-1112600): every handle whose expiry tick
+-- the current tick has passed is destroyed. No removal message -- the
+-- renderer was told the tick with the record and fades on its own.
+function __decalSweep()
+  local tick = __gameTick or 0
+  for id, d in pairs(__decals) do
+    if d.expire > 0 and d.expire <= tick then __decals[id] = nil end
+  end
+end
+
+local function jsonDecal(d)
+  return string.format(
+    '{"id":%d,"x":%.6g,"y":%.6g,"z":%.6g,"heading":%.6g,"sx":%.6g,"sz":%.6g,"tex1":%q,"tex2":%q,"type":%q,"lod":%.6g,"expire":%d,"army":%d,"fidelity":%d,"splat":%s,"tick":%d}',
+    d.id, d.x, d.y, d.z, d.heading, d.sx, d.sz, d.tex1, d.tex2, d.type, d.lod,
+    d.expire, math.floor(tonumber(d.army) or 0), math.floor(tonumber(d.fidelity) or 1),
+    d.splat and 'true' or 'false', d.tick)
+end
+
+--- The beat's new decals and splats (drained), one row each.
+function __drainDecalAddsJson()
+  if __decalAdds[1] == nil then return '[]' end
+  local parts = {}
+  for i, d in ipairs(__decalAdds) do parts[i] = jsonDecal(d) end
+  for i = #__decalAdds, 1, -1 do __decalAdds[i] = nil end
+  return '[' .. table.concat(parts, ',') .. ']'
+end
+
+--- The ids destroyed this beat through their handles (drained).
+function __drainDecalRemovalsJson()
+  if __decalRemovals[1] == nil then return '[]' end
+  local out = '[' .. table.concat(__decalRemovals, ',') .. ']'
+  for i = #__decalRemovals, 1, -1 do __decalRemovals[i] = nil end
+  return out
 end
 
 -- === Economy events (CreateEconomyEvent / WaitFor) ===

@@ -1685,6 +1685,14 @@ async function startSandbox(mapFolder: string): Promise<void> {
         meshEntities: () => luaSim?.allMeshEntities() ?? [],
         meshEntityDebug: () => meshEntities?.debug() ?? [],
         meshEntityObjects: () => meshEntities?.objects() ?? [],
+        decals: () => viewer.runtimeDecals?.stats() ?? null,
+        decalDebug: () => viewer.runtimeDecals?.debug() ?? [],
+        decalObjects: () => viewer.runtimeDecals?.objects() ?? [],
+        screenOf: (x: number, y: number, z: number) => {
+          const p = viewer.worldToScreen(new THREE.Vector3(x, y, z))
+          const r = viewportEl.getBoundingClientRect()
+          return p ? [Math.round(r.left + p.x), Math.round(r.top + p.y)] : null
+        },
         simEval: (lua: string) => luaSim?.debugEval(lua) ?? Promise.resolve(null),
       }
     }
@@ -2918,6 +2926,20 @@ function luaSimUpdate(): void {
   // Cfile:906023): one flat, additive, depth-test-free quad each
   // (TLight_ADD, particle.fx:1089-1099).
   for (const l of luaSim.drainLights()) void spawnLightParticle(l)
+
+  // Splats and decals (CreateSplat / CreateSplatOnBone / CreateDecal): the
+  // beat's adds and removals as the render thread's sync hands them over
+  // (AddDecals / RemoveDecals, Cfile:1327849-1327850), then ProcessRemovals'
+  // fade step for this tick (:1327851).
+  const runtimeDecals = viewer.runtimeDecals
+  if (runtimeDecals) {
+    for (const d of luaSim.drainDecalAdds()) runtimeDecals.add(d)
+    for (const id of luaSim.drainDecalRemovals()) runtimeDecals.remove(id)
+    runtimeDecals.beat(luaSim.gameTick)
+  } else {
+    luaSim.drainDecalAdds()
+    luaSim.drainDecalRemovals()
+  }
 
   // Neue Units aus der Sim (Baustelle, Fabrik-Produkt) bekommen ihr Modell. Die
   // Sim erzeugt sie; die Szene zieht nach — nicht umgekehrt.

@@ -260,6 +260,10 @@ interface StatesMsg {
   camShakes?: SimCamShake[]
   /** Light particles spawned this beat (CreateLightParticle, Cfile:905874-906033). */
   lights?: SimLightParticle[]
+  /** Splats and decals created this beat (CreateSplat / CreateDecal / CreateSplatOnBone). */
+  decalAdds?: SimDecal[]
+  /** Decal handles destroyed this beat (CDecalHandle:Destroy). */
+  decalRemovals?: number[]
   /** The army build restrictions as category text per army (the deny-list
    *  the sim enforces; the UI subtracts it from the build menu). */
   armyRestrictions?: Record<string, string>
@@ -270,6 +274,34 @@ interface StatesMsg {
  *  (cfunc_EntityShakeCameraL, Cfile:931108-931169). */
 /** One light particle: a flat additive quad of constant size at a fixed
  *  world point, its ramp sampled with t/lifetime (TLight_ADD, particle.fx). */
+/**
+ * A splat or decal as the sim records it (SDecalInfo, Cfile:907248-907282):
+ * the world position and heading, the two sizes (size.y is 1), the two
+ * texture paths already resolved as CDecalManager::AddDecals does it
+ * (1305895-1305930; '' = none), the type string ('' for a splat; the
+ * decal types are CWldTerrainDecal::sTypeDesc, 1966195-1966229), the LOD
+ * parameter, the expiry tick (0 = never), the army, the fidelity, and the
+ * creation tick.
+ */
+export interface SimDecal {
+  id: number
+  x: number
+  y: number
+  z: number
+  heading: number
+  sx: number
+  sz: number
+  tex1: string
+  tex2: string
+  type: string
+  lod: number
+  expire: number
+  army: number
+  fidelity: number
+  splat: boolean
+  tick: number
+}
+
 export interface SimLightParticle {
   x: number
   y: number
@@ -335,6 +367,8 @@ export class LuaSimClient {
   private readonly camShakes: SimCamShake[] = []
   /** Accumulated light particles; drained by the particle system in main. */
   private readonly lights: SimLightParticle[] = []
+  private readonly decalAdds: SimDecal[] = []
+  private readonly decalRemovals: number[] = []
   private armyRestrictions: Record<string, string> = {}
   /** Letzter gemeldeter Sim-Tick (Spielzeit = Tick / 10). */
   gameTick = 0
@@ -475,6 +509,12 @@ export class LuaSimClient {
         }
         if (m.camShakes && m.camShakes.length > 0) {
           for (const s of m.camShakes) this.camShakes.push(s)
+        }
+        if (m.decalAdds && m.decalAdds.length > 0) {
+          for (const d of m.decalAdds) this.decalAdds.push(d)
+        }
+        if (m.decalRemovals && m.decalRemovals.length > 0) {
+          for (const id of m.decalRemovals) this.decalRemovals.push(id)
         }
         if (m.lights && m.lights.length > 0) {
           for (const l of m.lights) this.lights.push(l)
@@ -642,6 +682,8 @@ export class LuaSimClient {
     this.audioRequests.length = 0
     this.camShakes.length = 0
     this.lights.length = 0
+    this.decalAdds.length = 0
+    this.decalRemovals.length = 0
     this.projectileStates = []
     this.emitterStates = []
     this.propStates = []
@@ -794,6 +836,18 @@ export class LuaSimClient {
   /** The army build restrictions of the last beat (category text per army). */
   getArmyRestrictions(): Record<string, string> {
     return this.armyRestrictions
+  }
+
+  /** Drain the splats and decals created since the last call. */
+  drainDecalAdds(): SimDecal[] {
+    if (this.decalAdds.length === 0) return []
+    return this.decalAdds.splice(0, this.decalAdds.length)
+  }
+
+  /** Drain the decal handles destroyed since the last call. */
+  drainDecalRemovals(): number[] {
+    if (this.decalRemovals.length === 0) return []
+    return this.decalRemovals.splice(0, this.decalRemovals.length)
   }
 
   /** Drain the light particles spawned since the last call. */

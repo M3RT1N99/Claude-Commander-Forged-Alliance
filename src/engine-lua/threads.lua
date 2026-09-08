@@ -254,6 +254,10 @@ end
 -- A sim tick (engine Sim::AdvanceBeat -- here: time + threads).
 function __simTick()
     __gameTick = __gameTick + 1
+    -- The decal buffer's sweep runs with the tick (CDecalBuffer, Cfile:1112362).
+    -- globals.lua provides it; the scheduler suite loads SimThreads alone.
+    local sweep = rawget(_G, '__decalSweep')
+    if sweep then sweep() end
     __simAdvanceThreads()
 end
 

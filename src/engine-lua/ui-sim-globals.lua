@@ -29,6 +29,8 @@ local NUR_SIM = {
   'CreateAttachedBeam', 'CreateAttachedEmitter', 'CreateBeamEmitter',
   'CreateBeamEmitterOnEntity', 'CreateBeamEntityToEntity',
   'CreateBeamToEntityBone', 'CreateBuilderArmController',
+  '__decals', '__decalAdds', '__decalRemovals', '__decalNextId', '__decalSweep',
+  '__drainDecalAddsJson', '__drainDecalRemovalsJson',
   'CreateCollisionDetector', 'CreateDecal', 'CreateEconomyEvent',
   'CreateEmitterAtBone', 'CreateEmitterAtEntity',
   'CreateEmitterOnEntity', 'CreateFootPlantController',

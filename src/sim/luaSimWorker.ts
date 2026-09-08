@@ -563,6 +563,11 @@ function tickAndPost(): void {
   // The light particles spawned this beat (CreateLightParticle -> the
   // particle buffer, Cfile:906023).
   const lights = host.pull<unknown[]>('__drainLightParticlesJson()')
+  // The splats and decals created this beat and the handles destroyed this
+  // beat (CDecalManager::AddDecals / RemoveDecals with the sync,
+  // Cfile:1327849-1327851).
+  const decalAdds = host.pull<unknown[]>('__drainDecalAddsJson()')
+  const decalRemovals = host.pull<number[]>('__drainDecalRemovalsJson()')
   // The army build restrictions (the lobby's restricted units, siminit.lua:190)
   // as text per army: the user side subtracts them from every build menu
   // (GetUnitCommandData x army->mVarDat.mCat, Cfile:1264632-1264646).
@@ -583,6 +588,8 @@ function tickAndPost(): void {
     audio,
     camShakes,
     lights,
+    decalAdds,
+    decalRemovals,
     armyRestrictions,
     economy: {
       mass: a.mass, massStorage: a.maxMass, massIncome: a.incomeMass, massExpense: a.expenseMass,

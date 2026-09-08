@@ -20,10 +20,29 @@ uniform float cutOffLOD;
 varying vec2 vUv;
 varying vec3 vWorldPos;
 varying vec2 vRotSC; // (cos, sin) of the decal's Y rotation (per instance)
+#ifdef INSTANCED_FADE
+varying float vInstAlpha;
+varying float vInstCutoff;
+#endif
+
+// GetLODAlpha (CWldTerrainDecal, Cfile:1335082-1335114; the batch loops
+// 1218082-1218099): with mNearCutoff 0 the alpha fades linearly from 1 at
+// cutoff * ren_DecalFadeFraction (0.5, :421725) to 0 at cutoff.
+float cfaLodAlpha(float d, float cutoff) {
+  if (cutoff <= 0.0) return 1.0;
+  float fadeFloor = cutoff * 0.5;
+  return clamp(1.0 - (max(d, fadeFloor) - fadeFloor) / (cutoff - fadeFloor), 0.0, 1.0);
+}
 
 void main() {
   if (vUv.x < 0.0 || vUv.x > 1.0 || vUv.y < 0.0 || vUv.y > 1.0) discard;
-  if (cutOffLOD > 0.0 && distance(cameraPosition, vWorldPos) > cutOffLOD) discard;
+  float d = distance(cameraPosition, vWorldPos);
+#ifdef INSTANCED_FADE
+  float decalAlpha = cfaLodAlpha(d, vInstCutoff) * vInstAlpha;
+#else
+  float decalAlpha = cfaLodAlpha(d, cutOffLOD);
+#endif
+  if (decalAlpha <= 0.0) discard;
 
   vec4 raw = texture2D(decalNormalTex, vUv);
   float mask = 1.0;
@@ -45,5 +64,5 @@ void main() {
 
   // Buffer RG = world X / world Z (the .xzy swizzle of the original with
   // Write_RG masking the rest).
-  gl_FragColor = vec4(rot * 0.5 + 0.5, 0.0, raw.r * mask);
+  gl_FragColor = vec4(rot * 0.5 + 0.5, 0.0, raw.r * mask * decalAlpha);
 }

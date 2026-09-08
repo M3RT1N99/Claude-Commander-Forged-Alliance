@@ -1798,10 +1798,9 @@ CreateLightParticle, Cfile:905874-906033: an additive billboard of constant
 size whose ramp texture drives colour and alpha over the lifetime, spawned
 only when a ramp is given; the Intel variant is gated by the focus army's
 line of sight, 909075-909090); `CreateSplat`/`CreateDecal`/
-`CreateSplatOnBone` carry sim state but nothing draws them (CDecal,
-Cfile:907293-907441: a ground-projected quad with size, yaw, expiry tick,
-type Albedo/Normals/Glow/Water, per-army visibility, 1112197-1112337;
-the map-decal renderer already has the projection); the shield dome and
+`CreateSplatOnBone` are drawn now (see "Splats and decals" below; the
+per-army visibility of CDecalBuffer::CreateHandle is not modelled); the
+shield dome and
 the personal shield's unit-mesh swap are drawn now (see "The shield dome"
 and "The personal shield" below); `SetEmitterParam`/`SetEmitterCurveParam`
 are write-only; `SetBeamParam` and `ResizeEmitterCurve` are missing.
@@ -2410,3 +2409,113 @@ bridge reports the swap applied with the shell.
   honoured; whether any unit has one is UNVERIFIED.
 - The construction site is still the fraction-driven build path; the 1:1
   way (the build mesh arriving as a swap like any other) is a later step.
+
+## Splats and decals: CreateSplat / CreateDecal / CreateSplatOnBone reach the ground
+
+**What was wrong.** The three bindings existed in globals.lua but rode the
+emitter list as a "fixed ground effect" with the texture name in the
+emitter's blueprint slot: no particle blueprint of that name, so the tread
+marks, scorch splats, craters and tarmacs of the original Lua
+(unit.lua:2325/2649, defaultexplosions.lua:211-219, defaultunits.lua:135-
+150, the nuke scripts) were never drawn; sizeZ, the type, the second
+texture, the lodParam and the fidelity were dropped on the way.
+
+**The sim side** (globals.lua, the decal block). The bindings parse as
+cfunc_CreateSplatL (Cfile:908309-908450: 8-9 arguments, fidelity 1 when
+absent, texName2 and type '', isSplat), cfunc_CreateDecalL (908117-
+908283: 9-11, fidelity 1 when nil) and cfunc_CreateSplatOnBoneL
+(908478-908610: exactly 9 -- entity, offset, bone, ... -- the mHelp at
+908465 has the first two the other way round, the parser and
+unit.lua:2648 agree; fidelity 1). CDecal::CDecal (907293-907423) is the
+record: the expiry tick is the truncated duration * 10 plus the current
+tick (frndint corrected down when it rounded up, 907344-907360; 0 = never)
+and the stored position is the footprint's CORNER -- the Lua position
+minus half the size along the transform's x and z axes (907380-907400) --
+because the render side spans the quad from that corner (ComputeCorner
+1335287-1335306) and reads the heading back as mRot.y = -yaw
+(907398-907400). The texture name resolves as CDecalManager::AddDecals
+does it (1305895-1305930): an absolute path (a leading separator, UNC, a
+drive letter) stays, a bare name becomes /env/common/splats/<name>.dds
+resp. /env/common/decals/<name>.dds. Only CreateDecal returns a handle
+(908270-908280; the two splat bindings return nothing, 908425-908460 and
+908610-908637), and it has one method, Destroy (luadef_CDecalHandleDestroy
+908048; cfunc_CDecalHandleDestroyL 908061-908075 removes it from the
+buffer); the sweep destroys expired handles
+with the tick (CDecalBuffer 1112362-1112600, __decalSweep from
+threads.lua). The beat's adds and the destroyed ids go to the renderer as
+two drained channels (AddDecals / RemoveDecals with the sync,
+1327849-1327850); an expiry sends nothing, the renderer knows the tick.
+
+**The renderer** (src/viewer/runtimeDecals.ts, shaders splat.vert/frag,
+decalGlow.frag, decal.vert/frag and decalNormals.frag extended):
+
+- A SPLAT is a CWldSplat: one quad whose corners are position + u * (sx
+  cos a, sx sin a) + v * (-sz sin a, sz cos a) with a = -heading, each
+  corner's Y from the heightfield (UpdateVertices 1335570-1335625; the
+  engine re-reads them per frame, this heightfield does not deform),
+  UVs (0,0) (1,0) (1,1) (0,1) (UpdateBatchTexture 1335626-1335661), drawn
+  with terrain.fx TSplats (:1436-1447; SplatsVS/PS :1372-1434: the albedo
+  lit on the screen-space normal buffer like a decal, alpha = albedo.w *
+  mAlpha, SrcAlpha/InvSrcAlpha on RGB, depth LessEqual without write, cull
+  none with a small negative bias). The engine packs every splat texture
+  into one atlas and draws one call (sub_802830 1219271-1219322); here one
+  non-indexed batch per texture.
+- A DECAL is a CWldTerrainDecal like the map's own: the mapDecals.ts
+  patch (the inverse DecalMatrix on the heightmap) as an instanced batch
+  per (type, textures) with a per-instance fade and cutoff. Types drawn:
+  Albedo (TDecals), Normals and Alpha Normals (TDecalsNormals /
+  TDecalsNormalsAlpha -- DecalsNormalsPS ignores its alphablend flag,
+  :1108-1129), Glow (TDecalsGlow :1286-1298: glow = albedo.a, mask =
+  tex2.x * 0.25, AlphaBlend_One_One_Write_A -- added into the frame ALPHA
+  the bloom reads; an unbound mask reads (0,0,0,1), so a Glow decal
+  without a second texture adds nothing, which the tarmacs' Glow entries
+  pass), AlbedoXP (TDecalsXP). Water Mask/Albedo/Normals and Glow Mask are
+  counted, not drawn (LookupDecalType 1334911-1334927, sTypeDesc
+  1966195-1966229).
+- Alpha = GetLODAlpha (1335082-1335114: a linear fade from cutoff *
+  ren_DecalFadeFraction 0.5 to cutoff, :421725) x mCurAlpha. The cutoff is
+  the lodParam, or ComputeCutoffLOD's diagonal x 15 for a splat, Water
+  Albedo and Glow Mask and x 6 for every other type when it is 0
+  (1335313-1335329; every shipped caller passes a lodParam). The static
+  map decals take the same fade now instead of a hard cut.
+  mCurAlpha starts at 1; once the tick passes mRemoveTick -- the expiry
+  tick, or 1 after Destroy (RemoveDecals 1306039-1306058) -- ProcessRemovals
+  (1306063-1306135) steps it down per tick, 0.2 for a decal and 0.03 for a
+  splat, and the object goes at 0.
+
+**Checks** (scripts/verify-decals.ts, new): the original CreateTarmac on a
+spawned T1 power generator (aibrain.lua:459 calls it so; ueb1101_unit.bp
+:71-87) queues an Albedo and an Alpha Normals decal with the resolved
+paths (the files exist), 6.4 x 6.4, lodParam 150, permanent, one of the
+block's four orientations, the corner plus half the rotated size on the
+unit; DestroyTarmac queues both removals; CreateSplat / CreateDecal /
+CreateSplatOnBone argument parsing, the absolute path, the default
+fidelity, the truncated expiry (2.06 s -> 20 ticks), the argument-count
+errors, Destroy once, the sweep, no emitter row. Seen red before the
+registry existed. Headless: a tarmac centred under the generator, a
+tread mark and a scorch splat on the ground (screenshots in the session).
+
+**Found on the way.** A 32-bit index buffer drew nothing in the headless
+WebGL context while a 16-bit one did; the splat batches are non-indexed
+triangle soups now (six vertices a quad). Whether that is the context or
+the renderer is UNVERIFIED -- nothing else in the renderer indexes beyond
+16 bits.
+
+**UNVERIFIED / not modelled.**
+
+- The per-army visibility (CDecalBuffer::CreateHandle 1112277-1112325:
+  allies see a splat, a decal follows line of sight; the per-tick LOS
+  re-check in sub_779710) -- everything is drawn.
+- The rotation sign convention comes from mRot.y = -yaw (907392-907395)
+  and the corner math; a mirrored texture would be the symptom. Not
+  compared with the original picture.
+- The D3D DepthBias of the splat states (-0.001, low fidelity -0.02) to
+  polygonOffset mapping; the decal's offset is used for both.
+- GetLODAlpha's distance: the shaders take the per-fragment distance to
+  the camera; the engine feeds a per-object value from the footprint's
+  extents centre (1220780-1220811) -- a large decal could show a gradient
+  the original does not.
+- Fidelity: the High/Medium techniques; LowFidelitySplat (unlit) is not.
+- A handle destroyed while its textures still load is placed already
+  fading (the engine's object exists from the sync on); the frame or two
+  of difference are the asynchronous load's.
