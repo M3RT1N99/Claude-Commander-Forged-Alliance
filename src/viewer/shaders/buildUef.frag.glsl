@@ -1,7 +1,7 @@
 // Port von UEFBuildHiFiPS (effects/mesh.fx:2928-2961), Pass P0 der Technique
 // UEFBuild (mesh.fx:5656: AlphaBlend SrcAlpha/InvSrcAlpha, Cull CW,
 // PARAM_FRACTIONCOMPLETE — material.y ist der Baufortschritt 0..1,
-// material.x das Alter der Unit in Sekunden). Die Baustelle ist blau
+// material.x das Alter der Unit in game ticks). Die Baustelle ist blau
 // durchscheinend und blendet mit dem Fortschritt zur normalen Farbe.
 
   precision highp float;
@@ -18,8 +18,8 @@
   uniform float lightMultiplier;
   uniform float glowMultiplier;   // mesh.fx:56 = 2.0
   uniform float fraction;         // material.y = FractionComplete
-  uniform float unitAge;          // material.x = time - creationTime (Sekunden)
-  uniform float time;             // Weltzeit in Sekunden (mesh.fx `time`)
+  uniform float unitAge;          // material.x = time - creation tick (game ticks)
+  uniform float time;             // mesh.fx `time`: game ticks + beat fraction
 
   varying vec2 vUv0;
   varying vec2 vUv1;

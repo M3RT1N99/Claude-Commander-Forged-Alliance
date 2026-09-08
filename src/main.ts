@@ -1066,7 +1066,9 @@ async function addPropMesh(p: LuaPropSnapshot): Promise<void> {
   }
   // Das Prop kann schon wieder weg sein (Reclaim), während das Mesh lud.
   if (!luaSim?.allProps().some((q) => q.id === p.id)) return
-  const mesh = viewer.addWreck(assets.model, assets.textures, noise, p.scale, p.spawn / 10)
+  // material.x of the wreck: the tick it was created on (WreckagePS shifts
+  // the specular lookup by frac(0.01 * material.x), mesh.fx:2344-2345).
+  const mesh = viewer.addWreck(assets.model, assets.textures, noise, p.scale, p.spawn)
   mesh.position.set(p.x, p.y, p.z)
   mesh.rotation.set(0, p.heading, 0)
   propMeshes.set(p.id, mesh)
@@ -2971,11 +2973,13 @@ function luaSimUpdate(): void {
     }
     u.scene.animator.setHiddenBones(hiddenIdx)
 
-    // BAUSTELLE: die Build-Technique lebt von drei Uniforms — Baufortschritt
-    // (material.y), Unit-Alter und Weltzeit in Sekunden (mesh.fx `time`).
-    // Bei Fertigstellung kommt das normale Unit-Material zurück.
+    // CONSTRUCTION SITE: the build technique lives on three uniforms -- the
+    // build fraction (material.y), the unit's age and mesh.fx `time`, the
+    // one shader clock in game ticks (meshShaderTime: MeshRenderer::Batch,
+    // Cfile:1212805-1212810; material.x is the creation tick, :1191960).
+    // On completion the ordinary unit material returns.
     if (u.build) {
-      const sek = (luaSim.gameTick + lerpAlpha) / 10
+      const shaderTime = meshShaderTime()
       if (s.fraction >= 1) {
         if (u.build.overlayMesh) u.mesh.remove(u.build.overlayMesh)
         u.build.overlay?.dispose()
@@ -2983,10 +2987,10 @@ function luaSimUpdate(): void {
         u.build.base.dispose()
         u.build = undefined
       } else {
-        const age = sek - s.born / 10
+        const age = shaderTime - s.born
         u.build.base.uniforms.fraction!.value = s.fraction
         u.build.base.uniforms.unitAge!.value = age
-        if (u.build.base.uniforms.time) u.build.base.uniforms.time.value = sek
+        if (u.build.base.uniforms.time) u.build.base.uniforms.time.value = shaderTime
         if (u.build.overlay) {
           u.build.overlay.uniforms.fraction!.value = s.fraction
           u.build.overlay.uniforms.unitAge!.value = age
@@ -3027,7 +3031,9 @@ function luaSimUpdate(): void {
 
   orderLines?.update(orderEntries)
   commandFeedback?.update(performance.now() / 1000)
-  // Both take mesh.fx's `time` in game ticks (meshShaderTime above).
+  // Every engine shader clock counts game ticks (meshShaderTime above): the
+  // viewer's terrain/water/prop/sky clock and the two mesh systems.
+  viewer.setShaderTime(meshShaderTime())
   worldMeshes?.update(meshShaderTime())
   meshEntities?.update(meshShaderTime())
 }

@@ -164,6 +164,20 @@ export class UnitViewer {
   /** Deferred normal pass (TerrainNormalsPS + TDecalsNormals into a
    *  screen-space RT; terrain/decal lighting reads it back). */
   private readonly terrainNormals = new TerrainNormalsPass(4, 4)
+  /**
+   * The engine's shader clock: game TICKS plus the frame's beat fraction.
+   * mesh.fx `time` (MeshRenderer::Batch, Cfile:1212805-1212810), terrain.fx
+   * `Time` (MediumFidelityTerrain::Func3 :1220731-1220732) and water2.fx
+   * `Time` (the water renderers sub_80FC80 :1228809-1228810 and
+   * HighFidelityWater::Func3 :1229395-1229396) are all fed sCurGameTick +
+   * sDeltaFrame by the viewport render (:1212790-1212800).
+   * A session sets it per frame (setShaderTime); the tools without a sim
+   * run real time x 10 (sky.fx:160 counts the same ticks).
+   */
+  private shaderTicks: number | null = null
+  setShaderTime(ticks: number): void {
+    this.shaderTicks = ticks
+  }
   /** Map '<default>' env cube — mesh.fx environmentSampler (Cfile:1189598). */
   private envCube: THREE.Texture | null = null
   /** The map's environment cube (mesh.fx environmentSampler) for materials built outside the viewer. */
@@ -228,18 +242,21 @@ export class UnitViewer {
 
     this.renderer.setAnimationLoop(() => {
       const dt = this.clock.getDelta()
+      // The shader clock in ticks (see shaderTicks): the session's, or real
+      // time x 10 for the tools.
+      const shaderTime = this.shaderTicks ?? this.clock.elapsedTime * 10
       // TTerrainGlow: the stratum1 lava layer scrolls with Time (terrain.fx
-      // :510-514) — feed the elapsed clock into the terrain material.
+      // :510-514).
       const terrainMat = this.current?.material as THREE.ShaderMaterial | undefined
       if (terrainMat?.uniforms?.time) {
-        terrainMat.uniforms.time.value = this.clock.elapsedTime
+        terrainMat.uniforms.time.value = shaderTime
       }
-      this.skyDome?.update(this.clock.elapsedTime)
-      this.mapProps?.update(this.clock.elapsedTime)
+      this.skyDome?.update(shaderTime)
+      this.mapProps?.update(shaderTime)
       // Water wave layers scroll with Time (water2.fx WaterVS :315-318).
       const waterMat = this.waterMesh?.material as THREE.ShaderMaterial | undefined
       if (waterMat?.uniforms?.time) {
-        waterMat.uniforms.time.value = this.clock.elapsedTime
+        waterMat.uniforms.time.value = shaderTime
       }
       if (this.animator && this.animPlaying) {
         this.animTime += dt * this.animationSpeed
@@ -632,7 +649,8 @@ export class UnitViewer {
     textures: UnitTextures,
     noise: THREE.Texture,
     scale: number,
-    creationTime: number,
+    /** The game tick the prop was created on (material.x, ticks). */
+    creationTick: number,
   ): THREE.Mesh {
     const geometry = this.scmGeometry(model)
     const animator = new UnitAnimator(model)
@@ -640,7 +658,7 @@ export class UnitViewer {
       textures,
       noise,
       animator.skinMatrices,
-      creationTime,
+      creationTick,
       this.mapLighting ?? undefined,
     )
     const mesh = new THREE.Mesh(geometry, material)

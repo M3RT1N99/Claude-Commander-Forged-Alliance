@@ -2299,3 +2299,34 @@ zoomed in. The unit-side WARN for the ACU's PhaseShield mesh is gone.
   Always (no recon gating for mesh entities yet).
 - The personal-shield unit-mesh swap (SetMesh(mesh, true) keepActor on a
   unit) is still the next branch.
+
+## Every engine shader clock counts game ticks -- not only mesh.fx
+
+**What was wrong.** After the shield dome settled that mesh.fx `time` is
+sCurGameTick + sDeltaFrame (see above), the other ported shaders turned
+out to run on seconds: the build techniques' `unitAge`/`time` (UEF grid,
+Cybran/Aeon/Seraphim overlays -- mesh.fx material.x is `time - creation
+tick`), the wreck's `creationTime` (WreckagePS shifts the specular lookup
+by frac(0.01 * material.x), mesh.fx:2344-2345 -- a per-instance offset
+that depends on the tick), the prop sway (mesh.fx `time`), the terrain
+glow scroll and the water wave layers. Every one of them animated ten
+times too slowly, and the wreck offset was a different number.
+
+**The evidence.** terrain.fx `Time` is set to `(float)tick + delta` in
+MediumFidelityTerrain::Func3 (Cfile:1220731-1220732; :1217856-1217857 and
+:1223673-1223674 are the other fidelity paths), water2.fx `Time` the same
+way in the water renderers (sub_80FC80 :1228809-1228810,
+HighFidelityWater::Func3 :1229395-1229396); the viewport render loads
+sCurGameTick and sDeltaFrame right before it calls them (:1212790-1212800).
+sky.fx:160 already counted ticks in this repo.
+
+**The fix.** The viewer owns one shader clock (`setShaderTime`, ticks):
+the session feeds `meshShaderTime()` per frame; the tools without a sim
+run real time x 10. Terrain, water, props, sky, the build materials and
+the wreck creation tick take it. Only the command feedback blips keep a
+seconds clock: their shader divides `time - material.x` by
+`mLifetimeParameter = mDuration * 10` (:1281923), a unit-free ratio.
+
+**UNVERIFIED.** No suite measures animation speed; the change is a unit
+conversion checked by reading, plus a headless session showing the
+shaders still compile and draw.

@@ -9,7 +9,7 @@ uniform sampler2D normalsMap;
 uniform sampler2D secondaryMap;
 uniform vec3 sunDirection;
 uniform float fraction; // material.y
-uniform float unitAge;  // material.x = time - creationTime (seconds)
+uniform float unitAge;  // material.x = time - creation tick (game ticks)
 
 varying vec2 vUv0;
 varying vec2 vUv1;

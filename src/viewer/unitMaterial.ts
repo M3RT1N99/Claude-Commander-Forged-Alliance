@@ -127,8 +127,8 @@ export function createUnitMaterial(
  * AlphaBlend SrcAlpha/InvSrcAlpha), Pass P1 = das scrollende Bau-Gitter
  * (UEFBuildOverlayHiFiPS:2977 auf EffectVertexNormalHiFiVS:1513).
  * material.y = FractionComplete (PARAM_FRACTIONCOMPLETE), material.x =
- * Alter der Unit in Sekunden. `fraction`/`time` werden pro Frame über die
- * zurückgegebenen Uniform-Referenzen gestellt.
+ * the unit's age in game ticks (mesh.fx `time` - creation tick).
+ * `fraction`/`time` are set per frame through the returned uniform refs.
  */
 export function createUefBuildMaterials(
   textures: UnitTextures,
@@ -211,8 +211,8 @@ export function createUefBuildMaterials(
  *    mesh scaled by 0.25 + pc*0.75, UV distortion from the secondary,
  *    falloff ramp per blueprints.lua:229).
  *
- * `fraction`/`unitAge` update per frame via the returned uniform refs,
- * like the UEF pair above.
+ * `fraction`/`unitAge` (material.x = time - creation tick, game ticks)
+ * update per frame via the returned uniform refs, like the UEF pair above.
  */
 export function createFactionBuildMaterials(
   faction: 'Aeon' | 'Cybran' | 'Seraphim',
@@ -340,7 +340,7 @@ export function createWreckageMaterial(
   textures: UnitTextures,
   noise: THREE.Texture,
   skinMatrices: THREE.Matrix4[],
-  /** Erstellungszeit in Sekunden (Sim-Tick / 10) — variiert das Noise. */
+  /** The creation tick (material.x, game ticks) -- varies the specular lookup. */
   creationTime: number,
   lighting: MapLighting = VIEWER_LIGHT,
 ): THREE.ShaderMaterial {

@@ -249,9 +249,9 @@ export class SkyDome {
     return out
   }
 
-  /** Advance the cirrus scroll — sky.fx:160 counts in ticks (10 per second). */
-  update(elapsedSeconds: number): void {
-    for (const u of this.timeUniforms) u.value = elapsedSeconds * 10
+  /** Advance the cirrus scroll — sky.fx:160 counts in game ticks (the viewer's shader clock). */
+  update(ticks: number): void {
+    for (const u of this.timeUniforms) u.value = ticks
   }
 
   dispose(): void {

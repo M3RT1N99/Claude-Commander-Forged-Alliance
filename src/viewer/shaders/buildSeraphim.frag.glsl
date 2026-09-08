@@ -18,7 +18,7 @@ uniform vec3 sunDirection;
 uniform vec3 sunAmbient;
 uniform vec3 shadowFill;
 uniform float fraction; // material.y
-uniform float unitAge;  // material.x
+uniform float unitAge;  // material.x = time - creation tick (game ticks)
 
 varying vec2 vUv0;
 varying vec2 vUv1;

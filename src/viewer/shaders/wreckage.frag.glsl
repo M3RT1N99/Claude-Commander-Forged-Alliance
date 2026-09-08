@@ -15,7 +15,7 @@
   uniform vec3 sunAmbient;        // scmap SunAmbience
   uniform vec3 shadowFill;        // scmap ShadowFillColor
   uniform float lightMultiplier;  // scmap LightingMultiplier
-  uniform float creationTime;     // Sekunden — mesh.fx: material.x
+  uniform float creationTime;     // mesh.fx material.x: the creation tick (game ticks)
 
   varying vec2 vUv0;
   varying vec2 vUv1;

@@ -324,9 +324,9 @@ export class MapProps {
     return out
   }
 
-  /** Drive the tree sway (mesh.fx `time`, seconds). */
-  update(elapsedSeconds: number): void {
-    for (const u of this.timeUniforms) u.value = elapsedSeconds
+  /** Drive the tree sway (mesh.fx `time`: game ticks + beat fraction, the viewer's shader clock). */
+  update(ticks: number): void {
+    for (const u of this.timeUniforms) u.value = ticks
   }
 
   /** Global map index -> its instance slot in every LOD mesh of the group. */

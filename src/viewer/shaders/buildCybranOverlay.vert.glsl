@@ -5,7 +5,7 @@ attribute vec2 scmUv1;
 attribute float scmBoneIndex;
 
 uniform mat4 boneMatrices[MAX_BONES];
-uniform float unitAge; // material.x = time - creationTime (seconds)
+uniform float unitAge; // material.x = time - creation tick (game ticks)
 
 varying vec2 vUvA; // texcoord0 * 14
 varying vec2 vUvB; // texcoord0 * 4 + age * (-0.008, 0.008)

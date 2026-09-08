@@ -6,7 +6,7 @@
   attribute float scmBoneIndex;
 
   uniform mat4 boneMatrices[MAX_BONES];
-  uniform float unitAge; // material.x = time - creationTime (Sekunden)
+  uniform float unitAge; // material.x = time - creation tick (game ticks)
 
   varying vec4 vUvs; // xy = texcoord0*16 + Scroll, zw = texcoord1*8 + Scroll
 

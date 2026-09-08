@@ -81,7 +81,7 @@
   uniform vec4 specularColor;
   uniform float lightingMultiplier;
 #ifdef GLOW
-  uniform float time; // seconds — drives the stratum1 UV scroll
+  uniform float time; // terrain.fx Time: game ticks + beat fraction — drives the stratum1 UV scroll
 #endif
 
 #include <cfaShadow>
