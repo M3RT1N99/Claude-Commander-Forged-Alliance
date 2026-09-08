@@ -75,7 +75,15 @@ export function simBootPaths(all: Iterable<string>, mapFolder?: string): SimBoot
     else if (
       ((p.startsWith('projectiles/') || p.startsWith('props/') || p.startsWith('effects/')) &&
         (p.endsWith('.bp') || p.endsWith('.lua'))) ||
-      (p.startsWith('env/') && p.endsWith('_prop.bp'))
+      // LoadBlueprints takes every .bp under /effects, /env, /meshes,
+      // /projectiles, /props and /units (lua/system/blueprints.lua:330-331).
+      // The unit blueprints themselves stay on demand (prepare); the mesh
+      // blueprints beside them (the ACU's phase shield, the personal
+      // shields), the /meshes folder and every env .bp are boot payload --
+      // Unit:SetMesh looks a mesh blueprint up by id mid-tick.
+      (p.startsWith('env/') && p.endsWith('.bp')) ||
+      (p.startsWith('meshes/') && p.endsWith('.bp')) ||
+      (p.startsWith('units/') && p.endsWith('.bp') && !p.endsWith('_unit.bp'))
     )
       blueprints.push(raw)
     else if (folder && isMapLua(p, folder)) map.push(raw)

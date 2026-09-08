@@ -107,6 +107,28 @@ local ENTITY_NAMES = {
   'ShowBone',
 }
 
+-- EVisibilityMode (Cfile:640586-640600) as SCR_GetEnum decodes it
+-- (598371-598420): the lexical names without the VIZMODE_ prefix, an unknown
+-- one the engine's error with the valid options listed.
+local VIZ_MODES = { 'Always', 'Never', 'Intel' }
+local VIZ_MODE_SET = { Always = true, Never = true, Intel = true }
+local function __setVizMode(self, field, name, ...)
+  local n = select('#', ...)
+  if n ~= 1 then
+    error(string.format('%s(type)\n  expected %d args, but got %d', name, 2, n + 1), 2)
+  end
+  local mode = ...
+  if type(mode) ~= 'string' then
+    error("bad argument #1 to '" .. name .. "' (string expected, got " .. type(mode) .. ")", 2)
+  end
+  if not VIZ_MODE_SET[mode] then
+    local options = ''
+    for _, m in ipairs(VIZ_MODES) do options = options .. '   ' .. m .. '\n' end
+    error('Invalid enum value ' .. mode .. '\nValid Options are:\n' .. options, 2)
+  end
+  self[field] = mode
+end
+
 -- luadef_EntityShakeCamera.mHelp (Cfile:931090-931097) -- the text the
 -- argument-count error prints.
 local SHAKE_CAMERA_HELP = 'Entity:ShakeCamera(radius, max, min, duration)\n'
@@ -606,7 +628,83 @@ local entity = withNoops(ENTITY_NAMES, {
   SetOrientation = function(self, o) self.__orient = o end,
   GetHeading = function(self) return self.__heading or 0 end,
 
-  SetMesh = function(self, mesh) self.__meshBp = mesh end,
+  --- SetMesh(meshBlueprint[, keepActor]) -- cfunc_EntitySetMeshL
+  --- (Cfile:935046-935118): two or three arguments (935064-935065), the name
+  --- a string (TypeError 935078). A name containing "<none>" is left
+  --- alone (935084); an empty name removes the mesh (Entity::SetMesh
+  --- 916806-916808, mMesh = 0); otherwise the mesh blueprint is looked up
+  --- (GetMeshBlueprint, 916739) -- one that yields none only warns "Failed
+  --- to load mesh for blueprint" and leaves the old mesh (916817-916823),
+  --- and the binding raises "SetMesh failed with <name>" when the entity
+  --- ends up WITHOUT a mesh (935092-935101). keepActor (the third argument)
+  --- keeps the unit's actor -- its skeleton -- across a swap (shield.lua:478
+  --- puts the personal shield mesh on the owner); this sim keeps the
+  --- skeleton always. A non-unit, non-prop entity with a mesh joins the
+  --- registry the renderer draws (props.lua __meshEntities).
+  SetMesh = function(self, ...)
+    -- Entity is a sim_SimInits class (docs/research/engine-api.md): the UI
+    -- VM has no mesh registry, and moho.lua loads into both -- fail with
+    -- the reason, not with a strict-_G miss deep inside.
+    if not rawget(_G, '__registered') then
+      error('Entity:SetMesh is a Sim binding (sim_SimInits); this VM has no mesh registry', 2)
+    end
+    local n = select('#', ...)
+    if n < 1 or n > 2 then
+      error(string.format('Entity:SetMesh(meshBlueprint, [keepActor])\n  expected between %d and %d args, but got %d', 2, 3, n + 1), 2)
+    end
+    local name = ...
+    if type(name) ~= 'string' then
+      error("bad argument #1 to 'SetMesh' (string expected, got " .. type(name) .. ")", 2)
+    end
+    if string.find(name, '<none>', 1, true) then return end
+    if name == '' then
+      self.__meshBp = nil
+      __meshEntityChanged(self)
+      return
+    end
+    local id = string.lower(name)
+    if not (__registered and __registered.Mesh and __registered.Mesh[id]) then
+      WARN('Failed to load mesh for blueprint ' .. name)
+      if not self.__meshBp and not self.__isUnit then
+        error('SetMesh failed with ' .. name, 2)
+      end
+      return
+    end
+    self.__meshBp = id
+    __meshEntityChanged(self)
+  end,
+  --- SetDrawScale(size) -- cfunc_EntitySetDrawScaleL (Cfile:935139-935178):
+  --- two arguments (935156-935157), a number (TypeError 935169),
+  --- written to all three axes of mVarDat.mScale (935171-935175) -- the
+  --- same field SetScale fills (935334-935337). shield.lua:268/274 sizes the
+  --- dome and its depth shell with the ShieldSize.
+  SetDrawScale = function(self, ...)
+    local n = select('#', ...)
+    if n ~= 1 then
+      error(string.format('Entity:SetDrawScale(size): Change mesh scale on the fly\n  expected %d args, but got %d', 2, n + 1), 2)
+    end
+    local size = ...
+    if type(size) ~= 'number' then
+      error("bad argument #1 to 'SetDrawScale' (number expected, got " .. type(size) .. ")", 2)
+    end
+    self.__drawScale = size
+    self.__scale = { size, size, size }
+  end,
+  --- SetVizToFocusPlayer/Allies/Enemies/Neutrals(type) -- cfunc_EntitySetVizTo*L
+  --- (Cfile:933062-933100 and neighbours): two arguments, a string decoded
+  --- as EVisibilityMode through SCR_GetEnum (598371-598420: "Invalid enum
+  --- value <x>" plus the valid options on failure); Entity::SetVizTo*
+  --- (915067-915100) stores the mode and reruns UpdateVisibility (915171-
+  --- 915235), which picks the mode for the FOCUS army's relation to the
+  --- owner. Defaults: the constructor sets all four to Always (914515-
+  --- 914518); StandardInit then puts Neutrals to Always and Enemies to Intel
+  --- (914882-914883). The modes: VIZMODE_Always, VIZMODE_Never, VIZMODE_Intel
+  --- (640586-640600). No recon model here: Intel draws like Always
+  --- (docs/STATUS.md).
+  SetVizToFocusPlayer = function(self, ...) __setVizMode(self, '__vizFocus', 'SetVizToFocusPlayer', ...) end,
+  SetVizToAllies = function(self, ...) __setVizMode(self, '__vizAllies', 'SetVizToAllies', ...) end,
+  SetVizToEnemies = function(self, ...) __setVizMode(self, '__vizEnemies', 'SetVizToEnemies', ...) end,
+  SetVizToNeutrals = function(self, ...) __setVizMode(self, '__vizNeutrals', 'SetVizToNeutrals', ...) end,
   -- Der Zeichen-Massstab (unit.lua:1111 gibt dem Wrack den UniformScale der
   -- Unit mit). Der Renderer liest ihn aus dem Prop-Snapshot.
   -- Entity:SetScale(s) ODER SetScale(x, y, z) — die Engine nimmt 2 oder 4

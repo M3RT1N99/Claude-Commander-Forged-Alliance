@@ -81,7 +81,8 @@ export class WorldMeshSystem {
     private readonly resolveBlueprint: (
       blueprintId: string,
     ) => Promise<{ meshPath: string; texPath: string; scale: number } | null>,
-    private readonly now: () => number = () => performance.now() / 1000,
+    /** mesh.fx `time`: game ticks + the frame's beat fraction (main.ts meshShaderTime). */
+    private readonly now: () => number,
   ) {}
 
   /** Per UI beat: the registry as the UI VM holds it now. */
@@ -112,7 +113,9 @@ export class WorldMeshSystem {
       serial: row.serial,
       mesh: null,
       material: null,
-      born: this.now(),
+      // material.x: the game tick the mesh instance was created on
+      // (MeshInstance ctor, Cfile:1193097 / :1191960) -- the whole tick.
+      born: Math.floor(this.now()),
       baseScale: row.scale,
       scaleTo: params.scaleTo,
       fade: params.fade,
@@ -161,14 +164,21 @@ export class WorldMeshSystem {
     entry.material = null
   }
 
-  /** Per render frame: the lifetime scale animation of the feedback shaders. */
-  update(nowSeconds: number): void {
+  /**
+   * Per render frame: the lifetime scale animation of the feedback shaders.
+   * `time` is mesh.fx's clock in game TICKS (sCurGameTick + sDeltaFrame,
+   * MeshRenderer::Batch Cfile:1212805-1212810), and the lifetime parameter
+   * is raw ticks too: SetLifetimeParameter stores the Lua number as is
+   * (:1296871), rallypoint.lua:33 passes 10 -- one second -- and the
+   * engine's own command feedback blips store mDuration * 10 (:1281923).
+   */
+  update(time: number): void {
     for (const e of this.live.values()) {
       if (!e.mesh || !e.material) continue
       const r = e.row
       // CommandFeedbackVS: t = saturate((time - material.x) / material.y);
       // a lifetime of 0 divides to +inf and saturates to 1.
-      const age = nowSeconds - e.born
+      const age = time - e.born
       const t = r.lifetime > 0 ? Math.min(age / r.lifetime, 1) : 1
       const s = e.baseScale * (1 + (e.scaleTo - 1) * t)
       e.mesh.scale.set(s * r.sx, s * r.sy, s * r.sz)

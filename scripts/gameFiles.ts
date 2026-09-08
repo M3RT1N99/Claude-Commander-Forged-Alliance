@@ -200,8 +200,16 @@ export class GameFiles {
     // Auch `/effects/entities/**` — dort liegen die TRÜMMER-Projektile
     // (defaultexplosions.lua:285 wirft beim Tod DebrisMisc0x) und die
     // Nuke-Effekt-Controller (uel0001_unit.bp:1188). Es sind ProjectileBlueprints.
+    // And the mesh blueprints outside effects/: every units/** .bp that is
+    // not the unit blueprint itself (the ACU's phase shield, the personal
+    // shields), meshes/** and the env/** .bp that are not props (those go
+    // through loadProps) -- the same set the worker boots with
+    // (simBootPaths, lua/system/blueprints.lua:330-331).
     const paths = [...this.paths].filter(
-      (p) => (p.startsWith('projectiles/') || p.startsWith('effects/')) && p.endsWith('.bp'),
+      (p) =>
+        ((p.startsWith('projectiles/') || p.startsWith('effects/') || p.startsWith('meshes/')) && p.endsWith('.bp')) ||
+        (p.startsWith('units/') && p.endsWith('.bp') && !p.endsWith('_unit.bp')) ||
+        (p.startsWith('env/') && p.endsWith('.bp') && !p.endsWith('_prop.bp')),
     )
     return loadProjectileBlueprints(host, paths)
   }

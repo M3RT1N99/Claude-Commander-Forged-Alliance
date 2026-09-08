@@ -206,6 +206,26 @@ export interface LuaPropSnapshot {
   assoc?: string
 }
 
+/**
+ * A plain entity with a mesh (Entity:SetMesh -- the shield domes above all),
+ * as props.lua __readMeshEntitiesJson serialises it: the mesh blueprint's
+ * long id, the world position (attached entities follow their parent per
+ * beat), heading, the uniform draw scale, the health fraction
+ * (PARAM_FRACTIONHEALTH), the army and the four visibility modes.
+ */
+export interface LuaMeshEntitySnapshot {
+  id: number
+  bp: string
+  x: number
+  y: number
+  z: number
+  heading: number
+  scale: number
+  hp: number
+  army: number
+  viz: { focus: string; allies: string; enemies: string; neutrals: string }
+}
+
 /** Was die Sim braucht, um eine Unit dieses Typs zu erzeugen. */
 interface UnitPayload {
   scriptPath: string
@@ -223,6 +243,8 @@ interface StatesMsg {
   projectiles: LuaProjectileSnapshot[]
   emitters: LuaEmitterSnapshot[]
   props: LuaPropSnapshot[]
+  /** The mesh entities (shield domes and shells) of this beat. */
+  meshEntities?: LuaMeshEntitySnapshot[]
   /** Map-prop indices whose sim props died this beat (reclaim/destroy). */
   removedMapProps?: number[]
   /** Sim->user audio requests (SAudioRequest analog). */
@@ -285,6 +307,7 @@ type OutMsg =
   | { type: 'spawnError'; reqId: number; error: string }
   | { type: 'emitterBp'; reqId: number; bp: unknown }
   | { type: 'meshBp'; reqId: number; bp: unknown }
+  | { type: 'debugEval'; reqId: number; value: unknown }
   | StatesMsg
 
 export class LuaSimClient {
@@ -296,6 +319,7 @@ export class LuaSimClient {
   private emitterStates: LuaEmitterSnapshot[] = []
   /** Die Props des letzten Beats (Wracks) — der Renderer zeichnet sie. */
   private propStates: LuaPropSnapshot[] = []
+  private meshEntityStates: LuaMeshEntitySnapshot[] = []
   /** Accumulated dead map-prop indices; drained by the instanced renderer. */
   private readonly removedMapProps: number[] = []
   /** Accumulated sim audio requests; drained by GameAudio in main. */
@@ -321,6 +345,7 @@ export class LuaSimClient {
   private readonly emitterBpCache = new Map<string, Promise<unknown>>()
   private readonly meshBpPending = new Map<number, (bp: unknown) => void>()
   private readonly meshBpCache = new Map<string, Promise<unknown>>()
+  private readonly debugEvalPending = new Map<number, (v: unknown) => void>()
 
   private constructor(
     private readonly worker: Worker,
@@ -432,6 +457,7 @@ export class LuaSimClient {
         this.projectileStates = m.projectiles ?? []
         this.emitterStates = m.emitters ?? []
         this.propStates = m.props ?? []
+        this.meshEntityStates = m.meshEntities ?? []
         // Map-prop instances that died this beat (reclaimed/destroyed) —
         // consumed by the instanced map-prop renderer.
         if (m.removedMapProps && m.removedMapProps.length > 0) {
@@ -472,6 +498,12 @@ export class LuaSimClient {
         const p = this.meshBpPending.get(m.reqId)
         this.meshBpPending.delete(m.reqId)
         p?.(m.bp)
+        break
+      }
+      case 'debugEval': {
+        const p = this.debugEvalPending.get(m.reqId)
+        this.debugEvalPending.delete(m.reqId)
+        p?.(m.value)
         break
       }
     }
@@ -730,6 +762,11 @@ export class LuaSimClient {
     return p
   }
 
+  /** The mesh entities of the last beat (the shield domes and shells). */
+  allMeshEntities(): LuaMeshEntitySnapshot[] {
+    return this.meshEntityStates
+  }
+
   /** Die Props des letzten Beats (Wracks, Felsen, Bäume). */
   allProps(): LuaPropSnapshot[] {
     return this.propStates
@@ -781,6 +818,18 @@ export class LuaSimClient {
    */
   simCallback(func: string, argsLua: string, unitIds: number[]): void {
     this.worker.postMessage({ type: 'simCallback', func, argsLua, unitIds })
+  }
+
+  /**
+   * DEV diagnosis only: a Lua expression returning JSON text, evaluated in
+   * the sim state (the page's __cfa.simEval). Not a game path.
+   */
+  debugEval(lua: string): Promise<unknown> {
+    const reqId = this.nextReq++
+    return new Promise<unknown>((resolve) => {
+      this.debugEvalPending.set(reqId, resolve)
+      this.worker.postMessage({ type: 'debugEval', reqId, lua })
+    })
   }
 
   /**

@@ -444,6 +444,21 @@ export class GameUi {
   }
 
   /**
+   * The focus army's relation to `army` as the UI VM's alliance table
+   * answers it (IsAlly / IsEnemy, ui-globals.lua): what Entity::
+   * UpdateVisibility (Cfile:915171-915235) decides the visibility mode by.
+   */
+  armyRelation(army: number): 'focus' | 'ally' | 'enemy' | 'neutral' {
+    const focus = this.focusArmy()
+    if (army === focus) return 'focus'
+    if (army < 1) return 'neutral'
+    const r = this.host.pull<string>(
+      `(function() if IsAlly(${focus}, ${army}) then return '"ally"' elseif IsEnemy(${focus}, ${army}) then return '"enemy"' else return '"neutral"' end end)()`,
+    )
+    return r === 'ally' || r === 'enemy' ? r : 'neutral'
+  }
+
+  /**
    * The army the player is looking through — `GetFocusArmy()`
    * (`__uiFocusArmy`, ui-globals.lua:927). Selection is limited to it: the
    * drag box only collects units whose army equals the focus army

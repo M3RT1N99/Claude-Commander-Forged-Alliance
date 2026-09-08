@@ -20,6 +20,8 @@ export interface UnitAssetPaths {
   normals: string[]
   specTeam: string[]
   lookup: string[]
+  /** LOD SecondaryName (mesh.fx secondarySampler -- the UEF dome's second map). */
+  secondary: string[]
   /** LOD0-ShaderName ('Unit', 'Seraphim', 'Insect', 'Aeon', …) */
   shader: string
   /** LOD0 `Scrolling`: the mesh scrolls its tread UVs (mesh.fx:438-452,
@@ -85,6 +87,7 @@ function resolveFromSource(
     normals: texture(lod?.NormalsName, `${prefix}_normalsts.dds`),
     specTeam: texture(lod?.SpecularName, `${prefix}_specteam.dds`),
     lookup: texture(lod?.LookupName, `${prefix}_lookup.dds`),
+    secondary: texture(lod?.SecondaryName, `${prefix}_secondary.dds`),
     shader: typeof lod?.ShaderName === 'string' && lod.ShaderName ? lod.ShaderName : 'Unit',
     scrolling: lod?.Scrolling === true,
   }
@@ -122,6 +125,26 @@ export function resolveUnitPaths(
     return resolve(sourceFor(placeholder.toLowerCase()))
   }
   return null
+}
+
+/**
+ * A MeshBlueprint's LOD0 by its long id ('/effects/entities/shield01/
+ * shield01_mesh' -- lua/system/blueprints.lua:114-121 strips the .bp and
+ * lowercases the source): the same RMeshBlueprintLOD::Init resolution as for
+ * units and props, the source being the blueprint path itself (prefix = up
+ * to the last '_', MeshName and the texture names completed against the
+ * blueprint's directory). The shield domes (shield.lua:266/272) are such
+ * blueprints.
+ */
+export function resolveMeshBlueprintLod(
+  bpId: string,
+  bp: BpObject,
+  exists: (path: string) => boolean,
+): UnitAssetPaths | null {
+  const source = bpId.toLowerCase().replace(/\.bp$/, '').replace(/^\//, '')
+  const lodsRaw = bpGet(bp, 'LODs')
+  const lod = (Array.isArray(lodsRaw) ? lodsRaw[0] : lodsRaw) as BpObject | undefined
+  return resolveFromSource(source, lod, exists)
 }
 
 export interface PropLodPaths extends UnitAssetPaths {

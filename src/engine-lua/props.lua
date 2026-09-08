@@ -171,6 +171,62 @@ function __readAllPropsJson()
   return '[' .. table.concat(parts, ',') .. ']'
 end
 
+-- === Mesh entities (Entity + SetMesh): the shield domes and every other
+-- plain entity the Lua gives a mesh ===
+--
+-- The engine draws every entity whose mVarDat.mMesh is set; units and props
+-- have their own snapshots here, so this registry holds the REST: shield.lua
+-- hangs its dome (the Shield entity itself, shield.lua:266) and the depth
+-- shell (MeshZ, :271-281) on the owner with a mesh, a draw scale and the
+-- four visibility modes. Each beat the renderer gets one row per registered
+-- entity that still exists and has a mesh.
+__meshEntities = {}
+
+function __meshEntityChanged(e)
+  if e.__isUnit or __props[e.__id] then return end
+  if e.__meshBp then
+    __meshEntities[e.__id] = e
+  else
+    __meshEntities[e.__id] = nil
+  end
+end
+
+--- One row per live mesh entity: id, the mesh blueprint id, the position
+--- (an attached entity follows its parent every beat, bones.lua), heading,
+--- the uniform draw scale (SetDrawScale / SetScale), the health fraction
+--- (PARAM_FRACTIONHEALTH -- the shield techniques tint by it, mesh.fx
+--- ShieldPS "Adjust color of shield based on its health percentage"), the
+--- army and the four visibility modes (Entity::UpdateVisibility picks one by
+--- the focus army's relation, Cfile:915171-915235).
+function __readMeshEntitiesJson()
+  local parts = {}
+  local n = 0
+  for id, e in pairs(__meshEntities) do
+    if e.__destroyed or e.__destroyQueued or not e.__meshBp then
+      -- Dead, or the mesh was cleared (SetMesh('') in RemoveShield): out of
+      -- the registry. An energy-stalled shield cycles up and down every few
+      -- seconds with a fresh MeshZ per cycle -- the dead ones must not pile up.
+      __meshEntities[id] = nil
+    elseif not e.__pos then
+      -- A mesh but no position yet (created, not yet warped or attached):
+      -- kept, drawn once it has one.
+    else
+      n = n + 1
+      local pos = e.__pos
+      local maxHp = e.__maxHealth or 0
+      local hp = e.__health or 0
+      local fraction = maxHp > 0 and math.max(0, math.min(1, hp / maxHp)) or 1
+      parts[n] = string.format(
+        '{"id":%d,"bp":%q,"x":%.6g,"y":%.6g,"z":%.6g,"heading":%.6g,"scale":%.6g,"hp":%.6g,"army":%d,"viz":{"focus":%q,"allies":%q,"enemies":%q,"neutrals":%q}}',
+        id, tostring(e.__meshBp), pos[1], pos[2], pos[3], e.__heading or 0,
+        e.__drawScale or 1, fraction, e.__army or -1,
+        e.__vizFocus or 'Always', e.__vizAllies or 'Always', e.__vizEnemies or 'Intel', e.__vizNeutrals or 'Always'
+      )
+    end
+  end
+  return '[' .. table.concat(parts, ',') .. ']'
+end
+
 --- Drain the removed-map-prop indices (one JSON array per beat). A dying
 --- MAP prop reports its instance index exactly once so the browser can
 --- hide it in the instanced renderer.

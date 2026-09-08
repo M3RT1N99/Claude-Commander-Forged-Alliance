@@ -57,6 +57,18 @@ check(
   'ein loc/<sprache>/strings_db.lua — localization.lua:20-31 sucht genau danach',
 )
 check(paths.blueprints.length > 500, `${paths.blueprints.length} Projektil-/Prop-/Effekt-Blueprints`)
+// LoadBlueprints takes EVERY .bp under /effects, /env, /meshes, /projectiles,
+// /props and /units (lua/system/blueprints.lua:330-331). The unit blueprints
+// stay on demand (prepare), but the mesh blueprints beside them -- the ACU's
+// phase shield, the personal shields -- and the /meshes folder must be in
+// the boot payload: Unit:SetMesh looks them up by id mid-tick.
+for (const [file, why] of [
+  ['units/uel0001/uel0001_phaseshield_mesh.bp', 'UEL0001 phase shield mesh (units/**_mesh.bp)'],
+  ['meshes/game/arrow_mesh.bp', 'a /meshes blueprint (blueprints.lua:330 lists /meshes)'],
+  ['env/devtest/props/sphere01_mesh.bp', 'an env/** mesh blueprint (every env .bp, not only _prop)'],
+] as const) {
+  check(paths.blueprints.some((p) => p.toLowerCase() === file), `${file} in the boot payload -- ${why}`)
+}
 check(paths.map.length >= 3, `${paths.map.length} Lua-Dateien der Karte ${MAP}`)
 for (const suffix of ['_save.lua', '_script.lua', '_scenario.lua']) {
   check(

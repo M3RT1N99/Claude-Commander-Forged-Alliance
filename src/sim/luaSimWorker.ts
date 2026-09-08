@@ -161,6 +161,9 @@ type InMsg =
   // Ein Mesh-Blueprint (Wrack-Varianten aus ExtractWreckageBlueprint,
   // lua/system/blueprints.lua:187): ShaderName/SpecularName fuer den Renderer.
   | { type: 'meshBp'; reqId: number; bp: string }
+  // DEV diagnosis only (the page's __cfa bridge): a Lua expression that
+  // returns JSON text, evaluated in the sim state. Never a game path.
+  | { type: 'debugEval'; reqId: number; lua: string }
   // SimCallback der UI (Cfile:1359123): eine Funktion aus lua/simcallbacks.lua
   // in der Sim rufen. argsLua ist der Serialisierungs-Snapshot der UI-VM als
   // Lua-Konstruktor-Literal (SCR_ToByteStream-Aequivalent), die Auswahl kommt
@@ -344,6 +347,14 @@ const handleMessage = async (msg: InMsg): Promise<void> => {
   } else if (msg.type === 'meshBp') {
     const bp = host.pull<unknown>(`__meshBpJson(${JSON.stringify(msg.bp)})`)
     ctx.postMessage({ type: 'meshBp', reqId: msg.reqId, bp })
+  } else if (msg.type === 'debugEval') {
+    let value: unknown
+    try {
+      value = host.pull<unknown>(msg.lua)
+    } catch (err) {
+      value = { error: err instanceof Error ? err.message : String(err) }
+    }
+    ctx.postMessage({ type: 'debugEval', reqId: msg.reqId, value })
   } else if (msg.type === 'simCallback') {
     // KEIN host.call mit Objekten (wasmoon reicht sie als userdata durch,
     // nicht als Lua-Tabelle) — das Args-Literal wertet die Lua-Seite aus.
@@ -489,6 +500,10 @@ function loadBlueprintGroups(h: LuaHost, files: Map<string, Uint8Array>): void {
     // props (rocks, trees) — Sim::Setup creates one prop per scmap entry.
     else if (path.startsWith('props/') || (path.startsWith('env/') && path.endsWith('_prop.bp')))
       props.push(path)
+    // The mesh blueprints outside effects/: units/**_mesh.bp, meshes/** and
+    // env/**_mesh.bp -- MeshBlueprint files, the same LoadBlueprints pass as
+    // the effects (blueprints.lua:330-331; simBootPaths hands them over).
+    else if (path.startsWith('units/') || path.startsWith('meshes/') || path.startsWith('env/')) proj.push(path)
   }
   const nProj = loadProjectileBlueprints(h, proj)
   const nProps = loadPropBlueprints(h, props)
@@ -533,6 +548,9 @@ function tickAndPost(): void {
   // Die PROPS (Wracks): Unit.OnKilled → CreateWreckageProp → CreateProp laeuft
   // komplett in der Original-Lua; ohne diesen Kanal bleibt jedes Wrack unsichtbar.
   const props = host.pull<unknown[]>('__readAllPropsJson()')
+  // The mesh entities (Entity + SetMesh: the shield domes and shells) --
+  // one row per live one, props.lua __readMeshEntitiesJson.
+  const meshEntities = host.pull<unknown[]>('__readMeshEntitiesJson()')
   // Map-prop instances that died this beat — the instanced renderer hides
   // them (map props are NOT serialized per beat, only their removals).
   const removedMapProps = host.pull<number[]>('__drainRemovedMapPropsJson()')
@@ -560,6 +578,7 @@ function tickAndPost(): void {
     projectiles,
     emitters,
     props,
+    meshEntities,
     removedMapProps,
     audio,
     camShakes,

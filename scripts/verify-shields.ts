@@ -12,7 +12,7 @@
 import { LuaHost } from '../src/lua/host'
 import { installEngine, beat } from '../src/lua/engine'
 import { setTerrainSource } from '../src/lua/engineGlobals'
-import { spawnLuaUnit } from '../src/lua/unitFactory'
+import { spawnLuaUnit, loadProjectileBlueprints } from '../src/lua/unitFactory'
 import { GameFiles } from './gameFiles'
 import { FLAT_TEST_MAP_SIZE } from '../src/sim/terrain'
 
@@ -268,6 +268,130 @@ console.log('\n== The shield entity hangs on its owner and follows it ==')
   check(
     Math.abs(s2[1] - (c2[1] + 2.5)) < 1e-6 && Math.abs(s2[0] - c2[0]) < 1e-6 && Math.abs(s2[2] - c2[2]) < 1e-6,
     `SetParentOffset(0, 2.5, 0) lifts it by 2.5 on the next beat (y ${s2[1].toFixed(3)} vs centre ${c2[1].toFixed(3)})`,
+  )
+}
+
+console.log('\n== The dome meshes: SetMesh, SetDrawScale, SetVizTo*, the registry the renderer draws ==')
+{
+  // The UEF T2 shield generator's dome (ueb4301_unit.bp:52-62): Mesh
+  // /effects/entities/Shield01/Shield01_mesh (ShaderName ShieldUEF), MeshZ
+  // Shield01z_mesh (ShieldFill), ShieldSize 44, ShieldVerticalOffset -6.
+  // Both mesh blueprints are MeshBlueprint files of effects.scd; the real
+  // LoadBlueprints pipeline registers them under their long id
+  // (lua/system/blueprints.lua:114-121, 240-244).
+  loadProjectileBlueprints(host, [
+    'effects/entities/Shield01/Shield01_mesh.bp',
+    'effects/entities/Shield01/Shield01z_mesh.bp',
+  ])
+  check(
+    host.eval(`return __registered.Mesh['/effects/entities/shield01/shield01_mesh'] ~= nil and __registered.Mesh['/effects/entities/shield01/shield01z_mesh'] ~= nil`) === true,
+    'the two dome mesh blueprints are registered under their long ids',
+  )
+  const err = (expression: string): string =>
+    host.eval(`local ok, e = pcall(function() ${expression} end); return ok and '' or tostring(e)`) as string
+  const rows = (): { id: number; bp: string; x: number; y: number; z: number; scale: number; hp: number; army: number; viz: { focus: string; allies: string; enemies: string; neutrals: string } }[] =>
+    JSON.parse(host.eval('return __readMeshEntitiesJson()') as string) as ReturnType<typeof rows>
+  check(rows().length === 0, 'before any SetMesh the registry is empty')
+  // The shield of the generator, recreated on the ACU with the generator's
+  // mesh spec (Unit:CreateShield destroys the old one first, unit.lua).
+  host.eval(`__units[${u}]:CreateShield({
+    ShieldMaxHealth = 250, ShieldRechargeTime = 2, ShieldEnergyDrainRechargeTime = 2,
+    ShieldRegenRate = 20, ShieldRegenStartTime = 1, ShieldSize = 44,
+    ShieldVerticalOffset = -6, PassOverkillDamage = false,
+    MaintenanceConsumptionPerSecondEnergy = 500,
+    Mesh = '/effects/entities/Shield01/Shield01_mesh',
+    MeshZ = '/effects/entities/Shield01/Shield01z_mesh',
+  })`)
+  // The shield's OnState thread (shield.lua:59 ChangeState) creates the meshes
+  // on its first slice, i.e. on the next beat -- give it a few.
+  for (let i = 0; i < 40 && !shieldOn(); i++) beat(engine)
+  for (let i = 0; i < 5; i++) beat(engine)
+  check(shieldOn(), 'the recreated shield is up')
+  const meshes = host.eval(`
+    local s = __units[${u}].MyShield
+    return tostring(s.__meshBp) .. '|' .. tostring(s.MeshZ and s.MeshZ.__meshBp) .. '|' .. tostring(s.__drawScale) .. '|' .. tostring(s.MeshZ and s.MeshZ.__drawScale)
+      .. '|' .. tostring(s.MeshZ and s.MeshZ:GetParent() == __units[${u}])
+  `)
+  check(
+    meshes === '/effects/entities/shield01/shield01_mesh|/effects/entities/shield01/shield01z_mesh|44|44|true',
+    `CreateShieldMesh (shield.lua:263-283): the dome mesh on the shield, the depth shell on MeshZ, both at draw scale 44, MeshZ attached to the owner (${meshes})`,
+  )
+  let r = rows()
+  const dome = r.find((e) => e.bp === '/effects/entities/shield01/shield01_mesh')
+  const shell = r.find((e) => e.bp === '/effects/entities/shield01/shield01z_mesh')
+  check(r.length === 2 && dome !== undefined && shell !== undefined, `the registry lists the dome and the shell (${r.length} rows)`)
+  // shield.lua:45-48 sets the shield's own modes in OnCreate: FocusPlayer
+  // Always, Enemies Intel, Allies Always, Neutrals Intel (over the entity
+  // defaults Always/Always/Intel/Always, Cfile:914515-914518, 914882-914883).
+  check(
+    dome !== undefined && dome.scale === 44 && dome.hp === 1 && dome.army === 1
+      && dome.viz.focus === 'Always' && dome.viz.allies === 'Always' && dome.viz.enemies === 'Intel' && dome.viz.neutrals === 'Intel',
+    `the dome row: scale 44, full health, army 1, shield.lua:45-48's modes Always/Always/Intel/Intel (${JSON.stringify(dome)})`,
+  )
+  const fresh = host.eval(`
+    local e = import('/lua/sim/Entity.lua').Entity {}
+    e:SetMesh('/effects/entities/Shield01/Shield01_mesh')
+    local viz = nil
+    for id, m in pairs(__meshEntities) do if m == e then viz = (m.__vizFocus or 'Always') .. '/' .. (m.__vizAllies or 'Always') .. '/' .. (m.__vizEnemies or 'Intel') .. '/' .. (m.__vizNeutrals or 'Always') end end
+    e:Destroy()
+    return viz
+  `)
+  check(fresh === 'Always/Always/Intel/Always', `a fresh entity carries the engine defaults Always/Always/Intel/Always (Cfile:914515-914518, StandardInit 914882-914883) (${fresh})`)
+  check(
+    shell !== undefined && shell.viz.focus === 'Always' && shell.viz.allies === 'Always' && shell.viz.enemies === 'Intel' && shell.viz.neutrals === 'Intel',
+    `the shell row carries shield.lua:278-281's modes Always/Always/Intel/Intel (${JSON.stringify(shell?.viz)})`,
+  )
+  // SetParentOffset(0, ShieldVerticalOffset, 0): both hang 6 below the owner's
+  // collision centre (shield.lua:267/276).
+  const centreY = Number(host.eval(`local p = __boneWorld(__units[${u}], -1); return p[2]`))
+  check(
+    dome !== undefined && shell !== undefined && Math.abs(dome.y - (centreY - 6)) < 1e-6 && Math.abs(shell.y - (centreY - 6)) < 1e-6,
+    `both sit ShieldVerticalOffset -6 below the collision centre (${dome?.y.toFixed(3)} / ${shell?.y.toFixed(3)} vs centre ${centreY.toFixed(3)})`,
+  )
+  // PARAM_FRACTIONHEALTH: the row's hp is the shield's health fraction.
+  damage(100)
+  r = rows()
+  const hurt = r.find((e) => e.bp === '/effects/entities/shield01/shield01_mesh')
+  check(hurt !== undefined && Math.abs(hurt.hp - 0.6) < 1e-6, `after 100 damage the dome row reports the health fraction 0.6 (${hurt?.hp})`)
+  // The engine's argument checks.
+  check(err(`__units[${u}].MyShield:SetMesh()`).includes('expected between 2 and 3 args, but got 1'), 'SetMesh without a name is the arg-count error (Cfile:935050-935051)')
+  check(err(`__units[${u}].MyShield:SetMesh(5)`).includes('string expected'), 'SetMesh with a number is the type error (935070-935071)')
+  host.eval(`__units[${u}].MyShield:SetMesh('/no/such/mesh')`)
+  check(
+    host.eval(`return __units[${u}].MyShield.__meshBp`) === '/effects/entities/shield01/shield01_mesh',
+    'an unknown mesh on an entity WITH a mesh only warns and keeps the old one (Entity::SetMesh 916817-916823)',
+  )
+  check(
+    err(`local e = import('/lua/sim/Entity.lua').Entity {}; e:SetMesh('/no/such/mesh')`).includes('SetMesh failed with /no/such/mesh'),
+    'an unknown mesh on an entity WITHOUT one is the error "SetMesh failed with" (935092-935101)',
+  )
+  check(err(`__units[${u}].MyShield:SetDrawScale()`).includes('expected 2 args, but got 1'), 'SetDrawScale without a size is the arg-count error (935143-935144)')
+  check(err(`__units[${u}].MyShield:SetDrawScale('x')`).includes('number expected'), 'SetDrawScale with a string is the type error (935155-935156)')
+  const bad = err(`__units[${u}].MyShield:SetVizToEnemies('Sometimes')`)
+  check(bad.includes('Invalid enum value Sometimes') && bad.includes('Always') && bad.includes('Intel'), `an unknown visibility mode is the enum error with the options (${bad.split('\n')[0]})`)
+  host.eval(`__units[${u}].MyShield:SetVizToEnemies('Never')`)
+  check(rows().find((e) => e.bp === '/effects/entities/shield01/shield01_mesh')?.viz.enemies === 'Never', 'SetVizToEnemies(Never) reaches the row')
+  // The shield goes down: RemoveShield (shield.lua:253-261) clears the mesh
+  // and destroys MeshZ -- the registry empties (the shell a beat later, once
+  // the deletion queue ran).
+  damage(500)
+  check(!shieldOn(), 'the dome is down after 500 damage')
+  beat(engine)
+  check(rows().length === 0, 'RemoveShield emptied the registry (SetMesh("") on the dome, MeshZ destroyed)')
+  // The destroyed shell must leave the registry TABLE too, not only the
+  // rows: an energy-stalled shield cycles up and down every few seconds
+  // (a new MeshZ per cycle), and a registry that keeps the dead ones grows
+  // without bound.
+  const registrySize = (): number => Number(host.eval('local n = 0 for _ in pairs(__meshEntities) do n = n + 1 end return n'))
+  check(registrySize() === 0, `the destroyed shell was pruned from the registry table (${registrySize()} entries left)`)
+  // The suites' blueprint payload (GameFiles.loadProjectiles) must carry the
+  // mesh blueprints that live beside the unit blueprints: the ACU's
+  // PhaseShield (uel0001_unit.bp Enhancements) is a units/**_mesh.bp, and
+  // Unit:SetMesh('/units/uel0001/UEL0001_PhaseShield_mesh') fails without it.
+  game.loadProjectiles(host)
+  check(
+    host.eval(`return __registered.Mesh['/units/uel0001/uel0001_phaseshield_mesh'] ~= nil`) === true,
+    'the ACU phase shield mesh blueprint (units/**_mesh.bp) is registered by the suite payload',
   )
 }
 

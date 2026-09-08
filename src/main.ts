@@ -16,7 +16,7 @@ import { GameAudio } from './ui/audio'
 import { EmitterRuntime, type EmitterBpData } from './effects/emitterRuntime'
 import { parseSca } from './formats/sca'
 import { parseScmap } from './formats/scmap'
-import { resolveUnitPaths } from './formats/unitPaths'
+import { resolveMeshBlueprintLod, resolveUnitPaths } from './formats/unitPaths'
 import {
   parseBlueprint,
   parseLuaAssignments,
@@ -67,6 +67,7 @@ import {
 import { OrderLineSystem, PARAMS, type OrderLineEntry } from './viewer/orderLines'
 import { CommandFeedbackSystem, type BlipAssets } from './viewer/commandFeedback'
 import { WorldMeshSystem } from './viewer/worldMeshes'
+import { MeshEntitySystem, type MeshEntityAssets } from './viewer/meshEntities'
 
 const $ = <T extends HTMLElement>(sel: string): T => {
   const el = document.querySelector<T>(sel)
@@ -730,7 +731,58 @@ let beams: BeamSystem | null = null
 let orderLines: OrderLineSystem | null = null
 let commandFeedback: CommandFeedbackSystem | null = null
 let worldMeshes: WorldMeshSystem | null = null
+let meshEntities: MeshEntitySystem | null = null
 const blipAssetCache = new Map<string, Promise<BlipAssets | null>>()
+const meshEntityAssetCache = new Map<string, Promise<MeshEntityAssets | null>>()
+
+/**
+ * LOD0 of a mesh blueprint for a mesh entity: the blueprint from the sim
+ * (the real LoadBlueprints registry), the SCM with the attributes the
+ * shield shaders read (tangent/binormal for the normal-mapped domes), the
+ * four textures with the WRAP addressing of mesh.fx's samplers (:162-210).
+ */
+async function loadMeshEntityAssets(bp: string): Promise<MeshEntityAssets | null> {
+  let p = meshEntityAssetCache.get(bp)
+  if (!p) {
+    p = (async (): Promise<MeshEntityAssets | null> => {
+      if (!vfs || !luaSim) return null
+      const raw = (await luaSim.meshBlueprint(bp)) as BpObject | null
+      if (!raw) {
+        log(`mesh entity ${bp}: no such mesh blueprint in the sim`)
+        return null
+      }
+      const paths = resolveMeshBlueprintLod(bp, raw, (q) => vfs!.exists(q.toLowerCase()))
+      if (!paths) {
+        log(`mesh entity ${bp}: LOD0 mesh missing`)
+        return null
+      }
+      const model = parseScm(await vfs.read(paths.mesh.toLowerCase()))
+      const geometry = new THREE.BufferGeometry()
+      geometry.setAttribute('position', new THREE.BufferAttribute(model.positions, 3))
+      geometry.setAttribute('normal', new THREE.BufferAttribute(model.normals, 3))
+      geometry.setAttribute('uv', new THREE.BufferAttribute(model.uv0, 2))
+      geometry.setAttribute('scmTangent', new THREE.BufferAttribute(model.tangents, 3))
+      geometry.setAttribute('scmBinormal', new THREE.BufferAttribute(model.binormals, 3))
+      geometry.setIndex(new THREE.BufferAttribute(model.indices, 1))
+      const lower = (l: string[]): string[] => l.map((x) => x.toLowerCase())
+      const [albedo, normals, specular, secondary] = await Promise.all([
+        loadFirstTexture(lower(paths.albedo)),
+        loadFirstTexture(lower(paths.normals)),
+        loadFirstTexture(lower(paths.specTeam)),
+        loadFirstTexture(lower(paths.secondary)),
+      ])
+      for (const t of [albedo, normals, specular, secondary]) {
+        if (!t) continue
+        t.wrapS = THREE.RepeatWrapping
+        t.wrapT = THREE.RepeatWrapping
+        t.needsUpdate = true
+      }
+      return { geometry, albedo, normals, specular, secondary, shader: paths.shader }
+    })()
+    meshEntityAssetCache.set(bp, p)
+  }
+  return p
+}
 let gameAudio: GameAudio | null = null
 /** Sim loop handles (HSound analog) map into their own id space. */
 const SIM_LOOP_HANDLE_BASE = 1_000_000_000
@@ -741,6 +793,21 @@ const emitterBpData = new Map<string, EmitterBpData>()
 const emitterBpPending = new Set<string>()
 let lastEmitterTick = -1
 let lastTickWall = 0
+
+/**
+ * mesh.fx's `time`: the engine hands the mesh renderer sCurGameTick +
+ * sDeltaFrame (MeshRenderer::Batch, Cfile:1212805-1212810) and sets the
+ * shader variable to that sum modulo 36000 (ConfigureShader :1194898-
+ * 1194903, flt_F57F08 :421818) -- game TICKS plus the frame's fraction of
+ * the beat, not seconds. A mesh instance's material.x is the tick it was
+ * created on (MeshInstance ctor :1193097, :1191960), the lifetime parameter
+ * is raw ticks (the command feedback blips set mDuration * 10, :1281923).
+ */
+function meshShaderTime(): number {
+  if (!luaSim) return 0
+  const frac = Math.min((performance.now() - lastTickWall) / 100, 1)
+  return (luaSim.gameTick + frac) % 36000
+}
 
 async function prepareEmitterBatch(bpId: string): Promise<void> {
   // `emitterBpPending` ist eine LAUFZEIT-Sperre gegen doppelte Ladevorgaenge,
@@ -1239,7 +1306,23 @@ async function startSandbox(mapFolder: string): Promise<void> {
     // The UI's world meshes (rally markers, tutorial arrows): the same
     // assets and material family, persistent and steered by the UI VM.
     worldMeshes?.dispose()
-    worldMeshes = new WorldMeshSystem((o) => viewer.addHelper(o), loadBlipAssets, resolveBlueprintMesh)
+    worldMeshes = new WorldMeshSystem((o) => viewer.addHelper(o), loadBlipAssets, resolveBlueprintMesh, meshShaderTime)
+    // The mesh entities of the sim (the shield domes): drawn with the
+    // mesh.fx shield techniques, visibility by the focus army's relation.
+    meshEntities?.dispose()
+    meshEntities = new MeshEntitySystem(
+      (o) => viewer.addHelper(o),
+      (o) => viewer.removeHelper(o),
+      loadMeshEntityAssets,
+      () => viewer.currentEnvCube(),
+      (army) => (gameUi ? gameUi.armyRelation(army) : army === focusArmy() ? 'focus' : 'enemy'),
+      log,
+      meshShaderTime,
+    )
+    ;(window as unknown as { __cfaMeshEntities?: () => { alive: number; drawn: number } }).__cfaMeshEntities = () => ({
+      alive: meshEntities?.count() ?? 0,
+      drawn: meshEntities?.drawn() ?? 0,
+    })
     ;(window as unknown as { __cfaWorldMeshes?: () => number }).__cfaWorldMeshes = () =>
       worldMeshes?.count() ?? 0
     {
@@ -1451,6 +1534,16 @@ async function startSandbox(mapFolder: string): Promise<void> {
           }),
         commandMode: () => gameUi?.commandMode() ?? null,
         selection: () => (gameUi ? gameUi.debugEval('return __uiSelectionJson()') : '[]'),
+        // A complete unit at a ground point (the self-test's own spawn path)
+        // and the camera onto a point -- for headless diagnosis of things the
+        // self-test scenario does not reach (a finished shield generator).
+        spawn: (id: string, x: number, z: number, army = 1) =>
+          luaSim?.spawn(id, { x, y: viewer.heightAt(x, z), z }, army) ?? Promise.resolve(-1),
+        lookAt: (x: number, z: number) => viewer.rtsTargetLocation(x, z),
+        meshEntities: () => luaSim?.allMeshEntities() ?? [],
+        meshEntityDebug: () => meshEntities?.debug() ?? [],
+        meshEntityObjects: () => meshEntities?.objects() ?? [],
+        simEval: (lua: string) => luaSim?.debugEval(lua) ?? Promise.resolve(null),
       }
     }
     const selftest = params.get('selftest')
@@ -2704,6 +2797,11 @@ function luaSimUpdate(): void {
   // Die Emitter: pro neuem Sim-Tick spawnen, pro Frame die Partikel-Uhr
   // stellen (uTime = Sim-Tick + Frame-Anteil; die Kurven zählen in Ticks).
   updateEmitters()
+
+  // The mesh entities (shield domes and shells): the sim's registry per
+  // beat -- after updateEmitters, which stamps lastTickWall for the new
+  // tick, so a mesh created this frame gets its creation tick right.
+  meshEntities?.sync(luaSim.allMeshEntities())
   if (luaSim) {
     const frac = Math.min((performance.now() - lastTickWall) / 100, 1)
     const uTime = luaSim.gameTick + frac
@@ -2929,7 +3027,9 @@ function luaSimUpdate(): void {
 
   orderLines?.update(orderEntries)
   commandFeedback?.update(performance.now() / 1000)
-  worldMeshes?.update(performance.now() / 1000)
+  // Both take mesh.fx's `time` in game ticks (meshShaderTime above).
+  worldMeshes?.update(meshShaderTime())
+  meshEntities?.update(meshShaderTime())
 }
 
 /**

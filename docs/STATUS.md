@@ -1802,11 +1802,11 @@ line of sight, 909075-909090); `CreateSplat`/`CreateDecal`/
 Cfile:907293-907441: a ground-projected quad with size, yaw, expiry tick,
 type Albedo/Normals/Glow/Water, per-army visibility, 1112197-1112337;
 the map-decal renderer already has the projection); the shield dome is
-never drawn (shield.lua:263-283 hangs two sphere entities on the owner with
-SetMesh/SetDrawScale/SetParentOffset -- ShieldUEF and ShieldFill techniques
-in mesh.fx, the unit-mesh swap of personal shields via SetMesh(mesh, true)
-keepActor, Cfile:954614-954634); `SetEmitterParam`/`SetEmitterCurveParam`
-are write-only; `SetBeamParam` and `ResizeEmitterCurve` are missing.
+drawn now (see "The shield dome" below), but the unit-mesh swap of the
+personal shields via SetMesh(mesh, true) keepActor (Cfile:954614-954634;
+the PhaseShield/SeraphimPersonalShield techniques) is still not;
+`SetEmitterParam`/`SetEmitterCurveParam` are write-only; `SetBeamParam` and
+`ResizeEmitterCurve` are missing.
 
 **The picture.** The original renderer is NOT colour-managed: the device
 default state sets D3DSAMP_SRGBTEXTURE to 0 for all samplers and
@@ -2178,3 +2178,124 @@ light batches with particles after the first combat.
 Not modelled: the Intel variant's line-of-sight gate -- this sim has no
 recon model and the browser draws the whole world, so it spawns
 unconditionally (recorded, not faked).
+
+## The shield dome: Entity:SetMesh, the mesh-entity registry and the mesh.fx shield techniques
+
+**What was wrong.** A shield went up in the sim and nothing appeared: the
+plain Entity's `SetMesh`, `SetDrawScale` and the four `SetVizTo*` were
+no-ops, so shield.lua:263-283 -- which hangs a dome (the shield entity
+itself, `SetMesh(MeshBp)`, `SetParentOffset(0, VerticalOffset, 0)`,
+`SetDrawScale(Size)`) and a depth shell (`MeshZ = Entity{Owner}`,
+`SetMesh(MeshZBp)`, `AttachBoneTo(-1, Owner, -1)`) on the owner -- had no
+effect the renderer could see.
+
+**The sim side.** `Entity:SetMesh(name[, keepActor])` is the engine's
+(Entity::SetMesh, Cfile:916731-916811: the mesh blueprint is looked up by
+its long id; an unknown one warns "Failed to load mesh for blueprint" and
+keeps the old mesh; the binding fails with "SetMesh failed with %s" only
+when the entity ends up with no mesh at all, :935092-935101; `'<none>'` is
+left alone :935080, `''` clears). `SetDrawScale(size)` is the uniform
+mScale (:935139-935178). `SetVizToFocusPlayer/Allies/Enemies/Neutrals`
+take the VIZMODE enum through SCR_GetEnum with its error text "Invalid enum
+value %s\nValid Options are:\n   Always\n   Never\n   Intel\n"
+(:598371-598420, values :640586-640600); a fresh Entity starts Always for
+all four (ctor :914515-914518), StandardInit turns Enemies to Intel
+(:914882-914883); shield.lua:45-48 sets Always/Always/Intel/Intel itself.
+Every plain entity that carries a mesh sits in `__meshEntities`
+(props.lua): one row per beat with the mesh blueprint's long id, the world
+position (attached entities follow their parent through bones.lua), the
+heading, the draw scale, the health fraction (PARAM_FRACTIONHEALTH --
+ShieldPS tints by it), the army and the four visibility modes. Units and
+props are excluded (they have their own channels).
+
+**A bug found on the way.** The registry never pruned destroyed entries:
+`__meshEntities[id] = dead and nil or e` is Lua's ternary trap (`x and nil
+or e` is always `e`). An energy-stalled shield cycles up and down every
+few seconds with a fresh MeshZ per cycle, and the browser session showed
+18 dead shells piling up. Explicit if/else now; the shields suite checks
+the registry TABLE after RemoveShield, not only the rows (seen red first).
+
+**The mesh blueprints the sim did not have.** LoadBlueprints takes every
+.bp under /effects, /env, /meshes, /projectiles, /props and /units
+(lua/system/blueprints.lua:330-331). Our boot payload had effects/,
+projectiles/, props/ and env/**_prop.bp only, so the 12 `units/**_mesh.bp`
+(the ACU's PhaseShield, the personal shields), the 33 `meshes/**` and
+`env/devtest/props/sphere01_mesh.bp` were never registered -- "Failed to
+load mesh for blueprint /units/uel0001/UEL0001_PhaseShield_mesh" in every
+session with an ACU. `simBootPaths`, the worker's `loadBlueprintGroups`
+and the suites' `GameFiles.loadProjectiles` now carry them (the unit
+blueprints themselves stay on demand, a deliberate narrowing that is
+documented at DiskFindFiles); verify-browser-session and verify-shields
+check the payload (red before the fix).
+
+**The renderer** (src/viewer/meshEntities.ts, the shaders under
+src/viewer/shaders/shield*.glsl). The mesh blueprint's LOD0 is resolved
+like a unit's (`resolveMeshBlueprintLod`: MeshName and the texture names
+against the blueprint's directory, Albedo/Normals/Specular and the
+SecondaryName mesh.fx's secondarySampler reads); the SCM goes in with its
+tangent/binormal for the normal-mapped domes; the textures wrap. The
+techniques are ported pass by pass from mesh.fx with their vertex-shader
+parameters (texture scales and shifts) and render states:
+
+| ShaderName | passes | mesh.fx |
+| --- | --- | --- |
+| ShieldFill | depth only, no colour, cull CW | :6160-6178 (FlatVS + ShieldFillPS) |
+| ShieldUEF | FourUVTexShiftScaleVS(1,3,32,6, ...) + ShieldPS, SrcAlpha/InvSrcAlpha RGBA, cull none | :5965-5984, :1614-1671, :3076-3115 |
+| ShieldCybran | two passes, the second NORMAL_OFFSET 0.01 (ShieldPositionNormalOffsetVS), ShieldCybranPS, cull CW | :6010-6038, :1739-1801, :3145-3189 |
+| ShieldAeon | ShieldNormalVS (normal-mapped) + ShieldAeonPS, cull CW | :6063-6082, :1673-1737, :3210-3243 |
+| ShieldSeraphim | ShieldNormalVS + ShieldSeraphimPS, additive (SrcAlpha/One), cull CW | :6108-6130, :3260-3300 |
+
+Three facts settled while making it show:
+
+- **Rasterizer_Cull_CW is the ordinary back-face cull.** The opaque unit
+  techniques use the same state (Unit_HighFidelity :4719, :4739) and show
+  their outer faces, and every one of Sphere01_lod0.scm's 960 triangles is
+  wound counter-clockwise seen from outside (measured) -- three.js
+  FrontSide. The depth shell therefore holds the NEAR hemisphere and the
+  dome's far half fails LessEqual behind it, which is the whole point of
+  Shield01z (SortOrder 999 before the dome's 1000).
+- **The shell and the dome must rasterise bit-identical depth.** With the
+  shell on a built-in material (modelViewMatrix on the CPU) and the dome's
+  own vertex shader (viewMatrix * modelMatrix on the GPU) the dome's
+  LessEqual test lost to the shell's z by rounding and nothing but a few
+  rim speckles survived. The shell now uses the dome's vertex shader with
+  a constant-zero fragment; both compute `projectionMatrix *
+  modelViewMatrix * position`.
+- **sqrt() of a negative under ps_2_0 is sqrt(|x|).** ShieldPS rebuilds
+  the normal's z as `sqrt(1 - x^2 - y^2)` unguarded; Shield01_Secondary's
+  alpha is 255 everywhere (y = 1), so the argument is negative for every
+  texel with x != 0. HLSL sqrt() is rsq + rcp on ps_2_0, and rsq "takes the
+  absolute value before processing" (D3D9 shader reference, rsq - ps) --
+  the port says `sqrt(abs(...))`, where an earlier draft clamped to 0.
+
+**mesh.fx `time` is game ticks, not seconds.** MeshRenderer::Batch gets
+sCurGameTick + sDeltaFrame (Cfile:1212805-1212810), ConfigureShader sets
+the shader variable to that sum modulo 36000 (:1194898-1194903, flt_F57F08
+= 36000 :421818); a MeshInstance's material.x is the tick it was created
+on (:1193097, :1191960); the lifetime parameter is raw ticks
+(SetLifetimeParameter stores the Lua number as is :1296871, rallypoint.lua
+:33 passes 10 -- one second -- and the engine's command feedback blips
+store mDuration * 10, :1281923). The shield shaders and the rally marker
+(WorldMesh) both ran on a seconds clock before; the rally marker's shrink
+took ten seconds instead of one. Both take `meshShaderTime()` now.
+
+**Verified in the browser** (headless, `__cfa.spawn('ueb4301', ...)` with
+48 T1 power generators so the shield stays up): both rows arrive, both
+meshes draw, the far view shows one translucent dome of radius 22 (scale
+44 on the unit sphere) with its rim, the near hemisphere only; the
+wireframe probe confirmed the dome rasterises across the whole view when
+zoomed in. The unit-side WARN for the ACU's PhaseShield mesh is gone.
+
+**UNVERIFIED / not modelled.**
+
+- The look was not compared side by side with the original renderer: the
+  shader math, states, textures and clock are ported from mesh.fx and the
+  Cfile, the glow feed is the frame alpha the bloom chain already reads,
+  but "the same picture" is a claim only a reference capture could settle.
+- Only the MedFidelity techniques are ported; the fidelity option
+  (:1376670-1376690) selecting Low/High variants is not.
+- Plain entities have no army in the spec here (`Entity { Owner }` gives
+  the shell army -1, drawn as neutral = Always); Intel is drawn like
+  Always (no recon gating for mesh entities yet).
+- The personal-shield unit-mesh swap (SetMesh(mesh, true) keepActor on a
+  unit) is still the next branch.

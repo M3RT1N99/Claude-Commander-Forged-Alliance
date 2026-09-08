@@ -166,6 +166,10 @@ export class UnitViewer {
   private readonly terrainNormals = new TerrainNormalsPass(4, 4)
   /** Map '<default>' env cube — mesh.fx environmentSampler (Cfile:1189598). */
   private envCube: THREE.Texture | null = null
+  /** The map's environment cube (mesh.fx environmentSampler) for materials built outside the viewer. */
+  currentEnvCube(): THREE.Texture | null {
+    return this.envCube
+  }
   /** Named env cubes from the scmap list ('<aeon>', '<seraphim>', …). */
   private readonly envCubesByName = new Map<string, THREE.Texture>()
   /** Cybran 'Insect' aniso lookup (/textures/engine/insectlookup.dds). */
