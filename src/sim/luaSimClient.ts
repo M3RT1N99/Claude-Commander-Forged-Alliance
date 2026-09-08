@@ -101,6 +101,13 @@ export interface LuaUnitSnapshot {
    *  drag box skips it (Cfile:1290062). */
   beingUpgraded?: boolean
   /** Erstellungs-Tick — die Build-Shader zählen ihr Alter darüber (material.x). */
+  /**
+   * The mesh blueprint the unit carries when it is NOT its own
+   * Display.MeshBlueprint (Unit:SetMesh -- the personal shield's
+   * OwnerShieldMesh, shield.lua:478); '' = no mesh at all. Absent while the
+   * unit wears its blueprint mesh (units.lua swappedMesh).
+   */
+  mesh?: string
   born: number
   /** The unit's active order (command graph): type + target position. */
   order?: SimOrderEntry

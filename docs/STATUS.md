@@ -1801,12 +1801,10 @@ line of sight, 909075-909090); `CreateSplat`/`CreateDecal`/
 `CreateSplatOnBone` carry sim state but nothing draws them (CDecal,
 Cfile:907293-907441: a ground-projected quad with size, yaw, expiry tick,
 type Albedo/Normals/Glow/Water, per-army visibility, 1112197-1112337;
-the map-decal renderer already has the projection); the shield dome is
-drawn now (see "The shield dome" below), but the unit-mesh swap of the
-personal shields via SetMesh(mesh, true) keepActor (Cfile:954614-954634;
-the PhaseShield/SeraphimPersonalShield techniques) is still not;
-`SetEmitterParam`/`SetEmitterCurveParam` are write-only; `SetBeamParam` and
-`ResizeEmitterCurve` are missing.
+the map-decal renderer already has the projection); the shield dome and
+the personal shield's unit-mesh swap are drawn now (see "The shield dome"
+and "The personal shield" below); `SetEmitterParam`/`SetEmitterCurveParam`
+are write-only; `SetBeamParam` and `ResizeEmitterCurve` are missing.
 
 **The picture.** The original renderer is NOT colour-managed: the device
 default state sets D3DSAMP_SRGBTEXTURE to 0 for all samplers and
@@ -2330,3 +2328,85 @@ seconds clock: their shader divides `time - material.x` by
 **UNVERIFIED.** No suite measures animation speed; the change is a unit
 conversion checked by reading, plus a headless session showing the
 shaders still compile and draw.
+
+## The personal shield: Unit:SetMesh swaps the owner's mesh, the renderer follows the row
+
+**What was wrong.** UnitShield (shield.lua:420-494) does not hang a dome
+on its owner; it swaps the OWNER's mesh: CreateShieldMesh :476-479
+`Owner:SetMesh(OwnerShieldMesh, true)`, RemoveShield :481-484 back to
+`Display.MeshBlueprint`. The sim already did that (Entity:SetMesh sets
+`__meshBp`), and the ACU's PhaseShield mesh blueprint registers since the
+dome commit -- but no row told the renderer, and the renderer had no
+notion of a unit changing its mesh: a shielded Obsidian looked like an
+unshielded one.
+
+**The sim side.** The unit row carries `mesh` whenever `__meshBp` is not
+the blueprint's `Display.MeshBlueprint` (units.lua swappedMesh) -- the
+swapped-in blueprint's long id, or `''` for no mesh at all (Entity::
+SetMesh(''), mMesh = 0, Cfile:916809-916812). Absent otherwise: the row
+stays small and the golden master unmoved for every unit that never
+swaps. The build mesh (unit.lua:1607 `SetMesh(BuildMeshBlueprint, true)`)
+reports the same way; the renderer's construction-site path is still the
+fraction-driven one and takes precedence while the site is unfinished.
+
+**The renderer** (main.ts applySwap/undoSwap, unitMaterial.ts
+createPhaseShieldOverlay, shaders phaseShield.vert/frag.glsl). A row with
+`mesh` loads that blueprint's LOD0 like a unit's (resolveMeshBlueprintLod:
+SCM, albedo/normals/specteam, LookupName, SecondaryName; the lookups
+wrap), rebuilds the body material with the technique's P0 and, for
+PhaseShield and SeraphimPersonalShield, adds the shell pass P1:
+
+- **keepActor.** shield.lua passes `true`; Unit::SetMesh then skips the
+  actor rebuild (Cfile:954635-954717; the binding negates the flag,
+  :935091) -- the animator and its bone palette stay, the new LOD0 is
+  skinned against them. A model with another bone count cannot ride that
+  palette; keepActor=false's rebuild is not modelled (the body keeps its
+  geometry, the material still changes, logged).
+- **P0 is the ordinary body pass.** PhaseShield's NormalMappedPS(true,
+  true,true,false,0,0) is Unit_HighFidelity's (mesh.fx:4721-4722 vs
+  :5821-5822), SeraphimPersonalShield's UnitFalloffPS(true) is
+  Seraphim_HighFidelity's (:5230-5231 vs :5856-5857): the existing 'Unit'
+  and 'Seraphim' materials, built by the viewer as addUnit builds them.
+- **P1 is the shell.** PositionNormalOffsetVS(0.05) (:1473-1511: the
+  vertex pushed along its normal by normalOffset / bone scale before the
+  bone transform) + PhaseShieldPS (:3348-3369) / SeraphimPhaseShieldPS
+  (:3371-3392, the same arithmetic on secondarySampler): three samples of
+  one lookup at three scales, scrolled by the age (material.x = time -
+  creation tick, game ticks), electricity and pulse, no light, no team
+  colour. AlphaBlend_SrcAlpha_InvSrcAlpha_Write_RGBA, Rasterizer_Cull_CW
+  (FrontSide), no DepthState in the pass (device default: test LessEqual,
+  write). Draw scale = Display.UniformScale stands in for the bone scale.
+- The row dropping `mesh` (RemoveShield) restores the blueprint material
+  and geometry and removes the shell.
+
+**Checks** (verify-shields.ts, the ACU's own enhancement block
+uel0001_unit.bp:527-545 through CreatePersonalShield as uel0001_script.lua
+:311-315 does it): the fresh unit carries its Display.MeshBlueprint and
+the row omits `mesh`; the shield up swaps `__meshBp` to the lowercased
+OwnerShieldMesh and the row carries it; the mesh blueprint names
+PhaseShield; 30000 damage drops the shield, the mesh and the row field go
+back; `SetMesh('')` reaches the row as `''`. Seen red (the row field)
+before the writer existed. Headless: an Obsidian (ual0202, innate
+personal shield, StartOn) shows the blue shell over its body, the DEV
+bridge reports the swap applied with the shell.
+
+**UNVERIFIED / not modelled.**
+
+- The look was not compared side by side with the original renderer; the
+  shell's depth write is the device default by reading (no DepthState in
+  the pass), not measured.
+- material.x for the swapped mesh is the tick the swap was seen; whether
+  the engine creates a fresh MeshInstance at SetMesh (creation tick = swap
+  tick) or keeps the entity's is not traced -- a phase offset of the
+  shell's scroll either way.
+- keepActor=false (a swap that rebuilds the actor from the new skeleton,
+  Cfile:954635-954717) is not modelled. shield.lua always passes true;
+  unit.lua:1616-1623 (StopBeingBuiltEffects with Display.TerrainMeshes)
+  calls SetMesh WITHOUT it -- that swap is followed like any other once
+  the site is complete, the actor rebuild is not.
+- The shell's normal offset divides by the bone scale (transPalette.w);
+  the port divides by Display.UniformScale, the scale the actor's pose is
+  built with (Cfile:954667). A per-bone scale in an animation is not
+  honoured; whether any unit has one is UNVERIFIED.
+- The construction site is still the fraction-driven build path; the 1:1
+  way (the build mesh arriving as a swap like any other) is a later step.

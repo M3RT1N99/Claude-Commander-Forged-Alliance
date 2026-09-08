@@ -490,7 +490,8 @@ export class UnitViewer {
 
   /** SCM → BufferGeometry mit allen Attributen des Unit-Shaders (UV1,
    *  Tangenten, Bone-Index) — von setModel, addUnit und addWreck geteilt. */
-  private scmGeometry(model: ScmModel): THREE.BufferGeometry {
+  /** The unit geometry of an SCM (the attributes unit.vert.glsl reads). */
+  scmGeometry(model: ScmModel): THREE.BufferGeometry {
     const geometry = new THREE.BufferGeometry()
     geometry.setAttribute('position', new THREE.BufferAttribute(model.positions, 3))
     geometry.setAttribute('normal', new THREE.BufferAttribute(model.normals, 3))
@@ -580,6 +581,30 @@ export class UnitViewer {
     const unit = new SceneUnit(mesh, animator, model.bones.map((b) => b.name))
     this.units.push(unit)
     return unit
+  }
+
+  /**
+   * The unit body material for a mesh blueprint's LOD, built exactly as
+   * addUnit builds it (map light, env cube, insect lookup, shadow
+   * uniforms) -- for a mesh swapped in at runtime (Unit:SetMesh, the
+   * personal shield's OwnerShieldMesh).
+   */
+  unitMaterialFor(
+    textures: UnitTextures,
+    teamColor: THREE.Color,
+    skinMatrices: THREE.Matrix4[],
+    shader: string,
+  ): THREE.ShaderMaterial {
+    return createUnitMaterial(
+      textures,
+      teamColor,
+      skinMatrices,
+      shader,
+      this.mapLighting ?? undefined,
+      shader === 'Aeon' ? this.envCubeFor('Aeon') : this.envCube,
+      this.insectLookup,
+      this.shadow.uniforms,
+    )
   }
 
   /** Das Licht der geladenen Karte — gesetzt in setMap, gelesen von addUnit. */

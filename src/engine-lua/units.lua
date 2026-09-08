@@ -737,6 +737,20 @@ end
 -- The unit's active order for the command graph (UICommandGraph draws
 -- order lines + waypoint markers per UNITCOMMAND_*, params from
 -- commandgraphparams.lua).
+-- mVarDat.mMesh as the renderer needs it: the mesh blueprint id when it is
+-- NOT the blueprint's Display.MeshBlueprint -- Unit:SetMesh swapped it (the
+-- personal shield's OwnerShieldMesh, shield.lua:478; the build mesh,
+-- unit.lua:1607) -- and '' when the unit has no mesh at all (SetMesh('')).
+-- nil while it is the blueprint one: the row stays small and the golden
+-- master unmoved for every unit that never swaps.
+local function swappedMesh(u)
+  local disp = u.__bp and u.__bp.Display
+  local def = (disp and disp.MeshBlueprint) or ''
+  local cur = u.__meshBp or ''
+  if cur ~= def then return cur end
+  return nil
+end
+
 local function activeOrder(id, u)
   local target = __attackOrders and __attackOrders[id]
   if target then
@@ -917,7 +931,7 @@ local function readRow(id, u)
     -- selecting the working original.
     beingUpgraded = u:IsUnitState('BeingUpgraded'),
     born = u.__spawnTick or 0,
-    mesh = u.__meshBp,
+    mesh = swappedMesh(u),
     army = u.__army or 1,
     -- Death mirror: a unit lingers in __units through its multi-beat death
     -- sequence (Kill -> OnKilled thread -> Destroy), so readRow still sends it.
@@ -1015,6 +1029,7 @@ function __readAllUnitsJson()
       .. ',"workProgress":' .. jnum(r.workProgress)
       .. ',"beingUpgraded":' .. tostring(r.beingUpgraded)
       .. ',"born":' .. jint(r.born)
+      .. (r.mesh and (',"mesh":' .. jstr(r.mesh)) or '')
       .. (function()
         -- The whole command queue (head first) for the command graph;
         -- 'order' stays as the head alias for existing consumers.

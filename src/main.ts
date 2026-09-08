@@ -68,6 +68,7 @@ import { OrderLineSystem, PARAMS, type OrderLineEntry } from './viewer/orderLine
 import { CommandFeedbackSystem, type BlipAssets } from './viewer/commandFeedback'
 import { WorldMeshSystem } from './viewer/worldMeshes'
 import { MeshEntitySystem, type MeshEntityAssets } from './viewer/meshEntities'
+import { createPhaseShieldOverlay } from './viewer/unitMaterial'
 
 const $ = <T extends HTMLElement>(sel: string): T => {
   const el = document.querySelector<T>(sel)
@@ -734,6 +735,144 @@ let worldMeshes: WorldMeshSystem | null = null
 let meshEntities: MeshEntitySystem | null = null
 const blipAssetCache = new Map<string, Promise<BlipAssets | null>>()
 const meshEntityAssetCache = new Map<string, Promise<MeshEntityAssets | null>>()
+
+/** LOD0 of a mesh blueprint for a unit mesh swap (Unit:SetMesh). */
+interface SwapAssets {
+  model: ScmModel
+  textures: UnitTextures
+  /** SecondaryName -- the Seraphim shell's lookup (SeraphimPhaseShieldPS). */
+  secondary: THREE.Texture | null
+  shader: string
+  scrolling: boolean
+}
+const swapAssetCache = new Map<string, Promise<SwapAssets | null>>()
+
+/**
+ * The swapped-in mesh's LOD0 as the unit path loads a unit's: the mesh
+ * blueprint from the sim's registry, the SCM, the four textures plus the
+ * SecondaryName. The lookups wrap (the shell scrolls and tiles them).
+ */
+async function loadSwapAssets(meshId: string): Promise<SwapAssets | null> {
+  let p = swapAssetCache.get(meshId)
+  if (!p) {
+    p = (async (): Promise<SwapAssets | null> => {
+      if (!vfs || !luaSim) return null
+      const raw = (await luaSim.meshBlueprint(meshId)) as BpObject | null
+      if (!raw) {
+        log(`mesh swap ${meshId}: no such mesh blueprint in the sim`)
+        return null
+      }
+      const paths = resolveMeshBlueprintLod(meshId, raw, (q) => vfs!.exists(q.toLowerCase()))
+      if (!paths) {
+        log(`mesh swap ${meshId}: LOD0 mesh missing`)
+        return null
+      }
+      const model = parseScm(await vfs.read(paths.mesh.toLowerCase()))
+      const lower = (l: string[]): string[] => l.map((x) => x.toLowerCase())
+      const [albedo, normals, specTeam, lookup, secondary] = await Promise.all([
+        loadFirstTexture(lower(paths.albedo)),
+        loadFirstTexture(lower(paths.normals)),
+        loadFirstTexture(lower(paths.specTeam)),
+        loadFirstTexture(lower(paths.lookup)),
+        loadFirstTexture(lower(paths.secondary)),
+      ])
+      if (!albedo) {
+        log(`mesh swap ${meshId}: albedo missing`)
+        return null
+      }
+      for (const t of [lookup, secondary]) {
+        if (!t) continue
+        t.wrapS = THREE.RepeatWrapping
+        t.wrapT = THREE.RepeatWrapping
+        t.needsUpdate = true
+      }
+      const lodsRaw = bpGet(raw, 'LODs')
+      const lod = (Array.isArray(lodsRaw) ? lodsRaw[0] : lodsRaw) as BpObject | undefined
+      return {
+        model,
+        textures: { albedo, normals, specTeam, lookup },
+        secondary,
+        shader: paths.shader,
+        scrolling: lod !== undefined && bpGet(lod, 'Scrolling') === true,
+      }
+    })()
+    swapAssetCache.set(meshId, p)
+  }
+  return p
+}
+
+/**
+ * Put the swapped mesh on the unit's body. keepActor (shield.lua:478 passes
+ * true): the unit's animator -- its bone palette -- stays and the new LOD0
+ * is skinned against it (Unit::SetMesh skips the actor rebuild,
+ * Cfile:954635-954717). A model with another bone count cannot ride that
+ * palette; keepActor=false's rebuild is not modelled, the body then keeps
+ * its geometry and only the material changes (logged). The technique's
+ * P0 is the body pass: PhaseShield's NormalMappedPS(true,true,true,false,
+ * 0,0) is Unit_HighFidelity's (mesh.fx:4721-4722 vs :5821-5822),
+ * SeraphimPersonalShield's UnitFalloffPS(true) is Seraphim_HighFidelity's
+ * (:5230-5231 vs :5856-5857); both add the shell pass P1.
+ */
+async function applySwap(u: LuaSceneUnit, meshId: string): Promise<void> {
+  const assets = await loadSwapAssets(meshId)
+  const sw = u.swap
+  if (!assets || !sw || sw.meshId !== meshId || sw.applied) return
+  const body = u.scene.mesh
+  const skin = u.scene.animator.skinMatrices
+  const sameSkeleton = assets.model.bones.length === u.scene.boneNames.length
+  if (!sameSkeleton) {
+    log(
+      `mesh swap ${meshId}: ${assets.model.bones.length} bones against the body's ${u.scene.boneNames.length} -- geometry kept (keepActor=false is not modelled)`,
+    )
+  }
+  const geometry = sameSkeleton ? viewer.scmGeometry(assets.model) : null
+  const p0 =
+    assets.shader === 'PhaseShield' ? 'Unit' : assets.shader === 'SeraphimPersonalShield' ? 'Seraphim' : assets.shader
+  const old = body.material as THREE.ShaderMaterial
+  const teamColor = (old.uniforms?.teamColor?.value as THREE.Color | undefined) ?? currentTeamColor()
+  const material = viewer.unitMaterialFor(assets.textures, teamColor, skin, p0)
+  if (material.uniforms.scrolling) material.uniforms.scrolling.value = assets.scrolling ? 1 : 0
+  let overlay: THREE.ShaderMaterial | null = null
+  let overlayMesh: THREE.Mesh | null = null
+  if (assets.shader === 'PhaseShield' || assets.shader === 'SeraphimPersonalShield') {
+    const shellLookup = assets.shader === 'PhaseShield' ? assets.textures.lookup : assets.secondary
+    if (shellLookup) {
+      overlay = createPhaseShieldOverlay(shellLookup, skin, body.scale.x)
+      overlayMesh = new THREE.Mesh(geometry ?? body.geometry, overlay)
+      overlayMesh.frustumCulled = false
+      overlayMesh.renderOrder = 1
+      body.add(overlayMesh)
+    } else {
+      log(`mesh swap ${meshId}: the shell's lookup texture is missing -- shell not drawn`)
+    }
+  }
+  if (geometry) body.geometry = geometry
+  body.material = material
+  sw.body = material
+  sw.geometry = geometry
+  sw.overlay = overlay
+  sw.overlayMesh = overlayMesh
+  sw.applied = true
+}
+
+/** The unit wears its blueprint mesh again (the row dropped `mesh`). */
+function undoSwap(u: LuaSceneUnit): void {
+  const sw = u.swap
+  if (!sw) return
+  const body = u.scene.mesh
+  if (sw.overlayMesh) body.remove(sw.overlayMesh)
+  sw.overlay?.dispose()
+  if (sw.body) {
+    body.material = sw.normalMaterial
+    sw.body.dispose()
+  }
+  if (sw.geometry) {
+    body.geometry = sw.normalGeometry
+    sw.geometry.dispose()
+  }
+  body.visible = true
+  u.swap = undefined
+}
 
 /**
  * LOD0 of a mesh blueprint for a mesh entity: the blueprint from the sim
@@ -1530,6 +1669,7 @@ async function startSandbox(mapFolder: string): Promise<void> {
               bp: u.bpId,
               army: u.army,
               selected: u.selected,
+              swap: u.swap ? { mesh: u.swap.meshId, applied: u.swap.applied, shell: !!u.swap.overlay } : null,
               sx: p ? Math.round(r.left + p.x) : null,
               sy: p ? Math.round(r.top + p.y) : null,
             }
@@ -2286,6 +2426,25 @@ interface LuaSceneUnit {
     overlayMesh: THREE.Mesh | null
     normalMaterial: THREE.Material
   }
+  /**
+   * A runtime mesh swap (Unit:SetMesh -- the personal shield's
+   * OwnerShieldMesh, shield.lua:478): the row's `mesh` names the blueprint,
+   * the body takes its LOD0 geometry, textures and technique; PhaseShield
+   * and SeraphimPersonalShield add the shell pass. '' hides the body
+   * (Entity::SetMesh(''), mMesh = 0). Undone when the row drops the field.
+   */
+  swap?: {
+    meshId: string
+    /** The tick the swap was seen: material.x of the new mesh instance. */
+    since: number
+    applied: boolean
+    body: THREE.Material | null
+    geometry: THREE.BufferGeometry | null
+    overlay: THREE.ShaderMaterial | null
+    overlayMesh: THREE.Mesh | null
+    normalMaterial: THREE.Material
+    normalGeometry: THREE.BufferGeometry
+  }
 }
 let luaSim: LuaSimClient | null = null
 /**
@@ -2783,6 +2942,8 @@ function luaSimUpdate(): void {
     for (let i = luaUnits.length - 1; i >= 0; i--) {
       const u = luaUnits[i]!
       if (luaSim.state(u.id)) continue
+      // A swapped-in mesh (the personal shield shell) goes with the unit.
+      undoSwap(u)
       viewer.removeUnit(u.scene)
       viewer.removeHelper(u.ring)
       unitLerp.delete(u.id)
@@ -2996,6 +3157,40 @@ function luaSimUpdate(): void {
           u.build.overlay.uniforms.unitAge!.value = age
         }
       }
+    }
+
+    // MESH SWAP (Unit:SetMesh): the row names the mesh blueprint when it is
+    // not the unit's own, '' when there is none. A construction site is the
+    // build path above (its build mesh is the same SetMesh, driven by the
+    // fraction there), so swaps are followed once the site is complete.
+    if (!u.build) {
+      const wanted = s.mesh
+      if (wanted !== u.swap?.meshId) {
+        undoSwap(u)
+        if (wanted !== undefined) {
+          const body = u.scene.mesh
+          u.swap = {
+            meshId: wanted,
+            since: luaSim.gameTick,
+            applied: false,
+            body: null,
+            geometry: null,
+            overlay: null,
+            overlayMesh: null,
+            normalMaterial: body.material as THREE.Material,
+            normalGeometry: body.geometry,
+          }
+          if (wanted === '') {
+            body.visible = false
+            u.swap.applied = true
+          } else {
+            void applySwap(u, wanted).catch((e) => {
+              log(`mesh swap ${wanted}: ${e instanceof Error ? e.message : String(e)}`)
+            })
+          }
+        }
+      }
+      if (u.swap?.overlay) u.swap.overlay.uniforms.unitAge!.value = meshShaderTime() - u.swap.since
     }
 
     // TEXTURE SCROLL: the entity's mScroll1 -> mScroll2 interpolated with the

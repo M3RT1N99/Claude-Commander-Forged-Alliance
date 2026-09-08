@@ -16,6 +16,8 @@ import BUILD_FACTION_VS from './shaders/buildFaction.vert.glsl?raw'
 import BUILD_AEON_FS from './shaders/buildAeon.frag.glsl?raw'
 import BUILD_AEON_OVERLAY_FS from './shaders/buildAeonOverlay.frag.glsl?raw'
 import BUILD_CYBRAN_FS from './shaders/buildCybran.frag.glsl?raw'
+import PHASE_SHIELD_VS from './shaders/phaseShield.vert.glsl?raw'
+import PHASE_SHIELD_FS from './shaders/phaseShield.frag.glsl?raw'
 import BUILD_CYBRAN_OVERLAY_VS from './shaders/buildCybranOverlay.vert.glsl?raw'
 import BUILD_CYBRAN_OVERLAY_FS from './shaders/buildCybranOverlay.frag.glsl?raw'
 import BUILD_SERAPHIM_FS from './shaders/buildSeraphim.frag.glsl?raw'
@@ -336,6 +338,49 @@ export function createFactionBuildMaterials(
  * ExtractWreckageBlueprint in lua/system/blueprints.lua:201 setzt).
  * Keine Team-Farbe, kein Phong, keine Schatten — so das Original.
  */
+/**
+ * The personal shield shell: pass P1 of PhaseShield (mesh.fx:5805-5832)
+ * and SeraphimPersonalShield (:5837-5867) -- PositionNormalOffsetVS(0.05)
+ * + PhaseShieldPS / SeraphimPhaseShieldPS, AlphaBlend_SrcAlpha_InvSrcAlpha
+ * _Write_RGBA, Rasterizer_Cull_CW (the ordinary back-face cull, see
+ * meshEntities.ts) and no DepthState of its own -- the device default,
+ * test LessEqual and write. `lookup` is the mesh blueprint's LookupName
+ * for PhaseShield and its SecondaryName for the Seraphim technique.
+ * unitAge = time - material.x in game ticks, set per frame by the caller;
+ * drawScale stands in for transPalette[bone].w, the bone's scale the HLSL
+ * divides the normal offset by -- the unit's Display.UniformScale, which
+ * is what the actor's pose is built with (Cfile:954667); a per-bone scale
+ * in an animation is not honoured (UNVERIFIED whether any unit has one).
+ */
+export function createPhaseShieldOverlay(
+  lookup: THREE.Texture,
+  skinMatrices: THREE.Matrix4[],
+  drawScale: number,
+): THREE.ShaderMaterial {
+  return new THREE.ShaderMaterial({
+    vertexShader: PHASE_SHIELD_VS,
+    fragmentShader: PHASE_SHIELD_FS,
+    defines: { MAX_BONES: Math.max(skinMatrices.length, 1) },
+    uniforms: {
+      boneMatrices: { value: skinMatrices.length > 0 ? skinMatrices : [new THREE.Matrix4()] },
+      lookupMap: { value: lookup },
+      unitAge: { value: 0 },
+      normalOffset: { value: 0.05 },
+      drawScale: { value: drawScale > 0 ? drawScale : 1 },
+    },
+    transparent: true,
+    depthTest: true,
+    depthWrite: true,
+    depthFunc: THREE.LessEqualDepth,
+    blending: THREE.CustomBlending,
+    blendSrc: THREE.SrcAlphaFactor,
+    blendDst: THREE.OneMinusSrcAlphaFactor,
+    blendSrcAlpha: THREE.SrcAlphaFactor,
+    blendDstAlpha: THREE.OneMinusSrcAlphaFactor,
+    side: THREE.FrontSide,
+  })
+}
+
 export function createWreckageMaterial(
   textures: UnitTextures,
   noise: THREE.Texture,

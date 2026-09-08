@@ -395,5 +395,56 @@ console.log('\n== The dome meshes: SetMesh, SetDrawScale, SetVizTo*, the registr
   )
 }
 
+console.log('\n== The personal shield: the owner\'s mesh swaps to the OwnerShieldMesh and back ==')
+{
+  // The ACU's Personal Shield Generator enhancement (uel0001_script.lua:311-
+  // 315): CreatePersonalShield with the enhancement's own block
+  // (uel0001_unit.bp:527-545), then the maintenance drain. UnitShield
+  // (shield.lua:420-494) swaps the OWNER's mesh: CreateShieldMesh :476-479
+  // `Owner:SetMesh(OwnerShieldMesh, true)`, RemoveShield :481-484 back to
+  // Display.MeshBlueprint. The mesh blueprint is a units/**_mesh.bp of the
+  // boot payload (registered by game.loadProjectiles above).
+  const u2 = spawnLuaUnit(host, 'uel0001', { x: 120, y: 20, z: 120 }, 1)
+  for (let i = 0; i < 4; i++) beat(engine)
+  const meshOf = (): string => host.eval(`return tostring(__units[${u2}].__meshBp)`) as string
+  const rowMesh = (): string | undefined => {
+    const rows = host.pull<{ id: number; mesh?: string }[]>('__readAllUnitsJson()')
+    const row = rows.find((r) => r.id === u2)
+    // No row at all is not "the field is absent": fail here, not vacuously.
+    if (!row) throw new Error(`unit ${u2} has no row in __readAllUnitsJson()`)
+    return row.mesh
+  }
+  check(meshOf() === '/units/uel0001/uel0001_mesh', `a fresh unit carries its Display.MeshBlueprint (${meshOf()})`)
+  check(rowMesh() === undefined, 'the unit row omits the mesh while it is the blueprint one')
+  host.eval(`__units[${u2}]:CreatePersonalShield({
+    OwnerShieldMesh = '/units/uel0001/UEL0001_PhaseShield_mesh', PersonalShield = true,
+    ImpactEffects = 'UEFShieldHit01', ShieldMaxHealth = 24000, ShieldRechargeTime = 140,
+    ShieldEnergyDrainRechargeTime = 5, ShieldRegenRate = 35, ShieldRegenStartTime = 1,
+    ShieldSize = 3, ShieldVerticalOffset = 0, MaintenanceConsumptionPerSecondEnergy = 250,
+  })
+  __units[${u2}]:SetEnergyMaintenanceConsumptionOverride(250)
+  __units[${u2}]:SetMaintenanceConsumptionActive()`)
+  for (let i = 0; i < 6; i++) beat(engine)
+  const shieldUp = (): boolean => host.eval(`local s = __units[${u2}].MyShield; return (s and s:IsOn()) == true`) as boolean
+  check(shieldUp(), 'the personal shield is up')
+  check(meshOf() === '/units/uel0001/uel0001_phaseshield_mesh', `the owner's mesh is the OwnerShieldMesh, lowercased (${meshOf()})`)
+  check(rowMesh() === '/units/uel0001/uel0001_phaseshield_mesh', `the unit row carries the swapped mesh id (${rowMesh()})`)
+  check(
+    host.eval(`return __registered.Mesh['/units/uel0001/uel0001_phaseshield_mesh'].LODs[1].ShaderName`) === 'PhaseShield',
+    'the swapped mesh blueprint names the PhaseShield technique (uel0001_phaseshield_mesh.bp)',
+  )
+  // Shield down by damage: RemoveShield puts Display.MeshBlueprint back
+  // (shield.lua:483) -- the row drops the field again.
+  host.eval(`Damage(nil, {120,20,120}, __units[${u2}], 30000, 'Normal')`)
+  for (let i = 0; i < 3; i++) beat(engine)
+  check(!shieldUp(), 'the personal shield is down after 30000 damage')
+  check(meshOf() === '/units/uel0001/uel0001_mesh', `the owner's mesh is the blueprint one again (${meshOf()})`)
+  check(rowMesh() === undefined, 'the unit row omits the mesh again')
+  // SetMesh('') on a unit: no mesh at all (Entity::SetMesh :916809-916812,
+  // mMesh = 0) -- the row says '' so the renderer hides the body.
+  host.eval(`__units[${u2}]:SetMesh('')`)
+  check(rowMesh() === '', `SetMesh('') on a unit reaches the row as '' (${JSON.stringify(rowMesh())})`)
+}
+
 console.log(failures === 0 ? '\nSHIELDS PASSED' : `\nSHIELDS FAILED (${failures})`)
 process.exit(failures === 0 ? 0 : 1)
