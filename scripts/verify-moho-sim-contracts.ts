@@ -459,9 +459,15 @@ console.log('\n== The attach family: Entity::AttachTo and its bindings ==')
     bool(host, `(function() local p = __units[${rider}]:GetPosition(); local b = __boneWorld(__units[${carrier}], 0); return math.abs(p[1]-b[1]) < 1e-6 and math.abs(p[3]-b[3]) < 1e-6 and b[1] > 301 end)()`),
     'the rider follows the carrier bone beat by beat and ignores its own goal (UMS_Attached, Cfile:966205-966229)',
   )
-  // Detach: a land unit without skipBallistic would fall -- refused loudly; with it, released in place.
-  check(err(`__units[${rider}]:DetachFrom()`).includes('ballistic drop'), 'DetachFrom() of a land unit is refused: the ballistic drop is not implemented (recorded, not faked)')
-  check(bool(host, `__units[${rider}]:GetParent() == __units[${carrier}]`), 'and the refusal left the attachment in place')
+  // Detach: a land unit without skipBallistic DROPS -- NotifyDetached puts it
+  // into UMS_Ballistic and the Air layer (Cfile:965830-965848) and
+  // CalcMoveBallistic lands it (970009-970420, motion.lua __ballisticStep);
+  // with skipBallistic it is released in place (965855-965863).
+  check(bool(host, `__units[${rider}]:DetachFrom() == true`), 'DetachFrom() of a land unit is accepted: the ballistic drop (Cfile:965830-965848)')
+  check(bool(host, `__units[${rider}]:GetParent() == __units[${rider}] and __units[${rider}].__motionState == 'Ballistic' and __units[${rider}].__layer == 'Air'`), 'the rider is released into UMS_Ballistic and the Air layer (NotifyDetached)')
+  for (let i = 0; i < 10; i++) beat(engine)
+  check(bool(host, `__units[${rider}].__motionState == 'None' and __units[${rider}].__layer == 'Land' and not __units[${rider}]:IsUnitState('Attached')`), 'and it lands: motion state None, the Land layer, no Attached bit (Cfile:970336-970343, 954404)')
+  host.eval(`__units[${rider}]:AttachBoneTo(-2, __units[${carrier}], 0)`)
   check(bool(host, `__units[${rider}]:DetachFrom(true) == true`), 'DetachFrom(true) returns true')
   check(bool(host, `__units[${rider}]:GetParent() == __units[${rider}] and not __units[${rider}]:IsUnitState('Attached') and __units[${rider}].__motionState == 'None'`), 'the rider is on its own again: no parent, no Attached bit, motion state None (Cfile:954404, 965857)')
   check(bool(host, `table.getn(__units[${carrier}].__attachedEntities) == 0`), "the carrier's list is empty")

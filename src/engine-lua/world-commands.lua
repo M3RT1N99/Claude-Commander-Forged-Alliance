@@ -103,10 +103,17 @@ function __uiSelectionJson()
     local canMove = hasCommandCap(commandCapMask, 'RULEUCC_Move') and not immobile
     -- FACTORY steht in den Categories des Blueprints (ueb0101_unit.bp) — dieselbe
     -- Liste, aus der das Kategorie-System seine Ausdruecke baut.
-    local isFactory = false
-    for _, c in ipairs(bp.Categories or {}) do
-      if c == 'FACTORY' then isFactory = true end
-    end
+    local cats = {}
+    for _, c in ipairs(bp.Categories or {}) do cats[c] = true end
+    local isFactory = cats.FACTORY == true
+    -- The transport right-click predicates (func_RightClickWithTransport,
+    -- Cfile:1238669-1238853; func_RightClickTransport 1238854-1239027) read
+    -- the caps RULEUCC_Transport / RULEUCC_CallTransport and the categories
+    -- COMMAND, TRANSPORTATION, TRANSPORTFOCUS, CANTRANSPORTCOMMANDER,
+    -- TELEPORTATION, EXPERIMENTAL and the blueprint's Air.CanFly.
+    local canTransport = hasCommandCap(commandCapMask, 'RULEUCC_Transport')
+    local canCallTransport = hasCommandCap(commandCapMask, 'RULEUCC_CallTransport')
+    local canFly = (bp.Air and bp.Air.CanFly) == true
     -- RULEUCC_Repair: a right-click on an own unfinished structure resumes
     -- the build through the repair task (dispatch 0x14) — only units with
     -- the cap get the order.
@@ -138,6 +145,18 @@ function __uiSelectionJson()
       .. ',"canGuard":' .. tostring(canGuard)
       .. ',"canReclaim":' .. tostring(canReclaim)
       .. ',"isFactory":' .. tostring(isFactory)
+      .. ',"canTransport":' .. tostring(canTransport)
+      .. ',"canCallTransport":' .. tostring(canCallTransport)
+      .. ',"isCommand":' .. tostring(cats.COMMAND == true)
+      .. ',"isTransportation":' .. tostring(cats.TRANSPORTATION == true)
+      .. ',"isTransportFocus":' .. tostring(cats.TRANSPORTFOCUS == true)
+      .. ',"canTransportCommander":' .. tostring(cats.CANTRANSPORTCOMMANDER == true)
+      .. ',"isTeleportation":' .. tostring(cats.TELEPORTATION == true)
+      .. ',"isFerryBeacon":' .. tostring(cats.FERRYBEACON == true)
+      .. ',"isExperimental":' .. tostring(cats.EXPERIMENTAL == true)
+      .. ',"canFly":' .. tostring(canFly)
+      .. ',"isAirStaging":' .. tostring(cats.AIRSTAGINGPLATFORM == true)
+      .. ',"cannotUseAirStaging":' .. tostring(cats.CANNOTUSEAIRSTAGING == true)
       -- IsMobile: the click handler splits the selection by it (sub_81EB20,
       -- Cfile:1239941-1240011) -- immobile units get FACTORY commands.
       .. ',"isMobile":' .. tostring(not immobile)

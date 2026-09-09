@@ -72,14 +72,43 @@ local function motionParams(u)
   -- 766128, clamp mMaxReserveSpeed 942130-942133) is a DOCUMENTED REDUCTION: the
   -- navigator only ever drives forward, so a unit ordered to a nearby point
   -- behind it pivots and drives forward instead of backing up. Not modelled yet.
+  -- A flyer's top speed is the blueprint's Air.MaxAirspeed, not Physics.
+  -- MaxSpeed: Unit::UpdateSpeedThroughStatus takes mAir.mMaxAirSpeed *
+  -- speedMult for a unit that can fly and mPhysics.mMaxSpeed * speedMult for
+  -- every other (Cfile:953164-953174), and CalcMoveAir caps on the same
+  -- product (968103). The blueprint pipeline already fills MaxAirspeed from
+  -- MaxSpeed when it is 0 (blueprints.lua:294, Cfile:655934-655935). The
+  -- engine also divides a loaded transport's top speed by
+  -- CalcTransportLoadFactor (953174) -- not modelled (docs/STATUS.md).
+  local air = (u.__bp and u.__bp.Air) or {}
+  local canFly = air.CanFly == true
+  local topSpeedBp = (canFly and (air.MaxAirspeed or 0)) or (phys.MaxSpeed or 0)
+  local maxSpeed = topSpeedBp * speedMult * 0.1
+  local turnRate = (phys.TurnRate or 0) * turnMult * DEG_PER_SEC_TO_RAD_PER_TICK
+  -- DOCUMENTED REDUCTION -- the air motion. The engine flies a unit that
+  -- can fly with CUnitMotion::CalcMoveAir (Cfile:968060-969700): a force
+  -- controller on the PhysBody -- force = (heading * KMove - velocity *
+  -- CalcAirMovementDampingFactor) * mass, lift from KLift/LiftFactor, the
+  -- turn from KTurn/KTurnDamping, banking, circling, the elevation
+  -- (969121-969200, 967852-967890) -- and none of the ground parameters
+  -- above (an air blueprint carries no Physics.MaxAcceleration or TurnRate,
+  -- uea0107_unit.bp). That controller is not modelled (docs/STATUS.md): a
+  -- flyer moves on the ground model at its Air.MaxAirspeed, takes it at once
+  -- and turns freely. These are not blueprint values -- they are the
+  -- placeholders of the missing subsystem, named here so nothing reads them
+  -- as the engine's numbers.
+  if canFly then
+    accel = maxSpeed
+    if turnRate <= 0 then turnRate = PI end
+  end
   return {
-    turnRate = (phys.TurnRate or 0) * turnMult * DEG_PER_SEC_TO_RAD_PER_TICK,
-    maxSpeed = (phys.MaxSpeed or 0) * speedMult * 0.1,
-    -- Raw blueprint MaxSpeed for the RotateOnSpot speed gate, which the engine
-    -- normalizes WITHOUT speedMult (Cfile:766083 |v|*10 / mMaxSpeed).
-    maxSpeedBp = phys.MaxSpeed or 0,
+    turnRate = turnRate,
+    maxSpeed = maxSpeed,
+    -- Raw blueprint top speed for the RotateOnSpot speed gate, which the
+    -- engine normalizes WITHOUT speedMult (Cfile:766083 |v|*10 / mMaxSpeed).
+    maxSpeedBp = topSpeedBp,
     accel = accel,
-    brake = (brakeBp ~= 0 and brakeBp * accMult * 0.01) or accel,
+    brake = (canFly and accel) or (brakeBp ~= 0 and brakeBp * accMult * 0.01) or accel,
     steer = (steerBp ~= 0 and steerBp * accMult * 0.01) or accel,
     turnRadius = (radiusBp ~= 0 and radiusBp / turnMult) or math.huge,
     rotateOnSpot = phys.RotateOnSpot == true,
@@ -126,10 +155,19 @@ local function surfaceY(u, x, z)
 end
 
 local function blockedAt(u, x, z)
+  -- The occupancy grid is per layer (EOccupancyCaps, the layer bits the
+  -- footprint fit tests -- OCCUPY_MobileCheck / OCCUPY_FootprintFits,
+  -- Cfile:970296-970303): a unit in the Air layer occupies no ground cell
+  -- and is blocked by none,
+  -- and an attached unit (a transport's cargo, a factory's site) is not on
+  -- the grid at all -- the Attached motion state has no position of its own
+  -- (966205-966229).
+  if u.__layer == 'Air' or (u.__bp and u.__bp.Air and u.__bp.Air.CanFly) then return false end
   local myR = footprintRadius(u)
   for _, other in pairs(__units) do
     if other ~= u and not other.__dead and not other.__destroyQueued
-      and not other.__goal and (other.__bp and other.__bp.Physics
+      and not other.__goal and not other.__attachParent and other.__layer ~= 'Air'
+      and (other.__bp and other.__bp.Physics
         and other.__bp.Physics.MotionType ~= 'RULEUMT_None' or false) then
       local op = other.__pos
       if op then
@@ -156,6 +194,33 @@ local function freeSpotNear(u, x, z)
     end
   end
   return x, z
+end
+__freeSpotNear = freeSpotNear
+
+--- SFootprint::FitsAt for the transport's drop check (TransportDetachUnit,
+--- Cfile:803767-803776) and OCCUPY_FootprintFits for the ballistic landing
+--- (CalcMoveBallistic 970296-970303): the occupancy grid under the unit's
+--- footprint at (x, z). This motion model has no ogrid: the STRUCTURES
+--- standing there are the blockers (a structure's footprint is on the grid
+--- from its placement on). Whether an idle mobile unit's reservation
+--- (Unit::ReserveOgridRect) is on that grid at the moment a dropped unit
+--- lands is UNVERIFIED -- it is not counted here, so a drop onto standing
+--- units is not a kill (docs/STATUS.md).
+function __footprintFitsAt(u, x, z)
+  local myR = footprintRadius(u)
+  for _, other in pairs(__units) do
+    if other ~= u and not other.__dead and not other.__destroyQueued
+      and not other.__attachParent and other.__layer ~= 'Air'
+      and (other.__bp and other.__bp.Physics and other.__bp.Physics.MotionType == 'RULEUMT_None' or false) then
+      local op = other.__pos
+      if op then
+        local r = myR + footprintRadius(other)
+        local ddx, ddz = op[1] - x, op[3] - z
+        if ddx * ddx + ddz * ddz < r * r then return false end
+      end
+    end
+  end
+  return true
 end
 
 -- Entity::AdvanceCoords — advance every unit with a goal by one tick.
@@ -259,6 +324,12 @@ function __advanceMotion()
       if par.__layer and not (par.__isUnit and par.__focusEntity == u) then
         __setCurrentLayer(u, par.__layer)
       end
+      goto continue
+    end
+    -- UMS_Ballistic (CUnitMotion tick, Cfile:966250-966253): the fall of a
+    -- released unit until the surface lands it (__ballisticStep below).
+    if u.__ballisticDrop then
+      __ballisticStep(u)
       goto continue
     end
     local goal = u.__goal
@@ -511,49 +582,47 @@ function __unitOnAttached(u)
   u.__transportLoadFactor = -1
 end
 
---- Before Unit::DetachFrom: NotifyDetached (Cfile:965794-965870) puts a
---- non-flying unit into UMS_Ballistic and LAYER_Air unless skipBallistic --
---- the unit falls (CalcMoveBallistic) until the surface collision lands it.
---- That fall is not implemented: refusing here beats a LIVE land unit that
---- stays in the Air layer for good. A DEAD unit is exempt: FinishBuildThread
---- skips `DetachFrom(true)` for a dead site (defaultunits.lua:539-542) and
---- releases it with `DetachAll(bone)` -- without skipBallistic -- while its
---- DeathThread still runs; refusing there would kill the factory's thread
---- and leave it busy for good. The dead unit is released in place instead
---- of dropping (docs/STATUS.md).
---- A unit already queued for deletion is exempt as well, whatever queued
---- it: Entity::Destroy defers to the deletion queue (Cfile:916089) and
---- Entity::OnDestroy detaches the entity at the end of the same beat
---- (916158) -- no ballistic tick ever runs for it in the engine either, so
---- releasing it in place is the engine's own outcome, not a silent guess.
---- The case that reaches this: FactoryUnit.BuildingState's DetachAll(bone)
---- (defaultunits.lua:669) on the site a failed build just destroyed.
+--- Before Unit::DetachFrom: nothing is refused. NotifyDetached
+--- (Cfile:965794-965870) puts a live non-flying unit into UMS_Ballistic and
+--- LAYER_Air unless skipBallistic; the fall is __ballisticStep below.
 function __unitCheckDetach(u, skipBallistic)
-  local canFly = u.__bp and u.__bp.Air and u.__bp.Air.CanFly
-  if not canFly and not skipBallistic and not u.__dead and not u.__destroyQueued then
-    error('DetachFrom: the ballistic drop of a live non-flying unit (UMS_Ballistic, CUnitMotion::CalcMoveBallistic) is not implemented; pass skipBallistic = true', 3)
-  end
 end
 
 --- Unit::DetachFrom after Entity::DetachFrom (Cfile:954394-954427):
---- NotifyDetached (965794-965870) -- motion state None for a flying unit or
---- with skipBallistic (965855-965863), the Air layer for a flying unit
---- without skipBallistic (965838-965848), mProcessSurfaceCollision (965870);
---- then the Attached bit is cleared (954404), mTransportLoadFactor reset and
+--- NotifyDetached (965794-965870) -- UMS_Ballistic and the Air layer for a
+--- live non-flying unit without skipBallistic (965830-965848: the drop,
+--- landed by __ballisticStep), motion state None for a flying unit or with
+--- skipBallistic (965855-965863), the Air layer for a flying unit without
+--- skipBallistic (965838-965848), mProcessSurfaceCollision (965870); then
+--- the Attached bit is cleared (954404), mTransportLoadFactor reset and
 --- mTransportedBy released (954406-954425). The engine gates NotifyDetached
 --- and the bit on the same unit predicate as Unit::AttachTo (954405-954409,
 --- UNVERIFIED which -- see __unitOnAttached); both run for every unit here.
 --- NotifyDetached also sets a steering target one unit behind the parent's
 --- facing (SetTarget, 965803-965816); this motion model has no such target,
 --- and a navigator goal the unit had before the attach survives the detach.
---- A dead non-flying unit released without skipBallistic keeps its layer:
---- the Ballistic/Air transition it would get (965830-965848) belongs to the
---- drop that is not implemented.
+--- A DEAD unit (or one queued for deletion) is released in place and keeps
+--- its layer: FinishBuildThread skips `DetachFrom(true)` for a dead site
+--- (defaultunits.lua:539-542) and releases it with `DetachAll(bone)` while
+--- its DeathThread runs, and Entity::OnDestroy detaches at the end of the
+--- beat (916158) with no ballistic tick in between; the engine's dead-body
+--- drop (OnImpact + UMS_Crashed, 970344-970356) is not run for them here
+--- (docs/STATUS.md).
 function __unitOnDetached(u, par, skipBallistic)
-  setMotionState(u, 'None')
   local canFly = u.__bp and u.__bp.Air and u.__bp.Air.CanFly
-  if canFly and not skipBallistic then __setCurrentLayer(u, 'Air') end
-  u.__snapToSurface = true
+  if not canFly and not skipBallistic and not u.__dead and not u.__destroyQueued then
+    setMotionState(u, 'Ballistic')
+    __setCurrentLayer(u, 'Air')
+    -- The velocity the fall starts with is the unit's own (GetVelocity,
+    -- 970015); an attached unit has none in this model.
+    u.__ballisticDrop = { v = { 0, 0, 0 } }
+    u.__goal = false
+    u.__speed = 0
+  else
+    setMotionState(u, 'None')
+    if canFly and not skipBallistic then __setCurrentLayer(u, 'Air') end
+    u.__snapToSurface = true
+  end
   if u.__unitStates then u.__unitStates.Attached = nil end
   u.__transportLoadFactor = -1
   u.__transportedBy = false
@@ -567,9 +636,65 @@ end
 --- that is not implemented and are not fired.
 function __unitDetachedOnDestroy(u)
   u.__motionState = 'None'
+  u.__ballisticDrop = nil
   if u.__unitStates then u.__unitStates.Attached = nil end
   u.__transportLoadFactor = -1
   u.__transportedBy = false
+end
+
+--- CUnitMotion::CalcMoveBallistic (Cfile:970009-970420), the tick of
+--- UMS_Ballistic: the velocity gains the sim gravity (mGravity * 0.01 per
+--- tick, 970111-970115), the unit moves along it, and the segment from the
+--- old to the new position is cut with the surface (STIMap::
+--- SurfaceIntersection 970248; an amphibious unit -- RULEUMT_Amphibious,
+--- 970244 -- takes the heightfield alone and walks the seabed). Landing puts
+--- the unit into the layer of the surface -- Land, Water, or Seabed for the
+--- amphibious unit under water (970270-970310) -- with OnLayerChange; a
+--- layer change that leaves the footprint blocked kills the unit
+--- (970296-970332: Kill without instigator or type). A live unit then goes
+--- to UMS_None (970336-970343), a dead one hears OnImpact("Terrain"|"Water")
+--- and goes to UMS_Crashed (970344-970356). Not modelled: the tumble of the
+--- falling body (the PhysBody orientation, 970038-970060), the playable-
+--- rect and upright checks of the kill (970325-970331), and the layer test
+--- of the footprint (a land unit landing on water survives here).
+function __ballisticStep(u)
+  local b = u.__ballisticDrop
+  local p = u.__pos
+  if not b or not p then return end
+  local v = b.v
+  v[2] = v[2] - __simGravity * 0.01
+  local nx, ny, nz = p[1] + v[1], p[2] + v[2], p[3] + v[3]
+  local mt = u.__bp and u.__bp.Physics and u.__bp.Physics.MotionType
+  local terrain = GetTerrainHeight(nx, nz)
+  local water = __mapWaterLevel or -10000
+  local surface = (mt == 'RULEUMT_Amphibious') and terrain or math.max(terrain, water)
+  if ny > surface then
+    p[1], p[2], p[3] = nx, ny, nz
+    return
+  end
+  p[1], p[2], p[3] = nx, surface, nz
+  local layer
+  if water >= surface then
+    layer = (mt == 'RULEUMT_Amphibious') and 'Seabed' or 'Water'
+  else
+    layer = 'Land'
+  end
+  local old = u.__layer
+  __setCurrentLayer(u, layer)
+  u.__ballisticDrop = nil
+  u.__speed = 0
+  if old ~= layer and not u.__dead and not __footprintFitsAt(u, p[1], p[3]) then
+    u:Kill(nil, '', 0)
+  end
+  if u.__dead then
+    if type(u.OnImpact) == 'function' then
+      local ok, err = pcall(u.OnImpact, u, layer == 'Land' and 'Terrain' or 'Water')
+      if not ok then WARN('OnImpact: ' .. tostring(err)) end
+    end
+    setMotionState(u, 'Crashed')
+  else
+    setMotionState(u, 'None')
+  end
 end
 
 --- An attached unit whose parent was destroyed (the CUnitMotion tick with an

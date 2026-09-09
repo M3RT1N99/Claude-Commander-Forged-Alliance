@@ -1533,19 +1533,20 @@ identical. The hash was updated with that explanation.
 
 Not implemented, recorded rather than faked:
 
-* **The ballistic drop.** `DetachFrom` without `skipBallistic` on a
-  non-flying unit (a transport unload, Cfile:965830-965848) puts the engine
-  unit into UMS_Ballistic and the Air layer until `CalcMoveBallistic` lands
-  it. Here that call is refused with an error naming the gap for a LIVE unit
-  (the tractor claw's `DetachAll` in aeonweapons.lua:179, scenario detaches).
-  A DEAD unit is exempt and released in place, keeping its layer: the factory
+* **The ballistic drop -- now modelled for a LIVE unit** (see "The
+  transport" below): `DetachFrom` without `skipBallistic` on a non-flying
+  unit puts it into UMS_Ballistic and the Air layer (NotifyDetached,
+  Cfile:965830-965848) and `__ballisticStep` (motion.lua) lands it
+  (CalcMoveBallistic 970009-970420). A DEAD unit (or one queued for
+  deletion) is still released in place, keeping its layer: the factory
   releases a dead site with `DetachAll(bone)` and no `skipBallistic`
   (defaultunits.lua:539-542, FinishBuildThread skips `DetachFrom(true)` for
-  a dead site), and a refusal there would kill the factory's thread while it
-  is busy. Likewise the children of a destroyed parent are released in place
-  instead of dropping (Cfile:966231-966238), and a dying attached unit's own
-  detach in OnDestroy (916158) keeps only the state bookkeeping of
-  Unit::DetachFrom, not the Ballistic/Air callbacks.
+  a dead site) while its DeathThread runs, and the engine's dead-body path
+  (OnImpact + UMS_Crashed, 970344-970356) is not run for it. Likewise the
+  children of a destroyed parent are released in place instead of dropping
+  (Cfile:966231-966238), and a dying attached unit's own detach in OnDestroy
+  (916158) keeps only the state bookkeeping of Unit::DetachFrom, not the
+  Ballistic/Air callbacks.
 * **Motion events.** `NotifyAttached` also forces the horizontal event to
   Stopped and the vertical one to Top with their callbacks and `UpdateIntel`
   (965760-965785); this motion model tracks neither event anywhere, so the
@@ -2670,9 +2671,8 @@ a strict-_G miss). The command graph draws an AggressiveMove in the
 attack colours with its own waypoint (commandgraphparams.lua:54-58).
 
 **Still missing** (each a strict-_G error when called; shipped callers in
-brackets): IssueTransportLoad [ai/aiutilities.lua:1453,
-ai/aibehaviors.lua:324], IssueTransportUnload [aiutilities.lua:1499,
-platoon.lua:2462, scenarioframework.lua:1259], IssueCapture
+brackets; IssueTransportLoad and IssueTransportUnload have since arrived --
+"The transport" below): IssueCapture
 [platoon.lua:1342, aiutilities.lua:1719], IssueDive [platoon.lua:2294,
 xss0201_script.lua:66], IssueOverCharge [ai/aibehaviors.lua:147],
 IssueFactoryAssist [aibrain.lua:2076], IssueScript [platoon.lua:293],
@@ -2682,11 +2682,196 @@ IssueFormPatrol [scenarioframework.lua:572]; without a shipped caller:
 IssueBuildFactory, IssueBuildMobile, IssueDestroySelf, IssueFerry,
 IssueFormAggressiveMove, IssueFormMove, IssueKillSelf, IssuePause,
 IssueSacrifice, IssueSiloBuildNuke, IssueSiloBuildTactical,
-IssueTeleportToBeacon, IssueTransportUnloadSpecific. The transport,
-capture, dive, overcharge, silo and teleport TASKS behind the first group
-are not modelled in the sim, which is why the bindings stay absent rather
-than queueing orders that nothing runs.
+IssueTeleportToBeacon, IssueTransportUnloadSpecific. The capture, dive,
+overcharge, silo and teleport TASKS behind the first group are not
+modelled in the sim, which is why the bindings stay absent rather than
+queueing orders that nothing runs.
 
 **UNVERIFIED.** IsValid_Vector3f's exact test (here: present and not
 NaN); the roll-off flag's consumer; the AggressiveMove line texture
 (orderline_arrow04) like Patrol's.
+
+## The transport: CAiTransportImpl, the load/call/unload tasks, IssueTransportLoad and IssueTransportUnload
+
+**What was wrong.** A transport could carry nothing: no unit had a
+transport component, `IssueTransportLoad` / `IssueTransportUnload` were
+strict-_G misses (ai/aiutilities.lua:1453/1499, platoon.lua:2462,
+scenarioframework.lua:1259), `GetCargo`, `TransportHasSpaceFor`,
+`TransportHasAvailableStorage`, `TransportDetachAllUnits` and
+`AddUnitToStorage` were silent no-ops, a right-click of a tank on a
+transport (or of a transport on a tank) was "not wired to the sim yet",
+`DetachFrom` on a live non-flying unit was refused with an error, a flyer
+moved at its ground `Physics.MaxSpeed` (0.5 for uea0107), and the
+uea0107's own script died in OnStopBeingBuilt on
+`CreateThrustController(self, "thruster", bone)` (two arguments taken,
+three passed) and `SetThrustingParam` (absent).
+
+**The engine** (all Cfile). A unit owns a `CAiTransportImpl` when
+RULEUCC_Transport is in its command caps or it is a PODSTAGINGPLATFORM
+(Unit ctor 950494-950512). `SetUpAttachPoints` (801771-801976) sorts the
+skeleton's bones by name substring -- "Launchpoint", "Attachpoint_Spr" (class
+4), "Attachpoint_Lrg" (3), "Attachpoint_Med" (2), a plain "Attachpoint" (1),
+"AttachSpecial" -- into per-class lists, a class going to the generic list
+once the blueprint's `Transport.ClassGenericUpTo` reaches it (default 0,
+655688); uea0107 has 6 small, 2 medium and 1 large point. A passenger of
+class n takes `ClassNAttachSize` points of the hook list nearest to its
+class point (GetClosestAttachPointsTo 801983-802083, TransportFindAttachList
+803468-803522, TransportHasSpaceFor 803523-803605, TransportAssignSlot
+803606-803718, the reservation ReserveBone 802115-802156);
+`TransportCanCarryUnit` (803349-803428) refuses an immobile or flying unit,
+a commander without CANTRANSPORTCOMMANDER, and a class without enough
+points. The pickup: `TransportAddPickupUnits` (803050-803151) stores the
+point, the facing and the waiting list; `TransportGetPickupUnitPos`
+(803295-803342) doubles the reserved bone's rest offset around it;
+`TransportGetAttachPosition` (804107-804162) is the cell under the live
+bone; `TransportIsReadyForUnit` (804101-804105) needs mHasSpace, set by
+`TransportAtPickupPosition` (804095-804099). `TransportAttachUnit`
+(803719-803744) attaches through Entity::AttachTo with the reserved bone and
+the passenger's "AttachPoint" bone (GetBestAttachPoint 802157-802180: bone 0
+for a flyer, the collision centre otherwise), sets mTransportedBy and runs
+`OnTransportAttach(boneName, unit)`; `TransportDetachUnit` (803748-803863)
+refuses under an airborne transport when the footprint does not fit,
+detaches WITHOUT skipBallistic, releases the reservation and runs
+`OnTransportDetach`; `TransportDetachAllUnits` (803868-804094) kills each
+passenger with 99 % when asked to destroy some (a commander that cannot be
+killed takes 10000 damage), stored units die with the transport.
+
+The commands: `IssueTransportLoad` (1011850-1011985) refuses an attached or
+carried unit ("One or more units are already attached to something.") and
+an empty list ("Couldn't find any units to load."), adds the transport to
+the set and issues ONE UNITCOMMAND_TransportLoadUnits targeting the
+transport, clear = 0, no handle; `IssueTransportUnload` (1012005-1012090)
+validates RULEUCC_Transport and issues TransportUnloadUnits with the
+target's position. The user side: the default right-click is CallTransport
+when the selection can be carried and `func_RightClickWithTransport`
+(1238669-1238853) accepts the hovered transport, or Transport when the
+hovered unit carries RULEUCC_CallTransport and `func_RightClickTransport`
+(1238854-1239027) accepts it -- both before Repair and Guard
+(GetRightMouseButtonAction 1240291-1240304); the CallTransport click adds
+the transport to the set (HandleEvent 1241826-1241836); the Transport click
+on a unit issues TransportReverseLoadUnits (1241600-1241617), which
+UNIT_IssueCommand reshapes to the closest transport with space plus the
+target (sub_6EF660 1006333-1006500, an idle transport at half its distance);
+the Transport click on the ground unloads there (1241640-1241665).
+func_ProcessUnitCommand validates each unit (1007144-1007334: the
+CallTransport cap, no seabed target, a live finished transport that can
+carry it, else "OnTransportReject").
+
+The tasks (DispatchTask 830700-830991, labels one value off):
+`CUnitLoadUnits` on the transport (ctor 852325-852382: the TransportLoading
+bit and OnStartTransportLoading; TaskTick 852997-853213: the sync gate --
+every passenger on the same command -- then the slot assignment, then an
+air transport runs OnTransportOrdered and flies a Land-layer move to the
+passengers' average position, mHasSpace at the pickup, then the wait for
+the pickup count with the 300-tick timeout; dtor 852391-852463:
+OnStopTransportLoading, on failure OnTransportAborted and the pickups
+released). `CUnitCallTransport` on each passenger (822991-823249: wait for
+the transport's TransportLoading and the shared command, the
+WaitingForTransport bit, the walk to the staging or attach cell, then
+within twice the transport's footprint of the attach bone the beam-up --
+OnStartTransportBeamUp, the Teleporting bit, ten ticks of
+cos(t*pi*0.1)*0.5+0.5 easing toward the live bone less the unit's SizeY,
+OnStopTransportBeamUp, TransportAttachUnit; five retries). `CUnitUnloadUnits`
+(ctor 853241-853347: the set filtered to this transport's own cargo, the
+TransportUnloading bit, the move aborted; TaskTick 853499-853809: the move
+to the point, then TransportDetachAllUnits or TransportDetachUnit per unit;
+an air transport leaves the placement to the fall, a ground one warps each
+unit to a free cell and orders it to the point). The drop:
+`CalcMoveBallistic` (970009-970420) -- gravity * 0.01 per tick on the
+velocity, the segment cut with the surface, the landing layer (Land, Water,
+Seabed for an amphibious unit), the kill on a blocked footprint, UMS_None
+for a live unit, OnImpact + UMS_Crashed for a dead one.
+
+**The port.** `src/engine-lua/transport.lua` (new; loaded by
+src/sim/transport.ts after the motion): the component (`__transportOf`),
+every function above, the three tasks as per-unit state machines ticked
+from `__ordersTick` through the new order types `TransportLoad`,
+`TransportReverseLoad` and `TransportUnload` (globals.lua branches;
+`__abortActive` / `__dispatchStop` / the destroyed branch run the task
+destructors), the bindings, and the user-side dispatch functions
+`__dispatchTransportLoad` / `__dispatchTransportReverseLoad` /
+`__dispatchTransportUnload`. motion.lua: `__unitOnDetached` starts the
+fall, `__ballisticStep` lands it, `__footprintFitsAt` is the occupancy test,
+`blockedAt` no longer counts attached units or air units, a flyer's top
+speed is `Air.MaxAirspeed` (Unit::UpdateSpeedThroughStatus 953164-953174).
+moho.lua: the five Unit methods with the engine's errors. globals.lua:
+`CreateThrustController(unit, label, thrustBone)` (mHelp 881245) and
+`ThrustManipulator:SetThrustingParam` (mHelp 881321-881322, nine values).
+The UI: world-commands.lua's selection row carries the two caps and the
+categories the predicates test; worldCommands.ts has the predicates, the
+transport defaults before Repair/Guard and the RULEUCC_Transport /
+RULEUCC_CallTransport modes; main.ts describes the hovered own unit for
+them; the sim client/worker carry `transportLoad`, `transportReverseLoad`
+and `transportUnload`; the command graph draws the three order types in
+default_TransportColors (commandgraphparams.lua:93-110).
+
+**Checks** (scripts/verify-transport.ts, new): the attach-point counts of
+uea0107, TransportHasSpaceFor for a class-1 tank and a class-3 Titan,
+TransportCanCarryUnit for the ACU and an air unit, the errors of GetCargo
+and TransportDetachAllUnits on a tank; IssueTransportLoad queueing one
+shared command on the transport and both tanks, the TransportLoading bit
+and OnStartTransportLoading at once, WaitingForTransport and Teleporting on
+the way, OnTransportOrdered, the beam-up callbacks, OnTransportAttach with
+the bone names, GetCargo, the Attached bit and mTransportedBy, the
+passenger gun disabled (weapon.lua:481), the passengers riding along, the
+task's end with OnStopTransportLoading; IssueTransportUnload with the
+TransportUnloading bit, both tanks passing UMS_Ballistic and landing in the
+Land layer on the terrain near the point with OnTransportDetach and the
+motion-state callbacks, the cargo empty, the gun enabled again, an unload on
+an empty transport queueing nothing; the argument, empty-list, non-object,
+non-target and attached-unit errors; `DetachFrom()` on a live tank accepted
+and landed; the reverse load choosing the closer transport, the
+CallTransport dispatch adding the transport; the two right-click predicates
+on nine constellations; TransportDetachAllUnits(false) releasing both. Seen
+red first (the spawn died on SetThrustingParam, then the ballistic and
+attach checks under a mutation that skipped UMS_Ballistic).
+
+**Not modelled, recorded rather than faked.**
+
+* **The air motion.** `CUnitMotion::CalcMoveAir` (968060-969700) is a force
+  controller on the PhysBody -- force = (heading * KMove - velocity *
+  CalcAirMovementDampingFactor) * mass, lift from KLift/LiftFactor, the turn
+  from KTurn/KTurnDamping, banking, circling, the elevation, the landing
+  (969121-969200, 967852-967890). An air blueprint carries no ground
+  Physics.MaxAcceleration or TurnRate, so on the ground model a flyer took
+  its top speed never. motion.lua names the reduction: a flyer moves on the
+  ground model at Air.MaxAirspeed, takes it at once and turns freely; it
+  keeps no altitude (the transport hovers at terrain height, the hover
+  height `Air.TransportHoverHeight` of ShouldHoverInsteadOfLand 967750-
+  967770 / 969581 has no effect), and a loaded transport is not slowed by
+  CalcTransportLoadFactor (953174). The next motion branch.
+* **The ogrid of mobile units.** `__footprintFitsAt` counts standing
+  structures; whether an idle mobile unit's reservation
+  (Unit::ReserveOgridRect) is on the grid when a dropped unit lands is
+  UNVERIFIED, so a drop onto standing units is not a kill here, and the
+  engine's playable-rect and upright tests of that kill (970325-970331) and
+  the tumble of the falling body (970038-970060) are not run. A land unit
+  landing on water keeps the Water layer here (the engine's layer test of
+  the footprint would kill it).
+* **The waiting formation.** `TransportGetUnitsWaitingForPickup` and the
+  formation instance (802850-802858, 802871-802949) are empty here: the
+  load task re-fetches nothing after the pickup, and the Complete state of
+  a staging platform waits on the loaded set only.
+* **Ferry, carrier, staging platform, teleporter.** A load whose target is a
+  FERRYBEACON, CARRIER, AIRSTAGINGPLATFORM or TELEPORTATION unit, the
+  right-click's third transport branch (a hovered FERRYBEACON with a
+  selection that may use it, sub_81DA20, 1240310-1240315), and the storage
+  side (`AddUnitToStorage`, `TransportAddToStorage` 804308-804345) beyond
+  the bookkeeping, have no task here; `IssueTransportUnloadSpecific` stays
+  absent.
+* **The engine's own random stream.** TransportDetachAllUnits' 99 % roll
+  draws from `Random()`, not the engine's MT19937 state.
+
+**UNVERIFIED.** The class-4 case of TransportFindAttachList runs on into the
+special case as decompiled (803493-803506) -- ported as decompiled, no
+shipped unit has TransportClass 4; the "uses bones" flag of CUnitLoadUnits
+(v17, 853082), read as "a bone slot was assigned"; the CUnitCallTransport
+destructor's clearing of WaitingForTransport / Teleporting (done here);
+whether func_QuatLERP is a spherical or a normalised linear interpolation;
+the vtable+44 test of func_RightClickWithTransport (read as "attached", not
+carried by the UI row) and its byte-872 flag (clear for a transport target,
+set for a staging platform -- read as accepting in both branches), and the
+field test at 1238912 of func_RightClickTransport (not modelled); the
+engine's unstable sort of the attach points (func_SortAttachData) against
+the bone-order tie-break here; the mHelp strings of the five Unit methods
+(the bare names are used in the argument-count errors).

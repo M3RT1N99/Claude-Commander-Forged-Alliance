@@ -21,6 +21,7 @@ export interface OrderLineEntry {
   /** Segment index within the unit's command queue (0 = active order). */
   seg?: number
   type: 'Move' | 'Attack' | 'Repair' | 'BuildMobile' | 'Patrol' | 'Guard' | 'Reclaim' | 'AggressiveMove'
+    | 'TransportLoad' | 'TransportReverseLoad' | 'TransportUnload'
   from: { x: number; y: number; z: number }
   to: { x: number; y: number; z: number }
 }
@@ -54,6 +55,15 @@ export const PARAMS: Record<
   // ('ddff0000') with its own waypoint (attack_move_btn_up.dds); its line
   // texture (orderline_arrow04) is the same named gap as Patrol's.
   AggressiveMove: { color: 0xff0000, alpha: 0xdd / 255, waypoint: 'attack_move_btn_up' },
+  // UNITCOMMAND_TransportLoadUnits (:99-103) and TransportReverseLoadUnits
+  // (:104, inherits it): default_TransportColors selected 'dd654bc2' (:93-97)
+  // with the load waypoint; the line texture (orderline_arrow04) is the same
+  // named gap as Patrol's.
+  TransportLoad: { color: 0x654bc2, alpha: 0xdd / 255, waypoint: 'load_btn_up' },
+  TransportReverseLoad: { color: 0x654bc2, alpha: 0xdd / 255, waypoint: 'load_btn_up' },
+  // UNITCOMMAND_TransportUnloadUnits (:106-110): the same colours, the
+  // unload waypoint.
+  TransportUnload: { color: 0x654bc2, alpha: 0xdd / 255, waypoint: 'unload_btn_up' },
 }
 
 const LINE_WIDTH = 0.3 // approximation (renderer constant not recovered)

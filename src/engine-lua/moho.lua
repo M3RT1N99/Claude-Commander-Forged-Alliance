@@ -1098,6 +1098,61 @@ local unit = withNoops(UNIT_NAMES, {
     if type(name) ~= 'string' then error("bad argument #1 to 'SetCustomName' (string expected)", 2) end
     self.__customName = name
   end,
+  --- "Unit:GetCargo()" (cfunc_UnitGetCargoL, Cfile:972295-972345): the loaded
+  --- units (TransportGetLoadedUnits, without the storage exclusion) as a
+  --- list; a unit without a transport component is the error.
+  GetCargo = function(self, ...)
+    local n = select('#', ...)
+    if n ~= 0 then error(string.format('GetCargo\n  expected %d args, but got %d', 1, n + 1), 2) end
+    local t = __transportOf(self)
+    if not t then error('Unit:GetCargo only valid for transport units', 2) end
+    local out = {}
+    for i, e in ipairs(__transportLoadedUnits(t, false)) do out[i] = e end
+    return out
+  end,
+  --- "Unit:TransportHasSpaceFor(unit)" (cfunc_UnitTransportHasSpaceForL,
+  --- Cfile:981349-981404): false without a component or a unit argument.
+  TransportHasSpaceFor = function(self, ...)
+    local n = select('#', ...)
+    if n ~= 1 then error(string.format('TransportHasSpaceFor\n  expected %d args, but got %d', 2, n + 1), 2) end
+    local unit = ...
+    local t = __transportOf(self)
+    if not t or type(unit) ~= 'table' or not unit.__bp then return false end
+    return __transportHasSpaceFor(t, unit.__bp)
+  end,
+  --- "Unit:TransportHasAvailableStorage()" (Cfile:981429-981458).
+  TransportHasAvailableStorage = function(self, ...)
+    local n = select('#', ...)
+    if n ~= 0 then error(string.format('TransportHasAvailableStorage\n  expected %d args, but got %d', 1, n + 1), 2) end
+    local t = __transportOf(self)
+    if not t then return false end
+    return __transportHasAvailableStorage(t)
+  end,
+  --- "Unit:TransportDetachAllUnits(destroySomeUnits)" (Cfile:804826-804870):
+  --- the transport's own release of its cargo; the error without a component.
+  TransportDetachAllUnits = function(self, ...)
+    local n = select('#', ...)
+    if n ~= 1 then error(string.format('TransportDetachAllUnits\n  expected %d args, but got %d', 2, n + 1), 2) end
+    local destroySome = ...
+    local t = __transportOf(self)
+    if not t then error('Unit:TransportDetachAllUnits can only be called for transports', 2) end
+    -- LuaStackObject::GetBoolean (804846): any value but nil/false is true.
+    __transportDetachAllUnits(t, destroySome ~= nil and destroySome ~= false)
+  end,
+  --- "Unit:AddUnitToStorage(unit)" (Cfile:979013-979058): into a carrier's
+  --- storage while there is room, else the engine's warning.
+  AddUnitToStorage = function(self, ...)
+    local n = select('#', ...)
+    if n ~= 1 then error(string.format('AddUnitToStorage\n  expected %d args, but got %d', 2, n + 1), 2) end
+    local unit = ...
+    local t = __transportOf(self)
+    if not t or type(unit) ~= 'table' or not unit.__id then return end
+    if __transportHasAvailableStorage(t) then
+      __transportAddToStorage(t, unit)
+    else
+      WARN('No more room available in carrier for unit to be stored')
+    end
+  end,
   SetUnitState = function(self, state, on)
     if type(state) ~= 'string' then error("bad argument #1 to 'SetUnitState' (string expected)", 2) end
     if not UNIT_STATES[state] then return end

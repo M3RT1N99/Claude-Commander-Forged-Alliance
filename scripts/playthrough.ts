@@ -252,6 +252,9 @@ const simFassade: WorldCommandSim = {
   patrol: ungenutzterBefehl('patrol'),
   reclaim: ungenutzterBefehl('reclaim'),
   reclaimMapProp: ungenutzterBefehl('reclaimMapProp'),
+  transportLoad: ungenutzterBefehl('transportLoad'),
+  transportReverseLoad: ungenutzterBefehl('transportReverseLoad'),
+  transportUnload: ungenutzterBefehl('transportUnload'),
   move: (id: number, x: number, z: number): void => {
     sim.eval(`local u=__units[${id}] if u then u:GetNavigator():SetGoal({ ${x}, 0, ${z} }) end`)
   },

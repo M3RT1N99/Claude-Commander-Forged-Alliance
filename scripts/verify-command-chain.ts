@@ -182,6 +182,15 @@ const sim = {
     simHost.eval(`__dispatchReclaim(${id}, ${targetId})`)
   },
   reclaimMapProp: (): void => {},
+  transportLoad: (ids: number[], transportId: number): void => {
+    simHost.eval(`__dispatchTransportLoad({ ${ids.join(',')} }, ${transportId}, true)`)
+  },
+  transportReverseLoad: (transportIds: number[], targetId: number): void => {
+    simHost.eval(`__dispatchTransportReverseLoad({ ${transportIds.join(',')} }, ${targetId}, true)`)
+  },
+  transportUnload: (id: number, x: number, z: number): void => {
+    simHost.eval(`__dispatchTransportUnload({ ${id} }, ${x}, ${z}, true)`)
+  },
   factoryCommand: (id: number, cmd: FactoryCommand, queue?: boolean): void => {
     const clear = queue ? 'false' : 'true'
     if ('targetId' in cmd) simHost.eval(`__dispatchFactory${cmd.cmd}(${id}, ${cmd.targetId}, ${clear})`)

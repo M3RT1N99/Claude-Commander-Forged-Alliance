@@ -778,7 +778,7 @@ end
 -- Resolve one command's waypoint position by its type — the SAME rules for the
 -- executing head and the waiting queue (both are entries of the command list).
 local function resolveOrderPos(cmd)
-  if cmd.type == 'Move' or cmd.type == 'Patrol' or cmd.type == 'AggressiveMove' then
+  if cmd.type == 'Move' or cmd.type == 'Patrol' or cmd.type == 'AggressiveMove' or cmd.type == 'TransportUnload' then
     return cmd.x, cmd.z
   elseif cmd.gx then
     return cmd.gx, cmd.gz -- ground attack (queued or active)

@@ -32,6 +32,7 @@ export interface MapPropSpawn {
 export interface SimOrderEntry {
   id: number
   t: 'Move' | 'Attack' | 'Repair' | 'BuildMobile' | 'Patrol' | 'Guard' | 'Reclaim' | 'AggressiveMove'
+    | 'TransportLoad' | 'TransportReverseLoad' | 'TransportUnload'
   x: number
   y?: number
   z: number
@@ -734,6 +735,26 @@ export class LuaSimClient {
   /** Repair (dispatch 0x14): resume building the unfinished `targetId`. */
   repair(id: number, targetId: number, queue = false): void {
     this.worker.postMessage({ type: 'repair', id, targetId, queue })
+  }
+  /**
+   * TransportLoadUnits (the CallTransport click, Cfile:1241799-1241870): the
+   * passengers `ids` and the transport itself get ONE command targeting the
+   * transport (dispatch 0x16: CUnitLoadUnits + CUnitCallTransport).
+   */
+  transportLoad(ids: number[], transportId: number, queue = false): void {
+    this.worker.postMessage({ type: 'transportLoad', ids, transportId, queue })
+  }
+  /**
+   * TransportReverseLoadUnits (the Transport click on a unit, Cfile:1241600-
+   * 1241617): the sim keeps the closest transport with space and the target
+   * (sub_6EF660) and both get the command (dispatch 0x17).
+   */
+  transportReverseLoad(transportIds: number[], targetId: number, queue = false): void {
+    this.worker.postMessage({ type: 'transportReverseLoad', transportIds, targetId, queue })
+  }
+  /** TransportUnloadUnits at a point (dispatch 0x18, CUnitUnloadUnits). */
+  transportUnload(id: number, x: number, z: number, queue = false): void {
+    this.worker.postMessage({ type: 'transportUnload', id, x, z, queue })
   }
   /** SetFireState (cfunc_SetFireStateL → sim driver ProcessInfo, ui-globals.lua:617). */
   setFireState(id: number, state: number): void {

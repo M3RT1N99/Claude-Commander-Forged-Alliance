@@ -20,6 +20,7 @@ import {
   footprintOf,
   type CommandMode,
   type WorldCommandSim,
+  type TransportHoverInfo,
 } from './worldCommands'
 import { translateKey } from './keys'
 import type { Validity } from '../sim/ogrid'
@@ -560,6 +561,9 @@ export class GameUi {
       enemyReclaimable?: boolean
       repair?: number
       own?: number
+      /** The own unit under the cursor as the transport predicates see it
+       *  (worldCommands.ts rightClickWithTransport / rightClickTransport). */
+      ownHover?: TransportHoverInfo
       reclaimProp?: number
       reclaimMapProp?: number
     } = {},
@@ -574,6 +578,7 @@ export class GameUi {
       enemyReclaimable: ziel.enemyReclaimable,
       repairTargetId: ziel.repair,
       ownTargetId: ziel.own,
+      ownHover: ziel.ownHover,
       reclaimPropId: ziel.reclaimProp,
       reclaimMapPropIndex: ziel.reclaimMapProp,
       waterElevation,

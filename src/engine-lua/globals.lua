@@ -727,7 +727,44 @@ function CreateBuilderArmController(unit, turretBone, barrelBone, aimBone)
   m.__aimBone = aimBone
   return m
 end
-function CreateThrustController(unit, bone) return newManipulator('thrust', unit, bone) end
+-- "CreateThrustController(unit, label, thrustBone)" (mHelp Cfile:881245;
+-- cfunc_CreateThrustControllerL 881256-881292): three arguments, the label a
+-- string, "Unit has no skeleton." for a unit without a model, the bone
+-- resolved. The air units' scripts build one per engine bone
+-- (uea0107_script.lua:37) and set its arcs with SetThrustingParam.
+function CreateThrustController(...)
+  local n = select('#', ...)
+  if n ~= 3 then
+    error(string.format('CreateThrustController(unit, label, thrustBone)\n  expected %d args, but got %d', 3, n), 2)
+  end
+  local unit, label, bone = ...
+  if type(label) ~= 'string' then error("bad argument #2 to 'CreateThrustController' (string expected)", 2) end
+  if #__skeletonOf(unit).names == 0 then error('Unit has no skeleton.', 2) end
+  local m = newManipulator('thrust', unit, bone)
+  m.__label = label
+  return m
+end
+-- "ThrustManipulator:SetThrustingParam(xCapMin, xCapMax, yCapMin, yCapMax,
+-- zCapMin, zCapMax, turnForceMult, turnSpeed)" (mHelp Cfile:881321-881322;
+-- cfunc_CThrustManipulatorSetThrustingParamL 881333-881420: nine stack values,
+-- every parameter a number). The thrust animation of the engine bone is part
+-- of the manipulator reduction named above (bones do not animate here); the
+-- parameters are kept on the manipulator.
+function ManipMeta:SetThrustingParam(...)
+  local n = select('#', ...)
+  if n ~= 8 then
+    error(string.format('ThrustManipulator:SetThrustingParam(xCapMin, xCapMax, yCapMin, yCapMax, zCapMin, zCapMax, turnForceMult, turnSpeed)\n  expected %d args, but got %d', 9, n + 1), 2)
+  end
+  local p = { ... }
+  for i = 1, 8 do
+    if type(p[i]) ~= 'number' then
+      error(string.format("bad argument #%d to 'SetThrustingParam' (number expected, got %s)", i, type(p[i])), 2)
+    end
+  end
+  self.__thrust = { xCapMin = p[1], xCapMax = p[2], yCapMin = p[3], yCapMax = p[4],
+    zCapMin = p[5], zCapMax = p[6], turnForceMult = p[7], turnSpeed = p[8] }
+  return self
+end
 
 -- "manip = CreateSlaver(unit, dest_bone, src_bone)" (Cfile:877923, sim only) —
 -- a CSlaveManipulator that copies src_bone's animated pose onto dest_bone.
@@ -1906,6 +1943,7 @@ local function __abortActive(unitId)
   __attackOrders[unitId] = nil
   __guardOrders[unitId] = nil
   __reclaimTasks[unitId] = nil
+  __transportAbort(unitId)
   u.__guardedUnit = false
   u:GetNavigator():AbortMove()
 end
@@ -2421,6 +2459,10 @@ local function __startOrder(unitId, cmd)
     return true
   elseif cmd.type == 'Guard' then
     return __guardStart(unitId, cmd.target)
+  elseif cmd.type == 'TransportLoad' or cmd.type == 'TransportReverseLoad' or cmd.type == 'TransportUnload' then
+    -- The transport tasks (transport.lua): CUnitLoadUnits, CUnitCallTransport
+    -- and CUnitUnloadUnits, chosen by the command and the unit's role in it.
+    return __transportStartOrder(unitId, cmd)
   end
   return false
 end
@@ -2519,6 +2561,8 @@ function __ordersTick()
     if not u or u.__destroyed then
       __orders[unitId] = nil
       __orderActive[unitId] = nil
+      __transportAbort(unitId)
+      __transports[unitId] = nil
     elseif u.__dead or u.__destroyQueued then
       -- Nothing. Dispatch runs only while !IsDead
       -- (IAiCommandDispatchImpl::TaskTick, Cfile:746583-746586), so a dying
@@ -2579,6 +2623,9 @@ function __ordersTick()
         -- must finish first, or the next queued order would fight
         -- __reclaimTick over the unit's movement goal.
         done = __guardOrders[unitId] == nil and __reclaimTasks[unitId] == nil
+      elseif cmd.type == 'TransportLoad' or cmd.type == 'TransportReverseLoad' or cmd.type == 'TransportUnload' then
+        -- The task's TaskTick; -1 ends the command (transport.lua).
+        done = __transportOrderTick(unitId, cmd)
       end
       if done then
         __orderActive[unitId] = nil
@@ -2614,6 +2661,7 @@ function __dispatchStop(unitId)
   __attackOrders[unitId] = nil
   __guardOrders[unitId] = nil
   __reclaimTasks[unitId] = nil
+  __transportAbort(unitId)
   u.__guardedUnit = false
   u:GetNavigator():AbortMove()
   u.__faceGoal = false

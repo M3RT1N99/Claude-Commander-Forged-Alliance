@@ -161,6 +161,9 @@ const recSim = {
   patrol: () => {},
   reclaim: () => {},
   reclaimMapProp: () => {},
+  transportLoad: () => {},
+  transportReverseLoad: () => {},
+  transportUnload: () => {},
   factoryCommand: () => {},
   build: async () => 0,
 }

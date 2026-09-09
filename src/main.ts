@@ -33,6 +33,7 @@ import { SANDBOX_SESSION, type SessionInfo } from './sim/session'
 import type { HeightfieldData } from './sim/terrain'
 import { Hud, type HudSource, type HudUnitInfo, type EcoSnapshot } from './ui/hud'
 import { GameUi } from './ui/gameUi'
+import type { TransportHoverInfo } from './ui/worldCommands'
 import { BuildPreview } from './ui/buildPreview'
 import {
   blueprintPlacement,
@@ -2088,6 +2089,8 @@ function zielUnter(clientX: number, clientY: number): {
   enemyReclaimable?: boolean
   repair?: number
   own?: number
+  /** The own unit under the cursor as the transport predicates see it. */
+  ownHover?: TransportHoverInfo
   /** A wreck prop under the cursor (sim prop id) — reclaim target. */
   reclaimProp?: number
   /** A map prop (tree/rock) under the cursor — its scmap instance index. */
@@ -2114,6 +2117,25 @@ function zielUnter(clientX: number, clientY: number): {
       return { enemy: u.id, enemyReclaimable: !!es && es.fraction < 1 }
     }
     const s = luaSim.state(u.id)
+    const bp = sandboxAssetCache.get(u.bpId)?.bp
+    const cats = bpGet(bp, 'Categories')
+    const isCat = (c: string): boolean => Array.isArray(cats) && cats.includes(c)
+    // The own unit as the transport right-click predicates see it
+    // (func_RightClickWithTransport / func_RightClickTransport, worldCommands.ts):
+    // its CallTransport cap, the categories they test, Air.CanFly, its layer.
+    const ownHover: TransportHoverInfo = {
+      canCallTransport: bpGet(bp, 'General.CommandCaps.RULEUCC_CallTransport') === true,
+      isTransportation: isCat('TRANSPORTATION'),
+      isTeleportation: isCat('TELEPORTATION'),
+      isFerryBeacon: isCat('FERRYBEACON'),
+      isAirStaging: isCat('AIRSTAGINGPLATFORM'),
+      isExperimental: isCat('EXPERIMENTAL'),
+      isCommand: isCat('COMMAND'),
+      canTransportCommander: isCat('CANTRANSPORTCOMMANDER'),
+      canFly: bpGet(bp, 'Air.CanFly') === true,
+      layer: s?.layer ?? 'Land',
+      beingBuilt: !!s && s.fraction < 1,
+    }
     // The engine's default-order precedence (Cfile:1240337-1240397):
     //   1. UNFINISHED own/allied unit -> Repair (resume construction).
     //   2. otherwise -> Guard (dispatch 0x0F). A FINISHED but DAMAGED unit is
@@ -2126,14 +2148,12 @@ function zielUnter(clientX: number, clientY: number): {
       // permanent assist that keeps feeding the factory's queue after it
       // finishes. Only a mobile unit or a non-factory/non-silo structure resumes
       // construction via a one-shot Repair.
-      const cats = bpGet(sandboxAssetCache.get(u.bpId)?.bp, 'Categories')
-      const isCat = (c: string): boolean => Array.isArray(cats) && cats.includes(c)
       if (placementOf(u.bpId)?.isMobile || (!isCat('FACTORY') && !isCat('SILO'))) {
         return { repair: u.id }
       }
-      return { own: u.id }
+      return { own: u.id, ownHover }
     }
-    return { own: u.id }
+    return { own: u.id, ownHover }
   }
   if (hit.kind === 'wreck') {
     // Props are reclaim targets (dispatch 0x13) — reverse-map the wreck
@@ -2158,6 +2178,7 @@ async function issueWorldCommand(
     enemyReclaimable?: boolean
     repair?: number
     own?: number
+    ownHover?: TransportHoverInfo
     reclaimProp?: number
     reclaimMapProp?: number
   } = {},

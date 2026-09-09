@@ -52,6 +52,20 @@ export interface WorldCommandSim {
   /** Reclaim a MAP prop (tree/rock) by its scmap instance index. */
   reclaimMapProp(id: number, mapIndex: number, queue?: boolean): void
   /**
+   * TransportLoadUnits (dispatch 0x16): the passengers `ids` and the
+   * transport get ONE command targeting the transport (the CallTransport
+   * click, Cfile:1241799-1241870).
+   */
+  transportLoad(ids: number[], transportId: number, queue?: boolean): void
+  /**
+   * TransportReverseLoadUnits (dispatch 0x17): the transports and the unit
+   * to pick up; the sim keeps the closest transport with space (sub_6EF660,
+   * Cfile:1006333-1006500).
+   */
+  transportReverseLoad(transportIds: number[], targetId: number, queue?: boolean): void
+  /** TransportUnloadUnits (dispatch 0x18): drop the cargo at the point. */
+  transportUnload(id: number, x: number, z: number, queue?: boolean): void
+  /**
    * A FACTORY command (ISSUE_FactoryCommand, Cfile:1350766): the click's
    * command into the factory's command list -- the rally point is the Move at
    * its head, every product inherits the list (818487-818600). The factory
@@ -93,6 +107,94 @@ export interface SelectedUnit {
    * command, which the sim keeps only for FACTORY builders (1007660-1007663).
    */
   isMobile: boolean
+  /** RULEUCC_Transport -- the unit carries others (bit 8, Cfile:656687). */
+  canTransport: boolean
+  /** RULEUCC_CallTransport -- the unit can be carried (bit 9, Cfile:656689). */
+  canCallTransport: boolean
+  /** The categories the transport right-click predicates test. */
+  isCommand: boolean
+  isTransportation: boolean
+  isTransportFocus: boolean
+  canTransportCommander: boolean
+  isTeleportation: boolean
+  isExperimental: boolean
+  /** Blueprint Air.CanFly. */
+  canFly: boolean
+  isFerryBeacon?: boolean
+  isAirStaging?: boolean
+  cannotUseAirStaging?: boolean
+  /** Attached to something (the vtable+44 test of func_RightClickWithTransport,
+   *  Cfile:1238700 -- UNVERIFIED which state; the UI mirror does not carry it). */
+  isAttached?: boolean
+}
+
+/**
+ * The own unit under the cursor as the two transport predicates see it
+ * (GetRightMouseButtonAction, Cfile:1240291-1240304): its CallTransport cap,
+ * the categories they test, Air.CanFly and its layer.
+ */
+export interface TransportHoverInfo {
+  canCallTransport: boolean
+  isTransportation: boolean
+  isTeleportation: boolean
+  isFerryBeacon: boolean
+  isAirStaging: boolean
+  isExperimental: boolean
+  isCommand: boolean
+  canTransportCommander: boolean
+  canFly: boolean
+  layer: string
+  beingBuilt?: boolean
+}
+
+/**
+ * func_RightClickWithTransport (Cfile:1238669-1238853): the hovered unit is
+ * alive, not on the seabed and finished (1238676); some selected unit is
+ * alive, finished and not attached (1238692-1238697; the third test is a
+ * vtable slot the decompilation does not name, read as "attached" --
+ * UNVERIFIED) and matches it: a COMMAND unit only a CANTRANSPORTCOMMANDER
+ * transport or a ferry beacon (1238700-1238720); a TRANSPORTATION,
+ * TELEPORTATION or FERRYBEACON target (1238746-1238768) while its byte 872
+ * is clear (1238806); an AIRSTAGINGPLATFORM target while that byte is SET
+ * and the unit is not CANNOTUSEAIRSTAGING (1238818-1238827). Which flag
+ * byte 872 is stays UNVERIFIED -- it is not carried here, so both branches
+ * read it as accepting.
+ */
+export function rightClickWithTransport(selection: SelectedUnit[], hover: TransportHoverInfo): boolean {
+  if (hover.layer === 'Seabed' || hover.beingBuilt) return false
+  for (const u of selection) {
+    if (u.isAttached) continue
+    if (u.isCommand && !hover.canTransportCommander && !hover.isFerryBeacon) continue
+    if (hover.isTransportation || hover.isTeleportation || hover.isFerryBeacon) return true
+    if (hover.isAirStaging && !u.cannotUseAirStaging) return true
+  }
+  return false
+}
+
+/**
+ * func_RightClickTransport (Cfile:1238854-1239027): the hovered unit is alive
+ * and finished (1238860); some selected unit that is not TELEPORTATION, with
+ * the hovered not EXPERIMENTAL (1238879-1238895), is a TRANSPORTFOCUS unit
+ * (1238913-1238917) that may carry a COMMAND target only when it is
+ * CANTRANSPORTCOMMANDER (1238930-1238946); a TRANSPORTATION or FERRYBEACON
+ * selection takes a non-flyer (1238972-1239001), an AIRSTAGINGPLATFORM a
+ * flyer (1239003-1239016). The engine asks only when the hovered unit's caps
+ * carry RULEUCC_CallTransport (1240300-1240304): the caller's check. The
+ * second field test at 1238912 (a value != 2) is UNVERIFIED and not modelled.
+ */
+export function rightClickTransport(selection: SelectedUnit[], hover: TransportHoverInfo): boolean {
+  if (hover.beingBuilt) return false
+  for (const u of selection) {
+    if (u.isTeleportation || hover.isExperimental) continue
+    if (!u.isTransportFocus) continue
+    if (hover.isCommand && !u.canTransportCommander) continue
+    if (u.isTransportation || u.isFerryBeacon) {
+      if (!hover.canFly) return true
+    } else if (u.isAirStaging && hover.canFly) {
+      return true
+    }
+  }
+  return false
 }
 
 /** Der Command-Mode, wie die Original-Lua ihn führt (commandmode.lua:109). */
@@ -160,6 +262,9 @@ export async function worldClick(
     /** An OWN HEALTHY unit under the cursor — the default click guards it
      *  (dispatch 0x0F: assist builds, share factory queues, follow). */
     ownTargetId?: number
+    /** That unit as the transport predicates see it (rightClickWithTransport /
+     *  rightClickTransport) -- the transport defaults come before Guard. */
+    ownHover?: TransportHoverInfo
     /** A wreck prop under the cursor (sim prop id) — reclaim (0x13). */
     reclaimPropId?: number
     /** A map prop under the cursor — its scmap instance index. */
@@ -375,10 +480,54 @@ export async function worldClick(
     return `Repair (${n}) → Unit ${target}`
   }
 
+  // The Transport button (orders.lua:709, RULEUCC_Transport): a click on a
+  // unit that can call a transport is the reverse load -- the closest
+  // transport of the selection with space goes to pick it up (HandleEvent,
+  // Cfile:1241600-1241617 -> sub_6EF660 in the sim); a click on the ground
+  // unloads the cargo there (1241640-1241665).
+  if (cm.mode === 'order' && cm.name === 'RULEUCC_Transport') {
+    const transports = selection.filter((u) => u.canTransport)
+    if (transports.length === 0) return null
+    const ids = transports.map((u) => u.id)
+    if (opts.ownTargetId !== undefined && opts.ownHover?.canCallTransport) {
+      sim.transportReverseLoad(ids, opts.ownTargetId, opts.queue)
+      onCommandIssued(host, {
+        CommandType: 'TransportLoadUnits',
+        Position: { x: hit.x, y: elevation(hit.x, hit.z), z: hit.z },
+        Clear: !opts.queue,
+      })
+      return `TransportLoad (${ids.length}) → Unit ${opts.ownTargetId}`
+    }
+    for (const id of ids) sim.transportUnload(id, hit.x, hit.z, opts.queue)
+    onCommandIssued(host, {
+      CommandType: 'TransportUnloadUnits',
+      Position: { x: hit.x, y: elevation(hit.x, hit.z), z: hit.z },
+      Clear: !opts.queue,
+    })
+    return `TransportUnload (${ids.length}) → ${hit.x.toFixed(1)}, ${hit.z.toFixed(1)}`
+  }
+
+  // The CallTransport mode (RULEUCC_CallTransport, no button of its own --
+  // the default right-click sets it, Cfile:1240294-1240298): a click on a
+  // transport loads the selection into it; the transport joins the command
+  // (HandleEvent 1241799-1241870).
+  if (cm.mode === 'order' && cm.name === 'RULEUCC_CallTransport') {
+    if (opts.ownTargetId === undefined) return null
+    const ids = selection.filter((u) => u.canCallTransport && u.isMobile).map((u) => u.id)
+    if (ids.length === 0) return null
+    sim.transportLoad(ids, opts.ownTargetId, opts.queue)
+    onCommandIssued(host, {
+      CommandType: 'TransportLoadUnits',
+      Position: { x: hit.x, y: elevation(hit.x, hit.z), z: hit.z },
+      Clear: !opts.queue,
+    })
+    return `CallTransport (${ids.length}) → Unit ${opts.ownTargetId}`
+  }
+
   // Any OTHER order mode (Capture, Overcharge, Nuke, Tactical, Teleport, Ferry,
-  // Transport, Sacrifice, Dive, SiloBuild*, Script): the sim has no task for it
-  // yet. FAIL LOUDLY (CLAUDE.md) rather than fall through to the default
-  // handler, which would silently misroute the click to Attack/Move.
+  // Sacrifice, Dive, SiloBuild*, Script): the sim has no task for it yet.
+  // FAIL LOUDLY (CLAUDE.md) rather than fall through to the default handler,
+  // which would silently misroute the click to Attack/Move.
   if (cm.mode === 'order') {
     return `command mode ${cm.name} is not wired to the sim yet — click ignored`
   }
@@ -474,6 +623,36 @@ export async function worldClick(
       }
     }
     return null
+  }
+  // The transport defaults sit between Reclaim and Repair
+  // (GetRightMouseButtonAction, Cfile:1240291-1240315): a selection that can
+  // call a transport clicking one calls it (RULEUCC_CallTransport ->
+  // TransportLoadUnits with the transport in the set); a transport clicking
+  // a unit that can call one picks it up (RULEUCC_Transport ->
+  // TransportReverseLoadUnits). The third branch -- a hovered FERRYBEACON
+  // with a selection that may use it (sub_81DA20, 1240310-1240315) -- is the
+  // ferry, which is not modelled (docs/STATUS.md).
+  if (opts.ownTargetId !== undefined && opts.ownHover) {
+    if (selection.some((u) => u.canCallTransport) && rightClickWithTransport(selection, opts.ownHover)) {
+      const ids = selection.filter((u) => u.canCallTransport && u.isMobile).map((u) => u.id)
+      sim.transportLoad(ids, opts.ownTargetId, opts.queue)
+      onCommandIssued(host, {
+        CommandType: 'TransportLoadUnits',
+        Position: { x: hit.x, y, z: hit.z },
+        Clear: !opts.queue,
+      })
+      return `CallTransport (${ids.length}) → Unit ${opts.ownTargetId}`
+    }
+    if (opts.ownHover.canCallTransport && rightClickTransport(selection, opts.ownHover)) {
+      const ids = selection.filter((u) => u.canTransport).map((u) => u.id)
+      sim.transportReverseLoad(ids, opts.ownTargetId, opts.queue)
+      onCommandIssued(host, {
+        CommandType: 'TransportLoadUnits',
+        Position: { x: hit.x, y, z: hit.z },
+        Clear: !opts.queue,
+      })
+      return `TransportLoad (${ids.length}) → Unit ${opts.ownTargetId}`
+    }
   }
   // Click on an OWN UNFINISHED structure: units with RULEUCC_Repair resume
   // its construction (repair task, dispatch 0x14) — the engine default.

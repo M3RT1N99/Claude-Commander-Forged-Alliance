@@ -85,6 +85,9 @@ type InMsg =
   | { type: 'patrol'; id: number; x: number; z: number; queue?: boolean }
   // Repair (dispatch 0x14): resume building an unfinished structure.
   | { type: 'repair'; id: number; targetId: number; queue?: boolean }
+  | { type: 'transportLoad'; ids: number[]; transportId: number; queue?: boolean }
+  | { type: 'transportReverseLoad'; transportIds: number[]; targetId: number; queue?: boolean }
+  | { type: 'transportUnload'; id: number; x: number; z: number; queue?: boolean }
   // SetFireState: the UI ASKS the sim via the sim driver (cfunc_SetFireStateL:
   // sSimDriver->ProcessInfo(entityId, "SetFireState", value)). EFireState
   // Cfile:702842-702850: ReturnFire=0, HoldFire=1, HoldGround=2.
@@ -391,6 +394,17 @@ const handleMessage = async (msg: InMsg): Promise<void> => {
     }
   } else if (msg.type === 'repair') {
     host.eval(`__dispatchRepair(${msg.id}, ${msg.targetId}, ${msg.queue ? 'false' : 'true'})`)
+  } else if (msg.type === 'transportLoad') {
+    // The user's CallTransport (Cfile:1241799-1241870): one command for the
+    // passengers and the transport; each validated like the engine's
+    // func_ProcessUnitCommand (transport.lua).
+    const ids = msg.ids.map((n) => Math.floor(n)).join(',')
+    host.eval(`__dispatchTransportLoad({ ${ids} }, ${Math.floor(msg.transportId)}, ${msg.queue ? 'false' : 'true'})`)
+  } else if (msg.type === 'transportReverseLoad') {
+    const ids = msg.transportIds.map((n) => Math.floor(n)).join(',')
+    host.eval(`__dispatchTransportReverseLoad({ ${ids} }, ${Math.floor(msg.targetId)}, ${msg.queue ? 'false' : 'true'})`)
+  } else if (msg.type === 'transportUnload') {
+    host.eval(`__dispatchTransportUnload({ ${Math.floor(msg.id)} }, ${msg.x}, ${msg.z}, ${msg.queue ? 'false' : 'true'})`)
   } else if (msg.type === 'fireState') {
     // No task, no queue: fire state is unit state, not a command
     // (Unit::SetFireState — weapons read it every tick, weapons.lua:89/229).
