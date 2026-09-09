@@ -14,6 +14,7 @@ import { TrailSystem, type TrailBpData } from './viewer/trails'
 import { BeamSystem, type BeamBpData } from './viewer/beams'
 import { GameAudio } from './ui/audio'
 import { EmitterRuntime, type EmitterBpData } from './effects/emitterRuntime'
+import { applyEmitterOverrides, emitterOverrideSignature } from './effects/emitterOverrides'
 import { parseSca } from './formats/sca'
 import { parseScmap } from './formats/scmap'
 import { resolveMeshBlueprintLod, resolveUnitPaths } from './formats/unitPaths'
@@ -928,6 +929,8 @@ const SIM_LOOP_HANDLE_BASE = 1_000_000_000
 /** One-shot sim sounds get unique negative handles (fire and forget). */
 let nextSimOneShotHandle = -1
 const emitterRuntimes = new Map<number, EmitterRuntime>()
+/** The override signature each runtime was built with (a change rebuilds it). */
+const emitterOverrideSigs = new Map<number, string>()
 const emitterBpData = new Map<string, EmitterBpData>()
 const emitterBpPending = new Set<string>()
 let lastEmitterTick = -1
@@ -1081,7 +1084,17 @@ function updateEmitters(): void {
       beams.set(e.id, e.bp, e, tick)
       continue
     }
+    // The Lua's parameter overrides ride the row; a runtime is built with
+    // them (and rebuilt should they change -- the shipped Lua sets them in
+    // the creating tick, so that never happens in play). The particle
+    // BATCH (blend mode, frames, flat, drag shading) stays the blueprint's:
+    // one batch per blueprint id (docs/STATUS.md).
+    const sig = emitterOverrideSignature(e)
     let rt = emitterRuntimes.get(e.id)
+    if (rt && emitterOverrideSigs.get(e.id) !== sig) {
+      emitterRuntimes.delete(e.id)
+      rt = undefined
+    }
     if (!rt) {
       const bp = emitterBpData.get(e.bp)
       if (!bp || !particles.hasBatch(e.bp)) {
@@ -1090,8 +1103,9 @@ function updateEmitters(): void {
         void prepareEmitterBatch(e.bp)
         continue
       }
-      rt = new EmitterRuntime(bp)
+      rt = new EmitterRuntime(sig ? applyEmitterOverrides(bp, e) : bp)
       emitterRuntimes.set(e.id, rt)
+      emitterOverrideSigs.set(e.id, sig)
     }
     const spawns = rt.tick(
       {
@@ -1113,7 +1127,10 @@ function updateEmitters(): void {
     for (const p of spawns) particles.add(e.bp, p)
   }
   for (const id of emitterRuntimes.keys()) {
-    if (!seen.has(id)) emitterRuntimes.delete(id)
+    if (!seen.has(id)) {
+      emitterRuntimes.delete(id)
+      emitterOverrideSigs.delete(id)
+    }
   }
 }
 

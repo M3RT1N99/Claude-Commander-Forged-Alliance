@@ -889,10 +889,180 @@ end
 -- are honest state carriers, not identity stubs.
 local EmitterMeta = {}
 EmitterMeta.__index = EmitterMeta
-function EmitterMeta:OffsetEmitter(x, y, z) self.__offset = { x, y, z }; return self end
-function EmitterMeta:ScaleEmitter(s) self.__scale = s; return self end
-function EmitterMeta:SetEmitterParam(p, v) self.__params[p] = v; return self end
-function EmitterMeta:SetEmitterCurveParam(p, a, b) self.__params[p] = { a, b }; return self end
+
+-- The IEffect parameter bindings (sim only). SetEmitterParam and
+-- SetBeamParam share one body (Cfile:907419-907472): the name is resolved
+-- case-insensitively (sub_8D9FD0, 1382386-1382398) against EEmitterParam
+-- resp. EBeamParam, an unknown one is "Invalid Effect Parameter %s", and
+-- the value goes to mParams[index] (SetFloatParam 889215-889221); the
+-- wrappers want three arguments (907507-907520 / 907556-907570).
+-- ScaleEmitter is SetFloatParam(18 = SCALE) (907605-907643), OffsetEmitter
+-- adds to the three POSITION slots (907918-907968). Here the POSITION
+-- slots are __offset and SCALE is __scale -- the slots the renderer already
+-- reads -- and every other parameter lives in __params by its canonical
+-- name; the curves (SetEmitterCurveParam 907794-907909, ResizeEmitterCurve
+-- 907678-907770) in __curves by the blueprint field they replace.
+--
+-- EEmitterParam (1105690-1105787, prefix EFFECT_ stripped), the aliases
+-- resolve to the slot they share.
+local EFFECT_PARAMS = {
+  POSITION = 'POSITION_X', POSITION_X = 'POSITION_X', POSITION_Y = 'POSITION_Y', POSITION_Z = 'POSITION_Z',
+  TICKCOUNT = 'TICKCOUNT', LIFETIME = 'LIFETIME', REPEATTIME = 'REPEATTIME', TICKINCREMENT = 'TICKINCREMENT',
+  BLENDMODE = 'BLENDMODE', FRAMECOUNT = 'FRAMECOUNT', USE_LOCAL_VELOCITY = 'USE_LOCAL_VELOCITY',
+  USE_LOCAL_ACCELERATION = 'USE_LOCAL_ACCELERATION', USE_GRAVITY = 'USE_GRAVITY',
+  ALIGN_ROTATION = 'ALIGN_ROTATION', INTERPOLATE_EMISSION = 'INTERPOLATE_EMISSION',
+  TEXTURE_STRIPCOUNT = 'TEXTURE_STRIPCOUNT', ALIGN_TO_BONE = 'ALIGN_TO_BONE', SORTORDER = 'SORTORDER',
+  FLAT = 'FLAT', SCALE = 'SCALE', LODCUTOFF = 'LODCUTOFF', EMITIFVISIBLE = 'EMITIFVISIBLE',
+  CATCHUPEMIT = 'CATCHUPEMIT', CREATEIFVISIBLE = 'CREATEIFVISIBLE', SNAPTOWATERLINE = 'SNAPTOWATERLINE',
+  ONLYEMITONWATER = 'ONLYEMITONWATER', PARTICLERESISTANCE = 'PARTICLERESISTANCE', LASTPARAM = 'LASTPARAM',
+}
+-- EBeamParam (1105815-1105895, prefix BEAM_ stripped).
+local BEAM_PARAMS = {
+  POSITION = 'POSITION_X', POSITION_X = 'POSITION_X', POSITION_Y = 'POSITION_Y', POSITION_Z = 'POSITION_Z',
+  ENDPOSITION = 'ENDPOSITION_X', ENDPOSITION_X = 'ENDPOSITION_X', ENDPOSITION_Y = 'ENDPOSITION_Y',
+  ENDPOSITION_Z = 'ENDPOSITION_Z', LENGTH = 'LENGTH', LIFETIME = 'LIFETIME',
+  STARTCOLOR = 'STARTCOLOR_R', STARTCOLOR_R = 'STARTCOLOR_R', STARTCOLOR_G = 'STARTCOLOR_G',
+  STARTCOLOR_B = 'STARTCOLOR_B', STARTCOLOR_A = 'STARTCOLOR_A',
+  ENDCOLOR = 'ENDCOLOR_R', ENDCOLOR_R = 'ENDCOLOR_R', ENDCOLOR_G = 'ENDCOLOR_G', ENDCOLOR_B = 'ENDCOLOR_B',
+  ENDCOLOR_A = 'ENDCOLOR_A', THICKNESS = 'THICKNESS', USHIFT = 'USHIFT', VSHIFT = 'VSHIFT',
+  REPEATRATE = 'REPEATRATE', LODCUTOFF = 'LODCUTOFF', LASTPARAM = 'LASTPARAM',
+}
+-- EEmitterCurve (1105583-1105689, prefix EMITTER_ stripped) -> the
+-- blueprint field it replaces (REmitterBlueprint::Init, 645017-645079;
+-- BEGINSIZE_CURVE is the StartSizeCurve field, ROTATION_CURVE the
+-- InitialRotationCurve). The LAST_CURVE sentinel the enum also carries
+-- indexes past the 21 curves (mCurves stride 2, 893987-894008) and is
+-- refused here.
+local EMITTER_CURVES = {
+  XDIR_CURVE = 'XDirectionCurve', YDIR_CURVE = 'YDirectionCurve', ZDIR_CURVE = 'ZDirectionCurve',
+  EMITRATE_CURVE = 'EmitRateCurve', LIFETIME_CURVE = 'LifetimeCurve', VELOCITY_CURVE = 'VelocityCurve',
+  X_ACCEL_CURVE = 'XAccelCurve', Y_ACCEL_CURVE = 'YAccelCurve', Z_ACCEL_CURVE = 'ZAccelCurve',
+  RESISTANCE_CURVE = 'ResistanceCurve', SIZE_CURVE = 'SizeCurve', X_POSITION_CURVE = 'XPosCurve',
+  Y_POSITION_CURVE = 'YPosCurve', Z_POSITION_CURVE = 'ZPosCurve', BEGINSIZE_CURVE = 'StartSizeCurve',
+  ENDSIZE_CURVE = 'EndSizeCurve', ROTATION_CURVE = 'InitialRotationCurve',
+  ROTATION_RATE_CURVE = 'RotationRateCurve', FRAMERATE_CURVE = 'FrameRateCurve',
+  TEXTURESELECTION_CURVE = 'TextureSelectionCurve', RAMPSELECTION_CURVE = 'RampSelectionCurve',
+}
+local SET_EMITTER_PARAM_HELP = "effect:SetEmitterParam('name', value)returns the effect so you can chain calls like:\n    effect:SetEmitterParam('x',1):ScaleEmitter(3.7)"
+local SET_BEAM_PARAM_HELP = "effect:SetBeamParam('name', value)"
+
+local function argCount(help, want, n)
+  if n ~= want then
+    error(string.format('%s\n  expected %d args, but got %d', help, want, n), 3)
+  end
+end
+
+local function resolveName(table, method, name, errorText)
+  if type(name) ~= 'string' then
+    error("bad argument #1 to '" .. method .. "' (string expected, got " .. type(name) .. ")", 3)
+  end
+  local canon = table[string.upper(name)]
+  if canon == nil then error(errorText .. name, 3) end
+  return canon
+end
+
+local function wantNumber(method, index, value)
+  if type(value) ~= 'number' then
+    error("bad argument #" .. index .. " to '" .. method .. "' (number expected, got " .. type(value) .. ")", 3)
+  end
+  return value
+end
+
+function EmitterMeta:SetEmitterParam(...)
+  argCount(SET_EMITTER_PARAM_HELP, 3, select('#', ...) + 1)
+  local name, value = ...
+  local canon = resolveName(EFFECT_PARAMS, 'SetEmitterParam', name, 'Invalid Effect Parameter ')
+  value = wantNumber('SetEmitterParam', 2, value)
+  if canon == 'POSITION_X' or canon == 'POSITION_Y' or canon == 'POSITION_Z' then
+    local off = self.__offset or { 0, 0, 0 }
+    off[canon == 'POSITION_X' and 1 or canon == 'POSITION_Y' and 2 or 3] = value
+    self.__offset = off
+  elseif canon == 'SCALE' then
+    self.__scale = value
+  else
+    self.__params[canon] = value
+  end
+  return self
+end
+
+function EmitterMeta:SetBeamParam(...)
+  argCount(SET_BEAM_PARAM_HELP, 3, select('#', ...) + 1)
+  local name, value = ...
+  local canon = resolveName(BEAM_PARAMS, 'SetBeamParam', name, 'Invalid Effect Parameter ')
+  self.__beam = self.__beam or {}
+  self.__beam[canon] = wantNumber('SetBeamParam', 2, value)
+  return self
+end
+
+function EmitterMeta:ScaleEmitter(...)
+  argCount("effect:ScaleEmitter(param, scale)\nreturns the effect so you can chain calls like:\n    effect:SetEmitterParam('x',1):ScaleEmitter(3.7)", 2, select('#', ...) + 1)
+  self.__scale = wantNumber('ScaleEmitter', 1, (...))
+  return self
+end
+
+function EmitterMeta:OffsetEmitter(...)
+  argCount('Effect:OffsetEmitter(x,y,z)', 4, select('#', ...) + 1)
+  local x, y, z = ...
+  x = wantNumber('OffsetEmitter', 1, x)
+  y = wantNumber('OffsetEmitter', 2, y)
+  z = wantNumber('OffsetEmitter', 3, z)
+  local off = self.__offset or { 0, 0, 0 }
+  self.__offset = { off[1] + x, off[2] + y, off[3] + z }
+  return self
+end
+
+-- Effect:SetEmitterCurveParam(param_name, height, size): a fresh curve with
+-- the single key {x = 0, y = height, z = size} (907794-907909, sub_5151B0
+-- 649144-649194) -- every sample of it is height +/- size/2
+-- (SEfxCurve::GetValue 649014-649062).
+function EmitterMeta:SetEmitterCurveParam(...)
+  argCount('Effect:SetEmitterCurveParam(param_name, height, size)', 4, select('#', ...) + 1)
+  local name, height, size = ...
+  local field = resolveName(EMITTER_CURVES, 'SetEmitterCurveParam', name, 'Invalid Emitter Curve Parameter ')
+  height = wantNumber('SetEmitterCurveParam', 2, height)
+  size = wantNumber('SetEmitterCurveParam', 3, size)
+  self.__curves = self.__curves or {}
+  self.__curves[field] = { XRange = 0, Keys = { { 0, height, size } } }
+  return self
+end
+
+-- Effect:ResizeEmitterCurve(parameter, time_in_ticks): the current curve
+-- (the override, else the blueprint's), its key times scaled by the new
+-- range over the old (sub_515090 649104-649136: x * (ticks - 0) /
+-- (xEnd - xStart)), the range set to the new one (907678-907770).
+function EmitterMeta:ResizeEmitterCurve(...)
+  argCount("Effect:ResizeEmitterCurve(parameter, time_in_ticks)Resize the emitter curve to the number of ticks passed in.\nThis is so if we change the lifetime of the emitter we can rescale some of the curves to match if needed.\nArguably this should happen automatically to all curves but the original design was screwed up.\n\nreturns the effect so you can chain calls like:\n    effect:SetEmitterParam('x',1):ScaleEmitter(3.7)", 3, select('#', ...) + 1)
+  local name, ticks = ...
+  local field = resolveName(EMITTER_CURVES, 'ResizeEmitterCurve', name, 'Invalid Emitter Curve Parameter ')
+  ticks = wantNumber('ResizeEmitterCurve', 2, ticks)
+  local source = self.__curves and self.__curves[field]
+  local keys, range
+  if source then
+    keys, range = source.Keys, source.XRange
+  else
+    local bp = __registered.Emitter[self.__spec] or __registered.TrailEmitter[self.__spec] or __registered.Beam[self.__spec]
+    if not bp then
+      error('ResizeEmitterCurve: no emitter blueprint ' .. tostring(self.__spec) .. ' in the sim', 2)
+    end
+    local curve = bp[field]
+    keys = {}
+    for i, k in ipairs((curve and curve.Keys) or {}) do keys[i] = { k.x or 0, k.y or 0, k.z or 0 } end
+    range = (curve and curve.XRange) or 0
+  end
+  -- A curve without a range (the single key SetEmitterCurveParam installs)
+  -- would scale by ticks / 0: the engine writes infinities into the key
+  -- times there; we refuse instead of carrying non-finite keys.
+  if range == 0 then
+    error('ResizeEmitterCurve: the ' .. name .. ' curve has no range to scale', 2)
+  end
+  local factor = ticks / range
+  local out = {}
+  for i, k in ipairs(keys) do out[i] = { k[1] * factor, k[2], k[3] } end
+  self.__curves = self.__curves or {}
+  self.__curves[field] = { XRange = ticks, Keys = out }
+  return self
+end
+
 function EmitterMeta:SetAmbientSound(a, b) return self end
 function EmitterMeta:SetSoftness(s) self.__softness = s; return self end
 function EmitterMeta:Enable() self.__enabled = true; return self end
@@ -911,6 +1081,42 @@ local function newEmitter(owner, bone, army, spec)
   __nextEmitterId = __nextEmitterId + 1
   __emitters[#__emitters + 1] = e
   return e
+end
+
+--- The parameter overrides of an emitter as JSON fragments: "params" (the
+--- scalar mParams by name), "curves" (the replaced curves by blueprint
+--- field, keys as [x, y, z]) and "beam" (EBeamParam) -- each only when set.
+function __emitterParamsJson(e)
+  local out = ''
+  if next(e.__params) ~= nil then
+    local parts, n = {}, 0
+    for name, value in pairs(e.__params) do
+      n = n + 1
+      parts[n] = string.format('%q:%.6g', name, value)
+    end
+    out = out .. ',"params":{' .. table.concat(parts, ',') .. '}'
+  end
+  if e.__curves and next(e.__curves) ~= nil then
+    local parts, n = {}, 0
+    for field, curve in pairs(e.__curves) do
+      local keys = {}
+      for i, k in ipairs(curve.Keys) do
+        keys[i] = string.format('[%.6g,%.6g,%.6g]', k[1], k[2], k[3])
+      end
+      n = n + 1
+      parts[n] = string.format('%q:{"XRange":%.6g,"Keys":[%s]}', field, curve.XRange, table.concat(keys, ','))
+    end
+    out = out .. ',"curves":{' .. table.concat(parts, ',') .. '}'
+  end
+  if e.__beam and next(e.__beam) ~= nil then
+    local parts, n = {}, 0
+    for name, value in pairs(e.__beam) do
+      n = n + 1
+      parts[n] = string.format('%q:%.6g', name, value)
+    end
+    out = out .. ',"beam":{' .. table.concat(parts, ',') .. '}'
+  end
+  return out
 end
 
 --- Der Zustand aller lebenden Emitter als JSON — der Renderer (Partikelsystem)
@@ -949,12 +1155,13 @@ function __readAllEmittersJson()
       end
       n = n + 1
       parts[n] = string.format(
-        '{"id":%d,"bp":%q,"x":%.6g,"y":%.6g,"z":%.6g,"qw":%.6g,"qx":%.6g,"qy":%.6g,"qz":%.6g,"scale":%.6g,"born":%d,"enabled":%s%s%s}',
+        '{"id":%d,"bp":%q,"x":%.6g,"y":%.6g,"z":%.6g,"qw":%.6g,"qx":%.6g,"qy":%.6g,"qz":%.6g,"scale":%.6g,"born":%d,"enabled":%s%s%s%s}',
         e.__id, tostring(e.__spec), pos[1], pos[2], pos[3],
         rot[1], rot[2], rot[3], rot[4],
         e.__scale or 1, e.__born, tostring(e.__enabled == true),
         off and string.format(',"ox":%.6g,"oy":%.6g,"oz":%.6g', off[1] or 0, off[2] or 0, off[3] or 0) or '',
-        zwei
+        zwei,
+        __emitterParamsJson(e)
       )
     end
   end

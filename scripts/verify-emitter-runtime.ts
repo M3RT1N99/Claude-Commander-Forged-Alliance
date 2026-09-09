@@ -10,6 +10,7 @@
  *   npx tsx scripts/verify-emitter-runtime.ts
  */
 import { EmitterRuntime, type EmitterState } from '../src/effects/emitterRuntime'
+import { applyEmitterOverrides, emitterOverrideSignature } from '../src/effects/emitterOverrides'
 
 let failures = 0
 const check = (ok: boolean, label: string): void => {
@@ -153,6 +154,44 @@ console.log('\n== Emitter-Lifetime: nach Ablauf keine Emission mehr ==')
   const je: number[] = []
   for (let i = 0; i < 5; i++) je.push(rt.tick(ruhend, i).length)
   check(je.join(',') === '1,1,1,0,0', `Lifetime 3 → 3 Ticks Emission (${je.join(',')})`)
+}
+
+console.log('\n== The Lua parameter overrides on the runtime (SetEmitterParam / SetEmitterCurveParam) ==')
+{
+  // The row's params/curves become the per-instance mParams/mCurves
+  // (emitterOverrides.ts): LIFETIME and REPEATTIME onto their fields, the
+  // flags tested > 0 like the engine (Cfile:894849, :894894), a replaced
+  // curve as a key list.
+  const bp = {
+    Lifetime: 20,
+    Repeattime: 20,
+    Gravity: true,
+    EmitRateCurve: { XRange: 20, Keys: [{ x: 0, y: 1, z: 0 }] },
+    XPosCurve: { XRange: 20, Keys: [{ x: 0, y: 5, z: 0 }] },
+  }
+  const eff = applyEmitterOverrides(bp, {
+    params: { LIFETIME: 12, REPEATTIME: 12, USE_GRAVITY: -1, FLAT: 2, SORTORDER: 7 },
+    curves: { XPosCurve: { XRange: 0, Keys: [[0, 0, 3]] } },
+  })
+  check(eff.Lifetime === 12 && eff.Repeattime === 12, `LIFETIME/REPEATTIME land on Lifetime/Repeattime (${eff.Lifetime}, ${eff.Repeattime})`)
+  check(eff.Gravity === false, `a flag at -1 is off: the engine tests > 0 (Gravity ${eff.Gravity})`)
+  check(eff.Flat === true, `a flag at 2 is on (Flat ${eff.Flat})`)
+  check(!('SORTORDER' in eff), 'a parameter the runtime has no field for is left alone')
+  check(
+    JSON.stringify(eff.XPosCurve) === JSON.stringify({ XRange: 0, Keys: [{ x: 0, y: 0, z: 3 }] }),
+    `the replaced curve is a key list in the blueprint shape (${JSON.stringify(eff.XPosCurve)})`,
+  )
+  check(eff.EmitRateCurve === bp.EmitRateCurve && bp.Lifetime === 20, 'untouched curves are shared, the blueprint itself is not written')
+  // The runtime honours the override: Lifetime 12 stops emission after 12 ticks.
+  const rt = new EmitterRuntime(eff, () => 0.5)
+  const state: EmitterState = { x: 0, y: 0, z: 0, qw: 1, qx: 0, qy: 0, qz: 0, scale: 1, enabled: true }
+  let spawned = 0
+  for (let t = 0; t < 30; t++) spawned += rt.tick(state, t).length
+  check(spawned === 12, `an emitter with LIFETIME 12 spawns for 12 ticks at rate 1 (${spawned})`)
+  // The single-key position curve: every spawn at 0 +/- 1.5 (rand 0.5 -> 0).
+  const p = new EmitterRuntime(eff, () => 0.5).tick(state, 0)[0]!
+  check(Math.abs(p.px) < 1e-9, `the replaced XPosCurve puts the spawn at x 0 (${p.px})`)
+  check(emitterOverrideSignature({}) === '' && emitterOverrideSignature({ params: { LIFETIME: 1 } }) !== '', 'the signature is empty without overrides')
 }
 
 console.log(failures === 0 ? '\nEMITTER-LAUFZEIT BESTANDEN' : `\n${failures} CHECK(S) FEHLGESCHLAGEN`)

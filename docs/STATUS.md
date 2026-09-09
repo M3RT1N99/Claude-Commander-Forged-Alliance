@@ -1802,8 +1802,10 @@ line of sight, 909075-909090); `CreateSplat`/`CreateDecal`/
 per-army visibility of CDecalBuffer::CreateHandle is not modelled); the
 shield dome and
 the personal shield's unit-mesh swap are drawn now (see "The shield dome"
-and "The personal shield" below); `SetEmitterParam`/`SetEmitterCurveParam`
-are write-only; `SetBeamParam` and `ResizeEmitterCurve` are missing.
+and "The personal shield" below); the IEffect parameters
+(`SetEmitterParam`, `SetEmitterCurveParam`, `ResizeEmitterCurve`,
+`SetBeamParam`) reach the emitter runtime now (see "The IEffect
+parameters" below; the beam ones are carried, not yet drawn).
 
 **The picture.** The original renderer is NOT colour-managed: the device
 default state sets D3DSAMP_SRGBTEXTURE to 0 for all samplers and
@@ -2519,3 +2521,93 @@ the renderer is UNVERIFIED -- nothing else in the renderer indexes beyond
 - A handle destroyed while its textures still load is placed already
   fading (the engine's object exists from the sync on); the frame or two
   of difference are the asynchronous load's.
+
+## The IEffect parameters: SetEmitterParam, SetEmitterCurveParam, ResizeEmitterCurve, SetBeamParam
+
+**What was wrong.** The emitter object took `SetEmitterParam` and
+`SetEmitterCurveParam` into a private table nothing read, and had no
+`SetBeamParam` or `ResizeEmitterCurve` at all. The shipped Lua uses them:
+defaultexplosions.lua:341-342 randomises a fire plume's REPEATTIME and
+LIFETIME per spawn, effectutilities.lua:516 and unit.lua:2603 lift the
+Aeon build beam and the air contrails with `SetEmitterParam('POSITION_Z',
+...)` -- which in the engine is the very slot `OffsetEmitter` accumulates
+on, so those effects sat at Z 0 here -- and effectutilities.lua:355-356
+spreads the Aeon "being built" ripple over the footprint with
+`SetEmitterCurveParam`.
+
+**The engine.** All six methods are `IEffect`'s (sim only). SetEmitterParam
+and SetBeamParam share one body (Cfile:907419-907472): the name is
+resolved case-insensitively (sub_8D9FD0, 1382386-1382398) against
+EEmitterParam (1105690-1105787: POSITION/_X/_Y/_Z, TICKCOUNT, LIFETIME,
+REPEATTIME, TICKINCREMENT, BLENDMODE, FRAMECOUNT, USE_LOCAL_VELOCITY,
+USE_LOCAL_ACCELERATION, USE_GRAVITY, ALIGN_ROTATION, INTERPOLATE_EMISSION,
+TEXTURE_STRIPCOUNT, ALIGN_TO_BONE, SORTORDER, FLAT, SCALE, LODCUTOFF,
+EMITIFVISIBLE, CATCHUPEMIT, CREATEIFVISIBLE, SNAPTOWATERLINE,
+ONLYEMITONWATER, PARTICLERESISTANCE) resp. EBeamParam (1105815-1105895),
+an unknown one is "Invalid Effect Parameter %s", and the value goes to
+mParams[index] (SetFloatParam 889215-889221); three arguments
+(907507-907520 / 907556-907570). ScaleEmitter is SetFloatParam(18 = SCALE)
+(907605-907643); OffsetEmitter reads the three POSITION slots, adds and
+writes them back (907918-907968). SetEmitterCurveParam(name, height,
+size) resolves EEmitterCurve (1105583-1105689) and installs a fresh curve
+with the single key {0, height, size} (907794-907909, sub_5151B0
+649144-649194) -- SEfxCurve::GetValue (649014-649062) then returns height
++/- size/2 for every sample. ResizeEmitterCurve(name, ticks) copies the
+current curve and scales its key times by ticks over the old range
+(907678-907770, sub_515090 649104-649136). Only SetBeamParam and
+ResizeEmitterCurve have no caller in the shipped Lua.
+
+**The port.** globals.lua: the three name tables, the aliases resolving to
+their slot (POSITION -> POSITION_X, STARTCOLOR -> STARTCOLOR_R), the
+engine's argument counts and error texts; POSITION_X/Y/Z write the
+`__offset` slots OffsetEmitter accumulates on and SCALE the `__scale` slot
+ScaleEmitter writes -- the slots the renderer already read; every other
+parameter lands in `__params` by its canonical name, the curves in
+`__curves` by the blueprint field they replace (XDIR_CURVE ->
+XDirectionCurve, BEGINSIZE_CURVE -> StartSizeCurve, ROTATION_CURVE ->
+InitialRotationCurve, ...), ResizeEmitterCurve reading the source curve
+from the override or the registered emitter blueprint. The emitter row
+carries `params`, `curves` and `beam` when set; the renderer builds the
+EmitterRuntime from the blueprint with those applied
+(src/effects/emitterOverrides.ts: LIFETIME, REPEATTIME, FRAMECOUNT,
+TEXTURE_STRIPCOUNT, BLENDMODE and the seven flags onto their fields, a
+flag tested > 0 like the engine, Cfile:894849; the curves as key lists)
+and rebuilds it should the overrides change.
+
+**Checks** (verify-sim-entities.ts, new block): a fire plume emitter on an
+ACU with the defaultexplosions calls, POSITION_Z plus OffsetEmitter (oz
+0.55), ScaleEmitter and SetEmitterParam('SCALE') on one slot, the
+single-key curve, ResizeEmitterCurve doubling the blueprint's EmitRateCurve
+key times (XRange 20 -> 40), the unknown-name and argument-count errors,
+case-insensitive names, SetBeamParam on a beam effect. Seen red first
+(ResizeEmitterCurve was nil). verify-emitter-runtime.ts: the overrides on
+the runtime -- LIFETIME/REPEATTIME on their fields, a flag at -1 off and
+at 2 on, an unknown name left alone, the replaced curve's shape, an
+emitter with LIFETIME 12 spawning for 12 ticks (the flag check seen red
+while the port still tested != 0).
+
+**UNVERIFIED / not modelled.**
+
+- The beam parameters (THICKNESS, the colours, the UV shifts, LENGTH,
+  LIFETIME) reach the row and stop there: which render-side code reads
+  them off mParams to build the beam quad is not traced
+  (CEfxBeam::Update 889527-889626 uses only the positions and LENGTH); no
+  shipped Lua calls SetBeamParam.
+- TICKCOUNT, TICKINCREMENT, ALIGN_ROTATION, SORTORDER, LODCUTOFF,
+  EMITIFVISIBLE, CATCHUPEMIT, CREATEIFVISIBLE, SNAPTOWATERLINE and
+  ONLYEMITONWATER have no reader in the runtime (the features behind
+  them are not modelled); no shipped Lua sets them.
+- A parameter change after the emitter's first frame rebuilds the runtime
+  and so resets its tick counter; the engine changes one slot in place.
+  The shipped Lua sets its parameters in the creating tick.
+- The curve header's x start is taken as 0 for the resize ratio (the
+  blueprint XRange as the old range); the header layout (sub_514FF0) is
+  read, not decoded field by field. Resizing a curve without a range
+  (the single key SetEmitterCurveParam installs) is refused with an error
+  where the engine would write infinite key times.
+- The particle BATCH is built once per blueprint id from the blueprint
+  (blend mode, frame count, flat, drag shading): an override of
+  BLENDMODE, FRAMECOUNT, FLAT or PARTICLERESISTANCE changes the runtime's
+  kinematics, not the drawn batch. No shipped Lua sets those four.
+- The beam parameters do not enter the runtime's override signature
+  (nothing reads them yet).

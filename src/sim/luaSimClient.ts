@@ -182,6 +182,15 @@ export interface LuaEmitterSnapshot {
   ox?: number
   oy?: number
   oz?: number
+  /**
+   * SetEmitterParam by canonical EEmitterParam name (the POSITION slots
+   * are ox/oy/oz, SCALE is scale) -- present only when the Lua set one.
+   */
+  params?: Record<string, number>
+  /** SetEmitterCurveParam / ResizeEmitterCurve: the replaced curves by blueprint field. */
+  curves?: Record<string, { XRange: number; Keys: [number, number, number][] }>
+  /** SetBeamParam by canonical EBeamParam name. */
+  beam?: Record<string, number>
   /** Zweiter Endpunkt (nur Beams via AttachBeamEntityToEntity —
    *  CEfxBeam::AttachEntityToEntity @0x655B50): das Ziel-Bone in Welt. */
   x2?: number
