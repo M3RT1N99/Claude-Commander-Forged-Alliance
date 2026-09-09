@@ -2673,7 +2673,7 @@ attack colours with its own waypoint (commandgraphparams.lua:54-58).
 **Still missing** (each a strict-_G error when called; shipped callers in
 brackets; IssueTransportLoad and IssueTransportUnload have since arrived --
 "The transport" below): IssueDive [platoon.lua:2294,
-xss0201_script.lua:66], IssueOverCharge [ai/aibehaviors.lua:147],
+xss0201_script.lua:66],
 IssueFactoryAssist [aibrain.lua:2076], IssueScript [platoon.lua:293],
 IssueTactical [platoon.lua:382], IssueNuke [platoon.lua:417],
 IssueTeleport [aibehaviors.lua:59], IssueFormAttack [platoon.lua:2517],
@@ -2684,8 +2684,8 @@ IssueSacrifice, IssueSiloBuildNuke, IssueSiloBuildTactical,
 IssueTeleportToBeacon, IssueTransportUnloadSpecific. The dive,
 overcharge, silo and teleport TASKS behind the first group are not
 modelled in the sim, which is why the bindings stay absent rather than
-queueing orders that nothing runs. IssueCapture and its task are ported
-since ("The capture" below).
+queueing orders that nothing runs. IssueCapture and IssueOverCharge and
+their tasks are ported since ("The capture", "The overcharge" below).
 
 **UNVERIFIED.** IsValid_Vector3f's exact test (here: present and not
 NaN); the roll-off flag's consumer; the AggressiveMove line texture
@@ -3190,3 +3190,117 @@ the passengers' IsMobile of the transfer (1073822), both read off the
 blueprint's MotionType; the attached unit's slot 10 read as IsBeingBuilt
 (826890); the target's field at +332 read as its army (826731); the
 SCR_FromLua_Unit and the integer TypeError texts of ChangeUnitArmy.
+
+## The overcharge: the attack task pinned to the OverChargeWeapon, IssueOverCharge, the paused flag in the user layer
+
+**What was wrong.** `IssueOverCharge` was a strict-_G miss
+(ai/aibehaviors.lua:147, ai/opai/opbehaviors.lua:96); the UI's Overcharge
+button (orders.lua EnterOverchargeMode, RULEUCC_Overcharge) armed a mode
+whose click the world handler refused as "not wired to the sim yet"; the
+user layer's `IsOverchargePaused` answered false always, so the button
+never greyed out during the ACU's pause.
+
+**The engine.** `UNITCOMMAND_OverCharge` is no task of its own:
+DispatchTask (831092-831098, under the off-by-one case label) creates the
+attack task `CUnitAttackTargetTask` with the overcharge flag for an entity
+target that is not allied, and nothing for any other target (the command
+completes at once). The constructor with the flag (812610-812640) takes
+the first weapon whose blueprint has `OverChargeWeapon`, keeps it as
+mWeapon and runs its `OnEnableWeapon`. With a pinned weapon TaskTick
+(813121-813506) never asks the attacker for one (813216-813218): Waiting
+sets the navigator's goal through Update (812845-813013) -- within the
+MaxRadius of the attacker's target weapon, the first weapon that can
+attack the target (GetTargetWeapon 791305-791320; SetWeaponGoal
+812691-812720, 813277-813299); Processing renews the goal when the
+navigator went idle or a mobile target left it by more than 10 (2 for a
+flyer; 813391-813410) and waits until the target is within the pinned
+weapon's attack range (TargetIsWithinWeaponAttackRange 791447-791460: the
+unit finished, the weapon enabled, CanAttackTarget, the range solution),
+then the weapon takes the target (UnitWeapon::SetTarget 813431); Complete
+waits for the script's `CanWeaponFire` (813474-813475; the weapon FSM
+keeps it false while its economy drain runs, defaultweapons.lua:487-494),
+sends a mobile unit whose position changed back through Update
+(813477-813483), and fires once the weapon is enabled and
+UnitWeapon::CanFire holds (813485-813490): UnitWeapon::Fire is
+`RunScript("OnFire")` and one more shot at the target (985600-985602).
+The fifth state aborts the move and ends the task (813493-813495,
+sub_5F3420); the destructor runs `OnDisableWeapon` on the pinned weapon
+and aborts the move (813679-813725). The price is the script's:
+StartEconomyDrain (defaultweapons.lua:132-147) creates an economy event of
+EnergyRequired over EnergyRequired / EnergyDrainPerSecond seconds -- not
+before the first shot when the blueprint says `EnergyChargeForFirstShot =
+false` (81-82, 133), and again right after each shot for the next
+(615-617). The ACU's own OverCharge weapon (uel0001_script.lua:30-95)
+disables itself after the shot and pauses the unit for 1 / RateOfFire
+seconds through `SetOverchargePaused` (cfunc 976254; the user layer's
+`UserUnit::IsOverchargePaused` 1362603-1362605 behind
+cfunc_UserUnitIsOverchargePausedL 1366354-1366375 gates the button,
+orders.lua:642/663). The
+binding IssueOverCharge (cfunc_IssueOverChargeL 1008066-1008140): two
+arguments, RULEUCC_Overcharge, an entity target left in the set,
+UNITCOMMAND_OverCharge with clear = 0, no handle; the user's dispatch
+needs the unit's RULEUCC_Overcharge cap (func_ProcessUnitCommand
+1007470-1007472), and the world view issues the entity under the cursor
+(1241977-1241990).
+
+**The port.** `src/engine-lua/overcharge.lua` (new; src/sim/overcharge.ts
+after the capture): the pinned-weapon attack task as a per-unit state
+machine ticked from `__ordersTick` through the order type `OverCharge`
+(`__overchargeStart` -- the dispatch and the constructor,
+`__overchargeOrderTick`, `__overchargeAbort` -- the destructor, also from
+the abort and stop paths). weapons.lua exposes the aim tick and the
+target test (`__weaponAimTick`, `__weaponCanTarget`) for a task that
+pins a ManualFire weapon the weapon tick skips. globals.lua: the order
+type, `__dispatchOverCharge` (with the cap), `IssueOverCharge`. The user
+layer: the unit row carries `overchargePaused` (units.lua -> the
+snapshot -> gameUi.ts `__uiSetUnit` -> `UserUnitMeta:IsOverchargePaused`
+in ui-globals.lua); the selection row carries `canOvercharge`;
+worldCommands.ts issues the overcharge for the RULEUCC_Overcharge mode on
+an enemy unit; the sim client / worker carry `overcharge`.
+
+**Checks** (scripts/verify-overcharge.ts, new, 27 checks): uel0001's
+OverCharge weapon disabled at rest; the binding's arity and target
+errors and the cap filter; the army's store above EnergyRequired; the
+command with its task and the pinned weapon's OnEnableWeapon; the weapon
+taking the target within its range, the shot, OnWeaponFired, a hit of
+more than 1000 in one beat that kills a T2 tank (the ACU's gun does about
+100), the drain of about 5000 for the next shot, the weapon disabled and
+the overcharge paused afterwards, the paused flag in the JSON row, the
+command completed, the pause ending after 1 / RateOfFire seconds; a far
+target approached to within MaxRadius 22 before the weapon takes it and
+killed, the goal renewed when that target is warped away by more than
+10 during the approach; an abort on the way running OnDisableWeapon
+without a shot, the
+weapon disabled, the move aborted; an allied target without a task; the
+user dispatch refusing a unit without the cap; no Lua errors. Seen red
+first: the shot and everything after it without the pinned weapon's aim
+tick; the kill and the drain checks while a T1 tank died to the ACU's
+gun and the drain was expected before the first shot (it follows it).
+verify-command-chain's "unwired mode" check moved from Overcharge to
+Nuke.
+
+**Review corrections** (a fresh agent against the Cfile): Complete's
+re-approach of a mobile unit whose position changed (813477-813483) was
+claimed and not coded -- it is now, with the position of the last tick;
+the approach goes by the attacker's target weapon (GetTargetWeapon,
+Update 812965-812970), not the pinned weapon; Processing renews the goal
+of a mobile target that left it (813393-813410); the user layer's
+IsOverchargePaused is UserUnit's (1362603-1362605), not the Sim's
+(976303); three citations off by one or two lines; the formation is none
+on this path (831097) and left the "Not modelled" list;
+docs/research/command-dispatch-binary.md's OverCharge row said
+`CUnitFireAtTask`.
+
+**Not modelled, recorded rather than faked.**
+
+* **The coordinating command** of the attack task (813266-813275,
+  813304-813330), **the "too close" back-off** (Starting, 813302-813360),
+  **the attack angle facing** (813498-813525) and **the fit test of a
+  renewed goal** (func_UnitWontFitAt 813404): none; a target closer than
+  MinRadius stays untargetable through the range solution.
+* **UNITSTATE Attacking** of the attack task (cleared in the destructor,
+  813690): the port's attack orders do not set it either.
+
+**UNVERIFIED.** The `mWeapon->v93` flag of the re-approach test (813479)
+is not read and taken as clear; the Attacking bit's number (bit 3 of
+mUnitStates, `&= ~8`).

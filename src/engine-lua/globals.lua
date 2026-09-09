@@ -1945,6 +1945,7 @@ local function __abortActive(unitId)
   __reclaimTasks[unitId] = nil
   __transportAbort(unitId)
   __captureAbort(unitId)
+  __overchargeAbort(unitId)
   u.__guardedUnit = false
   u:GetNavigator():AbortMove()
 end
@@ -2462,6 +2463,10 @@ local function __startOrder(unitId, cmd)
     -- The capture task (capture.lua, CUnitCaptureTask): the dispatch
     -- constructor of DispatchTask's UNITCOMMAND_Capture case (830696).
     return __captureStart(unitId, cmd)
+  elseif cmd.type == 'OverCharge' then
+    -- The attack task pinned to the OverChargeWeapon (overcharge.lua;
+    -- DispatchTask's UNITCOMMAND_OverCharge case 831092-831098).
+    return __overchargeStart(unitId, cmd)
   elseif cmd.type == 'Guard' then
     return __guardStart(unitId, cmd.target)
   elseif cmd.type == 'TransportLoad' or cmd.type == 'TransportReverseLoad' or cmd.type == 'TransportUnload' then
@@ -2568,6 +2573,7 @@ function __ordersTick()
       __orderActive[unitId] = nil
       __transportAbort(unitId)
       __captureAbort(unitId)
+      __overchargeAbort(unitId)
       __transports[unitId] = nil
     elseif u.__dead or u.__destroyQueued then
       -- Nothing. Dispatch runs only while !IsDead
@@ -2626,6 +2632,8 @@ function __ordersTick()
       elseif cmd.type == 'Capture' then
         -- The task's TaskTick; true ends the command (capture.lua).
         done = __captureOrderTick(unitId, cmd)
+      elseif cmd.type == 'OverCharge' then
+        done = __overchargeOrderTick(unitId, cmd)
       elseif cmd.type == 'Guard' then
         -- Guarded unit died (Cfile:839365) — but an adopted reclaim task
         -- (sub_612E80) sits ABOVE the guard on the engine's task stack and
@@ -2672,6 +2680,7 @@ function __dispatchStop(unitId)
   __reclaimTasks[unitId] = nil
   __transportAbort(unitId)
   __captureAbort(unitId)
+  __overchargeAbort(unitId)
   u.__guardedUnit = false
   u:GetNavigator():AbortMove()
   u.__faceGoal = false
@@ -2724,6 +2733,16 @@ end
 --- finished target ends the task immediately (TaskTick -1, Cfile:817856).
 function __dispatchRepair(unitId, targetId, clear)
   __issueOrder(unitId, { type = 'Repair', target = targetId }, clear)
+end
+
+--- OverCharge (UNITCOMMAND_OverCharge -- overcharge.lua): the user's click
+--- in the RULEUCC_Overcharge order mode on a unit (the world view issues
+--- the entity target, 1241977-1241990; the dispatcher needs the unit's
+--- RULEUCC_Overcharge cap, func_ProcessUnitCommand 1007470-1007472).
+function __dispatchOverCharge(unitId, targetId, clear)
+  local u = __units[unitId]
+  if not u or not hasCommandCap(u, 'RULEUCC_Overcharge') then return end
+  __issueOrder(unitId, { type = 'OverCharge', target = targetId }, clear)
 end
 
 --- Capture (UNITCOMMAND_Capture, CUnitCaptureTask -- capture.lua): the
@@ -3183,6 +3202,22 @@ function IssueRepair(...)
   local id = issueEntity('IssueRepair', target)
   for _, u in ipairs(issueWithoutTarget(issueValidate(issueUnits('IssueRepair', units), 'RULEUCC_Repair'), id)) do
     __issueOrder(u.__id, { type = 'Repair', target = id }, false)
+  end
+end
+
+--- IssueOverCharge(units, target) -- cfunc_IssueOverChargeL
+--- (Cfile:1008066-1008140): two arguments, RULEUCC_Overcharge
+--- (func_Validate_IssueCommand 1008107), an entity target
+--- (SCR_FromLua_Entity + CAiTarget::UpdateTarget 1008115-1008120, the set
+--- left as it is), UNITCOMMAND_OverCharge through UNIT_IssueCommand with
+--- clear = 0 (1008133), no handle. ai/aibehaviors.lua:147 and
+--- ai/opai/opbehaviors.lua:96 overcharge with it.
+function IssueOverCharge(...)
+  issueArgs('IssueOverCharge', 2, ...)
+  local units, target = ...
+  local id = issueEntity('IssueOverCharge', target)
+  for _, u in ipairs(issueValidate(issueUnits('IssueOverCharge', units), 'RULEUCC_Overcharge')) do
+    __issueOrder(u.__id, { type = 'OverCharge', target = id }, false)
   end
 end
 

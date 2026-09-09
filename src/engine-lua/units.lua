@@ -923,6 +923,10 @@ local function readRow(id, u)
     customName = u.__customName or '',
     -- UNITSTATE_UnSelectable (SetUnSelectable, Cfile:974215-974260).
     unselectable = (u.__unitStates and u.__unitStates.UnSelectable) == true,
+    -- mOverchargePaused (Unit:SetOverchargePaused, cfunc 976254; the user
+    -- layer's UserUnit::IsOverchargePaused 1362603-1362605 gates the
+    -- overcharge button, orders.lua:642/663).
+    overchargePaused = u.__overchargePaused == true,
     -- WorkProgress (mUnitVarDat.mWorkProgress): what this unit is working on,
     -- written by the build task every tick (Cfile:815482) and by Lua for
     -- enhancements (unit.lua:3579). The UI shows exactly this
@@ -1023,6 +1027,7 @@ function __readAllUnitsJson()
       .. ',"restrict":' .. jstr(r.restrict)
       .. (r.customName ~= '' and (',"customName":' .. jstr(r.customName)) or '')
       .. (r.unselectable and ',"unselectable":true' or '')
+      .. (r.overchargePaused and ',"overchargePaused":true' or '')
       .. (function()
         if not r.hidden then return '' end
         local hs = {}

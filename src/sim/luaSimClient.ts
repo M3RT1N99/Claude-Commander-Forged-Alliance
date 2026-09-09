@@ -97,6 +97,9 @@ export interface LuaUnitSnapshot {
   /** UNITSTATE_UnSelectable (SetUnSelectable, Cfile:974215-974260); absent
    *  when selectable. */
   unselectable?: boolean
+  /** mOverchargePaused (SetOverchargePaused, Cfile:976254); absent when not
+   *  paused -- the user layer's UserUnit::IsOverchargePaused (1362603-1362605). */
+  overchargePaused?: boolean
   /** WorkProgress (mUnitVarDat.mWorkProgress): the progress of what this unit
    *  is building/upgrading/enhancing, written by the build task every tick
    *  (Cfile:815482). construction.lua:380 draws it. */
@@ -742,6 +745,10 @@ export class LuaSimClient {
   /** Capture (UNITCOMMAND_Capture, CUnitCaptureTask): take the enemy `targetId` over. */
   capture(id: number, targetId: number, queue = false): void {
     this.worker.postMessage({ type: 'capture', id, targetId, queue })
+  }
+  /** OverCharge (UNITCOMMAND_OverCharge): fire the OverChargeWeapon at `targetId`. */
+  overcharge(id: number, targetId: number, queue = false): void {
+    this.worker.postMessage({ type: 'overcharge', id, targetId, queue })
   }
   /**
    * TransportLoadUnits (the CallTransport click, Cfile:1241799-1241870): the

@@ -172,6 +172,9 @@ const sim = {
   capture: (id: number, targetId: number): void => {
     simHost.eval(`__dispatchCapture(${id}, ${targetId})`)
   },
+  overcharge: (id: number, targetId: number): void => {
+    simHost.eval(`__dispatchOverCharge(${id}, ${targetId})`)
+  },
   guard: (id: number, targetId: number): void => {
     simHost.eval(`__dispatchGuard(${id}, ${targetId})`)
   },
@@ -404,7 +407,8 @@ console.log('\n== An unwired order mode fails loudly ==')
   simHost.eval(`__abortBuildTasks(${acu}); __attackOrders[${acu}] = nil; __orders[${acu}] = nil; __orderActive[${acu}] = nil`)
   mirror()
   uiHost.eval(`return __uiSelectByIds({ ${acu} })`)
-  uiHost.eval(`import('/lua/ui/game/commandmode.lua').StartCommandMode('order', { name = 'RULEUCC_Overcharge' })`)
+  uiHost.eval(`import('/lua/ui/game/commandmode.lua').StartCommandMode('order', { name = 'RULEUCC_Nuke' })`)
+  // Overcharge is wired since (overcharge.lua); the nuke launch is not.
   const ocMsg = await worldClick(uiHost, sim, { x: 190, z: 190 }, () => 20, { queue: false })
   check(
     ocMsg !== null && ocMsg.includes('not wired'),

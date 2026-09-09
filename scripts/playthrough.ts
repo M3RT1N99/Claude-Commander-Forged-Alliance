@@ -249,6 +249,7 @@ const simFassade: WorldCommandSim = {
   attackGround: ungenutzterBefehl('attackGround'),
   repair: ungenutzterBefehl('repair'),
   capture: ungenutzterBefehl('capture'),
+  overcharge: ungenutzterBefehl('overcharge'),
   guard: ungenutzterBefehl('guard'),
   patrol: ungenutzterBefehl('patrol'),
   reclaim: ungenutzterBefehl('reclaim'),

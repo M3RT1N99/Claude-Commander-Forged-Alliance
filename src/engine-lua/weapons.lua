@@ -689,3 +689,10 @@ function __weaponTick()
   -- laeuft in derselben Sim-Stage wie die Waffen-Tasks).
   __beamTick()
 end
+
+-- The aim tick and the target test for a task that pins a weapon of its
+-- own (the overcharge, overcharge.lua): the weapon tick above skips a
+-- ManualFire weapon, the engine's aim manipulators and
+-- UnitWeapon::CanAttackTarget do not.
+__weaponAimTick = aimTick
+__weaponCanTarget = function(w, u, t) return canTarget(w, u, t) end

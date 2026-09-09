@@ -139,6 +139,9 @@ function __uiSelectionJson()
     -- RULEUCC_Capture: the capture click (CUnitCaptureTask) needs the cap
     -- (func_Validate_IssueCommand, Cfile:1011614).
     local canCapture = hasCommandCap(commandCapMask, 'RULEUCC_Capture')
+    -- RULEUCC_Overcharge: the overcharge click (func_ProcessUnitCommand,
+    -- Cfile:1007470-1007472).
+    local canOvercharge = hasCommandCap(commandCapMask, 'RULEUCC_Overcharge')
     parts[i] = '{"id":' .. tostring(u:GetEntityId())
       .. ',"army":' .. tostring(u:GetArmy())
       .. ',"canMove":' .. tostring(canMove)
@@ -148,6 +151,7 @@ function __uiSelectionJson()
       .. ',"canGuard":' .. tostring(canGuard)
       .. ',"canReclaim":' .. tostring(canReclaim)
       .. ',"canCapture":' .. tostring(canCapture)
+      .. ',"canOvercharge":' .. tostring(canOvercharge)
       .. ',"isFactory":' .. tostring(isFactory)
       .. ',"canTransport":' .. tostring(canTransport)
       .. ',"canCallTransport":' .. tostring(canCallTransport)

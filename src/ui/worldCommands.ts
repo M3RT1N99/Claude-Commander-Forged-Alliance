@@ -51,6 +51,8 @@ export interface WorldCommandSim {
   reclaim(id: number, targetId: number, queue?: boolean): void
   /** Capture (UNITCOMMAND_Capture, CUnitCaptureTask): take the enemy unit over. */
   capture(id: number, targetId: number, queue?: boolean): void
+  /** OverCharge (UNITCOMMAND_OverCharge): the attack task pinned to the OverChargeWeapon. */
+  overcharge(id: number, targetId: number, queue?: boolean): void
   /** Reclaim a MAP prop (tree/rock) by its scmap instance index. */
   reclaimMapProp(id: number, mapIndex: number, queue?: boolean): void
   /**
@@ -102,6 +104,8 @@ export interface SelectedUnit {
   canReclaim: boolean
   /** RULEUCC_Capture -- may capture an enemy unit (CUnitCaptureTask). */
   canCapture: boolean
+  /** RULEUCC_Overcharge -- has an OverChargeWeapon to fire on command. */
+  canOvercharge: boolean
   /** Kategorie FACTORY — sie bekommt einen Sammelpunkt statt eines Move-Befehls. */
   isFactory: boolean
   /**
@@ -571,7 +575,30 @@ export async function worldClick(
     return `CallTransport (${ids.length}) → Unit ${opts.ownTargetId}`
   }
 
-  // Any OTHER order mode (Overcharge, Nuke, Tactical, Teleport, Ferry,
+  // The Overcharge button (orders.lua EnterOverchargeMode, RULEUCC_Overcharge):
+  // a click on a unit issues UNITCOMMAND_OverCharge with the entity target
+  // (the world view, Cfile:1241977-1241990); the dispatcher takes an enemy
+  // (831092-831095) and leaves any other target without a task. A ground
+  // click issues a position target the dispatcher ignores -- nothing here.
+  if (cm.mode === 'order' && cm.name === 'RULEUCC_Overcharge') {
+    if (opts.enemyTargetId === undefined) return 'Overcharge: no enemy unit under the cursor -- no order'
+    let n = 0
+    for (const u of selection) {
+      if (u.canOvercharge && u.id !== opts.enemyTargetId) {
+        sim.overcharge(u.id, opts.enemyTargetId, opts.queue)
+        n++
+      }
+    }
+    if (n === 0) return null
+    onCommandIssued(host, {
+      CommandType: 'OverCharge',
+      Position: { x: hit.x, y: elevation(hit.x, hit.z), z: hit.z },
+      Clear: !opts.queue,
+    })
+    return `Overcharge (${n}) -> Unit ${opts.enemyTargetId}`
+  }
+
+  // Any OTHER order mode (Nuke, Tactical, Teleport, Ferry,
   // Sacrifice, Dive, SiloBuild*, Script): the sim has no task for it yet.
   // FAIL LOUDLY (CLAUDE.md) rather than fall through to the default handler,
   // which would silently misroute the click to Attack/Move.

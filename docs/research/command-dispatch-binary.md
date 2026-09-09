@@ -45,7 +45,7 @@ Command enum: `EUnitCommandType` (faf-re `command/SSTICommandIssueData.h`).
 | 0x1F | DestroySelf | `Entity::Destroy` |
 | 0x20 | Sacrifice | `CUnitSacrificeTask` |
 | 0x21 | Pause | `Unit::SetPaused` |
-| 0x22 | OverCharge | `CUnitFireAtTask` |
+| 0x22 | OverCharge | the attack task pinned to the OverChargeWeapon: `CAttackTargetTask::operator new(target, 0, dispatch, 1)` for an entity target that is not allied (physically under the `Pause` label, Cfile:831092-831098 -- the same shift as the AggressiveMove row; the flag drives the constructor's OverChargeWeapon search 812627-812640) |
 | 0x23 | AggressiveMove | `CUnitPatrolTask` (one leg: Move + engage; Cfile:831100-831104) |
 | 0x24 | FormAggressiveMove | `CUnitFormAndMoveTask` (aggressive) |
 | 0x25 | AssistMove | `CUnitAssistMoveTask` |

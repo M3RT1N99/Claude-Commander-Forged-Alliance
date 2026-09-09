@@ -276,7 +276,11 @@ function UserUnitMeta:IsStunned() return false end
 function UserUnitMeta:IsAutoMode() return self.autoMode == true end
 function UserUnitMeta:IsAutoSurfaceMode() return self.autoSurfaceMode == true end
 function UserUnitMeta:IsRepeatQueue() return false end
-function UserUnitMeta:IsOverchargePaused() return false end
+-- UserUnit:IsOverchargePaused (Moho::UserUnit::IsOverchargePaused
+-- 1362603-1362605 behind cfunc_UserUnitIsOverchargePausedL 1366354-1366375,
+-- scr_UserInits): the sim's mOverchargePaused from the unit row
+-- (units.lua); orders.lua:642/663 gates the overcharge button on it.
+function UserUnitMeta:IsOverchargePaused() return self.overchargePaused == true end
 function UserUnitMeta:GetBuildRate() return self.buildRate or 0 end
 function UserUnitMeta:GetCustomName() return self.customName end
 function UserUnitMeta:GetFocus() return nil end
@@ -360,7 +364,7 @@ function GetAttachedUnitsList(units)
 end
 
 -- Von der Engine pro Beat: der Zustand einer Unit aus der Sim.
-function __uiSetUnit(id, blueprintId, army, x, y, z, health, maxHealth, workProgress, idle, fireState, guardedId, capMask, deadFlag, shieldRatio, fractionComplete, beingUpgraded, layer, scriptBits, toggleCapMask, autoMode, autoSurfaceMode, restrict, customName, unselectable)
+function __uiSetUnit(id, blueprintId, army, x, y, z, health, maxHealth, workProgress, idle, fireState, guardedId, capMask, deadFlag, shieldRatio, fractionComplete, beingUpgraded, layer, scriptBits, toggleCapMask, autoMode, autoSurfaceMode, restrict, customName, unselectable, overchargePaused)
   local u = __uiUnits[id]
   if not u then
     -- SUnitVarDat-Ctor (Cfile:772277): mFireState = FIRESTATE_ReturnFire (0).
@@ -426,6 +430,7 @@ function __uiSetUnit(id, blueprintId, army, x, y, z, health, maxHealth, workProg
   -- SELECTABLE category, not this state); here SelectUnits drops such
   -- units, which is what the name and the teleport use imply.
   if unselectable ~= nil then u.unselectable = unselectable == true end
+  if overchargePaused ~= nil then u.overchargePaused = overchargePaused == true end
 end
 
 -- Die Bau-Warteschlange einer Fabrik aus der Sim spiegeln. Die Engine haelt sie
