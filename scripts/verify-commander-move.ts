@@ -157,6 +157,7 @@ const recSim = {
   attack: () => {},
   attackGround: () => {},
   repair: () => {},
+  capture: () => {},
   guard: () => {},
   patrol: () => {},
   reclaim: () => {},

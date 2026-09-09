@@ -136,6 +136,9 @@ function __uiSelectionJson()
     -- RULEUCC_Reclaim: engineers and ACUs may drain wrecks/map props
     -- (dispatch 0x13, CUnitReclaimTask) — the cap gates the click.
     local canReclaim = hasCommandCap(commandCapMask, 'RULEUCC_Reclaim')
+    -- RULEUCC_Capture: the capture click (CUnitCaptureTask) needs the cap
+    -- (func_Validate_IssueCommand, Cfile:1011614).
+    local canCapture = hasCommandCap(commandCapMask, 'RULEUCC_Capture')
     parts[i] = '{"id":' .. tostring(u:GetEntityId())
       .. ',"army":' .. tostring(u:GetArmy())
       .. ',"canMove":' .. tostring(canMove)
@@ -144,6 +147,7 @@ function __uiSelectionJson()
       .. ',"canAttackGround":' .. tostring(canAttackGround)
       .. ',"canGuard":' .. tostring(canGuard)
       .. ',"canReclaim":' .. tostring(canReclaim)
+      .. ',"canCapture":' .. tostring(canCapture)
       .. ',"isFactory":' .. tostring(isFactory)
       .. ',"canTransport":' .. tostring(canTransport)
       .. ',"canCallTransport":' .. tostring(canCallTransport)

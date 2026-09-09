@@ -739,6 +739,10 @@ export class LuaSimClient {
   repair(id: number, targetId: number, queue = false): void {
     this.worker.postMessage({ type: 'repair', id, targetId, queue })
   }
+  /** Capture (UNITCOMMAND_Capture, CUnitCaptureTask): take the enemy `targetId` over. */
+  capture(id: number, targetId: number, queue = false): void {
+    this.worker.postMessage({ type: 'capture', id, targetId, queue })
+  }
   /**
    * TransportLoadUnits (the CallTransport click, Cfile:1241799-1241870): the
    * passengers `ids` and the transport itself get ONE command targeting the

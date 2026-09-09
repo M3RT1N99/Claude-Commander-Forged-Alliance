@@ -59,6 +59,15 @@ interface Consumer {
   rate: number
 }
 
+/** A CEconRequest owned by a task rather than a unit (see ArmyEconomy.requests). */
+interface TaskRequest {
+  mass: number
+  energy: number
+  rate: number
+  grantedMass: number
+  grantedEnergy: number
+}
+
 /**
  * Zwei-Ratio-Verteilung: r1 drosselt Doppel-Verbraucher (E und M) an der
  * knappsten Ressource, r2 lässt Einzel-Verbraucher der reichlichen Ressource
@@ -152,6 +161,16 @@ export class ArmyEconomy {
   private pendingEnergy = 0
 
   private readonly units = new Map<number, UnitEcon>()
+  /**
+   * The CEconRequests that are not a unit's consumption: the capture task's
+   * (CUnitCaptureTask 826936-826950) and the economy events'
+   * (CreateEconomyEvent, globals.lua). A CEconRequest (ctor 847554-847570)
+   * carries the per-tick demand (mPerSecond) and the grant it has
+   * accumulated (mAddWhenSetOff); the economy grants it like any consumer
+   * and the owner takes the accumulation (sub_773740: copy and zero) when
+   * it holds a tick's worth. Deleted by its owner (827364-827376).
+   */
+  private readonly requests = new Map<number, TaskRequest>()
   // There is NO separate build request. The engine's only consumers are the
   // units' own consumption requests (mConsumptionData): the builder's Lua
   // prices its focus blueprint and sets the rate (unit.lua:697-745), and
@@ -198,6 +217,38 @@ export class ArmyEconomy {
   }
   remove(id: number): void {
     this.units.delete(id)
+  }
+
+  /** A task's own request: create or update the per-tick demand. */
+  setRequest(key: number, massPerTick: number, energyPerTick: number): void {
+    const r = this.requests.get(key)
+    if (r) {
+      r.mass = massPerTick
+      r.energy = energyPerTick
+    } else {
+      this.requests.set(key, { mass: massPerTick, energy: energyPerTick, rate: 1, grantedMass: 0, grantedEnergy: 0 })
+    }
+  }
+  /** CEconRequest::LimitingRate of the last tick (1107891-1107909); 0 for a request the economy does not hold. */
+  requestRate(key: number): number {
+    const r = this.requests.get(key)
+    return r ? r.rate : 0
+  }
+  /** The accumulation (mAddWhenSetOff) of one resource. */
+  requestGranted(key: number, res: Res): number {
+    const r = this.requests.get(key)
+    if (!r) return 0
+    return res === 'MASS' ? r.grantedMass : r.grantedEnergy
+  }
+  /** sub_773740: the owner takes the accumulation, both slots to zero. */
+  requestTake(key: number): void {
+    const r = this.requests.get(key)
+    if (!r) return
+    r.grantedMass = 0
+    r.grantedEnergy = 0
+  }
+  clearRequest(key: number): void {
+    this.requests.delete(key)
   }
 
   /**
@@ -274,6 +325,19 @@ export class ArmyEconomy {
         }
       }
     }
+    // The task requests (capture tasks, economy events) are consumers like
+    // the units' own: their per-tick demand joins the two-ratio split, the
+    // grant accumulates until the owner takes it.
+    const taskConsumers: [TaskRequest, Consumer][] = []
+    for (const r of this.requests.values()) {
+      if (r.mass > 0 || r.energy > 0) {
+        const c: Consumer = { mass: f(r.mass), energy: f(r.energy), rate: 1 }
+        consumers.push(c)
+        taskConsumers.push([r, c])
+      } else {
+        r.rate = 1
+      }
+    }
     this.maxMass = maxM
     this.maxEnergy = maxE
 
@@ -297,6 +361,11 @@ export class ArmyEconomy {
     const { spentMass, spentEnergy } = distribute(availMass, availEnergy, consumers)
     // Persist each unit's granted rate for next tick's production factor.
     for (const [u, c] of unitConsumers) u.lastRate = c.rate
+    for (const [r, c] of taskConsumers) {
+      r.rate = c.rate
+      r.grantedMass = f(r.grantedMass + f(c.mass * c.rate))
+      r.grantedEnergy = f(r.grantedEnergy + f(c.energy * c.rate))
+    }
 
     this.mass = f(Math.min(Math.max(availMass - spentMass, 0), maxM))
     this.energy = f(Math.min(Math.max(availEnergy - spentEnergy, 0), maxE))
@@ -466,6 +535,24 @@ export function installEconomy(host: LuaHost, mgr: EconomyManager): void {
   // (Cfile:953945 / 953968).
   host.setGlobal('__econSetDead', (army: number, id: number) => {
     mgr.army(army).setDead(id)
+  })
+  // The task requests (a capture task's CEconRequest, an economy event's):
+  // set per tick or once, the rate read back, the accumulation read and
+  // taken, the request deleted. The economy events (globals.lua
+  // __econEventsCollect/__econEventsApply) called these three without any
+  // definition behind them -- a strict-_G error on the first event.
+  host.setGlobal('__econSetBuildRequest', (army: number, key: number, massPerTick: number, energyPerTick: number) => {
+    mgr.army(army).setRequest(key, massPerTick, energyPerTick)
+  })
+  host.setGlobal('__econBuildRate', (army: number, key: number) => mgr.army(army).requestRate(key))
+  host.setGlobal('__econClearBuildRequest', (army: number, key: number) => {
+    mgr.army(army).clearRequest(key)
+  })
+  host.setGlobal('__econRequestGranted', (army: number, key: number, res: string) =>
+    mgr.army(army).requestGranted(key, res === 'MASS' ? 'MASS' : 'ENERGY'),
+  )
+  host.setGlobal('__econRequestTake', (army: number, key: number) => {
+    mgr.army(army).requestTake(key)
   })
 
   // Echtes Engine-Global: SetArmyEconomy(army, mass, energy) setzt den

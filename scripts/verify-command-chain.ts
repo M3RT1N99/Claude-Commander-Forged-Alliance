@@ -169,6 +169,9 @@ const sim = {
   repair: (id: number, targetId: number): void => {
     simHost.eval(`__dispatchRepair(${id}, ${targetId})`)
   },
+  capture: (id: number, targetId: number): void => {
+    simHost.eval(`__dispatchCapture(${id}, ${targetId})`)
+  },
   guard: (id: number, targetId: number): void => {
     simHost.eval(`__dispatchGuard(${id}, ${targetId})`)
   },

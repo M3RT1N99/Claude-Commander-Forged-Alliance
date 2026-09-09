@@ -292,7 +292,7 @@ console.log('\n== The user side: TransportReverseLoadUnits and the right-click p
   // func_RightClickTransport 1238854-1239027).
   const sel = (o: Partial<SelectedUnit>): SelectedUnit => ({
     id: 1, army: 1, canMove: true, canRepair: false, canAttack: true, canAttackGround: true, canGuard: true,
-    canReclaim: false, isFactory: false, isMobile: true, canTransport: false, canCallTransport: true,
+    canReclaim: false, canCapture: false, isFactory: false, isMobile: true, canTransport: false, canCallTransport: true,
     isCommand: false, isTransportation: false, isTransportFocus: false, canTransportCommander: false,
     isTeleportation: false, canFly: false, isExperimental: false, isAttached: false, ...o,
   })

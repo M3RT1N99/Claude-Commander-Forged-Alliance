@@ -2672,8 +2672,7 @@ attack colours with its own waypoint (commandgraphparams.lua:54-58).
 
 **Still missing** (each a strict-_G error when called; shipped callers in
 brackets; IssueTransportLoad and IssueTransportUnload have since arrived --
-"The transport" below): IssueCapture
-[platoon.lua:1342, aiutilities.lua:1719], IssueDive [platoon.lua:2294,
+"The transport" below): IssueDive [platoon.lua:2294,
 xss0201_script.lua:66], IssueOverCharge [ai/aibehaviors.lua:147],
 IssueFactoryAssist [aibrain.lua:2076], IssueScript [platoon.lua:293],
 IssueTactical [platoon.lua:382], IssueNuke [platoon.lua:417],
@@ -2682,10 +2681,11 @@ IssueFormPatrol [scenarioframework.lua:572]; without a shipped caller:
 IssueBuildFactory, IssueBuildMobile, IssueDestroySelf, IssueFerry,
 IssueFormAggressiveMove, IssueFormMove, IssueKillSelf, IssuePause,
 IssueSacrifice, IssueSiloBuildNuke, IssueSiloBuildTactical,
-IssueTeleportToBeacon, IssueTransportUnloadSpecific. The capture, dive,
+IssueTeleportToBeacon, IssueTransportUnloadSpecific. The dive,
 overcharge, silo and teleport TASKS behind the first group are not
 modelled in the sim, which is why the bindings stay absent rather than
-queueing orders that nothing runs.
+queueing orders that nothing runs. IssueCapture and its task are ported
+since ("The capture" below).
 
 **UNVERIFIED.** IsValid_Vector3f's exact test (here: present and not
 NaN); the roll-off flag's consumer; the AggressiveMove line texture
@@ -3039,7 +3039,11 @@ of motion.lua, which lands the body; the port hands it over.
   (970056-970060) are not run. CUnitMotion::SetMotionTurnEvent
   (965543-965546) is an empty function in the engine.
 * **The random elevation offset** draws from `Random()`, not the engine's
-  MT19937 state.
+  MT19937 state -- and the port's `Random()` is Lua's `math.random`,
+  which Lua 5.4 seeds per process: every run draws a different offset.
+  The ridge check of verify-air-motion.ts therefore reads the look-ahead's
+  target elevation, not the flown height (which sat within a metre of the
+  ridge top and flipped the gate once).
 
 **UNVERIFIED.** mAlwaysUseTopSpeed is set by the steering's
 CalcAtTopSpeed (787876-787902); it is read here as "winged, or the
@@ -3052,3 +3056,137 @@ SizeZ; the mass factor of the collision's angular impulse is the body's
 second float (v2[1], 941423), read as mMass. The numbers of
 EAirCombatState beyond ACS_Normal = 0 (964785) are read off the
 comparisons (never set here).
+
+## The capture: CUnitCaptureTask, IssueCapture, ChangeUnitArmy and the task requests of the economy
+
+**What was wrong.** `IssueCapture` was a strict-_G miss (platoon.lua:1342,
+ai/aiutilities.lua:1719); the UI's Capture order mode and the Guard click
+on an enemy issued nothing ("not wired to the sim yet"); `ChangeUnitArmy`
+was absent from the Sim (unit.lua:555 OnCaptured -> simutils.lua:97
+TransferUnitsOwnership, scenarioframework.lua:224) -- so nothing could ever
+change hands; and the economy events (`CreateEconomyEvent`, globals.lua)
+called `__econSetBuildRequest` / `__econBuildRate` /
+`__econClearBuildRequest`, which nothing defined -- the first event was a
+strict-_G error.
+
+**The engine.** `UNITCOMMAND_Capture` becomes a `CUnitCaptureTask`
+(AiUnitCapture.cpp; DispatchTask 830696-830697, under the off-by-one case
+label). The dispatch constructor (826361-826459) takes the command's target
+and makes it the captor's focus entity with OnAssignedFocusEntity. TaskTick
+(826579-827099): a target that is gone or not capturable
+(UnitAttributes.mCapturable, `SetCapturable`) ends the task with
+OnStopCapture (826629-826650); a target without an army, in the Air layer
+or allied ends it silently (826651-826690); the distance is the XZ
+distance minus both units' larger footprint side (826692-826716); a mobile
+target already being captured that is more than 10 away ends it
+(826717-826729). Preparing: more than 5 away the captor moves beside the
+target's skirt (PrepareMove, ReserveOgridRect, NewMoveTask, 826733-826782).
+Waiting: more than 10 away ends it; a blip resolves to its creator; the
+target must be a live unit; the build arm is prepared; the captor gets
+UNITSTATE Capturing (826784-826849). Starting: the captor's
+`GetCaptureCosts(target)` (unit.lua:2734-2743: BuildTime / BuildRate / 2
+seconds, BuildCostEnergy, 0 mass) -- three numbers or "Failed to get valid
+capture costs from the target" -- gives mCapTime = max(1, time * 10) ticks,
+plus the same for every attached unit of the target that is not being
+built (826851-826935); the rates are cost / mCapTime per tick, held by a
+CEconRequest of the task's own (826936-826950); DoCallback(true) marks the
+target BeingCaptured, counts a capturer on it and runs
+OnStartBeingCaptured(captor) / OnStartCapture(target) (827160-827175).
+Processing: once the request holds a tick's rate of both resources they
+are taken (sub_773740) into mResourcesSpent and the progress advances by
+the target's capturer count, capped at mCapTime; mWorkProgress is the
+fraction (826956-826990). Complete: OnStopCapture(target) on the captor,
+OnStopBeingCaptured(captor) and OnCaptured(captor) on the target
+(826992-827005). The destructor (827294-827453) releases the focus entity
+and the blip, clears Capturing and mWorkProgress, runs DoCallback(false)
+-- for a target that is still a live unit not queued for deletion: one
+capturer less, BeingCaptured cleared at zero, OnFailedBeingCaptured /
+OnFailedCapture (827115-827181) -- and deletes the request. The Guard click
+on a unit (sub_613A80, 838839-838905) repairs an ally and captures anyone
+else. `ChangeUnitArmy` (cfunc_ChangeUnitArmyL 1089461-1089587) validates
+the army (ARMY_FromLuaState: "Invalid army %d"), refuses the unit's own
+("Unit already belongs to army %d") and a unit carrying a COMMAND unit
+(nil), then `Sim::TransferUnit` (1073702-1074080): nothing for a dead or
+deletion-queued unit; the attached live mobile units are detached and
+transferred first; a new unit of the same blueprint for the new army at the
+same transform and layer, complete, the elevation fixed; the poses shared,
+the health and the custom name copied; the passengers re-attached to their
+bones (a transport assigns the slot, OnTransportAttach); the old unit
+destroyed; a creation the unit cap refuses gives the brain
+OnFailedUnitTransfer. A CEconRequest (ctor 847554-847570) carries the
+per-tick demand and the grant it has accumulated (mAddWhenSetOff); the
+economy grants it like any consumer, the owner takes the accumulation.
+
+**The port.** `src/engine-lua/capture.lua` (new; src/sim/capture.ts after
+the transport): the task as a per-captor state machine ticked from
+`__ordersTick` through the order type `Capture` (`__captureStart`,
+`__captureOrderTick`, `__captureAbort` -- the destructor, also from the
+abort and stop paths), `doCallback`. globals.lua: the order type, the
+user dispatch `__dispatchCapture`, the binding `IssueCapture`. units.lua:
+`__transferUnit` and `ChangeUnitArmy`. economy.ts: the task requests
+(`setRequest` / `requestRate` / `requestGranted` / `requestTake` /
+`clearRequest`, consumers in the two-ratio split with an accumulating
+grant) and the bindings `__econSetBuildRequest`, `__econBuildRate`,
+`__econClearBuildRequest` -- the economy events run again --
+`__econRequestGranted`, `__econRequestTake`. The UI: the selection row
+carries `canCapture` (RULEUCC_Capture); worldCommands.ts issues the
+capture for the Capture order mode on an enemy unit and for the Guard
+mode on an enemy (sub_613A80); the sim client / worker carry `capture`.
+
+**Checks** (scripts/verify-capture.ts, new, 48 checks): the binding's
+arity and target errors, the RULEUCC_Capture filter, the target taken out
+of the set, the focus entity and OnAssignedFocusEntity; the walk up to
+the target, Capturing / BeingCaptured, one capturer,
+OnStartBeingCaptured / OnStartCapture, mCapTime 125 from GetCaptureCosts
+(125 / 5 / 2 s), the rates 6 energy and 0 mass per tick, the request
+supplied; one step per tick, the energy taken at the rate, mWorkProgress,
+the stall without energy and the resumption; the completion with
+OnStopCapture / OnStopBeingCaptured / OnCaptured, one new ueb1101 for the
+captor's army at the position with the health, the old unit destroyed,
+the OnCapturedNewUnit callback, no failed pair, the destructor's clears;
+the abort through IssueClearCommands with OnFailedBeingCaptured /
+OnFailedCapture, the capturer taken back, the request deleted; a
+non-capturable and an allied target refused; ChangeUnitArmy's errors,
+the new unit with the custom name and the health, the old destroyed; two
+capturers advancing by two per tick and the late task ending on the
+vanished target; an economy event reaching 1 over its ticks; no Lua
+errors. Seen red first: the abort checks under IssueStop (it queues
+behind the running command; the engine's ClearCommandQueue is the
+abort), the health copy while a tank of the captor's army shot the
+target, the two-capturer block with one engineer still walking, the
+stall check under a mutation that ignored the grant.
+
+**Review corrections** (a fresh agent against the Cfile): the preamble's
+OnStopCapture passes the captor itself as the argument (826721: &mUnit,
+the pointer DoCallback hands the target as "captor"; the Complete state
+passes the target, 827077) -- it passed the target; the transfer of
+attached passengers runs only for a unit with a transport component
+(1073756-1073889) -- it ran for every unit; the occupancy flag of the old
+unit (1074031) is not a per-unit flag here (the structure's footprint
+goes with its destroy) -- the comment claimed it; the Guard-on-ally
+branch of sub_613A80 is a decision on health, shield and focus, not a
+plain repair; the port's guard in DoCallback(true) and the MotionType
+reading of IsMobile in the transfer are disclosed; the request check of
+the suite gained a negative control.
+
+**Not modelled, recorded rather than faked.**
+
+* **The landing spot** beside the target's skirt (PrepareMove,
+  ReserveOgridRect, 826745-826776): the navigator goal is the target and
+  the ground model stops at its footprint.
+* **The build arm** (PrepareArmToBuild 826831-826845, 827355-827362): no
+  arm model.
+* **Recon blips** as targets (826791-826805): the target is the unit.
+* **The AIRES result codes** of the task (AIRES_1 / AIRES_2): the command
+  simply ends.
+* **The transfer**: the transport's stored units (TransportGetStoredUnits
+  1073760-1073817), the shared poses (1073911-1073913), the flyer's full
+  pose (the heading is carried), the unit cap (`__spawnUnit` enforces
+  none, so OnFailedUnitTransfer never runs), the old unit's occupancy
+  flag (1074031: the structure's footprint ends with its destroy).
+
+**UNVERIFIED.** The target's vtable slot 4 read as IsMobile (826717) and
+the passengers' IsMobile of the transfer (1073822), both read off the
+blueprint's MotionType; the attached unit's slot 10 read as IsBeingBuilt
+(826890); the target's field at +332 read as its army (826731); the
+SCR_FromLua_Unit and the integer TypeError texts of ChangeUnitArmy.

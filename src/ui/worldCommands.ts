@@ -49,6 +49,8 @@ export interface WorldCommandSim {
   patrol(id: number, x: number, z: number, queue?: boolean): void
   /** Reclaim (dispatch 0x13, CUnitReclaimTask): drain the wreck prop. */
   reclaim(id: number, targetId: number, queue?: boolean): void
+  /** Capture (UNITCOMMAND_Capture, CUnitCaptureTask): take the enemy unit over. */
+  capture(id: number, targetId: number, queue?: boolean): void
   /** Reclaim a MAP prop (tree/rock) by its scmap instance index. */
   reclaimMapProp(id: number, mapIndex: number, queue?: boolean): void
   /**
@@ -98,6 +100,8 @@ export interface SelectedUnit {
   canGuard: boolean
   /** RULEUCC_Reclaim — may drain wrecks and map props (dispatch 0x13). */
   canReclaim: boolean
+  /** RULEUCC_Capture -- may capture an enemy unit (CUnitCaptureTask). */
+  canCapture: boolean
   /** Kategorie FACTORY — sie bekommt einen Sammelpunkt statt eines Move-Befehls. */
   isFactory: boolean
   /**
@@ -364,11 +368,51 @@ export async function worldClick(
     return `Patrol (${n}) → ${hit.x.toFixed(0)}, ${hit.z.toFixed(0)}`
   }
 
+  // The Capture button (orders.lua, RULEUCC_Capture): a click on an enemy
+  // unit issues UNITCOMMAND_Capture (CUnitCaptureTask) to every selected
+  // unit with the cap; the task itself refuses an ally or a non-capturable
+  // target (capture.lua). A click elsewhere issues nothing.
+  if (cm.mode === 'order' && cm.name === 'RULEUCC_Capture') {
+    if (opts.enemyTargetId === undefined) return 'Capture: no enemy unit under the cursor -- no order'
+    let n = 0
+    for (const u of selection) {
+      if (u.canCapture && u.id !== opts.enemyTargetId) {
+        sim.capture(u.id, opts.enemyTargetId, opts.queue)
+        n++
+      }
+    }
+    if (n === 0) return null
+    onCommandIssued(host, {
+      CommandType: 'Capture',
+      Position: { x: hit.x, y: elevation(hit.x, hit.z), z: hit.z },
+      Clear: !opts.queue,
+    })
+    return `Capture (${n}) -> Unit ${opts.enemyTargetId}`
+  }
+
   // The Guard button (orders.lua, RULEUCC_Guard): a click on a unit guards
   // it (dispatch 0x0F). Guarding a POINT wraps a Move first
   // (Cfile:830638-830650) — the point-guard task itself is a named gap, so
   // a ground click just moves there. Guard on an ENEMY is capture in the
-  // original (sub_613A80) — capture is a gap, so only own/allied units take.
+  // original (sub_613A80, Cfile:838839-838905: an ally may get the repair
+  // task -- a decision on its health, its shield and its focus entity,
+  // 838850-838885 -- anyone else the capture task, 838897-838900).
+  if (cm.mode === 'order' && cm.name === 'RULEUCC_Guard' && opts.enemyTargetId !== undefined) {
+    let n = 0
+    for (const u of selection) {
+      if (u.canCapture && u.id !== opts.enemyTargetId) {
+        sim.capture(u.id, opts.enemyTargetId, opts.queue)
+        n++
+      }
+    }
+    if (n === 0) return null
+    onCommandIssued(host, {
+      CommandType: 'Guard',
+      Position: { x: hit.x, y: elevation(hit.x, hit.z), z: hit.z },
+      Clear: !opts.queue,
+    })
+    return `Guard on an enemy = Capture (${n}) -> Unit ${opts.enemyTargetId}`
+  }
   if (cm.mode === 'order' && cm.name === 'RULEUCC_Guard') {
     const target = opts.ownTargetId ?? opts.repairTargetId
     if (target !== undefined) {
@@ -527,7 +571,7 @@ export async function worldClick(
     return `CallTransport (${ids.length}) → Unit ${opts.ownTargetId}`
   }
 
-  // Any OTHER order mode (Capture, Overcharge, Nuke, Tactical, Teleport, Ferry,
+  // Any OTHER order mode (Overcharge, Nuke, Tactical, Teleport, Ferry,
   // Sacrifice, Dive, SiloBuild*, Script): the sim has no task for it yet.
   // FAIL LOUDLY (CLAUDE.md) rather than fall through to the default handler,
   // which would silently misroute the click to Attack/Move.

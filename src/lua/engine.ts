@@ -7,6 +7,7 @@ import { EconomyManager, installEconomy } from '../sim/economy'
 import { installMotion, motionTick } from '../sim/motion'
 import { installBuild, buildCollect, buildApply, factoryTick } from '../sim/build'
 import { installTransport } from '../sim/transport'
+import { installCapture } from '../sim/capture'
 import { setupSession, SANDBOX_SESSION, type SessionInfo } from '../sim/session'
 import { installCombat, weaponTick, projectileTick, flushDeletions } from './combat'
 import { installSession } from './session'
@@ -79,6 +80,8 @@ export function installEngine(
   // The transport component and its tasks (CAiTransportImpl, CUnitLoadUnits,
   // CUnitCallTransport, CUnitUnloadUnits) -- primitives like the motion.
   installTransport(host)
+  // The capture task (CUnitCaptureTask) and IssueCapture.
+  installCapture(host)
   // moho: die C-Form, wie die Engine sie uebergibt — Methodenlisten und
   // Basisklassen, KEINE fertigen Klassen (globalInit.lua:27-29). Braucht
   // deshalb kein `Class` und steht vor der Boot-Kette.

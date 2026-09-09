@@ -1199,3 +1199,107 @@ function CreateInitialArmyUnit(army, bpId)
   if not u then error(string.format('Unknown initial unit: %s', bpId), 2) end
   return u
 end
+
+-- === The transfer of a unit to another army ===
+
+--- Moho::Sim::TransferUnit (Cfile:1073702-1074080): nothing for a dead or
+--- deletion-queued unit; for a unit WITH a transport component
+--- (1073756-1073889) the stored units and the attached live mobile units
+--- are detached (skipBallistic) and transferred first (1073818-1073876);
+--- a new unit of the same blueprint is created for the new army at the
+--- same transform and layer, complete, with the elevation fixed
+--- (1073890-1073908); the poses are shared (1073911-1073913 -- no
+--- animation state here), the health is copied when it differs
+--- (1073938-1073941), the custom name is copied (1073942-1073944); the
+--- transferred passengers are attached to the new unit at their bones --
+--- the transport assigns the slot and hears OnTransportAttach
+--- (1073945-1074030); a static new unit clears the old unit's occupancy
+--- flag (1074031 -- no per-unit ogrid flag here: the old structure's
+--- footprint goes with its destroy) and the old unit is destroyed
+--- (1074033). When the new unit cannot be created and the army does not
+--- ignore the unit cap, the brain hears OnFailedUnitTransfer
+--- (1074036-1074040; the cap is not enforced by __spawnUnit,
+--- docs/STATUS.md). Not modelled: the transport's stored units
+--- (TransportGetStoredUnits 1073760-1073817), the flyer's full pose (the
+--- heading is carried). The "mobile" of the passengers (IsMobile 1073822)
+--- is read off the blueprint's MotionType -- UNVERIFIED as the engine's
+--- own test.
+function __transferUnit(u, army)
+  if not u or u.__dead or u.__destroyQueued then return nil end
+  local carried = {}
+  if __transportOf and __transportOf(u) then
+    for _, e in ipairs(u.__attachedEntities or {}) do
+      local mt = e.__bp and e.__bp.Physics and e.__bp.Physics.MotionType
+      if e.__isUnit and mt ~= nil and mt ~= 'RULEUMT_None' and not e.__dead and not e.__destroyQueued then
+        carried[#carried + 1] = { unit = e, parentBone = e.__attachParentBone, selfBone = e.__attachSelfBone }
+      end
+    end
+  end
+  for _, c in ipairs(carried) do
+    __entityDetach(c.unit, true)
+    c.unit.__transportedBy = false
+  end
+  for _, c in ipairs(carried) do c.newUnit = __transferUnit(c.unit, army) end
+  local bp = u.__bp
+  local key = string.lower(bp.BlueprintId or u.__bpId or '')
+  local scriptPath = bp.Script or ('/units/' .. key .. '/' .. key .. '_script.lua')
+  local p = u.__pos
+  local id, err = __spawnUnit(scriptPath, key, p[1], p[2], p[3], army, true, u.__layer, u.__heading)
+  if id < 0 then
+    if not __armyVar(army).ignoreUnitCap then
+      local brain = __getBrain(army)
+      if brain and type(brain.OnFailedUnitTransfer) == 'function' then
+        local ok, e2 = pcall(brain.OnFailedUnitTransfer, brain)
+        if not ok then WARN('OnFailedUnitTransfer: ' .. tostring(e2)) end
+      end
+    end
+    WARN('TransferUnit: ' .. tostring(err))
+    return nil
+  end
+  local n = __units[id]
+  if (u.__health or 0) ~= (n.__health or 0) then n:SetHealth(u, u.__health or 0) end
+  if u.__customName and u.__customName ~= '' then n.__customName = u.__customName end
+  for _, c in ipairs(carried) do
+    if c.newUnit then
+      __entityAttach(c.newUnit, n, c.selfBone, c.parentBone)
+      local t = __transportOf and __transportOf(n)
+      if t then
+        __transportAssignSlot(t, c.newUnit, c.parentBone)
+        local name = __skeletonOf(n).names[(c.parentBone or -1) + 1]
+        if name and type(n.OnTransportAttach) == 'function' then
+          local ok, e3 = pcall(n.OnTransportAttach, n, name, c.newUnit)
+          if not ok then WARN('OnTransportAttach: ' .. tostring(e3)) end
+        end
+      end
+    end
+  end
+  u:Destroy()
+  return n
+end
+
+--- ChangeUnitArmy(unit, army) -- cfunc_ChangeUnitArmyL (Cfile:1089461-1089587):
+--- two arguments, the unit (SCR_FromLua_Unit), the army by index or name
+--- (ARMY_FromLuaState; an unknown one is "Invalid army %d", a non-number
+--- the integer TypeError), "Unit already belongs to army %d" for its own; a
+--- unit carrying a COMMAND unit is refused with nil (1089531-1089575);
+--- otherwise Sim::TransferUnit's new unit, or nil. unit.lua:555 (the
+--- capture), simutils.lua:97 (TransferUnitsOwnership) and
+--- scenarioframework.lua:224 call it.
+function ChangeUnitArmy(...)
+  local n = select('#', ...)
+  if n ~= 2 then error(string.format('ChangeUnitArmy\n  expected %d args, but got %d', 2, n), 2) end
+  local unit, army = ...
+  if type(unit) ~= 'table' or not unit.__isUnit then
+    error("Expected a game object. (Did you call with '.' instead of ':'?)", 2)
+  end
+  local a = __resolveArmy(army)
+  if not a then
+    if type(army) ~= 'number' then error('bad argument #2 to \'ChangeUnitArmy\' (integer expected)', 2) end
+    error(string.format('Invalid army %d', army), 2)
+  end
+  if unit.__army == a then error(string.format('Unit already belongs to army %d', a), 2) end
+  for _, e in ipairs(unit.__attachedEntities or {}) do
+    if e.__isUnit and EntityCategoryContains(categories.COMMAND, e) then return nil end
+  end
+  return __transferUnit(unit, a)
+end

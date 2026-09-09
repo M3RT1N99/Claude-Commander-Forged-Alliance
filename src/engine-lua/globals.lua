@@ -1944,6 +1944,7 @@ local function __abortActive(unitId)
   __guardOrders[unitId] = nil
   __reclaimTasks[unitId] = nil
   __transportAbort(unitId)
+  __captureAbort(unitId)
   u.__guardedUnit = false
   u:GetNavigator():AbortMove()
 end
@@ -2457,6 +2458,10 @@ local function __startOrder(unitId, cmd)
     if __units[cmd.target] and t.__reclaimable == false then return false end
     __reclaimTasks[unitId] = { target = cmd.target, started = false }
     return true
+  elseif cmd.type == 'Capture' then
+    -- The capture task (capture.lua, CUnitCaptureTask): the dispatch
+    -- constructor of DispatchTask's UNITCOMMAND_Capture case (830696).
+    return __captureStart(unitId, cmd)
   elseif cmd.type == 'Guard' then
     return __guardStart(unitId, cmd.target)
   elseif cmd.type == 'TransportLoad' or cmd.type == 'TransportReverseLoad' or cmd.type == 'TransportUnload' then
@@ -2562,6 +2567,7 @@ function __ordersTick()
       __orders[unitId] = nil
       __orderActive[unitId] = nil
       __transportAbort(unitId)
+      __captureAbort(unitId)
       __transports[unitId] = nil
     elseif u.__dead or u.__destroyQueued then
       -- Nothing. Dispatch runs only while !IsDead
@@ -2617,6 +2623,9 @@ function __ordersTick()
         done = not __builderBusy(unitId)
       elseif cmd.type == 'Reclaim' then
         done = __reclaimTasks[unitId] == nil -- target fully reclaimed or gone
+      elseif cmd.type == 'Capture' then
+        -- The task's TaskTick; true ends the command (capture.lua).
+        done = __captureOrderTick(unitId, cmd)
       elseif cmd.type == 'Guard' then
         -- Guarded unit died (Cfile:839365) — but an adopted reclaim task
         -- (sub_612E80) sits ABOVE the guard on the engine's task stack and
@@ -2662,6 +2671,7 @@ function __dispatchStop(unitId)
   __guardOrders[unitId] = nil
   __reclaimTasks[unitId] = nil
   __transportAbort(unitId)
+  __captureAbort(unitId)
   u.__guardedUnit = false
   u:GetNavigator():AbortMove()
   u.__faceGoal = false
@@ -2714,6 +2724,14 @@ end
 --- finished target ends the task immediately (TaskTick -1, Cfile:817856).
 function __dispatchRepair(unitId, targetId, clear)
   __issueOrder(unitId, { type = 'Repair', target = targetId }, clear)
+end
+
+--- Capture (UNITCOMMAND_Capture, CUnitCaptureTask -- capture.lua): the
+--- user's capture click on an enemy unit (the RULEUCC_Capture order mode)
+--- and the Guard click on an enemy (sub_613A80 838839-838905: an ally is
+--- repaired, anyone else captured).
+function __dispatchCapture(unitId, targetId, clear)
+  __issueOrder(unitId, { type = 'Capture', target = targetId }, clear)
 end
 
 -- The distance the attack task closes to: the largest FIRING range
@@ -3165,6 +3183,22 @@ function IssueRepair(...)
   local id = issueEntity('IssueRepair', target)
   for _, u in ipairs(issueWithoutTarget(issueValidate(issueUnits('IssueRepair', units), 'RULEUCC_Repair'), id)) do
     __issueOrder(u.__id, { type = 'Repair', target = id }, false)
+  end
+end
+
+--- IssueCapture(units, target) -- cfunc_IssueCaptureL (Cfile:1011584-1011666):
+--- two arguments, RULEUCC_Capture (func_Validate_IssueCommand 1011614), an
+--- entity target (SCR_FromLua_Entity + CAiTarget::UpdateTarget
+--- 1011622-1011633), the target taken out of the set
+--- (EntitySetTemplate_Unit::Contains 1011632), UNITCOMMAND_Capture through
+--- UNIT_IssueCommand (1011634-1011647), no handle. platoon.lua:1342 and
+--- ai/aiutilities.lua:1719 capture with it.
+function IssueCapture(...)
+  issueArgs('IssueCapture', 2, ...)
+  local units, target = ...
+  local id = issueEntity('IssueCapture', target)
+  for _, u in ipairs(issueWithoutTarget(issueValidate(issueUnits('IssueCapture', units), 'RULEUCC_Capture'), id)) do
+    __issueOrder(u.__id, { type = 'Capture', target = id }, false)
   end
 end
 

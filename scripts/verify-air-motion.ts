@@ -266,17 +266,23 @@ console.log('\n== The terrain look-ahead lifts the flight before the ridge (STIM
   host.eval(`IssueMove({ __units[${jet}] }, { 240, 20, 150 })`)
   let arrived = false
   let minClearance = 1e9
-  let yBeforeRidge = 0
+  let targetBeforeRidge = 0
   for (let i = 0; i < 400 && !arrived; i++) {
     beat(engine)
     const p = posOf(jet)
     const clearance = p[1]! - ridge(p[0]!)
     if (clearance < minClearance) minClearance = clearance
-    if (p[0]! >= 168 && p[0]! < 180 && p[1]! > yBeforeRidge) yBeforeRidge = p[1]!
+    // The look-ahead's smoothed ground (mTargetElevation, 969660-969677)
+    // while the jet is still over the flat: the flown height there depends
+    // on the unseeded random cruise offset and sits right at the ridge top.
+    if (p[0]! >= 168 && p[0]! < 180) {
+      const te = Number(host.eval(`return __units[${jet}].__air.targetElevation`))
+      if (te > targetBeforeRidge) targetBeforeRidge = te
+    }
     arrived = queueLen(jet) === 0
   }
   check(arrived, 'the flight over the ridge completed')
-  check(yBeforeRidge > 60, `the target elevation rose before the ridge (y ${yBeforeRidge.toFixed(1)} at x 168-180, ridge top 60)`)
+  check(targetBeforeRidge > 40, `the look-ahead raised the target elevation before the ridge (${targetBeforeRidge.toFixed(1)} at x 168-180; flat 20, ridge top 60)`)
   check(minClearance > 0, `it cleared the ridge (min clearance ${minClearance.toFixed(1)})`)
   host.eval(`__units[${jet}]:Destroy()`)
   beat(engine)

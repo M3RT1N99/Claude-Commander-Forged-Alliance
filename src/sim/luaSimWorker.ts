@@ -85,6 +85,8 @@ type InMsg =
   | { type: 'patrol'; id: number; x: number; z: number; queue?: boolean }
   // Repair (dispatch 0x14): resume building an unfinished structure.
   | { type: 'repair'; id: number; targetId: number; queue?: boolean }
+  // Capture (UNITCOMMAND_Capture, CUnitCaptureTask): take the enemy unit over.
+  | { type: 'capture'; id: number; targetId: number; queue?: boolean }
   | { type: 'transportLoad'; ids: number[]; transportId: number; queue?: boolean }
   | { type: 'transportReverseLoad'; transportIds: number[]; targetId: number; queue?: boolean }
   | { type: 'transportUnload'; id: number; x: number; z: number; queue?: boolean }
@@ -395,6 +397,8 @@ const handleMessage = async (msg: InMsg): Promise<void> => {
     }
   } else if (msg.type === 'repair') {
     host.eval(`__dispatchRepair(${msg.id}, ${msg.targetId}, ${msg.queue ? 'false' : 'true'})`)
+  } else if (msg.type === 'capture') {
+    host.eval(`__dispatchCapture(${msg.id}, ${msg.targetId}, ${msg.queue ? 'false' : 'true'})`)
   } else if (msg.type === 'transportLoad') {
     // The user's CallTransport (Cfile:1241799-1241870): one command for the
     // passengers and the transport; each validated like the engine's
