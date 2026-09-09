@@ -443,7 +443,9 @@ console.log('\n== The attach family: Entity::AttachTo and its bindings ==')
   check(bool(host, `__units[${rider}]:GetParent() == __units[${carrier}]`), 'GetParent() is now the carrier')
   check(bool(host, `__units[${rider}]:IsUnitState('Attached')`), "and the rider IsUnitState('Attached')")
   check(bool(host, `__units[${rider}].__motionState == 'Attached'`), "NotifyAttached: the motion state is 'Attached' (Cfile:965759)")
-  check(bool(host, `__units[${rider}].__horzEvent == 'Stopped' and __units[${rider}].__vertEvent == 'Top'`), 'NotifyAttached forces the motion events to Stopped / Top (Cfile:965766-965785)')
+  // The label UMVE_Top at 965780-965787 is paired with vertMotionEvent_names[1]
+  // "Bottom" (motion.lua __setMotionVertEvent).
+  check(bool(host, `__units[${rider}].__horzEvent == 'Stopped' and __units[${rider}].__vertEvent == 'Bottom'`), 'NotifyAttached forces the motion events to Stopped / Bottom (Cfile:965766-965787; the label UMVE_Top is names[1] "Bottom")')
   check(
     bool(host, `(function() local p = __units[${rider}]:GetPosition(); local b = __boneWorld(__units[${carrier}], 0); return math.abs(p[1]-b[1]) < 1e-6 and math.abs(p[2]-b[2]) < 1e-6 and math.abs(p[3]-b[3]) < 1e-6 end)()`),
     'the rider moved onto the carrier bone in the same frame (the woken task thread, Cfile:915862-915878)',
