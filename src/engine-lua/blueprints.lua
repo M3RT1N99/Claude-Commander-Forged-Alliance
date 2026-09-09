@@ -10,6 +10,13 @@ local function collector(g) return function(bp) __registered[g][bp.BlueprintId o
 -- (unit.lua:243) zugreifen, obwohl die .bp-Datei diese Sektionen gar nicht
 -- enthaelt. Werte 1:1 aus den Ctors — nichts geschaetzt.
 __bpDefaults = {
+  -- REntityBlueprint ctor (Cfile:646969-646979): the body of every unit --
+  -- density and size for the mass, the inertia tensor (0 = derived from the
+  -- size below, 647192-647199), the collision offset.
+  AverageDensity = 0.49,
+  SizeX = 1.0, SizeY = 1.0, SizeZ = 1.0,
+  InertiaTensorX = 0.0, InertiaTensorY = 0.0, InertiaTensorZ = 0.0,
+  CollisionOffsetX = 0.0, CollisionOffsetY = 0.0, CollisionOffsetZ = 0.0,
   -- Die Upgrade-Felder sind KEINE leeren Strings: der Ctor setzt sie auf den
   -- String "none" (Cfile:656076-656077, func_StringInitFilename("none", ...));
   -- nur UpgradesTo startet leer (str_empty, Cfile:656075).
@@ -36,14 +43,23 @@ __bpDefaults = {
   -- RUnitBlueprintAir fields used by motion and weapon gates. The reflected
   -- Lua name is MaxAirspeed (lower-case "s"), despite the C++ member being
   -- mMaxAirSpeed (Cfile:656086-656127, 657447-657561).
+  -- RUnitBlueprintAir ctor (Cfile:656086-656129), every field.
   Air = {
-    CanFly = false,
-    Winged = false,
-    FlyInWater = false,
-    MaxAirspeed = 0.0,
-    MinAirspeed = 0.0,
-    StartTurnDistance = 0.0,
-    PredictAheadForBombDrop = 0.0,
+    TurnSpeed = 1.0, CombatTurnSpeed = 1.0, TightTurnMultiplier = 1.0,
+    KMove = 1.0, KMoveDamping = 1.0, KLift = 1.0, KLiftDamping = 1.0,
+    CirclingRadiusVsAirMult = 1.0, SustainedTurnThreshold = 10.0,
+    CirclingElevationChangeRatio = 0.25, LiftFactor = 5.0,
+    CirclingFlightChangeFrequency = 2.0, BankFactor = 0.5,
+    CirclingRadiusChangeMinRatio = 0.6, RandomBreakOffDistanceMult = 1.5,
+    CanFly = false, Winged = false, FlyInWater = false, AutoLandTime = 0.0,
+    MaxAirspeed = 0.0, MinAirspeed = 0.0, StartTurnDistance = 0.0,
+    BankForward = false, EngageDistance = 0.0, BreakOffTrigger = 0.0,
+    BreakOffDistance = 0.0, BreakOffIfNearNewTarget = false,
+    KTurn = 3.0, KTurnDamping = 3.0, KRoll = 3.0, KRollDamping = 3.0,
+    CirclingTurnMult = 3.0, CirclingRadiusChangeMaxRatio = 0.9,
+    CirclingDirChange = true, HoverOverAttack = false,
+    RandomMinChangeCombatStateTime = 3.0, RandomMaxChangeCombatStateTime = 6.0,
+    TransportHoverHeight = 0.0, PredictAheadForBombDrop = 0.0,
   },
   -- IdleEffects: Tabellen-Feld im Struct -> leer, nie nil. unit.lua:2463
   -- indiziert es ungeprueft (bpTable[layer]).
@@ -294,6 +310,14 @@ function RegisterUnitBlueprint(bp)
   if air.MaxAirspeed == 0 and air.CanFly then air.MaxAirspeed = physics.MaxSpeed end
   if air.MinAirspeed == 0 then air.MinAirspeed = air.MaxAirspeed end
   if air.StartTurnDistance == 0 then air.StartTurnDistance = (bp.SizeZ or 0) * 3 end
+  -- The inertia tensor of a box when the .bp leaves it at 0
+  -- (RUnitBlueprint, Cfile:647192-647199): (b^2 + c^2) / 12 per axis.
+  if (bp.InertiaTensorX or 0) * (bp.InertiaTensorY or 0) * (bp.InertiaTensorZ or 0) == 0 then
+    local sx, sy, sz = bp.SizeX or 1, bp.SizeY or 1, bp.SizeZ or 1
+    bp.InertiaTensorX = (sz * sz + sy * sy) / 12
+    bp.InertiaTensorY = (sz * sz + sx * sx) / 12
+    bp.InertiaTensorZ = (sy * sy + sx * sx) / 12
+  end
   -- Jeder Waffen-Eintrag ist ein eigenes Struct — also auch eigene Defaults.
   for _, w in ipairs(bp.Weapon or {}) do
     fillDefaults(w, __weaponDefaults)

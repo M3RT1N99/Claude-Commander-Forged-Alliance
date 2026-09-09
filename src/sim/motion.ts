@@ -1,5 +1,6 @@
 import type { LuaHost } from '../lua/host'
 import MOTION_LUA from '../engine-lua/motion.lua?raw'
+import AIR_LUA from '../engine-lua/air.lua?raw'
 
 /**
  * Engine-Bewegung — der Navigator (`unit:GetNavigator():SetGoal`) + die
@@ -19,6 +20,9 @@ import MOTION_LUA from '../engine-lua/motion.lua?raw'
 /** Installiert Navigator + Physik-Fortschreibung im Lua-Host. */
 export function installMotion(host: LuaHost): void {
   host.eval(MOTION_LUA)
+  // The air motion -- CUnitMotion::CalcMoveAir and its controller
+  // (src/engine-lua/air.lua), the flyer's branch of the motion tick.
+  host.eval(AIR_LUA)
 }
 
 /** Physik-Schritt eines Beats (nach der Thread-Stage). */

@@ -154,19 +154,22 @@ export interface TransportHoverInfo {
  * vtable slot the decompilation does not name, read as "attached" --
  * UNVERIFIED) and matches it: a COMMAND unit only a CANTRANSPORTCOMMANDER
  * transport or a ferry beacon (1238700-1238720); a TRANSPORTATION,
- * TELEPORTATION or FERRYBEACON target (1238746-1238768) while its byte 872
- * is clear (1238806); an AIRSTAGINGPLATFORM target while that byte is SET
- * and the unit is not CANNOTUSEAIRSTAGING (1238818-1238827). Which flag
- * byte 872 is stays UNVERIFIED -- it is not carried here, so both branches
- * read it as accepting.
+ * TELEPORTATION or FERRYBEACON target takes a selected unit that cannot fly
+ * (1238746-1238768 with 1238806: the selected unit's blueprint byte 872 --
+ * mAir.mCanFly, the same byte CUnitMotion::AtTarget tests at 965902); an
+ * AIRSTAGINGPLATFORM target takes one that can fly and is not
+ * CANNOTUSEAIRSTAGING (1238818-1238827).
  */
 export function rightClickWithTransport(selection: SelectedUnit[], hover: TransportHoverInfo): boolean {
   if (hover.layer === 'Seabed' || hover.beingBuilt) return false
   for (const u of selection) {
     if (u.isAttached) continue
     if (u.isCommand && !hover.canTransportCommander && !hover.isFerryBeacon) continue
-    if (hover.isTransportation || hover.isTeleportation || hover.isFerryBeacon) return true
-    if (hover.isAirStaging && !u.cannotUseAirStaging) return true
+    if (hover.isTransportation || hover.isTeleportation || hover.isFerryBeacon) {
+      if (!u.canFly) return true
+    } else if (hover.isAirStaging && u.canFly && !u.cannotUseAirStaging) {
+      return true
+    }
   }
   return false
 }

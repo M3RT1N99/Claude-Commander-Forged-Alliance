@@ -877,6 +877,9 @@ local function readRow(id, u)
     name = (u.__bp and u.__bp.BlueprintId) or '?',
     x = p[1], y = p[2], z = p[3],
     heading = u.__heading or 0,
+    -- A flyer's full pose (the PhysBody's mOrientation, air.lua) for the
+    -- renderer's banking and pitch: (x, y, z, w), absent for ground units.
+    orient = (u.__air and u.__orient) or nil,
     health = u.__health or 0,
     maxHealth = u:GetMaxHealth(),
     moving = moving,
@@ -1001,6 +1004,8 @@ function __readAllUnitsJson()
       .. ',"name":' .. jstr(r.name)
       .. ',"x":' .. jnum(r.x) .. ',"y":' .. jnum(r.y) .. ',"z":' .. jnum(r.z)
       .. ',"heading":' .. jnum(r.heading)
+      .. (r.orient and (',"orient":[' .. jnum(r.orient[1]) .. ',' .. jnum(r.orient[2]) .. ','
+        .. jnum(r.orient[3]) .. ',' .. jnum(r.orient[4]) .. ']') or '')
       .. ',"health":' .. jnum(r.health)
       .. ',"maxHealth":' .. jnum(r.maxHealth)
       .. ',"moving":' .. tostring(r.moving)

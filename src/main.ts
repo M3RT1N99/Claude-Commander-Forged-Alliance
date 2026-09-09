@@ -2440,6 +2440,11 @@ interface LuaSceneUnit {
   bpId: string
   mesh: THREE.Object3D
   ring: THREE.Mesh
+  /** A flyer's pose of the previous and the current beat (the row's
+   *  `orient`), slerped between beats like the heading. */
+  prevOrient?: THREE.Quaternion
+  lastOrient?: THREE.Quaternion
+  lastOrientBeat?: number
   selected: boolean
   name: string
   army: number
@@ -3093,7 +3098,24 @@ function luaSimUpdate(): void {
       heading = l.ph + dh * lerpAlpha
     }
     u.mesh.position.set(x, y, z)
-    u.mesh.rotation.set(0, heading, 0)
+    if (s.orient) {
+      // A flyer carries its whole pose (banking, pitch): the quaternion,
+      // slerped from the previous beat's like the heading above.
+      const cur = new THREE.Quaternion(s.orient[0]!, s.orient[1]!, s.orient[2]!, s.orient[3]!)
+      const prev = u.prevOrient
+      if (prev && l) {
+        u.mesh.quaternion.slerpQuaternions(prev, cur, lerpAlpha)
+      } else {
+        u.mesh.quaternion.copy(cur)
+      }
+      if (!u.lastOrientBeat || u.lastOrientBeat !== luaSim?.gameTick) {
+        u.prevOrient = u.prevOrient ? u.prevOrient.copy(u.lastOrient ?? cur) : (u.lastOrient ?? cur).clone()
+        u.lastOrient = cur
+        u.lastOrientBeat = luaSim?.gameTick
+      }
+    } else {
+      u.mesh.rotation.set(0, heading, 0)
+    }
     // The army comes from the sim (spawn-time value in addLuaUnitToScene was
     // always 1) — without this, an enemy under the cursor never triggered
     // Attack and its icon carried the wrong tint.

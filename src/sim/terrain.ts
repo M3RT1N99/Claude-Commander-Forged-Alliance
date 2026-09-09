@@ -67,6 +67,15 @@ export class Heightfield {
     const h11 = data[(z0 + 1) * this.stride + x0 + 1]!
     return ((h00 * (1 - fx) + h10 * fx) * (1 - fz) + (h01 * (1 - fx) + h11 * fx) * fz) * scale
   }
+
+  /** The stored sample at an integer corner, clamped to the field (0..width,
+   *  0..height) -- no interpolation; the height pyramid's reader. */
+  sample(ix: number, iz: number): number {
+    const { data, width, height, scale } = this.hf
+    const x = Math.min(Math.max(Math.trunc(ix), 0), width)
+    const z = Math.min(Math.max(Math.trunc(iz), 0), height)
+    return data[z * this.stride + x]! * scale
+  }
 }
 
 /**

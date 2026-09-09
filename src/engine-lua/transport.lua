@@ -861,7 +861,9 @@ local function loadTick(u, task)
     end
     local cx, cz = cellOf(u, avg[1], avg[2])
     local wx, wz = cellCentre(u, cx, cz)
-    u:GetNavigator():SetGoal({ wx, 0, wz })
+    -- The goal carries LAYER_Land (853121): the transport lands -- or
+    -- hovers at its TransportHoverHeight (ShouldHoverInsteadOfLand).
+    u:GetNavigator():SetGoal({ wx, 0, wz }, 'Land')
     local f = t.pickup.facing
     if f[1] ~= 0 or f[3] ~= 0 then u.__faceGoal = { u.__pos[1] + f[1], u.__pos[3] + f[3] } end
     task.waitMove = true
@@ -1055,8 +1057,10 @@ local function unloadTick(u, task)
     end
     local isAir = u.__bp.Air and u.__bp.Air.CanFly
     if not t.stagingPlatform and isAir then
-      -- An air transport re-targets itself in the Air layer (853603-853611)
-      -- and leaves the placement to the passengers' own fall.
+      -- An air transport re-targets itself in the Air layer
+      -- (CUnitMotion::SetTarget(pos, 0, LAYER_Air), 853603-853611) and
+      -- leaves the placement to the passengers' own fall.
+      __airSetTarget(u, u.__pos[1], nil, u.__pos[3], 'Air')
       task.state = 4
       return 0
     end

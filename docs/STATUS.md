@@ -2793,7 +2793,7 @@ destructors), the bindings, and the user-side dispatch functions
 `__dispatchTransportUnload`. motion.lua: `__unitOnDetached` starts the
 fall, `__ballisticStep` lands it, `__footprintFitsAt` is the occupancy test,
 `blockedAt` no longer counts attached units or air units, a flyer's top
-speed is `Air.MaxAirspeed` (Unit::UpdateSpeedThroughStatus 953164-953174).
+speed is `Air.MaxAirspeed` (Unit::UpdateInfoCache 953164-953174).
 moho.lua: the five Unit methods with the engine's errors. globals.lua:
 `CreateThrustController(unit, label, thrustBone)` (mHelp 881245) and
 `ThrustManipulator:SetThrustingParam` (mHelp 881321-881322, nine values).
@@ -2828,18 +2828,8 @@ attach checks under a mutation that skipped UMS_Ballistic).
 
 **Not modelled, recorded rather than faked.**
 
-* **The air motion.** `CUnitMotion::CalcMoveAir` (968060-969700) is a force
-  controller on the PhysBody -- force = (heading * KMove - velocity *
-  CalcAirMovementDampingFactor) * mass, lift from KLift/LiftFactor, the turn
-  from KTurn/KTurnDamping, banking, circling, the elevation, the landing
-  (969121-969200, 967852-967890). An air blueprint carries no ground
-  Physics.MaxAcceleration or TurnRate, so on the ground model a flyer took
-  its top speed never. motion.lua names the reduction: a flyer moves on the
-  ground model at Air.MaxAirspeed, takes it at once and turns freely; it
-  keeps no altitude (the transport hovers at terrain height, the hover
-  height `Air.TransportHoverHeight` of ShouldHoverInsteadOfLand 967750-
-  967770 / 969581 has no effect), and a loaded transport is not slowed by
-  CalcTransportLoadFactor (953174). The next motion branch.
+* **The air motion** was the next branch and is ported since ("The air
+  motion" below): a transport flies, lands and hovers on CalcMoveAir.
 * **The ogrid of mobile units.** `__footprintFitsAt` counts standing
   structures; whether an idle mobile unit's reservation
   (Unit::ReserveOgridRect) is on the grid when a dropped unit lands is
@@ -2869,9 +2859,196 @@ shipped unit has TransportClass 4; the "uses bones" flag of CUnitLoadUnits
 destructor's clearing of WaitingForTransport / Teleporting (done here);
 whether func_QuatLERP is a spherical or a normalised linear interpolation;
 the vtable+44 test of func_RightClickWithTransport (read as "attached", not
-carried by the UI row) and its byte-872 flag (clear for a transport target,
-set for a staging platform -- read as accepting in both branches), and the
-field test at 1238912 of func_RightClickTransport (not modelled); the
+carried by the UI row) -- its byte-872 flag is resolved since: the byte is
+`mAir.mCanFly` (CUnitMotion::AtTarget tests the same byte at 965902), a
+transport target takes a selected unit that cannot fly, a staging platform
+one that can (worldCommands.ts) -- and the field test at 1238912 of
+func_RightClickTransport (not modelled); the
 engine's unstable sort of the attach points (func_SortAttachData) against
 the bone-order tie-break here; the mHelp strings of the five Unit methods
 (the bare names are used in the argument-count errors).
+
+## The air motion: CalcMoveAir, the PhysBody, the winged and the hover pose, landing and take-off
+
+**What was wrong.** A flyer moved on the ground model -- a named
+reduction in motion.lua: it took `Air.MaxAirspeed` at once, turned
+freely, kept no altitude (a transport hovered at terrain height), never
+banked or pitched, never landed after `Air.AutoLandTime`, and a loaded
+transport was not slowed by its cargo. The transport branch above flew
+its pickups and drops on that model.
+
+**The engine.** `CUnitMotion::CalcMoveAir` (969188-970006) is the tick
+of every unit whose blueprint has `Air.CanFly` (966254-966261). The unit
+is a rigid body (the PhysBody: position, orientation, velocity, angular
+impulse, mass = AverageDensity * SizeX * SizeY * SizeZ, the inverse
+inertia 1 / (InertiaTensor * mass), CUnitMotion ctor 964840-964854; the
+box tensor when the .bp leaves it at 0, RUnitBlueprint 647192-647199).
+`ComputeAirControl` (968961-969184) turns the desired velocity into a
+force -- (desired * KMove - velocity * CalcAirMovementDampingFactor -
+gravity) * mass -- and the desired pose into a torque -- angular velocity
+* KTurnDamping plus the axis-angle of the pose error * KTurn, scaled by
+the inertia into the world frame. The desired pose comes from
+`CalcWingedOrientation` (968384-968648: the bank from the turn rate and
+BankFactor, the turn clamped to TurnSpeed, the lift of CalcWingedLift
+967793-967834) or `CalcHoverOrientation` (968873-968960: the lean into
+the relative velocity by BankFactor, scaled by the height reached). The
+cruise height is `Physics.Elevation` plus a random offset of +-1
+(GetElevation 967776-967791, SimConVar_RandomElevationOffset); the terrain
+look-ahead (STIMap::LookAheadForMaxTerrain 859169-859220 over the height
+pyramid, GetTierBoundsUWord 525225-525290) lifts the target elevation
+before a ridge (969629-969673). Within `Air.StartTurnDistance` of the
+target an idle flyer waits `Air.AutoLandTime` from mPreparationTick
+(MotionTick 966189-966202: 0 while a command is queued, else the tick of
+becoming idle), finds a landing spot (Unit::PrepareMove 857914-858170: a
+square footprint on the land cap, water when CANLANDONWATER, the target
+cell then a ring search), descends with MovingDown, touches down
+(969706-969739: velocity zero, the landing layer, UMS_Down/Top), and takes
+off again with the next order (969748-969753, MovingUp). A transport with
+cargo hovers at `Air.TransportHoverHeight` instead
+(ShouldHoverInsteadOfLand 967749-967775). The body integrates with dt =
+0.1 (sub_697B00 940931-940964 for the velocity and position, sub_6978D0
+940860-940930 for the angular impulse and the orientation, inlined at
+969950-969975); HandleGroundCollision (967589-967745, sub_698350
+941347-941440) stops a body that meets the heightfield with a damped
+impulse. A dead body keeps the Air layer, UMS_Ballistic and no force
+(969888-969949) for one last CalcMoveAir tick; from the next one the
+motion tick dispatches on UMS_Ballistic (966250-966253) to
+CalcMoveBallistic, which carries the fall from Unit::GetVelocity to the
+surface, OnImpact and UMS_Crashed (970106-970115, 970344-970356). The top speed is
+`Air.MaxAirspeed` * speedMult / CalcTransportLoadFactor, computed every
+tick by Unit::UpdateInfoCache (953100-953198, from Unit::OnTick 952785;
+the division 953164-953174). CalcTransportLoadFactor (952480-952513) is a
+cache: (cargo mass + own mass) / own mass is computed when the field is
+below 0 and kept; the field starts at -1 (949682) and only AttachTo /
+DetachFrom of the unit being attached reset it (954392, 954415 -- the
+cargo's own field), never a load on the transport's. So a transport's
+factor is the 1 of its first tick: **the retail engine does not slow a
+loaded transport** (verified-facts.md). The navigator:
+CAiNavigatorAir::SetGoal / SetTarget (755918-755958, 755824-755841) hand
+the goal and its layer (LAYER_None -> Air, 755838-755841) to
+CUnitMotion::SetTarget (965091-965180); AbortMove (756062-756096) stops a
+flyer at Unit::PredictAheadBomb(1.0) (858914-858975: the per-tick velocity
+followed for ten steps, turned each step by the yaw of the angular
+impulse's y * 0.1) through CUnitMotion::Stop (965024-965077); Dispatch
+(756132-756236) ends the goal when AtTarget (965877-965925: within 0.25,
+or a quarter of the top speed when always at top speed; not a quarter
+for a winged unit; a hovering or a parked flyer counts).
+
+**The port.** `src/engine-lua/air.lua` (new; src/sim/motion.ts evals it
+after motion.lua): the body from the blueprint (`__airInit`), the
+controller, both orientations, the lift, the damping factor, the
+elevation, the look-ahead, the landing spot, both integrators, the
+ground collision, and the navigator side `__airSetTarget` / `__airStop`
+(the PredictAheadBomb curve) / `__airAtTarget`; `__airStep` is the tick.
+The landing spot takes the water cap once from the target and the nearest
+fitting cell of a ring (858041-858049, 858230-858256); the load factor is
+the engine's cache (`u.__transportLoadFactor`, reset by the cargo's own
+attach and detach in motion.lua); a dead body's last air tick hands its
+displacement to the ballistic drop (`u.__ballisticDrop`, motion.lua
+`__ballisticStep`). motion.lua: the tick's flyer
+branch (a crashed body lies still, an Immobile or stunned flyer only
+reports Stopped), the navigator's `SetGoal(pos, [layer])`, `AbortMove`
+and `SetSpeedThroughGoal` reach the air motion, the ground reduction is
+gone. blueprints.lua: the entity body defaults (AverageDensity 0.49,
+Size 1, InertiaTensor 0, CollisionOffset 0; REntityBlueprint ctor
+646969-646979), every field of the RUnitBlueprintAir ctor
+(656086-656129) and the box tensor. engineGlobals.ts: `__terrainMaxTier`,
+the height pyramid the look-ahead samples. transport.lua: the load task's
+goal carries LAYER_Land (853121; the transport lands or hovers), the
+unload re-targets in the Air layer (853603-853611). units.lua /
+luaSimClient.ts / main.ts: a flyer's row carries its full pose (`orient`),
+the renderer slerps it between beats like the heading. worldCommands.ts:
+the byte-872 test of the right-click predicates is `Air.CanFly`.
+
+**Checks** (scripts/verify-air-motion.ts, new, 47 checks): the body of
+uea0107 from the blueprint (the ctor defaults, the box inertia, the mass,
+the spawn at Elevation +-1, a random offset that a POD (uea0003) does not
+draw); a move that arrives at about the blueprint's speed with TopSpeed
+and Stopped, in the Air layer, at the cruise height, with the pose as a
+unit quaternion in the JSON row; the AutoLandTime landing (MovingDown, UMS_Down, Top
+and the Land layer, the ground height, zero velocity), the take-off with
+the next order (MovingUp, UMS_Up, airborne) and the second arrival; the
+winged uea0102 banking into its turn (|up.x| > 0.1), arriving and never
+touching the ground; the flight over a ridge of 60 that lifts the target
+elevation before the slope and clears it; a loaded uea0107 hovering at
+TransportHoverHeight with the Hover event, its load factor the cached 1
+of the first tick and above 1 once the cache is reset; the Aeon uaa0107
+with its collision offset landing on its point and resting, and its
+ground collision called directly on a level, moving, spinning body: the
+lever arm's point velocity, the impulse r x (-m vp/2) and the velocity
+-vp/2 damped by 0.9, the lift by the penetration; a killed uea0102
+losing height with UMS_Ballistic and OnImpact("Terrain") + UMS_Crashed on
+the ground; no Lua errors. Seen red first: the winged checks under the
+controller's rotation in the wrong frame (the up axis inverted, the jet
+went underground), the arrival before the preparation tick followed
+MotionTick, the death checks under DestroyNoFallRandomChance = 0
+(MobileUnit.OnKilled destroyed the unit in the air), the body checks
+without the ctor defaults, the cache check while the factor was
+recomputed every call.
+
+**Review corrections** (a fresh agent against the Cfile): the turned
+forward of a winged unit keeps the desired direction's y (968576-968579;
+it was flattened -- no pitch, no climb-linked bank); the ground
+collision lifts the body only for a point that moves down (941421-941442;
+it snapped every tick); the landing spot's water cap is decided once from
+the target and a ring's nearest fitting cell wins (it took the first);
+the load factor is the engine's cache (it was recomputed, which slowed a
+loaded transport the retail engine does not slow); the stop point is the
+PredictAheadBomb curve (it was a straight second); the height pyramid's
+first level is a cell's four corners (it was one sample per cell, so a
+ridge sample on an even boundary belonged to the next block only); the
+top speed's function is Unit::UpdateInfoCache, not UpdateSpeedThroughStatus
+(955372-955449, which only toggles the speed-through flag); the byte-872
+test is at 965902; the texture scroller ran twice a tick for a flyer;
+the axis-angle helper's w <= -1 value is 8.0 (four * 2.0). Rejected after
+reading: the per-tick velocity of the motion events (Entity::GetVelocity
+915398-915413 is the displacement per tick; AbortMove multiplies it by 10
+for m/s, 756087), the dead branch's force (zero in the engine too,
+969912-969916). A second round on the corrections: the stop curve turns
+by GetImpulse's world angular velocity (941106-941130), not the raw
+angular impulse; the ground collision applies the one point's lever arm
+-- its velocity v + w x r, the angular impulse r x (-m v/2)
+(941397-941442) -- which the flat version had dropped for a body with a
+CollisionOffset (uaa0107: -2); the height pyramid reads the exact corner
+sample at the field's far edge (Heightfield.sample), where the bilinear
+world query clamps to width - 0.001. Found while checking that: the
+dead flyer's crash was read into CalcMoveAir's readback, but the motion
+tick dispatches on the state (966203-966262) -- after the dead branch's
+UMS_Ballistic the next ticks are CalcMoveBallistic's, the ballistic drop
+of motion.lua, which lands the body; the port hands it over.
+
+**Not modelled, recorded rather than faked.**
+
+* **The combat tactics.** ComputeAirCombatTactics (967997-968379) --
+  attack runs, break-off, the bomb-drop prediction, the combat turn speed
+  -- every flyer flies in ACS_Normal; UNITSTATE MakingAttackRun is never
+  set.
+* **The circling orientation** (968649-968870) is the hover orientation
+  here; the circling parameters of the blueprint are carried, not read.
+* **The carrier events** (UMCE_1/2, with the force law near a carrier
+  969122-969149) and **formations** (the top-speed clamp of
+  Unit::UpdateInfoCache 953176-953196, which bounds the mTopSpeed every
+  CUnitMotion read takes): none.
+* **The collision geometry.** HandleGroundCollision walks the terrain
+  collision points of the mesh with a per-point margin (Elevation + the
+  point's w - bp+780, 967704-967709); one point, the entity's position,
+  stands for it. A landing spot is not reserved on the ogrid
+  (CanReserveOgridRect) and PrepareMove's skirt test is not run; the
+  playable-rect clamp of SetTarget is not run; the dead body's random
+  tumble (969915-969949) and its rotation during the ballistic fall
+  (970056-970060) are not run. CUnitMotion::SetMotionTurnEvent
+  (965543-965546) is an empty function in the engine.
+* **The random elevation offset** draws from `Random()`, not the engine's
+  MT19937 state.
+
+**UNVERIFIED.** mAlwaysUseTopSpeed is set by the steering's
+CalcAtTopSpeed (787876-787902); it is read here as "winged, or the
+speed-through flag" -- the steering's own condition is not read. The
+rotation-vector-to-quaternion helper (func_VecToQuatB, called at
+940911-940916, no decompiled body) is ported as the exponential map;
+whether the engine approximates for small angles is not read.
+HandleGroundCollision's height limit reads bp+172 / bp+180 as SizeY /
+SizeZ; the mass factor of the collision's angular impulse is the body's
+second float (v2[1], 941423), read as mMass. The numbers of
+EAirCombatState beyond ACS_Normal = 0 (964785) are read off the
+comparisons (never set here).

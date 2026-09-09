@@ -228,6 +228,7 @@ const handleMessage = async (msg: InMsg): Promise<void> => {
     setTerrainSource(h, (x, z) => hf.at(x, z), {
       width: msg.terrain.width,
       height: msg.terrain.height,
+      sampleAt: (ix, iz) => hf.sample(ix, iz),
       waterElevation: msg.waterElevation,
       terrainTypeAt: terrainTypesOf(msg.terrain),
     })

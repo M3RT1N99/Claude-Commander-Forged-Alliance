@@ -50,6 +50,9 @@ export interface LuaUnitSnapshot {
   y: number
   z: number
   heading: number
+  /** A flyer's full pose, the PhysBody's orientation as (x, y, z, w)
+   *  (CalcMoveAir, air.lua); absent for a ground unit. */
+  orient?: number[]
   health: number
   maxHealth: number
   moving: boolean

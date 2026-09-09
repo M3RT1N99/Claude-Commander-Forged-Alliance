@@ -73,6 +73,25 @@ in CLAUDE.md. Before working on one of the topics: read the relevant section.*
   (Cfile:766161-766163). Stop: `dist ≤ brake ? dist : sqrt(2·brake·dist)`
   (Cfile:766249-766262). Struct-Default TurnRadius = 5.0 (Cfile:656160).
 
+- **A loaded transport is not slowed by its cargo in the retail engine.**
+  `Unit::CalcTransportLoadFactor` (Cfile:952480-952513) computes
+  (cargo mass + own mass) / own mass only while `mTransportLoadFactor` is
+  below 0 and caches it; the field starts at -1 (the Unit ctor 949682) and
+  is reset to -1 only by `Unit::AttachTo` / `Unit::DetachFrom` of the unit
+  being attached (954392 / 954415 -- the cargo's own field). The transport's
+  own field is computed on its first tick (`Unit::UpdateInfoCache`
+  953164-953174, from `Unit::OnTick` 952785), before any cargo, and never
+  refreshed by a load -- 1.0 for its whole life unless the transport is
+  itself attached and released. Ported as the cache
+  (air.lua `__transportLoadFactor`, verify-air-motion.ts).
+- **`Entity::GetVelocity` is the displacement per tick**, not m/s
+  (Cfile:915398-915413: mCurTransform - mLastTransform, times
+  mCurImpactSomething = 1.0, 914881). `CAiNavigatorAir::AbortMove` multiplies
+  it by 10 for m/s (756087); `CUnitMotion::CalcMoveAir` compares it as it is
+  with `mTopSpeed * 0.08` / `* 0.005` for the TopSpeed / Stopped events
+  (969841, 969852) -- so a flyer reports TopSpeed above 80 % of its top
+  speed, not 8 %.
+
 ## Units, weapons, skeleton (Details: [weapons.md](weapons.md))
 
 - **Unit lifecycle:** `OnPreCreate` (@943748) → `OnCreate` (@944007) → at

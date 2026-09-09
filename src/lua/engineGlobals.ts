@@ -36,6 +36,13 @@ export interface TerrainSize {
   height: number
   waterElevation?: number
   /**
+   * The stored sample at an integer corner of the heightfield (0..width,
+   * 0..height), for the height pyramid below: the world query `heightAt`
+   * clamps to width - 0.001 and blends at the far edge, the engine's
+   * GetTierBoundsUWord reads the raw sample (Cfile:525225-525250).
+   */
+  sampleAt?: (ix: number, iz: number) => number
+  /**
    * Der TYPCODE der Terrain-Typ-Ebene an einer Zelle
    * (`scmap.terrainTypeData`, ein Byte je Zelle).
    *
@@ -59,6 +66,65 @@ export function setTerrainSource(
   size?: TerrainSize,
 ): void {
   host.setGlobal('__terrainHeight', heightAt)
+  // CHeightField's tiers (the ctor 525543-525580: msb(largest - 1) + 1
+  // tiers of (width >> tier) x (height >> tier) cells, at least 1;
+  // UpdateBounds 526184-526330: tier 1 holds the min/max of the samples
+  // 2x..2x+2 of each cell pair, every higher tier the min/max of the 2 x 2
+  // cells below it) and GetTierBoundsUWord (525225-525290: tier 0 is the
+  // extreme of a cell's four corner samples, a higher tier the stored
+  // cell). The air motion's terrain look-ahead (STIMap::LookAheadForMaxTerrain
+  // 859169-859220) reads the max per tick. Built once per map from the same
+  // sampler; only the max is kept (the look-ahead reads no min).
+  const width = size?.width ?? 256
+  const height = size?.height ?? 256
+  let tiers: Float32Array[] | undefined
+  const buildTiers = (): Float32Array[] => {
+    // Level 0: a cell's four corners, the samples x..x+1 and z..z+1.
+    const sample = size?.sampleAt ?? heightAt
+    const base = new Float32Array(width * height)
+    for (let z = 0; z < height; z++) {
+      for (let x = 0; x < width; x++) {
+        base[z * width + x] = Math.max(sample(x, z), sample(x + 1, z), sample(x, z + 1), sample(x + 1, z + 1))
+      }
+    }
+    const out = [base]
+    let w = width
+    let h = height
+    let prev = base
+    while (w > 1 || h > 1) {
+      const nw = Math.max(1, w >> 1)
+      const nh = Math.max(1, h >> 1)
+      const next = new Float32Array(nw * nh)
+      for (let z = 0; z < nh; z++) {
+        for (let x = 0; x < nw; x++) {
+          let m = -Infinity
+          for (let dz = 0; dz < 2; dz++) {
+            for (let dx = 0; dx < 2; dx++) {
+              const sx = Math.min(w - 1, x * 2 + dx)
+              const sz = Math.min(h - 1, z * 2 + dz)
+              const v = prev[sz * w + sx]!
+              if (v > m) m = v
+            }
+          }
+          next[z * nw + x] = m
+        }
+      }
+      out.push(next)
+      prev = next
+      w = nw
+      h = nh
+    }
+    return out
+  }
+  host.setGlobal('__terrainMaxTier', (tier: number, bx: number, bz: number): number => {
+    tiers ??= buildTiers()
+    const level = Math.max(0, Math.min(tiers.length - 1, Math.floor(tier)))
+    const lw = Math.max(1, width >> level)
+    const lh = Math.max(1, height >> level)
+    const x = Math.max(0, Math.min(lw - 1, Math.floor(bx)))
+    const z = Math.max(0, Math.min(lh - 1, Math.floor(bz)))
+    return tiers[level]![z * lw + x]!
+  })
   if (size) {
     host.setGlobal('__mapSizeX', size.width)
     host.setGlobal('__mapSizeZ', size.height)

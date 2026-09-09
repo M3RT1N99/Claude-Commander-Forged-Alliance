@@ -27,15 +27,27 @@ local DEG_PER_SEC_TO_RAD_PER_TICK = 0.0017453292
 function __getNavigator(id)
   return {
     __id = id,
-    SetGoal = function(self, pos)
+    -- SetGoal(pos, [layer]): the goal cell. A flyer's navigator hands the
+    -- goal's position and layer to CUnitMotion::SetTarget (CAiNavigatorAir::
+    -- SetGoal 755918-755958 -> SetTarget 755824-755841; air.lua), the layer
+    -- LAYER_Air unless the goal names one (a transport's Land-layer flight
+    -- to its passengers, CUnitLoadUnits 853120-853123).
+    SetGoal = function(self, pos, layer)
       local u = __units[id]
-      if u and pos then u.__goal = { pos[1] or pos.x or 0, pos[3] or pos.z or 0 } end
+      if u and pos then
+        local x, z = pos[1] or pos.x or 0, pos[3] or pos.z or 0
+        u.__goal = { x, z }
+        if u.__bp and u.__bp.Air and u.__bp.Air.CanFly then __airSetTarget(u, x, nil, z, layer) end
+      end
     end,
+    -- AbortMove: a flyer's navigator stops the motion at the point a second
+    -- ahead (CAiNavigatorAir::AbortMove 756062-756096 -> CUnitMotion::Stop).
     AbortMove = function(self)
       local u = __units[id]
       if u then
         u.__goal = false
         u.__speed = 0
+        if u.__air then __airStop(u) end
       end
     end,
     AtGoal = function(self)
@@ -52,7 +64,14 @@ function __getNavigator(id)
     -- to a stop (the final leg). Drives the arrival/stop-cap gates below.
     SetSpeedThroughGoal = function(_, flag)
       local u = __units[id]
-      if u then u.__speedThroughGoal = flag == 1 or flag == true end
+      if u then
+        u.__speedThroughGoal = flag == 1 or flag == true
+        -- CAiSteeringImpl::CalcAtTopSpeed sets CUnitMotion::mAlwaysUseTopSpeed
+        -- (787876-787902); the speed-through flag is read as that here --
+        -- UNVERIFIED that the steering's condition is the same
+        -- (docs/STATUS.md).
+        if u.__air then u.__air.alwaysUseTopSpeed = u.__speedThroughGoal end
+      end
     end,
   }
 end
@@ -73,7 +92,7 @@ local function motionParams(u)
   -- navigator only ever drives forward, so a unit ordered to a nearby point
   -- behind it pivots and drives forward instead of backing up. Not modelled yet.
   -- A flyer's top speed is the blueprint's Air.MaxAirspeed, not Physics.
-  -- MaxSpeed: Unit::UpdateSpeedThroughStatus takes mAir.mMaxAirSpeed *
+  -- MaxSpeed: Unit::UpdateInfoCache (953100-953198) takes mAir.mMaxAirSpeed *
   -- speedMult for a unit that can fly and mPhysics.mMaxSpeed * speedMult for
   -- every other (Cfile:953164-953174), and CalcMoveAir caps on the same
   -- product (968103). The blueprint pipeline already fills MaxAirspeed from
@@ -85,22 +104,9 @@ local function motionParams(u)
   local topSpeedBp = (canFly and (air.MaxAirspeed or 0)) or (phys.MaxSpeed or 0)
   local maxSpeed = topSpeedBp * speedMult * 0.1
   local turnRate = (phys.TurnRate or 0) * turnMult * DEG_PER_SEC_TO_RAD_PER_TICK
-  -- DOCUMENTED REDUCTION -- the air motion. The engine flies a unit that
-  -- can fly with CUnitMotion::CalcMoveAir (Cfile:968060-969700): a force
-  -- controller on the PhysBody -- force = (heading * KMove - velocity *
-  -- CalcAirMovementDampingFactor) * mass, lift from KLift/LiftFactor, the
-  -- turn from KTurn/KTurnDamping, banking, circling, the elevation
-  -- (969121-969200, 967852-967890) -- and none of the ground parameters
-  -- above (an air blueprint carries no Physics.MaxAcceleration or TurnRate,
-  -- uea0107_unit.bp). That controller is not modelled (docs/STATUS.md): a
-  -- flyer moves on the ground model at its Air.MaxAirspeed, takes it at once
-  -- and turns freely. These are not blueprint values -- they are the
-  -- placeholders of the missing subsystem, named here so nothing reads them
-  -- as the engine's numbers.
-  if canFly then
-    accel = maxSpeed
-    if turnRate <= 0 then turnRate = PI end
-  end
+  -- A flyer never reaches this ground model: its tick is CalcMoveAir
+  -- (air.lua __airStep); the top speed here only feeds the row's motion
+  -- events for a flyer that is attached.
   return {
     turnRate = turnRate,
     maxSpeed = maxSpeed,
@@ -332,6 +338,18 @@ function __advanceMotion()
       __ballisticStep(u)
       goto continue
     end
+    -- A unit that can fly takes CalcMoveAir (the tick's default branch for
+    -- mAir.mCanFly, Cfile:966254-966261; an Immobile or stunned flyer only
+    -- reports Stopped; a crashed body lies still, 966252-966253).
+    if u.__bp and u.__bp.Air and u.__bp.Air.CanFly then
+      if u.__motionState == 'Crashed' then goto continue end
+      if u.__immobile or stunned then
+        __setMotionHorzEvent(u, 'Stopped')
+        goto continue
+      end
+      __airStep(u)
+      goto continue
+    end
     local goal = u.__goal
     local p = u.__pos
     -- CalcMoveCommon's result: whether a move was computed this tick
@@ -561,6 +579,7 @@ local function setMotionState(u, state)
     if not ok then WARN('OnMotionStateChange: ' .. tostring(err)) end
   end
 end
+__airMotionState = setMotionState
 
 --- Unit::AttachTo after Entity::AttachTo succeeded (Cfile:954378-954392):
 --- CUnitMotion::NotifyAttached (Cfile:965746-965793) and the Attached state
