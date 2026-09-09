@@ -1169,6 +1169,107 @@ console.log('\n== A unit that must unpack does not look for targets while it mov
   )
 }
 
+console.log('\n== The Sim Issue* family: Patrol, Attack, AggressiveMove, Repair, Reclaim, MoveOffFactory ==')
+{
+  // The AI and the scenario scripts drive units with these (platoon.lua:2519
+  // IssueAttack, scenarioframework.lua:579 IssueAggressiveMove,
+  // ai/aiutilities.lua:1738 IssueRepair, :1717 IssueReclaim, the T3 air
+  // factories' IssueMoveOffFactory). Every one appends (UNIT_IssueCommand
+  // with clear = 0), keeps only the units whose command caps carry the rule
+  // (func_Validate_IssueCommand, Cfile:1005910-1005945) and parses its
+  // target through CAiTarget::SetTarget (1006044-1006110: an entity or a
+  // Vec3, else "Invalid target set in %s; expected an entity or a Vec3 but
+  // got a %s").
+  await game.giveUnit(host, 'uel0105')
+  await game.giveUnit(host, 'ueb0101')
+  const tank = spawnLuaUnit(host, 'uel0201', { x: 900, y: 20, z: 100 }, 1)
+  const foe = spawnLuaUnit(host, 'uel0201', { x: 900, y: 20, z: 140 }, 2)
+  const eng = spawnLuaUnit(host, 'uel0105', { x: 910, y: 20, z: 100 }, 1)
+  const fac = spawnLuaUnit(host, 'ueb0101', { x: 930, y: 20, z: 130 }, 1)
+  beat(engine)
+  host.eval(`Damage(nil, {930,20,130}, __units[${fac}], 200, 'Normal')`)
+  const queue = (id: number): { type: string; x?: number; z?: number; gx?: number; gz?: number; target?: number; rollOff?: boolean }[] =>
+    host.pull(`(function() local out = {} local a = __orderActive[${id}] if a then out[#out+1] = a end for _, c in ipairs(__orders[${id}] or {}) do out[#out+1] = c end local parts = {} for i, c in ipairs(out) do parts[i] = string.format('{"type":%q,"x":%s,"z":%s,"gx":%s,"gz":%s,"target":%s,"rollOff":%s}', c.type, tostring(c.x or 'null'), tostring(c.z or 'null'), tostring(c.gx or 'null'), tostring(c.gz or 'null'), tostring(c.target or 'null'), tostring(c.rollOff == true)) end return '[' .. table.concat(parts, ',') .. ']' end)()`)
+  const errOf = (expression: string): string =>
+    host.eval(`local ok, e = pcall(function() ${expression} end); return ok and '' or tostring(e)`) as string
+  // IssuePatrol: a Patrol leg, appended; returns nothing (cfunc_IssuePatrolL
+  // 1010110-1010190: RULEUCC_Patrol, UNITCOMMAND_Patrol, no handle).
+  check(host.eval(`return select('#', IssuePatrol({ __units[${tank}] }, { 900, 20, 120 }))`) === 0, 'IssuePatrol returns nothing')
+  let q = queue(tank)
+  check(q.length === 1 && q[0]!.type === 'Patrol' && q[0]!.x === 900 && q[0]!.z === 120, `IssuePatrol appended a Patrol leg (${JSON.stringify(q)})`)
+  // IssueAttack with a unit: an Attack on it; with a Vec3: a ground attack.
+  // Both APPENDED behind the patrol; the command handle comes back
+  // (1009150-1009245: RULEUCC_Attack, UNITCOMMAND_Attack, the handle pushed).
+  check(host.eval(`__cmdA = IssueAttack({ __units[${tank}] }, __units[${foe}]); return type(__cmdA) == 'table' and __cmdA.id ~= nil`) === true, 'IssueAttack returns the command handle')
+  host.eval(`IssueAttack({ __units[${tank}] }, { 950, 20, 150 })`)
+  q = queue(tank)
+  check(q.length === 3 && q[1]!.type === 'Attack' && q[1]!.target === foe, `an Attack on the unit waits behind the patrol (${JSON.stringify(q[1])})`)
+  check(q[2]!.type === 'Attack' && q[2]!.gx === 950 && q[2]!.gz === 150, `a Vec3 target is a ground attack (${JSON.stringify(q[2])})`)
+  check(host.eval(`return IsCommandDone(__cmdA)`) === false, 'the attack handle is not done while it waits')
+  // IssueAggressiveMove: the dispatcher builds a patrol task to the point
+  // (DispatchTask, Cfile:831100-831104 under the one-off case labels): it
+  // engages on the way and completes at the point without the ring
+  // rotation; the handle comes back (1010420-1010485).
+  check(host.eval(`local c = IssueAggressiveMove({ __units[${tank}] }, { 960, 20, 160 }); return type(c) == 'table'`) === true, 'IssueAggressiveMove returns the command handle')
+  q = queue(tank)
+  check(q.length === 4 && q[3]!.type === 'AggressiveMove' && q[3]!.x === 960 && q[3]!.z === 160, `an AggressiveMove leg is appended (${JSON.stringify(q[3])})`)
+  // IssueMoveOffFactory: a Move with the roll-off mark (1008640-1008725:
+  // RULEUCC_Move, UNITCOMMAND_Move, the command flagged, the handle pushed).
+  check(host.eval(`local c = IssueMoveOffFactory({ __units[${tank}] }, { 905, 20, 100 }); return type(c) == 'table'`) === true, 'IssueMoveOffFactory returns the command handle')
+  q = queue(tank)
+  check(q.length === 5 && q[4]!.type === 'Move' && q[4]!.rollOff === true, `a Move marked as the factory roll-off is appended (${JSON.stringify(q[4])})`)
+  // The validation: a tank has no RULEUCC_Repair, a factory (a builder that
+  // is not mobile) takes no Move/Patrol through the unit path -- nothing is
+  // queued and no error is raised (1005910-1005945).
+  host.eval(`IssueRepair({ __units[${tank}] }, __units[${fac}])`)
+  check(queue(tank).length === 5, 'IssueRepair on a unit without the Repair cap queues nothing')
+  host.eval(`IssuePatrol({ __units[${fac}] }, { 940, 20, 140 })`)
+  check(queue(fac).length === 0, 'IssuePatrol on a factory queues nothing (the immobile builder exception)')
+  // The handle bindings push nil when no unit passed the validation
+  // (1009261): a factory has no RULEUCC_Attack.
+  check(host.eval(`return IssueAttack({ __units[${fac}] }, __units[${foe}]) == nil`) === true, 'IssueAttack on a unit without the cap returns nil')
+  // The engineer repairs the damaged factory and reclaims the enemy tank
+  // (both entity targets through SCR_FromLua_Entity + UpdateTarget,
+  // 1011060-1011145 / 1011460-1011540; no handle).
+  check(host.eval(`return select('#', IssueRepair({ __units[${eng}] }, __units[${fac}]))`) === 0, 'IssueRepair returns nothing')
+  host.eval(`IssueReclaim({ __units[${eng}] }, __units[${foe}])`)
+  q = queue(eng)
+  check(q.length === 2 && q[0]!.type === 'Repair' && q[0]!.target === fac && q[1]!.type === 'Reclaim' && q[1]!.target === foe, `Repair then Reclaim wait in the engineer's queue (${JSON.stringify(q)})`)
+  // EntitySetTemplate_Unit::Contains removes the target from the issuers
+  // (804956-804980; IssueRepair 1011122-1011124): a unit never repairs itself.
+  host.eval(`IssueRepair({ __units[${eng}] }, __units[${eng}])`)
+  check(queue(eng).length === 2, 'IssueRepair with the unit as its own target queues nothing')
+  // The errors of the bindings.
+  const e1 = errOf(`IssueAttack({ __units[${tank}] })`)
+  check(e1.includes('expected 2 args, but got 1'), `IssueAttack with one argument: ${e1.split('\n')[0]}`)
+  const e2 = errOf(`IssuePatrol({ __units[${tank}] }, 5)`)
+  check(e2.includes('Invalid target set in IssuePatrol; expected an entity or a Vec3 but got a number'), `a number is no target: ${e2.split('\n')[0]}`)
+  const e3 = errOf(`IssueAggressiveMove({ __units[${tank}] }, {})`)
+  check(e3.includes('Invalid target set in IssueAggressiveMove; expected an entity or a Vec3 but got a table'), `a table that is no Vec3 (lua_getn ~= 3, 1006082) is the SetTarget error: ${e3.split('\n')[0]}`)
+  const e3b = errOf(`IssuePatrol({ __units[${tank}] }, nil)`)
+  check(e3b.includes('IssuePatrol: Passed in an invalid target point.'), `nil leaves AITARGET_None and the point binding refuses it: ${e3b.split('\n')[0]}`)
+  const e4 = errOf(`IssueRepair({ __units[${eng}] }, { 1, 2, 3 })`)
+  check(e4.includes("Expected a game object. (Did you call with '.' instead of ':'?)"), `IssueRepair wants an entity (SCR_FromLua_Entity 758208-758224): ${e4.split('\n')[0]}`)
+  // An aggressive move actually runs: with no enemy near, it reaches its
+  // point and completes without the ring rotation.
+  host.eval(`Damage(nil, {900,20,140}, __units[${foe}], 99999, 'Normal')`)
+  host.eval(`IssueClearCommands({ __units[${tank}] })`)
+  host.eval(`IssueAggressiveMove({ __units[${tank}] }, { 900, 20, 104 })`)
+  for (let t = 0; t < 40; t++) beat(engine)
+  const p = host.pull<number[]>(`__jsonVal(__units[${tank}]:GetPosition())`)
+  check(Math.abs(p[2]! - 104) < 1.5 && queue(tank).length === 0, `the aggressive move reached its point and completed without a ring rotation (z ${p[2]?.toFixed(2)}, ${queue(tank).length} queued)`)
+  // ... and engages on the way like a patrol leg: an enemy beside the route
+  // becomes the attacker's target while the leg runs.
+  const foe2 = spawnLuaUnit(host, 'uel0201', { x: 906, y: 20, z: 128 }, 2)
+  host.eval(`IssueAggressiveMove({ __units[${tank}] }, { 900, 20, 134 })`)
+  let engaged = false
+  for (let t = 0; t < 60 && !engaged; t++) {
+    beat(engine)
+    engaged = host.eval(`return __attackOrders[${tank}] == ${foe2}`) === true
+  }
+  check(engaged, 'the aggressive move engages the enemy it meets on the way')
+}
+
 console.log('\n== A DoNotTarget unit is skipped by the free target search ==')
 {
   // CAcquireTargetTask's FindBestEnemy loop passes over candidates whose

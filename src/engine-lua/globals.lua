@@ -2373,10 +2373,15 @@ local function __startOrder(unitId, cmd)
   if cmd.type == 'Move' then
     u:GetNavigator():SetGoal({ cmd.x, 0, cmd.z })
     return true
-  elseif cmd.type == 'Patrol' then
+  elseif cmd.type == 'Patrol' or cmd.type == 'AggressiveMove' then
     -- One patrol leg IS a move: CUnitPatrolTask sets exactly one nav goal
     -- (TaskTick, Cfile:845598-845601); the LOOP lives in the queue's ring
-    -- rotation, not in the task.
+    -- rotation, not in the task. An AggressiveMove is the SAME task to one
+    -- point (DispatchTask, Cfile:831100-831104 -- physically under the label
+    -- OverCharge, the switch's labels sit one value off, docs/research/
+    -- command-dispatch-binary.md:49-62: CUnitCommand::Move, then
+    -- CUnitPatrolTask::operator new(dispatch, goal, 1)) -- it engages on the
+    -- way and completes at the point; only a Patrol command rotates.
     u:GetNavigator():SetGoal({ cmd.x, 0, cmd.z })
     return true
   elseif cmd.type == 'Attack' then
@@ -2533,9 +2538,10 @@ function __ordersTick()
         local through = nxt ~= nil and (nxt.type == 'Move' or nxt.type == 'Patrol')
         u:GetNavigator():SetSpeedThroughGoal(through and 1 or 0)
         done = not u.__goal -- motion.lua sets __goal = false on arrival
-      elseif cmd.type == 'Patrol' then
+      elseif cmd.type == 'Patrol' or cmd.type == 'AggressiveMove' then
         -- A patrol leg always flows through its waypoint (SetSpeedThroughGoal(1),
         -- Cfile:850088/850132/850199) — the unit never stops at a patrol point.
+        -- The aggressive move rides the same task (see __startOrder).
         u:GetNavigator():SetSpeedThroughGoal(1)
         -- Engage on the way; otherwise the leg completes inside the 1x1
         -- goal cell (the task's SNavGoal box, Cfile:845637-845650) and a
@@ -2931,6 +2937,200 @@ function __dispatchReclaimMapProp(unitId, mapIndex, clear)
     return
   end
   __dispatchReclaim(unitId, targetId, clear)
+end
+
+-- === The Sim's Issue* family: the AI's and the scripts' orders ===
+--
+-- Every binding here is a cfunc_Issue*L of the sim (docs/research/
+-- engine-api.md): the unit list (func_GetUnitList), the target through
+-- CAiTarget::SetTarget (Cfile:1006044-1006110: an entity or a Vec3, else
+-- "Invalid target set in %s; expected an entity or a Vec3 but got a %s"),
+-- the units filtered by func_Validate_IssueCommand (1005910-1005945: the
+-- rule must be in the unit's command caps; for Move/Guard/Patrol/Ferry a
+-- unit with a factory builder stays only when IsMobile), one
+-- SSTICommandIssueData(UNITCOMMAND_x) through UNIT_IssueCommand with
+-- clear = 0 -- APPENDED, like IssueMove/IssueGuard above. The bindings
+-- that push the command handle return it; the others return nothing. The
+-- mHelp of each is its bare name.
+local ISSUE_MOVE_LIKE = COMMAND_CAP_BITS.RULEUCC_Move | COMMAND_CAP_BITS.RULEUCC_Guard
+  | COMMAND_CAP_BITS.RULEUCC_Patrol | COMMAND_CAP_BITS.RULEUCC_Ferry
+
+local function issueArgs(name, want, ...)
+  local n = select('#', ...)
+  if n ~= want then
+    error(string.format('%s\n  expected %d args, but got %d', name, want, n), 3)
+  end
+end
+
+local function issueUnits(name, units)
+  if type(units) ~= 'table' then
+    error(name .. ': expected a table of units, got ' .. type(units), 3)
+  end
+  return units
+end
+
+-- func_Validate_IssueCommand (Cfile:1005910-1005945).
+local function issueValidate(units, cap)
+  local bit = COMMAND_CAP_BITS[cap]
+  local out = {}
+  for _, u in ipairs(units) do
+    if u and u.__id and __units[u.__id] and (__ensureCommandCapMask(u) & bit) ~= 0 then
+      if (bit & ISSUE_MOVE_LIKE) == 0 or not __isFactoryBuilder(u) or isMobile(u) then
+        out[#out + 1] = u
+      end
+    end
+  end
+  return out
+end
+
+-- CAiTarget::SetTarget (Cfile:1006044-1006110): nil leaves AITARGET_None
+-- without an error; an entity (SCR_FromLuaNoError_Entity: a unit or a
+-- prop) is an entity target; a table is a Vec3 only when lua_getn gives 3
+-- (three numbers by index, 1006082); anything else is "Invalid target set
+-- in %s; expected an entity or a Vec3 but got a %s" (1006087).
+local function issueTarget(name, obj, level)
+  if obj == nil then return { none = true } end
+  if type(obj) == 'table' then
+    if obj.__id and (__units[obj.__id] or (__props and __props[obj.__id])) then
+      return { entity = obj.__id }
+    end
+    if #obj == 3 and type(obj[1]) == 'number' and type(obj[2]) == 'number' and type(obj[3]) == 'number' then
+      return { x = obj[1], y = obj[2], z = obj[3] }
+    end
+  end
+  error(string.format('Invalid target set in %s; expected an entity or a Vec3 but got a %s', name, type(obj)), level or 3)
+end
+
+-- The point bindings check IsValid_Vector3f and mType != AITARGET_None
+-- ("%s: Passed in an invalid target point.", IssuePatrol 1010153-1010154,
+-- IssueAggressiveMove 1010444-1010445, IssueMoveOffFactory 1008696-1008697);
+-- an entity target is its position (GetTargetPosGun).
+local function issuePoint(name, obj)
+  local t = issueTarget(name, obj, 4)
+  if t.entity then
+    local e = __units[t.entity] or (__props and __props[t.entity])
+    if e and e.__pos then return e.__pos[1], e.__pos[3] end
+  end
+  if t.x == nil or t.x ~= t.x or t.z ~= t.z then
+    error(name .. ': Passed in an invalid target point.', 3)
+  end
+  return t.x, t.z
+end
+
+-- SCR_FromLua_Entity + CAiTarget::UpdateTarget (IssueRepair 1011119-1011126,
+-- IssueReclaim 1011524-1011529): an entity, anything else the binding's
+-- error (SCR_FromLua_Entity 758208-758224).
+local function issueEntity(name, obj)
+  if type(obj) == 'table' and obj.__id and (__units[obj.__id] or (__props and __props[obj.__id])) then
+    return obj.__id
+  end
+  error("Expected a game object. (Did you call with '.' instead of ':'?)", 3)
+end
+
+-- EntitySetTemplate_Unit::Contains (Cfile:804956-804980) is not a
+-- predicate: it REMOVES the match. IssueRepair (1011122-1011124) and
+-- IssueReclaim (1011527) run it with the target on the validated issuers,
+-- so a unit never repairs or reclaims itself; an emptied set issues nothing.
+local function issueWithoutTarget(list, id)
+  local out = {}
+  for _, u in ipairs(list) do
+    if u.__id ~= id then out[#out + 1] = u end
+  end
+  return out
+end
+
+-- The bindings that push the command handle push nil instead when no unit
+-- passed the validation (cfunc_IssueAttackL 1009261 and the two
+-- others: lua_pushnil on an empty set).
+local function issueHandle(list, apply)
+  if list[1] == nil then return nil end
+  return issueTo(list, apply)
+end
+
+--- IssuePatrol(units, position) -- cfunc_IssuePatrolL (Cfile:1010110-1010190):
+--- two arguments, RULEUCC_Patrol, UNITCOMMAND_Patrol, no handle.
+--- scenarioframework.lua and scenarioplatoonai.lua drive routes with it.
+function IssuePatrol(...)
+  issueArgs('IssuePatrol', 2, ...)
+  local units, target = ...
+  local x, z = issuePoint('IssuePatrol', target)
+  for _, u in ipairs(issueValidate(issueUnits('IssuePatrol', units), 'RULEUCC_Patrol')) do
+    __issueOrder(u.__id, { type = 'Patrol', x = x, z = z }, false)
+  end
+end
+
+--- IssueAttack(units, target) -- cfunc_IssueAttackL (Cfile:1009150-1009245):
+--- two arguments, RULEUCC_Attack, the target an entity or a Vec3 (a ground
+--- attack), UNITCOMMAND_Attack, the handle pushed. platoon.lua:2519 and the
+--- experimentals' AI (ai/aibehaviors.lua:670) attack with it. A target that
+--- is neither issues nothing here (the engine's task would fail at once).
+function IssueAttack(...)
+  issueArgs('IssueAttack', 2, ...)
+  local units, target = ...
+  local t = issueTarget('IssueAttack', target)
+  local list = issueValidate(issueUnits('IssueAttack', units), 'RULEUCC_Attack')
+  return issueHandle(list, function(u, cmd)
+    if t.entity then
+      __issueOrder(u.__id, { type = 'Attack', target = t.entity, cmdId = cmd.id }, false)
+    elseif not t.none then
+      __issueOrder(u.__id, { type = 'Attack', gx = t.x, gz = t.z, cmdId = cmd.id }, false)
+    end
+  end)
+end
+
+--- IssueAggressiveMove(units, position) -- cfunc_IssueAggressiveMoveL
+--- (Cfile:1010420-1010485): two arguments, RULEUCC_Move,
+--- UNITCOMMAND_AggressiveMove, the handle pushed. The dispatcher builds a
+--- patrol task to the point (831100-831104). scenarioframework.lua:579
+--- sends groups down an attack chain with it.
+function IssueAggressiveMove(...)
+  issueArgs('IssueAggressiveMove', 2, ...)
+  local units, target = ...
+  local x, z = issuePoint('IssueAggressiveMove', target)
+  local list = issueValidate(issueUnits('IssueAggressiveMove', units), 'RULEUCC_Move')
+  return issueHandle(list, function(u, cmd)
+    __issueOrder(u.__id, { type = 'AggressiveMove', x = x, z = z, cmdId = cmd.id }, false)
+  end)
+end
+
+--- IssueMoveOffFactory(units, position) -- cfunc_IssueMoveOffFactoryL
+--- (Cfile:1008640-1008725): two arguments, RULEUCC_Move, UNITCOMMAND_Move
+--- with the command flagged (1008727; the flag's consumer is not traced,
+--- carried as rollOff), the handle pushed. The T3 air factories' scripts
+--- roll their product off with it (uaa0310_script.lua:114).
+function IssueMoveOffFactory(...)
+  issueArgs('IssueMoveOffFactory', 2, ...)
+  local units, target = ...
+  local x, z = issuePoint('IssueMoveOffFactory', target)
+  local list = issueValidate(issueUnits('IssueMoveOffFactory', units), 'RULEUCC_Move')
+  return issueHandle(list, function(u, cmd)
+    __issueOrder(u.__id, { type = 'Move', x = x, z = z, rollOff = true, cmdId = cmd.id }, false)
+  end)
+end
+
+--- IssueRepair(units, target) -- cfunc_IssueRepairL (Cfile:1011060-1011145):
+--- two arguments, RULEUCC_Repair, an entity target, UNITCOMMAND_Repair, no
+--- handle. ai/aiutilities.lua:1738 repairs allied structures with it.
+function IssueRepair(...)
+  issueArgs('IssueRepair', 2, ...)
+  local units, target = ...
+  local id = issueEntity('IssueRepair', target)
+  for _, u in ipairs(issueWithoutTarget(issueValidate(issueUnits('IssueRepair', units), 'RULEUCC_Repair'), id)) do
+    __issueOrder(u.__id, { type = 'Repair', target = id }, false)
+  end
+end
+
+--- IssueReclaim(units, target) -- cfunc_IssueReclaimL (Cfile:1011460-1011540):
+--- two arguments, RULEUCC_Reclaim, an entity target (a prop or a unit),
+--- UNITCOMMAND_Reclaim, no handle. ai/aiutilities.lua:1717 and
+--- platoon.lua:1498 reclaim with it.
+function IssueReclaim(...)
+  issueArgs('IssueReclaim', 2, ...)
+  local units, target = ...
+  local id = issueEntity('IssueReclaim', target)
+  for _, u in ipairs(issueWithoutTarget(issueValidate(issueUnits('IssueReclaim', units), 'RULEUCC_Reclaim'), id)) do
+    __issueOrder(u.__id, { type = 'Reclaim', target = id }, false)
+  end
 end
 
 function __reclaimTick()

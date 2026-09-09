@@ -31,7 +31,7 @@ export interface MapPropSpawn {
  *  (y only where the sim resolved it -- factory commands always). */
 export interface SimOrderEntry {
   id: number
-  t: 'Move' | 'Attack' | 'Repair' | 'BuildMobile' | 'Patrol' | 'Guard' | 'Reclaim'
+  t: 'Move' | 'Attack' | 'Repair' | 'BuildMobile' | 'Patrol' | 'Guard' | 'Reclaim' | 'AggressiveMove'
   x: number
   y?: number
   z: number

@@ -20,7 +20,7 @@ export interface OrderLineEntry {
   unitId: number
   /** Segment index within the unit's command queue (0 = active order). */
   seg?: number
-  type: 'Move' | 'Attack' | 'Repair' | 'BuildMobile' | 'Patrol' | 'Guard' | 'Reclaim'
+  type: 'Move' | 'Attack' | 'Repair' | 'BuildMobile' | 'Patrol' | 'Guard' | 'Reclaim' | 'AggressiveMove'
   from: { x: number; y: number; z: number }
   to: { x: number; y: number; z: number }
 }
@@ -50,6 +50,10 @@ export const PARAMS: Record<
   // TypeError EVERY render frame, aborting the whole world-view update.
   Guard: { color: 0xffff00, alpha: 0xdd / 255, waypoint: 'guard_btn_up' },
   Reclaim: { color: 0xffff00, alpha: 0xdd / 255, waypoint: 'reclaim_btn_up' },
+  // UNITCOMMAND_AggressiveMove (:54-58): inherits default_AttackColors
+  // ('ddff0000') with its own waypoint (attack_move_btn_up.dds); its line
+  // texture (orderline_arrow04) is the same named gap as Patrol's.
+  AggressiveMove: { color: 0xff0000, alpha: 0xdd / 255, waypoint: 'attack_move_btn_up' },
 }
 
 const LINE_WIDTH = 0.3 // approximation (renderer constant not recovered)

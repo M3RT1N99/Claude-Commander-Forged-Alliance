@@ -2611,3 +2611,82 @@ while the port still tested != 0).
   kinematics, not the drawn batch. No shipped Lua sets those four.
 - The beam parameters do not enter the runtime's override signature
   (nothing reads them yet).
+
+## The Sim's Issue* family: Patrol, Attack, AggressiveMove, Repair, Reclaim, MoveOffFactory
+
+**What was wrong.** Of the 38 Issue* bindings the Sim registers, seven
+existed (Move, Guard, Stop, Upgrade, ClearCommands, FactoryRallyPoint,
+ClearFactoryCommands). The AI and the scenario scripts call others on
+every path: platoon.lua:2519 `IssueAttack`, scenarioframework.lua:579
+`IssueAggressiveMove` (attack chains) and its patrol routes,
+ai/aiutilities.lua:1738 `IssueRepair` and :1717 `IssueReclaim`, the T3
+air factories' scripts `IssueMoveOffFactory` (uaa0310_script.lua:114) --
+each a strict-_G error that killed the calling thread.
+
+**The engine** (one shape for all of them). The unit list
+(func_GetUnitList), the target through CAiTarget::SetTarget
+(Cfile:1006044-1006110: an entity or a Vec3, else "Invalid target set in
+%s; expected an entity or a Vec3 but got a %s"), the units filtered by
+func_Validate_IssueCommand (1005910-1005945: the rule must be in the
+unit's command caps; for Move/Guard/Patrol/Ferry a unit with a factory
+builder stays only when IsMobile), one SSTICommandIssueData(UNITCOMMAND_x)
+through UNIT_IssueCommand with clear = 0 -- appended, never a clear. The
+point bindings refuse an unusable target with "%s: Passed in an invalid
+target point." (1010153-1010154, 1010444-1010445, 1008696-1008697); the
+entity bindings take the target through SCR_FromLua_Entity. Attack,
+AggressiveMove and MoveOffFactory push the command handle, the others
+return nothing -- and nil when no unit passed the validation
+(1009261). An AggressiveMove is dispatched as a CUnitPatrolTask to
+the one point (DispatchTask 831100-831104, physically under the label
+OverCharge: the switch's labels sit one value off, docs/research/
+command-dispatch-binary.md:49-62): it engages on the way like a patrol
+leg and completes at the point without the ring rotation.
+IssueMoveOffFactory is a Move with a flag on the command (1008727) whose
+consumer is not traced (carried as rollOff). IssueRepair and IssueReclaim
+run EntitySetTemplate_Unit::Contains (804956-804980) with the target on
+the issuers -- it removes the match, so a unit never repairs or reclaims
+itself. CAiTarget::SetTarget takes nil as no target (no error), an entity,
+or a table of exactly three numbers as the Vec3 (lua_getn == 3, 1006082);
+anything else is its "Invalid target set" error (1006087).
+
+**The port** (globals.lua after the dispatch functions): the six
+bindings, the validation on the unit's own cap mask (`__ensureCommandCapMask`)
+with the factory-builder exception, the target parsing, the errors; the
+`AggressiveMove` order type rides the Patrol branches of `__startOrder`
+and `__ordersTick` (speed-through, engage on the way, complete in the
+goal cell) and stays out of the rotation; the unit row resolves its
+waypoint like a Move.
+
+**Checks** (verify-combat.ts, new block): a Patrol leg appended with no
+return value; an Attack on a unit and a Vec3 ground attack queued behind
+it, the handle not done while waiting; an AggressiveMove leg; a Move
+flagged as the roll-off; Repair on a unit without the cap and Patrol on a
+factory queue nothing, IssueAttack on a factory returns nil; Repair then
+Reclaim in an engineer's queue, the engineer as its own target queues
+nothing; the argument-count, SetTarget, invalid-point and game-object
+errors; an aggressive move that runs to its point and completes, and one
+that engages the enemy beside its route. Seen red first (IssuePatrol was
+a strict-_G miss). The command graph draws an AggressiveMove in the
+attack colours with its own waypoint (commandgraphparams.lua:54-58).
+
+**Still missing** (each a strict-_G error when called; shipped callers in
+brackets): IssueTransportLoad [ai/aiutilities.lua:1453,
+ai/aibehaviors.lua:324], IssueTransportUnload [aiutilities.lua:1499,
+platoon.lua:2462, scenarioframework.lua:1259], IssueCapture
+[platoon.lua:1342, aiutilities.lua:1719], IssueDive [platoon.lua:2294,
+xss0201_script.lua:66], IssueOverCharge [ai/aibehaviors.lua:147],
+IssueFactoryAssist [aibrain.lua:2076], IssueScript [platoon.lua:293],
+IssueTactical [platoon.lua:382], IssueNuke [platoon.lua:417],
+IssueTeleport [aibehaviors.lua:59], IssueFormAttack [platoon.lua:2517],
+IssueFormPatrol [scenarioframework.lua:572]; without a shipped caller:
+IssueBuildFactory, IssueBuildMobile, IssueDestroySelf, IssueFerry,
+IssueFormAggressiveMove, IssueFormMove, IssueKillSelf, IssuePause,
+IssueSacrifice, IssueSiloBuildNuke, IssueSiloBuildTactical,
+IssueTeleportToBeacon, IssueTransportUnloadSpecific. The transport,
+capture, dive, overcharge, silo and teleport TASKS behind the first group
+are not modelled in the sim, which is why the bindings stay absent rather
+than queueing orders that nothing runs.
+
+**UNVERIFIED.** IsValid_Vector3f's exact test (here: present and not
+NaN); the roll-off flag's consumer; the AggressiveMove line texture
+(orderline_arrow04) like Patrol's.
