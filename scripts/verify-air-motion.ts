@@ -48,7 +48,7 @@ await game.giveUnit(host, 'uaa0107')
 const posOf = (id: number): number[] => host.pull<number[]>(`__jsonVal(__units[${id}]:GetPosition())`)
 const isState = (id: number, s: string): boolean => host.eval(`return __units[${id}]:IsUnitState('${s}')`) === true
 const layerOf = (id: number): string => host.eval(`return __units[${id}].__layer`) as string
-const vertOf = (id: number): string => host.eval(`return __units[${id}].__vertEvent or 'Bottom'`) as string
+const vertOf = (id: number): string => host.eval(`return __units[${id}].__vertEvent or 'Top'`) as string
 const horzOf = (id: number): string => host.eval(`return __units[${id}].__horzEvent or 'Stopped'`) as string
 const speedOf = (id: number): number => Number(host.eval(`local b = __units[${id}].__air.body.vel return math.sqrt(b[1]*b[1]+b[3]*b[3])`))
 const queueLen = (id: number): number => Number(host.eval(`local n = __orderActive[${id}] and 1 or 0 return n + #(__orders[${id}] or {})`))
@@ -126,7 +126,10 @@ beat(engine)
   check(minY > 26 && maxY < 34, `it kept its cruise height on the way (y ${minY.toFixed(1)}..${maxY.toFixed(1)})`)
   check(layerOf(transport) === 'Air', 'it stays in the Air layer (969985)')
   check(sawOrient, 'the JSON row carries the full pose of the flyer as a unit quaternion')
-  check(vertOf(transport) === 'Bottom', `the vertical event is Bottom in level flight (${vertOf(transport)})`)
+  // The names table (Cfile:421838) makes level flight "Top" (the label
+  // UMVE_Bottom is the value 0); a landed flyer is "Bottom" (unit.lua:2216
+  // plays "Landed" on it).
+  check(vertOf(transport) === 'Top', `the vertical event is Top in level flight (${vertOf(transport)})`)
 }
 
 console.log('\n== AutoLandTime: the idle transport lands, the next order lifts it ==')
@@ -139,7 +142,7 @@ console.log('\n== AutoLandTime: the idle transport lands, the next order lifts i
   for (let i = 0; i < 200 && !landed; i++) {
     beat(engine)
     if (isState(transport, 'MovingDown') || vertOf(transport) === 'Down') sawDown = true
-    landed = vertOf(transport) === 'Top' && layerOf(transport) === 'Land'
+    landed = vertOf(transport) === 'Bottom' && layerOf(transport) === 'Land'
   }
   const p = posOf(transport)
   check(sawDown, 'MovingDown / the Down event on the way to the ground (969573, 969831)')

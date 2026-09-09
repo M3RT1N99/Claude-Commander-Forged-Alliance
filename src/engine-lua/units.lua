@@ -265,9 +265,11 @@ function __spawnUnit(scriptPath, bpId, x, y, z, army, complete, requestedLayer, 
   u.__bones = __unitBones[string.lower(bpId)] or { names = {}, xform = {}, index = {} }
   -- The creation transform's yaw: the initial rally point below turns by it.
   u.__heading = heading or 0
-  -- CUnitMotion::CUnitMotion: Stopped / Bottom (Cfile:964772-964773).
+  -- CUnitMotion::CUnitMotion: Stopped / "Top" (Cfile:964772-964773: the
+  -- label UMVE_Bottom is the value 0 = vertMotionEvent_names[0] "Top";
+  -- motion.lua __setMotionVertEvent).
   u.__horzEvent = 'Stopped'
-  u.__vertEvent = 'Bottom'
+  u.__vertEvent = 'Top'
   u.__navigator = __getNavigator(id)
   -- echte Felder (nicht der wrapInstance-Stub) für die Physik-Fortschreibung
   u.__goal = false

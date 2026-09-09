@@ -118,7 +118,9 @@ console.log('\n== The motion events: Stopped -> Cruise -> TopSpeed -> Stopping -
       return orig(self, new, old)
     end
   `)
-  check(bool(host, `__units[${eid}].__horzEvent == 'Stopped' and __units[${eid}].__vertEvent == 'Bottom'`), 'a fresh unit is Stopped / Bottom (CUnitMotion ctor, Cfile:964772-964773)')
+  // The ctor's UMVE_Bottom label is the value 0 = vertMotionEvent_names[0]
+  // "Top" (Cfile:421838; motion.lua __setMotionVertEvent).
+  check(bool(host, `__units[${eid}].__horzEvent == 'Stopped' and __units[${eid}].__vertEvent == 'Top'`), 'a fresh unit is Stopped / Top (CUnitMotion ctor, Cfile:964772-964773; the label UMVE_Bottom is names[0] "Top")')
   for (let i = 0; i < 5; i++) beat()
   check(bool(host, `table.getn(__evLog) == 0`), 'standing still fires nothing (the callback needs a change)')
   host.eval(`__units[${eid}]:GetNavigator():SetGoal({ 460, 20, 128 })`)

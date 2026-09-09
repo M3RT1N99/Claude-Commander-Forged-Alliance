@@ -754,8 +754,10 @@ function __airAtTarget(u)
     if v8 > 0.25 then v5 = v8 end
   end
   if v5 < dist then
-    local ev = u.__vertEvent or 'Bottom'
-    if ev ~= 'Hover' and (ev ~= 'Top' or st.height == INF) then return false end
+    -- (965922: UMVE_Hover, or the label UMVE_Top = "Bottom", the landed
+    -- flyer, with a pinned height; motion.lua __setMotionVertEvent.)
+    local ev = u.__vertEvent or 'Top'
+    if ev ~= 'Hover' and (ev ~= 'Bottom' or st.height == INF) then return false end
   end
   return true
 end
@@ -837,7 +839,7 @@ function __airStep(u)
         if st.height == INF then
           if shouldHoverInsteadOfLand(u) or u.__vertEvent == 'Hover' then
             st.newElevation = air.TransportHoverHeight or 0
-          elseif a3 < 0.5 or u.__vertEvent == 'Top' then
+          elseif a3 < 0.5 or u.__vertEvent == 'Bottom' then
             st.newElevation = 0.0
           else
             st.newElevation = getElevation(u, st) * 0.5
@@ -892,7 +894,9 @@ function __airStep(u)
           setState(u, 'MovingUp', nil)
           setState(u, 'MovingDown', nil)
           if not shouldHoverInsteadOfLand(u) then
-            __setMotionVertEvent(u, 'Top')
+            -- The touchdown's event (969729: the label UMVE_Top = "Bottom",
+            -- unit.lua:2216 "Landed").
+            __setMotionVertEvent(u, 'Bottom')
             st.target = { p[1], p[2], p[3] }
             st.prevVel = body.vel
             body.vel = { 0, 0, 0 }
@@ -903,8 +907,9 @@ function __airStep(u)
           __setMotionVertEvent(u, 'Hover')
         end
       else
-        local ev = u.__vertEvent or 'Bottom'
-        if ev == 'Top' or ev == 'Hover' then setState(u, 'MovingUp', true) end
+        -- (969747: the label UMVE_Top = "Bottom", the landed flyer.)
+        local ev = u.__vertEvent or 'Top'
+        if ev == 'Bottom' or ev == 'Hover' then setState(u, 'MovingUp', true) end
         if st.newElevation > 0 and st.newElevation * 0.5 > st.curElevation then
           if st.topSpeed * 0.08 > vlen(body.vel) then
             local v106 = math.min(st.curElevation / st.newElevation, 1.0)
@@ -923,8 +928,9 @@ function __airStep(u)
       __setMotionVertEvent(u, 'Down')
     elseif hasState(u, 'MovingUp') then
       __setMotionVertEvent(u, 'Up')
-    elseif (u.__vertEvent or 'Bottom') ~= 'Hover' then
-      __setMotionVertEvent(u, 'Bottom')
+    elseif (u.__vertEvent or 'Top') ~= 'Hover' then
+      -- Level flight (969884: the label UMVE_Bottom = "Top").
+      __setMotionVertEvent(u, 'Top')
     end
     local horz
     if a3 > (air.StartTurnDistance or 0) or st.alwaysUseTopSpeed then
@@ -953,7 +959,7 @@ function __airStep(u)
   -- The ground (969977-969996).
   if handleGroundCollision(u, st) and v139 and a3 < 0.5 then
     __setCurrentLayer(u, st.layer)
-  elseif (u.__vertEvent or 'Bottom') ~= 'Hover' and not dead then
+  elseif (u.__vertEvent or 'Top') ~= 'Hover' and not dead then
     __setCurrentLayer(u, 'Air')
   end
   -- The pose back to the entity (sub_697750 940807-940824).

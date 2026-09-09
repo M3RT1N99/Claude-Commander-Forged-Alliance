@@ -2965,7 +2965,7 @@ uea0107 from the blueprint (the ctor defaults, the box inertia, the mass,
 the spawn at Elevation +-1, a random offset that a POD (uea0003) does not
 draw); a move that arrives at about the blueprint's speed with TopSpeed
 and Stopped, in the Air layer, at the cruise height, with the pose as a
-unit quaternion in the JSON row; the AutoLandTime landing (MovingDown, UMS_Down, Top
+unit quaternion in the JSON row; the AutoLandTime landing (MovingDown, UMS_Down, Bottom
 and the Land layer, the ground height, zero velocity), the take-off with
 the next order (MovingUp, UMS_Up, airborne) and the second arrival; the
 winged uea0102 banking into its turn (|up.x| > 0.1), arriving and never
@@ -3304,3 +3304,35 @@ docs/research/command-dispatch-binary.md's OverCharge row said
 **UNVERIFIED.** The `mWeapon->v93` flag of the re-approach test (813479)
 is not read and taken as clear; the Attacking bit's number (bit 3 of
 mUnitStates, `&= ~8`).
+
+## The vertical motion events: the decompilation's UMVE_Top and UMVE_Bottom labels are swapped
+
+**What was wrong.** The port read the decompiled enum labels as the
+strings: a landed flyer reported 'Top', a flyer in level flight 'Bottom',
+every fresh unit started at 'Bottom', and NotifyAttached set 'Top'. The
+original unit.lua plays "Landed" on 'Bottom' (2216-2218), "TakeOff" on
+'Up' or a 'Top' after 'Down'/'Bottom' (2219-2221), switches the beam
+exhaust on 'Bottom' (2225-2229) and the idle effects on 'Top' after 'Up'
+(2246-2248) -- with the labels swapped the air unit's sounds and effects
+came at the wrong moments.
+
+**The engine.** `CScriptObject::CallbackStr2(..., "OnMotionVertEventChange",
+&vertMotionEvent_names[new], &vertMotionEvent_names[old])` indexes the
+table `{ "Top", "Bottom", "Up", "Down", "Hover" }` (Cfile:421838) with the
+event value (SetMotionVertEvent 965524-965538). Three sites pair the
+label `UMVE_Top` with `&vertMotionEvent_names[1]` -- "Bottom" -- as the
+new name (964895-964903, 965780-965787, 966164-966171): the label
+UMVE_Top is the value 1 and UMVE_Bottom the value 0. So the ctor's
+`mVertEvent = UMVE_Bottom` (964773) is "Top", CalcMoveAir's level-flight
+`UMVE_Bottom` (969884) is "Top", its touchdown `UMVE_Top` (969729) and
+the AtTarget test (965922) are "Bottom", NotifyAttached's `UMVE_Top`
+(965780-965787) is "Bottom", and a submarine spawned in the Sub layer
+gets "Bottom" (964895-964903).
+
+**The port.** motion.lua's `__setMotionVertEvent` documents the table
+and the swap; the ctor default (units.lua) is 'Top', NotifyAttached
+sets 'Bottom', air.lua's level flight is 'Top', its touchdown, take-off
+test and AtTarget test are 'Bottom'. verify-motion.ts (a fresh unit is
+Stopped / Top) and verify-air-motion.ts (Top in level flight, Bottom at
+the landing) carry the corrected expectations -- both were red under the
+old code. Found while reading the dive (UNITCOMMAND_Dive) for its port.

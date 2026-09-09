@@ -261,9 +261,16 @@ function __setMotionHorzEvent(u, ev)
   motionCallback(u, 'OnMotionHorzEventChange', ev, old)
 end
 
---- CUnitMotion::SetMotionVertEvent (Cfile:965524-965538).
+--- CUnitMotion::SetMotionVertEvent (Cfile:965524-965538). The value is
+--- the index into vertMotionEvent_names { "Top", "Bottom", "Up", "Down",
+--- "Hover" } (421838); the decompilation's enum LABELS UMVE_Top and
+--- UMVE_Bottom are swapped against that table (UMVE_Top is paired with
+--- names[1] "Bottom" at 964895-964903, 965780-965787, 966164-966171),
+--- so a `UMVE_Top` in the decompiled code is the string "Bottom" and a
+--- `UMVE_Bottom` the string "Top" -- unit.lua:2216 plays "Landed" on
+--- 'Bottom'. The ctor's UMVE_Bottom (964773) is therefore "Top".
 function __setMotionVertEvent(u, ev)
-  local old = u.__vertEvent or 'Bottom'
+  local old = u.__vertEvent or 'Top'
   if old == ev then return end
   u.__vertEvent = ev
   motionCallback(u, 'OnMotionVertEventChange', ev, old)
@@ -589,13 +596,14 @@ __airMotionState = setMotionState
 --- unit (slot 0x30 of the IUnit vtable, 954384) whose identity the
 --- decompilation does not resolve (that vtable is not listed) -- UNVERIFIED;
 --- both are applied to every unit here. NotifyAttached also forces the
---- horizontal motion event to Stopped and the vertical one to Top, with
---- their callbacks (965760-965785; the UpdateIntel on Stopped has no intel
---- model here).
+--- horizontal motion event to Stopped and the vertical one to "Bottom"
+--- (the label UMVE_Top with names[1], 965780-965787 -- see
+--- __setMotionVertEvent), with their callbacks (965760-965785; the
+--- UpdateIntel on Stopped has no intel model here).
 function __unitOnAttached(u)
   setMotionState(u, 'Attached')
   __setMotionHorzEvent(u, 'Stopped')
-  __setMotionVertEvent(u, 'Top')
+  __setMotionVertEvent(u, 'Bottom')
   u.__unitStates = u.__unitStates or {}
   u.__unitStates.Attached = true
   u.__transportLoadFactor = -1

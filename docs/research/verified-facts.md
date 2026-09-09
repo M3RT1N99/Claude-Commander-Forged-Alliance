@@ -84,6 +84,17 @@ in CLAUDE.md. Before working on one of the topics: read the relevant section.*
   refreshed by a load -- 1.0 for its whole life unless the transport is
   itself attached and released. Ported as the cache
   (air.lua `__transportLoadFactor`, verify-air-motion.ts).
+- **The vertical motion event names come from a table the decompiled
+  enum labels contradict.** `OnMotionVertEventChange(new, old)` gets
+  `vertMotionEvent_names[value]` with `{ "Top", "Bottom", "Up", "Down",
+  "Hover" }` (Cfile:421838; SetMotionVertEvent 965524-965538). The
+  decompilation's label `UMVE_Top` is the value 1 -- paired with
+  `&vertMotionEvent_names[1]` "Bottom" at 964895-964903, 965780-965787,
+  966164-966171 -- and `UMVE_Bottom` the value 0 "Top". Read every
+  `UMVE_Top` in the Cfile as the string "Bottom" (the landed flyer, the
+  submerged sub) and every `UMVE_Bottom` as "Top" (the ctor default
+  964773, level flight 969884, the surfaced sub). unit.lua:2216 plays
+  "Landed" on 'Bottom'.
 - **`Entity::GetVelocity` is the displacement per tick**, not m/s
   (Cfile:915398-915413: mCurTransform - mLastTransform, times
   mCurImpactSomething = 1.0, 914881). `CAiNavigatorAir::AbortMove` multiplies
