@@ -9,6 +9,7 @@ import { installBuild, buildCollect, buildApply, factoryTick } from '../sim/buil
 import { installTransport } from '../sim/transport'
 import { installCapture } from '../sim/capture'
 import { installOvercharge } from '../sim/overcharge'
+import { installDive } from '../sim/dive'
 import { setupSession, SANDBOX_SESSION, type SessionInfo } from '../sim/session'
 import { installCombat, weaponTick, projectileTick, flushDeletions } from './combat'
 import { installSession } from './session'
@@ -86,6 +87,8 @@ export function installEngine(
   // The overcharge (the attack task pinned to the OverChargeWeapon) and
   // IssueOverCharge.
   installOvercharge(host)
+  // The dive of a surfacing submarine and IssueDive.
+  installDive(host)
   // moho: die C-Form, wie die Engine sie uebergibt — Methodenlisten und
   // Basisklassen, KEINE fertigen Klassen (globalInit.lua:27-29). Braucht
   // deshalb kein `Class` und steht vor der Boot-Kette.

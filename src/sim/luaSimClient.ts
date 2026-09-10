@@ -750,6 +750,10 @@ export class LuaSimClient {
   overcharge(id: number, targetId: number, queue = false): void {
     this.worker.postMessage({ type: 'overcharge', id, targetId, queue })
   }
+  /** Dive (UNITCOMMAND_Dive): the surfacing submarine's layer toggle. */
+  dive(id: number, clear = true): void {
+    this.worker.postMessage({ type: 'dive', id, clear })
+  }
   /**
    * TransportLoadUnits (the CallTransport click, Cfile:1241799-1241870): the
    * passengers `ids` and the transport itself get ONE command targeting the

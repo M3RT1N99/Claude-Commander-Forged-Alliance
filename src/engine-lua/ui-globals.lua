@@ -1658,9 +1658,13 @@ function GetUnitCommandFromCommandCap(cap)
   return CAP_TO_COMMAND[key] or 'None'
 end
 
+-- cfunc_IssueCommandL (Cfile:1265433-1265540): `clear` defaults to TRUE
+-- (1265527) and is read only from a third argument -- the Stop and the
+-- Dive buttons (orders.lua:205/241) replace the queue.
 function IssueCommand(command, data, clear)
   local sel = GetSelectedUnits()
   if not sel then return end
+  if clear == nil then clear = true end
   sendSim(command, sel, { data = data, clear = clear == true })
 end
 

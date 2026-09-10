@@ -2672,9 +2672,7 @@ attack colours with its own waypoint (commandgraphparams.lua:54-58).
 
 **Still missing** (each a strict-_G error when called; shipped callers in
 brackets; IssueTransportLoad and IssueTransportUnload have since arrived --
-"The transport" below): IssueDive [platoon.lua:2294,
-xss0201_script.lua:66],
-IssueFactoryAssist [aibrain.lua:2076], IssueScript [platoon.lua:293],
+"The transport" below): IssueFactoryAssist [aibrain.lua:2076], IssueScript [platoon.lua:293],
 IssueTactical [platoon.lua:382], IssueNuke [platoon.lua:417],
 IssueTeleport [aibehaviors.lua:59], IssueFormAttack [platoon.lua:2517],
 IssueFormPatrol [scenarioframework.lua:572]; without a shipped caller:
@@ -2684,8 +2682,9 @@ IssueSacrifice, IssueSiloBuildNuke, IssueSiloBuildTactical,
 IssueTeleportToBeacon, IssueTransportUnloadSpecific. The dive,
 overcharge, silo and teleport TASKS behind the first group are not
 modelled in the sim, which is why the bindings stay absent rather than
-queueing orders that nothing runs. IssueCapture and IssueOverCharge and
-their tasks are ported since ("The capture", "The overcharge" below).
+queueing orders that nothing runs. IssueCapture, IssueOverCharge and
+IssueDive and their mechanics are ported since ("The capture", "The
+overcharge", "The dive" below).
 
 **UNVERIFIED.** IsValid_Vector3f's exact test (here: present and not
 NaN); the roll-off flag's consumer; the AggressiveMove line texture
@@ -3336,3 +3335,98 @@ test and AtTarget test are 'Bottom'. verify-motion.ts (a fresh unit is
 Stopped / Top) and verify-air-motion.ts (Top in level flight, Bottom at
 the landing) carry the corrected expectations -- both were red under the
 old code. Found while reading the dive (UNITCOMMAND_Dive) for its port.
+
+## The dive: UNITCOMMAND_Dive, the surfacing submarine's layer toggle, IssueDive
+
+**What was wrong.** `IssueDive` was a strict-_G miss (platoon.lua:2294
+surfaces the naval force with it, xss0201_script.lua:66 the newborn
+Seraphim destroyer); the UI's Dive button (orders.lua DiveOrderBehavior
+-> IssueCommand 'Dive') ended in main.ts's "noch kein Weg dorthin" log; a
+surfacing submarine lay on the seabed in every layer (the ground model's
+height for RULEUMT_SurfacingSub was the terrain); and the UI's
+`IssueCommand` sent `clear = false` by default where the engine sends
+true.
+
+**The engine.** The command is no task: DispatchTask (830531-830543,
+under the off-by-one case label) hands the motion a target layer --
+Water for a unit in the Sub layer, Sub for any other -- through
+IAiCommandDispatchImpl::SetNewTargetLayer (832195-832198) and
+CUnitMotion::SetNewTargetLayer (965234-965274): from Sub to Water the
+MovingUp bit and the "Up" event, from Water to Sub the MovingDown bit
+and the "Down" event, the motion's mLayer takes the new one. The command
+is instant (CommandIsInstant 842857-842872): the dispatcher pops it the
+next tick (746616-746650) and the queue goes on while the boat still
+dives; a second Dive during the dive is idempotent, the target layer
+follows the unit's layer, which flips only at the end. The motion: a
+unit in the Water or Sub layer ticks CalcMoveWater (966296-966310,
+971814-971860) -- CalcMoveCommon, then HandleDivingAndSurfacing
+(971735-971812), then SnapToWater (970979-971036) when it moved or dived.
+HandleDivingAndSurfacing: nothing without a Physics.Elevation
+(UnitAttributes.mElevation, 949113) or without MovingUp / MovingDown;
+the depth is capped at terrain + 0.25 - water (shallow water, at most
+0); the speed per tick is Physics.DiveSurfaceSpeed * 0.1 (the ctor
+default 1.0, 656139 -- no shipped blueprint sets it) on a sine ramp over
+the depth reached, at least a tenth of it; rising, mSubElevation reaches
+0 and the unit takes the layer, drops the bit and reports "Top"; sinking,
+it reaches the depth and reports "Bottom" (the labels UMVE_Bottom /
+UMVE_Top are names[0] / names[1], "The vertical motion events" above).
+SnapToWater: y = max(terrain + 0.25, water + mSubElevation), capped at
+the water while submerged, mSubElevation following. A unit born in the
+Sub layer starts at its depth with the "Bottom" event (the CUnitMotion
+ctor 964891-964904; CalcSpawnElevation 683106-683111: Elevation +
+water). IssueDive (cfunc_IssueDiveL 1008189-1008260): one argument, no
+cap validation, UNITCOMMAND_Dive with clear = 0, the command handle or
+nil; func_ProcessUnitCommand takes the command for a
+RULEUMT_SurfacingSub only (1006861-1006864). The UI: DiveOrderBehavior
+(orders.lua:241-266) issues `IssueCommand('Dive')`, whose clear defaults
+to true (cfunc_IssueCommandL 1265527); GetIsSubmerged / the auto-surface
+mode were in place already.
+
+**The port.** `src/engine-lua/dive.lua` (new; src/sim/dive.ts after the
+overcharge): `__diveSetNewTargetLayer`, `__diveTick`
+(HandleDivingAndSurfacing), `__diveSnapY` (SnapToWater), `__diveInitSpawn`
+(the ctor's Sub-layer start), `__diveStart` (the dispatch, instant),
+`__dispatchDive` (the user's command with the SurfacingSub test),
+`__isSurfacingSub`. motion.lua: a surfacing submarine's height is
+`__diveSnapY` and its tick runs `__diveTick` after the ground model with
+the snap after a move or a dive step. units.lua: the spawn hook.
+globals.lua: the `Dive` order type (instant) and `IssueDive`.
+ui-globals.lua: `IssueCommand`'s clear defaults to true. The sim client
+/ worker carry `dive`; main.ts routes the UI's Dive to it.
+
+**Checks** (scripts/verify-dive.ts, new, 31 checks): a Tigershark
+(ues0203) born in the Sub layer at water minus 1.5 with mSubElevation
+-1.5 and the "Bottom" event; the binding's arity error, a frigate
+(RULEUMT_Water) getting no command and nil, an empty list nil, the
+frigate on the water; the surfacing with the handle, MovingUp and "Up",
+the instant command, the rise to the surface in the Water layer on a
+monotonic sine ramp with steps in [0.01, 0.1] peaking above 0.05,
+OnLayerChange(Water, Sub) before the "Top" event with MovingUp cleared;
+the dive with MovingDown and "Down", the depth in the Sub layer with
+"Bottom", two dives during a surfacing still ending on the surface; the
+shelf at 39 capping the dive at 39.25; IssueDive appending behind a
+move, the user's Dive clearing the queue, the user dispatch dropping a
+frigate, a surfaced boat moving on the surface; the Seraphim destroyer
+born submerged at -2, surfacing from its own OnStopBeingBuilt, its
+turrets on at "Top" and off at "Down"; no Lua errors. Seen red first:
+the shelf check under a completion depth without the cap; the ramp
+check with the last remainder step counted; the destroyer's birth height
+read after its first tick.
+
+**Not modelled, recorded rather than faked.**
+
+* **The attack task's auto-surface** (813228-813290: a submerged sub in
+  auto-surface mode surfaces to attack what it cannot reach), **the
+  transport unload's and the carrier's surfacing** (853573-853588,
+  828062-828072).
+* **SnapToWater's lift over an occupied rect** (970999-971011: the unit
+  the boat rides).
+
+**UNVERIFIED.** Whether the horizontal speed is throttled while
+diving: no site in the Cfile reads MovingUp / MovingDown for it (a
+negative grep). The decompiled completion test of the dive reads
+`mElevation >= mElevation` (971801); the local is a MAPDST split
+(971735) -- the capped target against the new depth -- read as "the
+depth reached", the mirror of the surfacing side (971783). The fresh
+review of this diff is still owed: the review agent died on the session
+limit; the port was self-checked against every cited range.

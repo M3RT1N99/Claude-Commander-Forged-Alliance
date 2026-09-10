@@ -89,6 +89,9 @@ type InMsg =
   | { type: 'capture'; id: number; targetId: number; queue?: boolean }
   // OverCharge (UNITCOMMAND_OverCharge): the attack task pinned to the OverChargeWeapon.
   | { type: 'overcharge'; id: number; targetId: number; queue?: boolean }
+  // Dive (UNITCOMMAND_Dive): the surfacing submarine's layer toggle; `clear`
+  // as the UI's IssueCommand sends it (true by default, Cfile:1265527).
+  | { type: 'dive'; id: number; clear: boolean }
   | { type: 'transportLoad'; ids: number[]; transportId: number; queue?: boolean }
   | { type: 'transportReverseLoad'; transportIds: number[]; targetId: number; queue?: boolean }
   | { type: 'transportUnload'; id: number; x: number; z: number; queue?: boolean }
@@ -403,6 +406,8 @@ const handleMessage = async (msg: InMsg): Promise<void> => {
     host.eval(`__dispatchCapture(${msg.id}, ${msg.targetId}, ${msg.queue ? 'false' : 'true'})`)
   } else if (msg.type === 'overcharge') {
     host.eval(`__dispatchOverCharge(${msg.id}, ${msg.targetId}, ${msg.queue ? 'false' : 'true'})`)
+  } else if (msg.type === 'dive') {
+    host.eval(`__dispatchDive(${msg.id}, ${msg.clear ? 'true' : 'false'})`)
   } else if (msg.type === 'transportLoad') {
     // The user's CallTransport (Cfile:1241799-1241870): one command for the
     // passengers and the transport; each validated like the engine's

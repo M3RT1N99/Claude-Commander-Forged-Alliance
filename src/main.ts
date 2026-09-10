@@ -1593,6 +1593,14 @@ async function startSandbox(mapFolder: string): Promise<void> {
         for (const id of ids) luaSim?.setAutoSurfaceMode(id, value)
         return
       }
+      // The Dive button (orders.lua:241 DiveOrderBehavior -> IssueCommand
+      // 'Dive'): UNITCOMMAND_Dive with the UI's clear flag (true by default,
+      // cfunc_IssueCommandL Cfile:1265527) -- the sim's __dispatchDive.
+      if (cmd === 'dive') {
+        const clear = (value as { clear?: boolean } | undefined)?.clear !== false
+        for (const id of ids) luaSim?.dive(id, clear)
+        return
+      }
       // UNITCOMMAND_Upgrade (construction.lua:876 IssueBlueprintCommand): the
       // structure builds its successor (General.UpgradesTo) on its own spot.
       // Same seam as every other order — IssueUpgrade in the sim VM

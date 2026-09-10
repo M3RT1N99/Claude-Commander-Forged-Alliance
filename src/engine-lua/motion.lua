@@ -157,6 +157,10 @@ local FLOATS_ON_WATER = {
 local function surfaceY(u, x, z)
   local mt = u.__bp and u.__bp.Physics and u.__bp.Physics.MotionType
   if FLOATS_ON_WATER[mt] then return GetSurfaceHeight(x, z) end
+  -- A surfacing submarine sits at the water plus its depth (SnapToWater,
+  -- Cfile:970979-971036; dive.lua): on the surface when surfaced, below
+  -- it when submerged -- not on the seabed.
+  if mt == 'RULEUMT_SurfacingSub' then return __diveSnapY(u, x, z) end
   return GetTerrainHeight(x, z)
 end
 
@@ -546,6 +550,13 @@ function __advanceMotion()
         -- two positions drift apart in Y forever.
         p[2] = surfaceY(u, p[1], p[3])
       end
+    end
+    -- CalcMoveWater (Cfile:971814-971860): after CalcMoveCommon a surfacing
+    -- submarine runs HandleDivingAndSurfacing (971826, dive.lua), and
+    -- SnapToWater follows a move or a dive step (971849-971854).
+    if __isSurfacingSub(u) and p then
+      local dived = __diveTick(u)
+      if dived or moving then p[2] = surfaceY(u, p[1], p[3]) end
     end
     -- CUnitMotion::ProcessCommonMotionState closes every land, hover and
     -- water tick (Cfile:971718, 971575, 971856).

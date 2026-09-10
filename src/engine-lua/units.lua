@@ -270,6 +270,9 @@ function __spawnUnit(scriptPath, bpId, x, y, z, army, complete, requestedLayer, 
   -- motion.lua __setMotionVertEvent).
   u.__horzEvent = 'Stopped'
   u.__vertEvent = 'Top'
+  -- A unit born in the Sub layer starts at its depth with the "Bottom"
+  -- event (CUnitMotion ctor 964891-964904; dive.lua).
+  __diveInitSpawn(u)
   u.__navigator = __getNavigator(id)
   -- echte Felder (nicht der wrapInstance-Stub) für die Physik-Fortschreibung
   u.__goal = false

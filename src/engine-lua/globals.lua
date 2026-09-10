@@ -2467,6 +2467,11 @@ local function __startOrder(unitId, cmd)
     -- The attack task pinned to the OverChargeWeapon (overcharge.lua;
     -- DispatchTask's UNITCOMMAND_OverCharge case 831092-831098).
     return __overchargeStart(unitId, cmd)
+  elseif cmd.type == 'Dive' then
+    -- The dive (dive.lua; DispatchTask's UNITCOMMAND_Dive case
+    -- 830531-830543): the motion's target layer flips, the command is
+    -- instant (CommandIsInstant 842857-842872).
+    return __diveStart(unitId, cmd)
   elseif cmd.type == 'Guard' then
     return __guardStart(unitId, cmd.target)
   elseif cmd.type == 'TransportLoad' or cmd.type == 'TransportReverseLoad' or cmd.type == 'TransportUnload' then
@@ -3203,6 +3208,25 @@ function IssueRepair(...)
   for _, u in ipairs(issueWithoutTarget(issueValidate(issueUnits('IssueRepair', units), 'RULEUCC_Repair'), id)) do
     __issueOrder(u.__id, { type = 'Repair', target = id }, false)
   end
+end
+
+--- IssueDive(units) -- cfunc_IssueDiveL (Cfile:1008189-1008260): one
+--- argument, no cap validation (the SurfacingSub test of
+--- func_ProcessUnitCommand 1006861-1006864 drops every other unit),
+--- UNITCOMMAND_Dive through UNIT_IssueCommand with clear = 0 (1008223),
+--- the command handle or nil (1008240-1008249). platoon.lua:2294 surfaces
+--- the naval force with it, xss0201_script.lua:66 the newborn Seraphim
+--- destroyer.
+function IssueDive(...)
+  issueArgs('IssueDive', 1, ...)
+  local units = ...
+  local list = {}
+  for _, u in ipairs(issueUnits('IssueDive', units)) do
+    if __isSurfacingSub(u) and not u.__destroyed then list[#list + 1] = u end
+  end
+  return issueHandle(list, function(u, cmd)
+    __issueOrder(u.__id, { type = 'Dive', cmdId = cmd.id }, false)
+  end)
 end
 
 --- IssueOverCharge(units, target) -- cfunc_IssueOverChargeL
